@@ -170,8 +170,10 @@ class TestDriftTextHint:
             ]
         )
         assert local_edit_hint(2) in out
-        # The hint must precede the re-sync advice that would overwrite edits.
-        assert out.index("apm export-patch") < out.index("Run 'apm install'")
+        # The hint must precede the restore advice that would overwrite edits,
+        # and plain 'apm install' is not offered as the restore (#3994).
+        assert out.index("apm export-patch") < out.index("apm install --force")
+        assert "Run 'apm install' to re-sync" not in out
 
     def test_local_path_package_findings_get_no_hint(self, tmp_path: Path) -> None:
         lock = _lockfile(tmp_path, **{".github/a.md": (_ORIGINAL, _EDITED)})

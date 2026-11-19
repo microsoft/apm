@@ -227,6 +227,10 @@ def is_valid_mcp_server_name(server_name: object) -> bool:
     return isinstance(server_name, str) and _SERVER_NAME_RE.fullmatch(server_name) is not None
 
 
+class RegistryEgressRefusedError(RuntimeError):
+    """Raised when registry-only mode forbids a direct MCP registry request."""
+
+
 class ServerNotFoundError(ValueError):
     """Raised when a server lookup against the registry returns 404.
 
@@ -370,6 +374,23 @@ class SimpleRegistryClient:
         self._timeout = _resolve_timeout()
         self._http_cache = self._init_http_cache()
 
+    def _refuse_direct_egress_when_proxy_only(self) -> None:
+        """Refuse the public default registry when ``PROXY_REGISTRY_ONLY`` is set.
+
+        Registry-only mode sanctions no direct egress for dependency content;
+        MCP server metadata is dependency content. A registry URL the user
+        configured (flag, ``MCP_REGISTRY_URL``, or ``apm config``) is the
+        sanctioned mirror and stays allowed.
+        """
+        from apm_cli.deps.registry_proxy import is_enforce_only
+
+        if self.registry_url_source == "default" and is_enforce_only():
+            raise RegistryEgressRefusedError(
+                f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
+                f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
+                "mcp-registry-url') at your proxied registry, or unset PROXY_REGISTRY_ONLY."
+            )
+
     @staticmethod
     def _init_http_cache():
         """Resolve the shared HTTP response cache, or ``None`` if disabled.
@@ -405,6 +426,7 @@ class SimpleRegistryClient:
         Falls back to a plain ``session.get`` when the cache is disabled
         or unavailable.
         """
+        self._refuse_direct_egress_when_proxy_only()
         # Cache key includes query params so paginated/search URLs are
         # cached independently.
         cache_key = url

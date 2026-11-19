@@ -1102,6 +1102,36 @@ class TestDirectFetchHostRouting:
         mock_get.assert_not_called()
 
 
+class TestProxyOnlyRefusesDirectCatalogEgress:
+    """PROXY_REGISTRY_ONLY refuses every catalog fetch without a proxy route (#3994)."""
+
+    @pytest.mark.parametrize(
+        ("url", "path", "kind"),
+        [
+            ("https://catalog.example.com/marketplace.json", "", "url"),
+            ("https://git.example.com/acme/plugins.git", "marketplace.json", "git"),
+            ("https://dev.azure.com/org/proj/_git/plugins", "marketplace.json", "ado"),
+            ("https://github.com/acme/plugins", "marketplace.json", "github"),
+        ],
+    )
+    def test_refuses_without_network(self, monkeypatch, url, path, kind):
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        monkeypatch.delenv("PROXY_REGISTRY_URL", raising=False)
+        monkeypatch.delenv("ARTIFACTORY_BASE_URL", raising=False)
+        source = MarketplaceSource(name="mkt", url=url, path=path)
+        assert source.kind == kind
+        network = MagicMock(side_effect=AssertionError("direct egress"))
+        with (
+            patch("apm_cli.marketplace.client._http_get", network),
+            patch("apm_cli.marketplace.client._fetch_git", network),
+            patch("apm_cli.marketplace.client._read_cache", return_value=None),
+            patch("apm_cli.marketplace.client._read_stale_cache", return_value=None),
+        ):
+            with pytest.raises(MarketplaceFetchError, match="PROXY_REGISTRY_ONLY"):
+                client_mod.fetch_marketplace(source, force_refresh=True)
+        network.assert_not_called()
+
+
 class TestCacheKey:
     """Cache key includes host for non-github.com sources."""
 

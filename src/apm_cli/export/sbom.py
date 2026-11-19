@@ -70,6 +70,14 @@ def _spdx_license_declared(declared: str | None) -> str:
     return declared
 
 
+def _sha256_hex(dep: LockedDependency) -> str | None:
+    """The lockfile-recorded SHA-256 content hash as bare hex, when recorded."""
+    algorithm, _, digest = (dep.content_hash or "").partition(":")
+    if algorithm.lower() == "sha256" and digest:
+        return digest.lower()
+    return None
+
+
 def _external_references(dep: LockedDependency) -> list[dict[str, str]]:
     """Scrubbed distribution reference, when a source URL was recorded."""
     if not dep.resolved_url:
@@ -105,6 +113,9 @@ def _build_cyclonedx(lockfile: LockFile, timestamp: str) -> dict[str, Any]:
         licenses = _cyclonedx_licenses(dep.declared_license)
         if licenses is not None:
             comp["licenses"] = licenses
+        digest = _sha256_hex(dep)
+        if digest:
+            comp["hashes"] = [{"alg": "SHA-256", "content": digest}]
         refs = _external_references(dep)
         if refs:
             comp["externalReferences"] = refs
@@ -130,6 +141,8 @@ def _build_spdx(lockfile: LockFile, timestamp: str) -> dict[str, Any]:
             "SPDXID": spdx_id,
             "name": _component_name(dep),
             "downloadLocation": download or _NOASSERTION,
+            # The SBOM inventories packages; it never lists their files.
+            "filesAnalyzed": False,
             # APM records provenance, it never CONCLUDES a license.
             "licenseConcluded": _NOASSERTION,
             "licenseDeclared": _spdx_license_declared(dep.declared_license),
@@ -144,6 +157,9 @@ def _build_spdx(lockfile: LockFile, timestamp: str) -> dict[str, Any]:
         version = _component_version(dep)
         if version:
             pkg["versionInfo"] = version
+        digest = _sha256_hex(dep)
+        if digest:
+            pkg["checksums"] = [{"algorithm": "SHA256", "checksumValue": digest}]
         packages.append(pkg)
     return {
         "spdxVersion": SPDX_VERSION,

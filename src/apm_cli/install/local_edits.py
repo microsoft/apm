@@ -44,8 +44,7 @@ def restore_locked_content_hint(subject: str) -> str:
     """
     return (
         f"To restore the locked content, delete {subject} and rerun 'apm install', "
-        "or run 'apm install --force' (overwrites local edits). To keep the edits, "
-        "run 'apm export-patch' first"
+        "or run 'apm install --force' (overwrites local edits)"
     )
 
 

@@ -817,8 +817,8 @@ class InstallService:
         else:
             tip = (
                 "Tip: nothing was deployed. "
-                f"{restore_locked_content_hint('the listed files')}, then commit "
-                "the deployed files and apm.lock.yaml."
+                f"{restore_locked_content_hint('the listed files')}. To keep local "
+                "edits, run 'apm export-patch' or move them aside first."
             )
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",

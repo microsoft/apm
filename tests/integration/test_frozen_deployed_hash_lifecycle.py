@@ -202,3 +202,42 @@ def test_warm_frozen_with_kept_skill_edit_fails_closed(
     scenario.run("install", *flags, "--frozen", "--no-policy", cwd=cwd, env=env)
     if scope == "project":
         scenario.run("audit", "--ci", "--no-policy", cwd=cwd, env=env)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        ".claude/rules/global.md",
+        ".claude/agents/rev.md",
+        ".claude/commands/hello.md",
+        ".claude/skills/helper/SKILL.md",
+    ],
+    ids=["instruction", "agent", "command", "skill"],
+)
+def test_frozen_fails_on_edit_of_every_primitive_type(
+    tmp_path: Path, apm_binary_path: Path, relative: str
+) -> None:
+    """An edited deployed file fails --frozen whatever integrator owns it (#3994).
+
+    Integrators that rewrite instructions, agents, and commands used to
+    restore the edit before the post-deploy check, so frozen passed silently.
+    """
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    sha, env = _published(scenario)
+    project = _project(scenario, sha, env, ["claude"])
+    edited = project / relative
+    assert edited.is_file(), relative
+    edited.write_bytes(b"Edited.\n")
+    lock_before = (project / "apm.lock.yaml").read_bytes()
+
+    frozen = scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env, expect=1)
+    text = output(frozen)
+    assert f"{relative}: expected sha256:" in text, text
+    assert "nothing was deployed" in text and "apm install --force" in text, text
+    assert edited.read_bytes() == b"Edited.\n"
+    assert (project / "apm.lock.yaml").read_bytes() == lock_before
+
+    # The named repair restores the locked bytes for every primitive type.
+    scenario.run("install", "--force", "--no-policy", cwd=project, env=env)
+    assert edited.read_bytes() != b"Edited.\n"
+    scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env)

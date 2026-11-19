@@ -3,6 +3,12 @@
   "components": [
     {
       "bom-ref": "pkg:generic/local-helper@sha256:aaa111",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "aaa111"
+        }
+      ],
       "name": "acme/local-helper",
       "purl": "pkg:generic/local-helper@sha256:aaa111",
       "type": "library",
@@ -47,6 +53,19 @@
       "purl": "pkg:github/acme/proprietary@abc123",
       "type": "library",
       "version": "abc123"
+    },
+    {
+      "bom-ref": "pkg:github/acme/skills@feed01#skills/review",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "bbb222"
+        }
+      ],
+      "name": "acme/skills",
+      "purl": "pkg:github/acme/skills@feed01#skills/review",
+      "type": "library",
+      "version": "feed01"
     },
     {
       "bom-ref": "pkg:oci/oci-tools@sha256:abc123",

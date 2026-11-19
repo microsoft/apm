@@ -365,7 +365,9 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 # Consumer next-steps surface (Wave 3 v3 noun-verb teach)
                 assert "apm install" in result.output
-                assert "apm run" in result.output
+                # No experimental step, and ASCII-only chrome (#3994).
+                assert "apm run" not in result.output
+                assert result.output.isascii()
                 assert "apm plugin init" in result.output
                 assert "apm marketplace init" in result.output
                 assert "https://microsoft.github.io/apm" in result.output
@@ -1366,6 +1368,20 @@ class TestInitMetadataFlags:
 
                 assert result.exit_code == 0, result.output
                 assert self._read_yaml()["author"] == ""
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_apply_implies_discover(self):
+        """`init --apply` runs discovery instead of demanding --discover (#3994)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                with patch("apm_cli.commands.init.run_discover") as run_discover:
+                    result = self.runner.invoke(cli, ["init", "--apply", "--yes"])
+
+                assert result.exit_code == 0, result.output
+                assert run_discover.call_args.kwargs["write"] is True
+                assert not Path("apm.yml").exists()
             finally:
                 os.chdir(self.original_dir)
 

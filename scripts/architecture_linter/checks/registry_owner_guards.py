@@ -1039,7 +1039,37 @@ def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
         *_doctor_status_findings(provider, rule_id),
         *_target_error_status_findings(provider, rule_id),
         *_policy_discovery_output_findings(provider, rule_id),
+        *_rich_console_construction_findings(provider, rule_id),
     )
+
+
+_CONSOLE_OWNER = "src/apm_cli/utils/console.py"
+_RICH_CONSOLE_IMPORT = re.compile(r"^\s*from\s+rich\.console\s+import\b.*\bConsole\b")
+_RICH_CONSOLE_CALL = re.compile(r"(?<![\w.])(?:rich\.console\.)?Console\(")
+
+
+def _rich_console_construction_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Rich consoles come from utils/console.py so tables and panels stay ASCII (#3994)."""
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        if path == _CONSOLE_OWNER:
+            continue
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "build Rich consoles with apm_cli.utils.console.new_console() or "
+                "_get_console(); a direct rich Console renders Unicode boxes",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _RICH_CONSOLE_IMPORT.search(line) or _RICH_CONSOLE_CALL.search(line)
+        )
+    return findings
 
 
 def _target_error_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:

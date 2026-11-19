@@ -527,19 +527,18 @@ class TestBrowseCmd:
         assert result.exit_code == 0
         assert "my-plugin" in result.output
 
-    def test_plugins_rendered_with_rich(self, runner: CliRunner) -> None:
+    def test_plugins_listed_with_full_install_names(self, runner: CliRunner) -> None:
         from apm_cli.commands.marketplace import marketplace
 
         source = _make_source()
         plugin = MarketplacePlugin(name="my-plugin")
         manifest = _make_manifest(plugins=(plugin,))
-        mock_console = MagicMock()
         with patch("apm_cli.marketplace.registry.get_marketplace_by_name", return_value=source):
             with patch("apm_cli.marketplace.client.fetch_marketplace", return_value=manifest):
-                with patch("apm_cli.commands.marketplace._get_console", return_value=mock_console):
-                    result = runner.invoke(marketplace, ["browse", "my-market"])
+                result = runner.invoke(marketplace, ["browse", "my-market"])
         assert result.exit_code == 0
-        mock_console.print.assert_called()
+        # A list keeps install names whole; a table truncated them (#3994).
+        assert "my-plugin@my-market" in result.output
 
 
 # ---------------------------------------------------------------------------

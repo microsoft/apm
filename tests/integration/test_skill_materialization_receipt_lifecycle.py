@@ -41,10 +41,10 @@ def test_user_edit_equal_to_old_version_remains_protected(
     result = scenario.install(*(["--frozen"] if frozen else []))
     output = " ".join(result.stdout.split())
     if frozen:
-        # --frozen fails closed on any deployed-hash mismatch (#3654) but
-        # still keeps the user's edit in place.
+        # --frozen fails closed on any deployed-hash mismatch (#3654) before
+        # deploying, so the user's edit stays in place (#3994).
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "Kept user-edited file .claude/skills/demo/SKILL.md" in output
+        assert "nothing was deployed" in output
         assert "deployed files do not match the hashes recorded in apm.lock.yaml" in output
         assert "- .claude/skills/demo/SKILL.md: expected sha256:" in output
     else:

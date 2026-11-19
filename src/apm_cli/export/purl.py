@@ -6,7 +6,7 @@ what the lockfile recorded, nothing more.
 
 purl scheme (per design D3):
 
-* git deps          -> ``pkg:<host>/<owner>/<repo>@<resolved_commit>``
+* git deps          -> ``pkg:<host>/<owner>/<repo>@<resolved_commit>[#<subpath>]``
 * OCI registry deps -> ``pkg:oci/<name>@<digest>``
 * local / generic   -> ``pkg:generic/<name>@<content_hash>`` (version omitted
                        when no hash was recorded)
@@ -53,11 +53,18 @@ def _host_segment(repo_url: str) -> str:
 
 
 def _purl_type_for(dep: LockedDependency) -> str | None:
-    """Resolve the forge purl type from host_type, else the repo_url domain."""
+    """Resolve the forge purl type from host_type, the repo_url domain, or host.
+
+    Lockfiles record default-host GitHub deps as a host-less ``owner/repo``
+    with ``host: github.com``, so the recorded host decides those.
+    """
     explicit = _HOST_TYPE_TO_PURL.get((dep.host_type or "").lower())
     if explicit:
         return explicit
-    return _HOST_DOMAIN_TO_PURL.get(_host_segment(dep.repo_url))
+    from_url = _HOST_DOMAIN_TO_PURL.get(_host_segment(dep.repo_url))
+    if from_url:
+        return from_url
+    return _HOST_DOMAIN_TO_PURL.get((dep.host or "").lower())
 
 
 def _owner_repo(repo_url: str) -> str:
@@ -128,6 +135,15 @@ def _encode_path(owner_repo: str) -> str:
     return "/".join(_encode_segment(p) for p in owner_repo.split("/"))
 
 
+def _subpath(dep: LockedDependency) -> str:
+    """Return the ``#subpath`` naming a package inside its repository, if any.
+
+    Two packages from one repository at one commit stay distinct components.
+    """
+    parts = [part for part in (dep.virtual_path or "").split("/") if part not in ("", ".", "..")]
+    return f"#{'/'.join(_encode_segment(part) for part in parts)}" if parts else ""
+
+
 def build_purl(dep: LockedDependency) -> str:
     """Build the Package URL identity for *dep* from lockfile fields only."""
     if _is_oci(dep):
@@ -137,12 +153,17 @@ def build_purl(dep: LockedDependency) -> str:
 
     if not _is_local(dep) and dep.resolved_commit:
         purl_type = _purl_type_for(dep)
+        subpath = _subpath(dep)
         if purl_type:
             return (
-                f"pkg:{purl_type}/{_encode_path(_owner_repo(dep.repo_url))}@{dep.resolved_commit}"
+                f"pkg:{purl_type}/{_encode_path(_owner_repo(dep.repo_url))}"
+                f"@{dep.resolved_commit}{subpath}"
             )
         # Unknown forge: stay honest with a generic identity keyed on the commit.
-        return f"pkg:generic/{_encode_segment(_basename(dep.repo_url))}@{dep.resolved_commit}"
+        return (
+            f"pkg:generic/{_encode_segment(_basename(dep.repo_url))}"
+            f"@{dep.resolved_commit}{subpath}"
+        )
 
     # Local / primitive / hash-only identity.
     name = _encode_segment(_basename(dep.repo_url))

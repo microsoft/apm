@@ -1496,6 +1496,35 @@ Use this skill for comprehensive guidance.
         assert result.skill_created is True
         assert result.references_copied == 4  # All 4 files
 
+    def test_native_skill_adopts_identical_unmanaged_copy(self):
+        """An unmanaged copy equal to the install's output is adopted, not skipped (#3994)."""
+        from apm_cli.utils.diagnostics import CATEGORY_COLLISION, DiagnosticCollector
+
+        package_dir = self.project_root / "upstream" / "review"
+        package_dir.mkdir(parents=True)
+        (package_dir / "SKILL.md").write_text("---\nname: review\ndescription: Review\n---\n")
+        (package_dir / "LICENSE").write_text("MIT\n")
+        pkg = self._create_package_info(name="review", install_path=package_dir)
+
+        target = self.project_root / ".agents" / "skills" / "review"
+        shutil.copytree(package_dir, target)
+        diag = DiagnosticCollector()
+        result = self.integrator.integrate_package_skill(
+            pkg, self.project_root, diagnostics=diag, managed_files=set()
+        )
+        assert target in result.target_paths
+        assert CATEGORY_COLLISION not in diag.by_category()
+
+        # A differing copy is still user content and stays untouched.
+        (target / "SKILL.md").write_text("# edited\n")
+        diag = DiagnosticCollector()
+        result = SkillIntegrator().integrate_package_skill(
+            pkg, self.project_root, diagnostics=diag, managed_files=set()
+        )
+        assert target not in (result.target_paths or [])
+        assert CATEGORY_COLLISION in diag.by_category()
+        assert (target / "SKILL.md").read_text() == "# edited\n"
+
     def test_native_skill_cross_package_collision_records_diagnostic(self):
         """Two distinct packages that both deploy a same-named skill should warn on the second install.
 

@@ -17,6 +17,7 @@ from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_adoption import (
+    adoptable_skill_members,
     dircmp_equal,
     installing_commit,
     is_skill_dir_identical_to_source,
@@ -1300,34 +1301,55 @@ class SkillIntegrator(BaseIntegrator):
                 continue
             seen_skill_dirs.add(resolved)
 
+            from apm_cli.models.apm_package import PackageType as _PackageType
+
+            native_ignore = _build_deployable_copy_ignore(
+                skip_bin=skip_bin,
+                source_plan=source_plan,
+                exclude_apm=True,
+                exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
+            )
             rel_path = deployed_path_entry(target_skill_dir, project_root, [target])
             session_owned = resolved in self._native_skill_session_owners
             target_existed = skill_dir_has_content(target_skill_dir)
-            if target_existed and self.check_collision(
-                target_skill_dir,
-                rel_path,
-                {rel_path} if session_owned else collision_managed,
-                force,
-                diagnostics=diagnostics,
+            # A local copy that already equals this install's output is adopted,
+            # as sub-skills are, rather than skipped as user content (#3994).
+            unchanged = (
+                target_existed
+                and not session_owned
+                and bool(
+                    adoptable_skill_members(
+                        package_path,
+                        target_skill_dir,
+                        walk_source=self.walk_source_tree,
+                        ignore=native_ignore,
+                        resolve_links=self.resolve_links,
+                    )
+                )
+            )
+            if (
+                target_existed
+                and not unchanged
+                and self.check_collision(
+                    target_skill_dir,
+                    rel_path,
+                    {rel_path} if session_owned else collision_managed,
+                    force,
+                    diagnostics=diagnostics,
+                )
             ):
                 self._skill_can_complete = False
                 continue
-
-            from apm_cli.models.apm_package import PackageType as _PackageType
 
             copied = self._copy_skill_bundle(
                 package_path,
                 target_skill_dir,
                 project_root,
-                ignore=_build_deployable_copy_ignore(
-                    skip_bin=skip_bin,
-                    source_plan=source_plan,
-                    exclude_apm=True,
-                    exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
-                ),
+                ignore=native_ignore,
                 managed_files=collision_managed,
                 force=force,
                 diagnostics=diagnostics,
+                unchanged=unchanged,
             )
             if target_skill_dir / "SKILL.md" in copied:
                 all_target_paths.append(target_skill_dir)

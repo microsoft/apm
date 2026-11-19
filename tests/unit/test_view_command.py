@@ -164,6 +164,22 @@ class TestViewCommand(_InfoCmdBase):
         assert "aabbccdd" in result.output
         assert "deadbeef" in result.output
 
+    def test_view_versions_renders_ascii_table(self):
+        """The Rich versions table draws its box in ASCII (encoding rule, #3994)."""
+        mock_refs = [
+            RemoteRef(name="v1.0.0", ref_type=GitReferenceType.TAG, commit_sha="11223344aabbccdd"),
+        ]
+        with (
+            patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_cls,
+            patch("apm_cli.commands.view.AuthResolver"),
+        ):
+            mock_cls.return_value.list_remote_refs.return_value = mock_refs
+            result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        assert "v1.0.0" in result.output
+        assert "+--" in result.output
+        assert result.output.isascii(), result.output
+
     def test_view_versions_empty_refs(self):
         """``apm view org/repo versions`` with no refs shows info message."""
         with (

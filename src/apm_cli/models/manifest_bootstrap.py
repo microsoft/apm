@@ -135,6 +135,15 @@ def write_minimal_manifest(config, plugin=False, target_path=None):
         )
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
 
+    if plugin:
+        # Scaffold the field without choosing a license for the author (#3799):
+        # 'apm pack' records NOASSERTION in the SBOM until it is set.
+        license_comment = (
+            "# SPDX license for this package (set before publishing), for example:\n"
+            "# license: MIT\n"
+        )
+        content = content.replace("dependencies:", license_comment + "\ndependencies:", 1)
+
     from .manifest_targets import verify_rewritten_manifest
 
     verify_rewritten_manifest(out_file, content)

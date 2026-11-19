@@ -12,6 +12,12 @@
   "packages": [
     {
       "SPDXID": "SPDXRef-Package-0",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "aaa111"
+        }
+      ],
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -20,6 +26,7 @@
           "referenceType": "purl"
         }
       ],
+      "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
       "name": "acme/local-helper",
@@ -35,6 +42,7 @@
           "referenceType": "purl"
         }
       ],
+      "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "(MIT OR Apache-2.0)",
       "name": "acme/dual",
@@ -50,6 +58,7 @@
           "referenceType": "purl"
         }
       ],
+      "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "MIT",
       "name": "acme/git-utils",
@@ -65,6 +74,7 @@
           "referenceType": "purl"
         }
       ],
+      "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "UNLICENSED",
       "name": "acme/proprietary",
@@ -72,6 +82,28 @@
     },
     {
       "SPDXID": "SPDXRef-Package-4",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bbb222"
+        }
+      ],
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/acme/skills@feed01#skills/review",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "acme/skills",
+      "versionInfo": "feed01"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-5",
       "downloadLocation": "oci://registry.example.com/acme/oci-tools@sha256:abc123",
       "externalRefs": [
         {
@@ -80,6 +112,7 @@
           "referenceType": "purl"
         }
       ],
+      "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
       "name": "acme/oci-tools",
