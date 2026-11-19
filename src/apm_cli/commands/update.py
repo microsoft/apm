@@ -100,6 +100,7 @@ from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, 
 from ._helpers import (
     UnknownPackageError,
     _find_apm_yml,
+    explicit_policy_option,
     resolve_requested_packages,
     trust_transitive_mcp_option,
 )
@@ -729,6 +730,7 @@ def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool, market
     ),
 )
 @trust_transitive_mcp_option
+@explicit_policy_option
 @click.pass_context
 @serialized_lifecycle
 def update(
@@ -753,6 +755,7 @@ def update(
         apm update --yes                # Skip the prompt (CI-safe)
         apm update org/pkg-a org/pkg-b  # Refresh only the named packages
         apm update -g                   # Refresh user-scope deps (~/.apm/)
+        apm update --policy ./org-policy.yml  # Also enforce a vendored policy
     """
     from apm_cli.core.scope import InstallScope, get_manifest_path
     from apm_cli.integration.targets import should_use_legacy_skill_paths

@@ -840,6 +840,7 @@ class InstallLogger(CommandLogger):
         age_seconds: int | None = None,
         subgroup_scoped: bool = False,
         chain: list[str] | None = None,
+        explicit: bool = False,
     ):
         """Log policy discovery outcome.
 
@@ -847,7 +848,8 @@ class InstallLogger(CommandLogger):
         (users must know blocking is active) or when ``subgroup_scoped``
         is set and enforcement is not ``off`` -- a GitLab subgroup policy
         composed with its ancestors names its ordered extends chain even at
-        default verbosity (#2753).
+        default verbosity (#2753). An ``explicit`` ``--policy`` source is
+        likewise always named so the user sees it was applied (#1925).
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
@@ -876,7 +878,7 @@ class InstallLogger(CommandLogger):
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
-        elif self.verbose or (subgroup_scoped and enforcement != "off"):
+        elif self.verbose or ((subgroup_scoped or explicit) and enforcement != "off"):
             # GitLab subgroup composition: show the chain even in non-verbose
             # warn mode so the dev sees which namespaces applied (#2753);
             # an ``off`` policy needs no action and stays silent.
@@ -1088,6 +1090,22 @@ class InstallLogger(CommandLogger):
             return False
         self._policy_banners.add(key)
         return True
+
+    def policy_source_unavailable(self, source: str, error: str, blocking: bool = False):
+        """Log a composed policy source that could not be loaded (#1925).
+
+        Always visible: a named source that silently drops out would hide
+        a gap in enforcement. With ``blocking`` the caller fails closed
+        right after, so the line is an error instead of a warning.
+        """
+        if blocking:
+            _rich_error(f"Policy source {source} could not be loaded: {error}", symbol="error")
+            return
+        _rich_warning(
+            f"Policy source {source} could not be loaded ({error}); continuing "
+            "without it. Set policy.fetch_failure_default: block in apm.yml to fail closed.",
+            symbol="warning",
+        )
 
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.

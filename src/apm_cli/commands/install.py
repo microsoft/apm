@@ -191,6 +191,7 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_bootstrap_config,
+    explicit_policy_option,
     trust_transitive_mcp_option,
 )
 
@@ -1036,6 +1037,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     default=False,
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
+@explicit_policy_option
 @click.option(
     "--audit",
     "audit_mode",
@@ -1164,6 +1166,7 @@ def install(  # noqa: PLR0913
         apm install --only=apm                  # Install only APM packages
         apm update                              # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would change
+        apm install --policy ./org-policy.yml   # Also enforce a vendored policy
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
         apm install --allow-insecure http://...  # HTTP URL (needs allow_insecure)
         apm install --skill my-skill org/bundle  # Install one skill from bundle
