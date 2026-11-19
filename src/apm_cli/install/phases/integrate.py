@@ -553,8 +553,12 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
 
 def _decl_fully_trusted(allow: dict, decl) -> bool:
     """Return True when *allow* grants every exec type *decl* declares."""
-    grant = allow.get(decl.package_key) or allow.get(decl.package_name) or {}
-    return all(grant.get(t, False) for t in decl.exec_types)
+    identity = decl.package_key.split("#", 1)[0]
+    grant = allow.get(decl.package_key) or allow.get(identity) or allow.get(decl.package_name) or {}
+    # A pinned item map was just recorded from the current definitions.
+    return all(
+        grant.get(t, False) is True or isinstance(grant.get(t), dict) for t in decl.exec_types
+    )
 
 
 # ======================================================================
@@ -702,22 +706,23 @@ def run(ctx: InstallContext) -> None:
     if ctx.frozen and ctx.existing_lockfile is not None:
         from apm_cli.install.service import InstallService
         from apm_cli.install.template import effective_allow_map
-        from apm_cli.security.executables import project_mcp_executables_gate
+        from apm_cli.security.trust import McpAdmission
 
         InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
+        effective_allow_map(ctx)
         InstallService.enforce_hydrated_mcp(
             ctx.apm_package,
             ctx.existing_lockfile,
             apm_modules_dir,
-            trust_transitive_mcp=ctx.trust_transitive_mcp,
-            logger=ctx.logger,
-            # The pipeline's routed, cached allow map (already resolved for
-            # materialized packages) is the same one deployment uses.
-            approve=project_mcp_executables_gate(
+            # The pipeline's routed, cached trust context (already resolved
+            # for materialized packages) is the same one deployment uses.
+            admission=McpAdmission.for_project(
                 ctx.project_root,
-                ctx.apm_package,
-                executable_context=(effective_allow_map(ctx), True),
+                one_off=ctx.trust_transitive_mcp,
+                trust_context=getattr(effective_allow_map(ctx), "trust_context", None)
+                or getattr(ctx, "exec_trust_ctx", None),
             ),
+            logger=ctx.logger,
             active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
         )
 

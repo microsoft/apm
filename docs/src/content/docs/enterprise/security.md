@@ -459,6 +459,17 @@ across targets.
 | **Grok Build** | `.grok/commands/*.md` | Deployed when `.grok/` exists. |
 | **Windsurf** | `.windsurf/workflows/*.md` | Deployed when `.windsurf/` exists. |
 
+## Agent tool capability gate (Kiro)
+
+Kiro agent `tools` are permission-bearing. An agent that declares a value
+outside the [approved Kiro tool selectors](../../reference/targets-matrix/)
+fails closed: APM writes zero bytes for it, does not adopt an existing
+copy, and does not record it in `apm.lock.yaml` (a previously deployed copy
+is removed on reinstall). The gate is per agent and non-fatal: other agents
+still deploy, `apm install` prints a warning naming the value, and the
+command exits 0. Pipelines that need a hard failure should check install
+output for the warning.
+
 ## Executable trust gate
 
 When the executable trust gate is enabled, APM blocks unapproved executable
@@ -503,6 +514,21 @@ to `recommend`. Local bundle hook, MCP, LSP, and canvas approvals are narrower: 
 prints an exact `executables.allow` key containing the bundle's SHA-256 content
 digest, so another bundle that claims the same package name cannot inherit that
 consent.
+
+### Content-pinned approvals
+
+`apm approve` pins each dependency hook file and self-defined MCP server to a
+SHA-256 fingerprint of what runs: the MCP command, args, env, URL, headers and
+related fields, or the hook document plus the scripts it references. When an
+approved definition changes upstream, install parks it as `definition-changed`
+until someone reviews and re-approves it. Org, user, and project deny win
+over every grant, including pins and the one-off `--trust-transitive-mcp`
+flag, for self-defined MCP servers, hooks, and transitive MCP servers that need
+trust. A hook's run-time downloads (`npx`, `curl`) and indirectly
+loaded code are not covered. Legacy `hooks: true` / `mcp: true` grants still
+deploy any content and warn on every install. See
+[Pinned approvals](../../reference/cli/approve/#pinned-approvals) for the
+fingerprint inputs and admission order.
 
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).
@@ -549,12 +575,13 @@ MCP servers declared by your direct dependencies (packages listed in your `apm.y
 
 ### Transitive dependencies
 
-Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Registry-resolved servers declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
+Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Plain registry references declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
 
-To allow transitive self-defined MCP servers, you must either:
+The same applies to a transitive registry reference that sets its own `registry:` URL or a configuration overlay. To allow such a server:
 
 - **Re-declare the dependency** in your own `apm.yml`, promoting it to a direct dependency.
-- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to opt in for that run. The lockfile records which servers were written; it does not carry this consent to later runs.
+- **Approve it:** `apm approve <pkg>` pins the server's definition in `apm.yml`; commit it to share. A type-level `mcp: true` does not admit a transitive server.
+- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to deploy it for that run only. The flag is not saved, and `apm audit --ci` fails a lockfile that admitted a server `apm.yml` does not approve.
 
 ## Token handling
 

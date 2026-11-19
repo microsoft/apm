@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import jsonschema
 import pytest
 
+from apm_cli.security.trust import McpAdmission
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     fixture_path,
@@ -202,7 +203,7 @@ def test_frozen_mcp_validation_fails_before_durable_mutation(tmp_path):
         package,
         None,
         tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
+        admission=McpAdmission(None),
     )
     stale_configs = {name: dict(config) for name, config in view.configs.items()}
     stale_configs["fixture-mcp"]["args"] = ["stale"]
@@ -274,7 +275,7 @@ def test_cold_dependency_evidence_cannot_defer_direct_mcp_drift(
         package,
         lock,
         fixture.root / "apm_modules",
-        trust_transitive_self_defined=False,
+        admission=McpAdmission(None),
         allow_pending=True,
     )
     lock.mcp_configs = {

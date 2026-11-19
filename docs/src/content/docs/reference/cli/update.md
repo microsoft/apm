@@ -54,7 +54,7 @@ On a fresh clone or CI runner without local deployment receipts (for example a s
 | `--global`, `-g` | off | Refresh user-scope dependencies under `$APM_HOME` (default `~/.apm`) instead of the current project (mirrors `apm install -g`). |
 | `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
-| `--trust-transitive-mcp` | off | Trust self-defined MCP servers declared by transitive packages for this run, as with `apm install`. Servers recorded in `apm.lock.yaml` are not trusted again without it. |
+| `--trust-transitive-mcp` | off | Deploy unapproved transitive MCP servers for this run only, as with [`apm install`](../install/). Neither `apm.yml` nor `apm.lock.yaml` carries this consent; to keep a server, run [`apm approve`](../approve/) on its package. |
 | `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |
 | `--legacy-skill-paths` | off | Keep refreshed skills in per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Pass it when the project was installed with `apm install --legacy-skill-paths`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
