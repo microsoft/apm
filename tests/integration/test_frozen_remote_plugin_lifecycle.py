@@ -329,7 +329,7 @@ def test_frozen_replays_pin_after_remote_head_advances(
 
 def _assert_mcp_matches_producer(scenario: _Scenario) -> None:
     """Compare actual native config, not merely the lockfile's intended server set."""
-    relative = Path(".github/mcp.json")
+    relative = Path(".mcp.json")
     baseline = scenario.producer / relative
     actual = scenario.consumer / relative
     if baseline.exists():
@@ -398,8 +398,7 @@ def test_frozen_hydrated_mcp_drift_preserves_native_settings(
         changed_lock[field] = old_lock.get(field, [] if field == "mcp_servers" else {})
     dump_yaml(changed_lock, scenario.consumer / "apm.lock.yaml")
     (scenario.consumer / "apm.yml").write_bytes((scenario.producer / "apm.yml").read_bytes())
-    native = scenario.consumer / ".github/mcp.json"
-    native.parent.mkdir()
+    native = scenario.consumer / ".mcp.json"
     native.write_text(
         json.dumps(
             {
@@ -453,8 +452,7 @@ def test_frozen_refuses_unverifiable_source_evidence(
     else:
         scenario.repository.origin.rename(scenario.repository.origin.with_name("offline.git"))
     dump_yaml(lock, scenario.consumer / "apm.lock.yaml")
-    native = scenario.consumer / ".github/mcp.json"
-    native.parent.mkdir()
+    native = scenario.consumer / ".mcp.json"
     native.write_text(
         '{"mcpServers":{"user-owned":{"command":"keep"}},"userSetting":true}\n', encoding="utf-8"
     )
@@ -526,8 +524,7 @@ def test_frozen_does_not_defer_present_or_local_sources(
                 },
                 present / "apm.yml",
             )
-    native = scenario.consumer / ".github/mcp.json"
-    native.parent.mkdir()
+    native = scenario.consumer / ".mcp.json"
     native.write_text('{"mcpServers":{"user-owned":{"command":"keep"}}}\n', encoding="utf-8")
     previous = native.read_bytes()
     output = scenario.freeze(success=False)
@@ -541,8 +538,7 @@ def test_frozen_services_only_cannot_defer_without_hydration(
 ) -> None:
     """A services-only invocation cannot accept missing package declarations without fetching."""
     scenario = _scenario(tmp_path, apm_binary_path)
-    native = scenario.consumer / ".github/mcp.json"
-    native.parent.mkdir()
+    native = scenario.consumer / ".mcp.json"
     native.write_text('{"mcpServers":{"user-owned":{"command":"keep"}}}\n', encoding="utf-8")
     previous = native.read_bytes()
     output = scenario.freeze(success=False, only_mcp=True)

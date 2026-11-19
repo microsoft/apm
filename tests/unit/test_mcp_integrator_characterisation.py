@@ -70,7 +70,7 @@ class TestInstallCharacterisation:
             ):
                 result = MCPIntegrator.install(
                     mcp_deps=mock_mcp_deps,
-                    runtime="vscode",
+                    runtime="copilot",
                 )
                 assert isinstance(result, int)
 
@@ -88,7 +88,7 @@ class TestInstallCharacterisation:
             ):
                 result = MCPIntegrator.install(
                     mcp_deps=mock_mcp_deps,
-                    runtime="vscode",
+                    runtime="copilot",
                     logger=logger,
                 )
                 assert isinstance(result, int)
@@ -105,12 +105,12 @@ class TestInstallCharacterisation:
                 "_check_self_defined_servers_needing_installation",
                 return_value=["test-server"],
             ):
-                # exclude="cursor" doesn't affect explicit runtime="vscode"
+                # exclude="cursor" doesn't affect explicit runtime="copilot"
                 result = MCPIntegrator.install(
                     mcp_deps=mock_mcp_deps,
-                    runtime="vscode",
+                    runtime="copilot",
                     exclude="cursor",
-                    explicit_target="vscode",
+                    explicit_target="copilot",
                     logger=logger,
                 )
                 assert isinstance(result, int)
@@ -130,8 +130,8 @@ class TestInstallCharacterisation:
             ):
                 MCPIntegrator.install(
                     mcp_deps=mock_mcp_deps,
-                    runtime="vscode",
-                    explicit_target="vscode",
+                    runtime="copilot",
+                    explicit_target="copilot",
                     logger=logger,
                 )
                 assert mock_install.called
@@ -192,7 +192,7 @@ class TestInstallCharacterisation:
                 MCPIntegrator.install(
                     mcp_deps=mock_mcp_deps,
                     verbose=True,
-                    runtime="vscode",
+                    runtime="copilot",
                     logger=logger,
                 )
 
@@ -210,7 +210,7 @@ class TestInstallCharacterisation:
             ):
                 result = MCPIntegrator.install(
                     mcp_deps=mock_mcp_deps,
-                    runtime="vscode",
+                    runtime="copilot",
                     logger=logger,
                 )
                 assert result >= 0

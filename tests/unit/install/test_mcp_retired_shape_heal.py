@@ -31,7 +31,9 @@ _RETIRED = {"type": "http", "url": _URL, "tools": ["*"], "id": ""}
 
 
 def _compare(tmp_path: Path, native: dict, *, managed: bool, fingerprint: str | None):
-    client = ClientFactory.create_client("copilot", project_root=tmp_path)
+    # The Copilot CLI shape (default tools, empty id) is the user-scope destination;
+    # project scope writes Claude's .mcp.json shape (#3866).
+    client = ClientFactory.create_client("copilot", project_root=tmp_path, user_scope=True)
     return compare_native_mcp_connection(
         client,
         "io.example/heal",
@@ -106,7 +108,10 @@ def test_frozen_heal_keeps_the_retired_receipt_verifiable(
 ) -> None:
     """--frozen heals without writing the lock, so the receipt still fingerprints the retired render."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
-    client = ClientFactory.create_client(runtime, project_root=tmp_path)
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "copilot-home"))
+    client = ClientFactory.create_client(
+        runtime, project_root=tmp_path, user_scope=runtime == "copilot"
+    )
     current = client.render_server_config(_INFO)
     (retired,) = client.legacy_managed_renders(_INFO)
     native = dict(current)

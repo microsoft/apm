@@ -139,10 +139,16 @@ def test_reinit_keeps_the_singular_all_deployment_set(
             f"re-init narrowed target: all from {expanded} to {after}:\n"
             f"{(project / 'apm.yml').read_text(encoding='utf-8')}"
         )
-        # The rewritten spellings keep the MCP destination target: all had.
+        # The rewritten spellings name copilot (never the vscode alias), whose
+        # project MCP destination is the workspace-root .mcp.json (#3866).
         manifest = load_yaml(project / "apm.yml") or {}
+        assert "copilot" in manifest.get("targets", []), manifest
+        assert "vscode" not in manifest.get("targets", []), manifest
         manifest.setdefault("dependencies", {})["mcp"] = [dict(SELF_DEFINED_MCP)]
         dump_yaml(manifest, project / "apm.yml")
         tw.run(project, "install", step="4-mcp")
-        assert (project / ".vscode/mcp.json").is_file(), "re-init moved MCP off .vscode/mcp.json"
-        assert not (project / ".github/mcp.json").exists(), "re-init redirected MCP to .github"
+        assert (project / ".mcp.json").is_file(), "re-init lost the Copilot MCP destination"
+        lock = load_yaml(project / "apm.lock.yaml") or {}
+        assert "copilot" in (lock.get("mcp_target_servers") or {}), lock
+        for retired in (".vscode/mcp.json", ".github/mcp.json"):
+            assert not (project / retired).exists(), f"re-init wrote {retired}"

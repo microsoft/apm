@@ -212,8 +212,8 @@ def test_install_restores_dev_mcp_dependencies_to_lockfile_and_config(tmp_path, 
     result = CliRunner().invoke(cli, ["install", "--runtime", "vscode", "--target", "copilot"])
 
     assert result.exit_code == 0, result.output
-    config = json.loads((tmp_path / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
-    assert config["servers"]["dev-server"] == {
+    config = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    assert config["mcpServers"]["dev-server"] == {
         "type": "stdio",
         "command": "python",
         "args": ["-m", "dev_server"],
@@ -294,7 +294,7 @@ def test_install_loopback_http_remote_is_byte_idempotent_for_requested_targets(
         5500,
         "/mcp",
     )
-    copilot_config_path = tmp_path / ".github" / "mcp.json"
+    copilot_config_path = tmp_path / ".mcp.json"
     copilot_config = json.loads(copilot_config_path.read_text(encoding="utf-8"))
     copilot_url = urlparse(copilot_config["mcpServers"]["loopback-remote"]["url"])
     assert (copilot_url.scheme, copilot_url.hostname, copilot_url.port, copilot_url.path) == (
@@ -832,11 +832,11 @@ def test_prune_removes_only_owned_antigravity_mcp(tmp_path, monkeypatch):
         )
 
 
-def test_legacy_vscode_ownership_migrates_to_copilot_without_rewriting_vscode(
+def test_vscode_alias_install_records_copilot_ownership(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """A legacy VS Code entry becomes Copilot-owned without a second VS Code write."""
+    """The deprecated vscode alias writes and owns exactly what copilot does (#3866)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     LockFile().write(tmp_path / "apm.lock.yaml")
@@ -845,21 +845,22 @@ def test_legacy_vscode_ownership_migrates_to_copilot_without_rewriting_vscode(
         encoding="utf-8",
     )
 
-    legacy = CliRunner().invoke(
+    alias = CliRunner().invoke(
         cli,
         ["install", "--runtime", "vscode", "--target", "vscode", "--no-policy"],
     )
-    assert legacy.exit_code == 0, legacy.output
-    legacy_lock = LockFile.read(tmp_path / "apm.lock.yaml")
-    assert legacy_lock is not None
-    assert legacy_lock.mcp_target_servers == {"vscode": ["apm-managed"]}
+    assert alias.exit_code == 0, alias.output
+    alias_lock = LockFile.read(tmp_path / "apm.lock.yaml")
+    assert alias_lock is not None
+    assert alias_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
+    assert not (tmp_path / ".vscode" / "mcp.json").exists()
+    copilot_config = tmp_path / ".mcp.json"
+    copilot_bytes = copilot_config.read_bytes()
+    assert "apm-managed" in json.loads(copilot_bytes)["mcpServers"]
 
-    vscode_config = tmp_path / ".vscode" / "mcp.json"
-    vscode_bytes = vscode_config.read_bytes()
+    canonical = CliRunner().invoke(cli, ["install", "--no-policy"])
 
-    migrated = CliRunner().invoke(cli, ["install", "--no-policy"])
-
-    assert migrated.exit_code == 0, migrated.output
+    assert canonical.exit_code == 0, canonical.output
     lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
     assert lockfile is not None
     assert lockfile.mcp_target_servers == {"copilot": ["apm-managed"]}
@@ -869,10 +870,8 @@ def test_legacy_vscode_ownership_migrates_to_copilot_without_rewriting_vscode(
         for record in ledger.records.values()
         if record.locator.target == "mcp"
     } == {"copilot"}
-    assert vscode_config.read_bytes() == vscode_bytes
-    copilot_config = tmp_path / ".github" / "mcp.json"
-    copilot_payload = json.loads(copilot_config.read_text(encoding="utf-8"))
-    assert "apm-managed" in copilot_payload["mcpServers"]
+    assert copilot_config.read_bytes() == copilot_bytes
+    assert not (tmp_path / ".github" / "mcp.json").exists()
 
 
 def test_legacy_lockfile_adopts_exact_mcp_baseline_before_target_contraction(

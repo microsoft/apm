@@ -354,7 +354,7 @@ def test_transitive_package_migrates_owned_entries_and_cleans_by_provenance(
             (
                 "install",
                 "--target",
-                "vscode",
+                "copilot",
                 "--trust-transitive-mcp",
                 "--no-policy",
             ),
@@ -642,7 +642,7 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """A failed IntelliJ target does not prevent later VS Code cleanup."""
+    """A failed IntelliJ target does not prevent Copilot cleanup."""
     isolated = _create_environment(tmp_path, "continued-uninstall")
     package = isolated.package_root / "agent-config"
     package.mkdir()
@@ -658,7 +658,7 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
         (
             "install",
             "--target",
-            "intellij,vscode",
+            "intellij,copilot",
             "--trust-transitive-mcp",
             "--no-policy",
         ),
@@ -667,8 +667,8 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
         env=environment,
     )
     assert install.returncode == 0, install.stderr + install.stdout
-    vscode_path = project / ".vscode" / "mcp.json"
-    assert "managed-server" in json.loads(vscode_path.read_text(encoding="utf-8"))["servers"]
+    copilot_path = project / ".mcp.json"
+    assert "managed-server" in json.loads(copilot_path.read_text(encoding="utf-8"))["mcpServers"]
     canonical.write_bytes(b"{malformed\n")
 
     uninstall = runner.run(
@@ -679,7 +679,8 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
     )
 
     assert uninstall.returncode == 1
-    assert "managed-server" not in json.loads(vscode_path.read_text(encoding="utf-8"))["servers"]
+    copilot_servers = json.loads(copilot_path.read_text(encoding="utf-8")).get("mcpServers", {})
+    assert "managed-server" not in copilot_servers
     output = uninstall.stderr + uninstall.stdout
     assert "Uninstall incomplete" in output
     assert "run 'apm install'" in " ".join(output.split())

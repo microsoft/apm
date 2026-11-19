@@ -7,7 +7,10 @@ project whose ``apm.yml`` and ``apm.lock.yaml`` were produced by 0.35.1 or
 
 * ``install``, ``install --frozen``, ``update`` and ``compile --dry-run`` never
   rewrite the manifest and never change the deployed target set or the
-  lockfile's deployment rows. A 0.36.0 lockfile stays byte-identical.
+  lockfile's deployment rows, except for the one move #3866 makes on the first
+  install: Copilot project MCP servers leave ``.github/mcp.json`` (and the
+  former ``vscode`` alias's ``.vscode/mcp.json``) for ``.mcp.json``, and their
+  deployment rows are recorded for ``copilot``. Nothing changes after that.
 * ``audit --ci`` writes nothing.
 * Only compilation-target policy verdicts change, exactly as the brief
   predicts: comma-separated and alias spellings stop failing, ``target: all``
@@ -81,6 +84,23 @@ def _project_files(project: Path) -> dict[str, str]:
     return tree_snapshot(project, exclude=(".git", "apm_modules", ".apm-local"))
 
 
+_RETIRED_MCP_FILES = frozenset({".github/mcp.json", ".vscode/mcp.json"})
+# .github/mcp.json is a copilot detection signal, so the heal empties it but keeps it.
+_DELETABLE_RETIRED_MCP_FILES = frozenset({".vscode/mcp.json"})
+
+
+def _after_mcp_move(rows: set[tuple], files: set[str]) -> tuple[set[tuple], set[str]]:
+    """The deployment rows and files #3866's one-time MCP destination move yields."""
+    moved_rows = {
+        (kind, target, value, "copilot" if runtime == "vscode" else runtime)
+        for kind, target, value, runtime in rows
+    }
+    moved_files = set(files) - _DELETABLE_RETIRED_MCP_FILES
+    if files & _RETIRED_MCP_FILES:
+        moved_files.add(".mcp.json")
+    return moved_rows, moved_files
+
+
 @pytest.mark.parametrize("case", list(VERDICTS))
 @pytest.mark.parametrize("version", VERSIONS)
 def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
@@ -94,9 +114,11 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         shutil.copytree(source / case, project, dirs_exist_ok=True)
         manifest = (project / "apm.yml").read_bytes()
         lock_path = project / "apm.lock.yaml"
-        original_lock = lock_path.read_bytes()
-        original_rows = _deployment_rows(lock_path)
-        original_files = _project_files(project)
+        original_rows, original_paths = _after_mcp_move(
+            _deployment_rows(lock_path), set(_project_files(project))
+        )
+        settled_files: dict[str, str] | None = None
+        settled_lock_bytes: bytes | None = None
 
         for step, args in (
             ("1-install", ("install",)),
@@ -109,16 +131,25 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
             assert (project / "apm.yml").read_bytes() == manifest, f"[{step}] rewrote apm.yml"
             assert _deployment_rows(lock_path) == original_rows, f"[{step}] deployment churn"
             files = _project_files(project)
-            assert set(files) == set(original_files), (
-                f"[{step}] deployed set changed: {sorted(set(files) ^ set(original_files))}"
+            assert set(files) == original_paths, (
+                f"[{step}] deployed set changed: {sorted(set(files) ^ original_paths)}"
             )
-            if version == "v0.36.0":
-                assert lock_path.read_bytes() == original_lock, f"[{step}] lockfile churn"
-                assert files == original_files, (
-                    f"[{step}] content churn: {changed_paths(original_files, files)}"
+            if settled_files is None:
+                settled_files, settled_lock_bytes = files, lock_path.read_bytes()
+            elif version == "v0.36.0":
+                assert lock_path.read_bytes() == settled_lock_bytes, f"[{step}] lockfile churn"
+                assert files == settled_files, (
+                    f"[{step}] content churn: {changed_paths(settled_files, files)}"
                 )
         settled_lock = lock_path.read_bytes()
-        assert _normalized_lock(lock_path) == _normalized_lock(source / case / "apm.lock.yaml")
+        fixture_lock = _normalized_lock(source / case / "apm.lock.yaml")
+        settled = _normalized_lock(lock_path)
+        for lock in (fixture_lock, settled):
+            lock.pop("deployments", None)
+            servers = lock.get("mcp_target_servers") or {}
+            if "vscode" in servers:
+                servers["copilot"] = sorted({*servers.pop("vscode"), *servers.get("copilot", ())})
+        assert settled == fixture_lock
 
         before = tree_snapshot(project)
         tw.run(project, "audit", "--ci", step="5-audit-unrestricted")

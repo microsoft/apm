@@ -137,7 +137,7 @@ from ..core.project_name import (
     resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
 )
 from ..core.target_catalog import target_all_exclusion_help, target_help_fragment
-from ..core.target_detection import TargetParamType
+from ..core.target_detection import TargetParamType, install_runtime_option
 from ..install.mcp.args import parse_env_pairs as _parse_mcp_env_pairs
 from ..install.mcp.args import parse_header_pairs as _parse_mcp_header_pairs
 
@@ -831,13 +831,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     short_help="Install APM, MCP, and LSP dependencies",
 )
 @click.argument("packages", nargs=-1)
-@click.option(
-    "--runtime",
-    help=(
-        f"Target a specific runtime only. {target_help_fragment('install')} "
-        "(legacy alias for --target, single value only; prefer --target)"
-    ),
-)
+@install_runtime_option
 @click.option("--exclude", help="Exclude one runtime from the resolved MCP/LSP target set")
 @click.option(
     "--only",

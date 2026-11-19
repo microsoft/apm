@@ -120,9 +120,13 @@
     },
     {
       "id": "copilot-cli-mcp-config-paths",
-      "decision": "Copilot CLI MCP config paths",
-      "owner": "adapters/client/copilot.py",
-      "selectors": ["src/apm_cli/adapters/client/copilot.py"],
+      "decision": "Copilot MCP config paths and destinations: user scope mcp-config.json under COPILOT_HOME; project scope workspace-root .mcp.json shared with Claude Code; .github/mcp.json and .vscode/mcp.json are retired destinations healed by lockfile ownership",
+      "owner": "adapters/client/copilot.py (user scope), adapters/client/copilot_project.py (CopilotProjectClientAdapter, routed by ClientFactory), install/mcp/retired_destinations.py (heal)",
+      "selectors": [
+        "src/apm_cli/adapters/client/copilot.py",
+        "src/apm_cli/adapters/client/copilot_project.py",
+        "src/apm_cli/install/mcp/retired_destinations.py"
+      ],
       "guards": ["hooks-integrations-copilot-cli-mcp-paths"]
     },
     {

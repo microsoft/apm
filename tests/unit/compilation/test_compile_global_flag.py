@@ -550,7 +550,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())
 
     def test_vscode_alias_is_normalized_to_a_known_profile(self, tmp_path):
-        """`targets: [vscode]` is manifest-legal but not a KNOWN_TARGETS key."""
+        """Deprecated `targets: [vscode]` is read as copilot (#3866)."""
         source_root = self._prepare(
             tmp_path,
             "name: h\nversion: 1.0.0\ntargets: [vscode]\n",
@@ -561,7 +561,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert names == ["copilot"]
         logger.verbose_detail.assert_called_once_with(
-            f"Global targets from {source_root / 'apm.yml'}: vscode -> copilot"
+            f"Global targets from {source_root / 'apm.yml'}: copilot"
         )
 
     def test_alias_and_canonical_name_collapse_to_one_profile(self, tmp_path):

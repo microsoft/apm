@@ -1130,7 +1130,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={},
             explicit_target="copilot",
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_user_scope_explicit_target_overrides_config(self, tmp_path):
         result = self._gate(
@@ -1140,7 +1140,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude"]},
             explicit_target="copilot",
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_user_scope_apm_config_none_passes_all_runtimes(self, tmp_path):
         result = self._gate(
@@ -1205,8 +1205,8 @@ class TestGateProjectScopedRuntimes:
         assert result == ["claude"]
 
     def test_targets_multiple_values_keeps_all_listed(self, tmp_path):
-        # `vscode` runtime canonicalizes to `copilot`, so when copilot is
-        # in active targets both `copilot` and `vscode` runtime writes pass.
+        # `vscode` is no longer an MCP runtime (#3866): copilot owns the
+        # project destination, so a stray `vscode` runtime never passes.
         result = self._gate(
             ["claude", "copilot", "vscode", "codex", "cursor"],
             user_scope=False,
@@ -1214,7 +1214,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude", "copilot"]},
             explicit_target=None,
         )
-        assert result == ["claude", "copilot", "vscode"]
+        assert result == ["claude", "copilot"]
 
     # -- no targets field: directory-detection acts as the whitelist ------
 
@@ -1229,7 +1229,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={},
             explicit_target=None,
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_no_targets_with_ambiguous_signals_fails_closed(self, tmp_path):
         # >=2 signals + no flag + no targets: -> AmbiguousHarnessError.
@@ -1248,8 +1248,8 @@ class TestGateProjectScopedRuntimes:
     # -- explicit_target CLI flag overrides config -------------------------
 
     def test_explicit_target_overrides_config(self, tmp_path):
-        # vscode runtime -> copilot canonical; gate keeps both vscode AND
-        # copilot when the flag resolves to copilot.
+        # The deprecated vscode flag selects copilot; only the copilot
+        # runtime writes (#3866).
         result = self._gate(
             ["claude", "copilot", "vscode", "codex"],
             user_scope=False,
@@ -1257,7 +1257,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude", "copilot"]},
             explicit_target="vscode",
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_explicit_target_without_config(self, tmp_path):
         result = self._gate(

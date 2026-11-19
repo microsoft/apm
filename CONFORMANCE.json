@@ -1508,7 +1508,7 @@
       "keyword": "MUST",
       "section": "7.4.1",
       "status": "active",
-      "test_count": 20,
+      "test_count": 21,
       "tests": [
         "tests/spec_conformance/test_subset_merge_reqs.py::test_all_absorbs_per_edge_and_axis[edges0-claude-None]",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_all_absorbs_per_edge_and_axis[edges1-cursor-expected1]",
@@ -1517,6 +1517,7 @@
         "tests/spec_conformance/test_subset_merge_reqs.py::test_exact_pairing_never_crosses_edges",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_exact_product_omits_subset_pairings",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_frozen_rejects_changed_or_invalid_selections_before_deploy",
+        "tests/spec_conformance/test_subset_merge_reqs.py::test_frozen_replay_reads_a_recorded_vscode_target_as_copilot",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records0]",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records1]",
         "tests/spec_conformance/test_subset_merge_reqs.py::test_inconsistent_or_malformed_pairings_are_invalid_lock_state[records2]",
@@ -1809,11 +1810,16 @@
       "keyword": "MUST",
       "section": "8.5.3",
       "status": "active",
-      "test_count": 3,
+      "test_count": 8,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_dependency_package_targets_are_restriction_only",
-        "tests/spec_conformance/test_manifest_reqs.py::test_targets_admits_preserved_vscode_and_rejects_agents",
-        "tests/spec_conformance/test_manifest_reqs.py::test_targets_vscode_narrows_like_copilot"
+        "tests/spec_conformance/test_manifest_reqs.py::test_dependency_vscode_narrows_like_copilot_without_warning",
+        "tests/spec_conformance/test_manifest_reqs.py::test_rewrite_normalises_vscode_to_copilot_keeping_first[fields0-expected0]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_rewrite_normalises_vscode_to_copilot_keeping_first[fields1-expected1]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_rewrite_normalises_vscode_to_copilot_keeping_first[fields2-expected2]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_vscode_is_a_deprecated_alias_of_copilot[declaration0-selection0]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_vscode_is_a_deprecated_alias_of_copilot[declaration1-selection1]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_vscode_is_a_deprecated_alias_of_copilot[declaration2-copilot]"
       ]
     },
     {

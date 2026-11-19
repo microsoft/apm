@@ -3430,21 +3430,26 @@ def test_install_layering_guard_rejects_bypasses(path: str, old: str, new: str) 
         pytest.param(
             "src/apm_cli/install/pipeline.py",
             "import builtins\n",
-            "import builtins\n\n"
-            "from apm_cli.models.manifest_target_migration import plan_manifest_migration\n",
-            id="install-imports-manifest-rewrite",
-        ),
-        pytest.param(
-            "src/apm_cli/install/pipeline.py",
-            "import builtins\n",
             "import builtins\n\n_NOTICE = \"apm.yml uses the deprecated 'target:' key.\"\n",
             id="deprecation-warning-outside-owner",
         ),
         pytest.param(
-            "src/apm_cli/commands/manifest.py",
-            "from ..models.manifest_target_migration import (",
-            "from ..models.manifest_rewrite import (",
-            id="migrate-command-bypasses-rewrite-owner",
+            "src/apm_cli/models/manifest_targets.py",
+            "    replacement = declaration.targets_replacement(user_scope=user_scope)\n",
+            "    replacement = tuple(declaration.authored_names())\n",
+            id="warning-bypasses-replacement-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            "import builtins\n",
+            "import builtins\n\n\ndef targets_replacement(value):\n    return value\n",
+            id="second-target-replacement-mapping",
+        ),
+        pytest.param(
+            "src/apm_cli/models/manifest_targets.py",
+            "            return rewrite_target_names(self) or ()\n",
+            "            return tuple(self.canonical) or ()\n",
+            id="warning-suggestion-bypasses-rewrite-mapping",
         ),
         pytest.param(
             "src/apm_cli/commands/init.py",
@@ -3510,18 +3515,6 @@ def test_install_layering_guard_rejects_bypasses(path: str, old: str, new: str) 
             id="scaffold-verification-made-optional",
         ),
         pytest.param(
-            "src/apm_cli/models/manifest_target_migration.py",
-            "    verify_rewritten_manifest(path, migrated_text)\n",
-            "",
-            id="migrate-writes-unverified-rewrite",
-        ),
-        pytest.param(
-            "src/apm_cli/models/manifest_target_migration.py",
-            "    targets = rewrite_target_names(legacy_declaration)\n",
-            "    targets = tuple(legacy_declaration.canonical) or None\n",
-            id="migrate-keeps-its-own-mapping",
-        ),
-        pytest.param(
             "src/apm_cli/models/manifest_targets.py",
             "def rewrite_target_names(",
             "def _rewrite_target_names_removed(",
@@ -3571,22 +3564,10 @@ def test_manifest_target_declaration_guard_rejects_raw_readers(
             id="target-declaration-read-bypasses-owner",
         ),
         pytest.param(
-            "src/apm_cli/models/manifest_target_migration.py",
-            "text = read_manifest_text(path)",
-            'text = path.read_text(encoding="utf-8")',
-            id="migrate-read-bypasses-owner",
-        ),
-        pytest.param(
             "src/apm_cli/commands/audit.py",
             "        read_manifest_text(manifest_path)\n",
             '        manifest_path.read_text(encoding="utf-8")\n',
             id="audit-skips-manifest-checks",
-        ),
-        pytest.param(
-            "src/apm_cli/models/manifest_target_migration.py",
-            "        sequence = legacy_value\n",
-            "        sequence = legacy_value.copy() if legacy_value.anchor.value else legacy_value\n",
-            id="migrate-rewrites-anchored-list",
         ),
         pytest.param(
             "src/apm_cli/utils/yaml_io.py",
@@ -3705,3 +3686,128 @@ def test_credential_report_guard_rejects_side_doors(path: str, old: str, new: st
     report = run_selected_rules(ROOT, (_CRED_REPORT_RULE,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(v.rule_id == _CRED_REPORT_RULE for v in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/factory.py",
+            '        if key == "copilot" and not user_scope:\n',
+            '        if key == "copilot" and user_scope is None:\n',
+            id="factory-stops-routing-project-copilot",
+        ),
+        pytest.param(
+            "src/apm_cli/adapters/client/copilot_project.py",
+            'PROJECT_MCP_JSON = ".mcp.json"\n',
+            'PROJECT_MCP_JSON = ".github/mcp.json"\n',
+            id="project-destination-moves-back-to-github",
+        ),
+        pytest.param(
+            "src/apm_cli/adapters/client/copilot_project.py",
+            "class CopilotProjectClientAdapter(ClaudeClientAdapter):\n",
+            "class CopilotProjectClientAdapter(CopilotClientAdapter):\n",
+            id="project-adapter-drops-shared-claude-shape",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/ownership.py",
+            'frozenset({"claude", "copilot"})',
+            "frozenset()",
+            id="mcp-json-ownership-not-shared",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "import builtins\n",
+            'import builtins\n\n_LEGACY = ".github/mcp.json"\n',
+            id="second-module-names-retired-destination",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "    heal_basis = pre_install_lock if pre_install_lock is not None else previous_lock\n",
+            "    heal_basis = previous_lock\n",
+            id="heal-gate-reads-the-stamped-lock",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            "            pre_install_lock=existing_lock,\n",
+            "",
+            id="install-drops-the-pre-install-lock",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "    retired = split_mcp_claims(\n",
+            "    retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
+            id="bundle-reads-retired-claims-as-live",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/command.py",
+            "                    retired = split_mcp_claims(\n",
+            "                    retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
+            id="install-mcp-reads-retired-claims-as-live",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "    retired = split_mcp_claims(\n",
+            "    retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
+            id="uninstall-reads-retired-claims-as-live",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/update.py",
+            "            pre_install_lock=existing_lock,\n",
+            "",
+            id="update-drops-the-pre-install-lock",
+        ),
+    ],
+)
+def test_copilot_project_mcp_destination_guard_rejects_mutations(
+    path: str, old: str, new: str
+) -> None:
+    """#3866: project copilot MCP goes to the shared workspace-root .mcp.json."""
+    rule_id = "mutation_writes.copilot_cli_mcp_paths"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            '            target_subset=canonical_target_subset(data.get("target_subset")),\n',
+            '            target_subset=list(data.get("target_subset") or []),\n',
+            id="lock-read-skips-target-canonicalisation",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "            target_subset=canonical_target_subset(dep_ref.target_subset)\n",
+            "            target_subset=sorted(dep_ref.target_subset)\n",
+            id="lock-write-skips-target-canonicalisation",
+        ),
+        pytest.param(
+            "src/apm_cli/models/dependency/subsets.py",
+            "        if canonical_target_name(name) in valid_set:\n"
+            "            name = canonical_target_name(name)\n",
+            "",
+            id="edge-parse-keeps-alias-spelling",
+        ),
+    ],
+)
+def test_lock_target_canonicalisation_guard_rejects_mutations(
+    path: str, old: str, new: str
+) -> None:
+    """#3866: lock target names are canonical; a 0.36 lock recording vscode reads as copilot."""
+    rule_id = "install-deployment-selection-merge"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

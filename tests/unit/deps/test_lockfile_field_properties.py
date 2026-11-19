@@ -731,7 +731,11 @@ def test_alias_placement_property_breaks_if_reconstruction_drops_alias(
 def test_subset_persistence_is_permutation_invariant(
     skill_permutation: tuple[str, ...], target_permutation: tuple[str, ...]
 ) -> None:
-    """Any input order of the same subset must persist identically (sorted)."""
+    """Any input order of the same subset must persist identically (sorted).
+
+    Target aliases persist canonically: ``vscode`` is recorded as ``copilot``.
+    """
+    canonical_targets = ["claude", "copilot"]
     dep_ref = DependencyReference(
         repo_url="acme/example",
         host="gitlab.example.invalid",
@@ -745,11 +749,11 @@ def test_subset_persistence_is_permutation_invariant(
     persisted = locked.to_dict()
 
     assert persisted["skill_subset"] == sorted(skill_permutation)
-    assert persisted["target_subset"] == sorted(target_permutation)
+    assert persisted["target_subset"] == canonical_targets
 
     reconstructed = LockedDependency.from_dict(persisted).to_dependency_ref()
     assert reconstructed.skill_subset == sorted(skill_permutation)
-    assert reconstructed.target_subset == sorted(target_permutation)
+    assert reconstructed.target_subset == canonical_targets
 
 
 @pytest.mark.parametrize(

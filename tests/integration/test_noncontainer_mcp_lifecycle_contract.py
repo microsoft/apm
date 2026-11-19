@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 
-from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
@@ -50,9 +49,9 @@ class _TargetCase:
 
 _TARGET_CASES = (
     _TargetCase(
-        runtime="vscode",
-        config_path=PurePosixPath(".vscode/mcp.json"),
-        config_section="servers",
+        runtime="copilot",
+        config_path=PurePosixPath(".mcp.json"),
+        config_section="mcpServers",
         external_config_root=False,
     ),
 )
@@ -223,7 +222,7 @@ def _native_document(
 
 def _server_key(case: _TargetCase, full_name: str) -> str:
     """Return the target-native key for one registry server."""
-    return full_name if case.runtime == "vscode" else full_name.rsplit("/", 1)[-1]
+    return full_name.rsplit("/", 1)[-1]
 
 
 def _assert_idempotent_state(
@@ -241,13 +240,7 @@ def _assert_idempotent_state(
 
 def _expected_args(case: _TargetCase) -> dict[str, list[str]]:
     """Return exact typed argv for all registry packages on one target."""
-    secret = (
-        "${input:"
-        f"{VSCodeClientAdapter._vscode_argument_secret_input_id(_GENERIC_SERVER, _SECRET_VARIABLE)}"
-        "}"
-        if case.runtime == "vscode"
-        else f"${{{_SECRET_VARIABLE}}}"
-    )
+    secret = f"${{{_SECRET_VARIABLE}}}"
     return {
         _NPM_SERVER: [
             "-y",
@@ -485,5 +478,9 @@ def test_malformed_registry_type_errors_without_native_config_write(
         )
 
     output = " ".join(f"{result.stdout}\n{result.stderr}".split())
-    assert "registry_name must be a string" in output
+    # The .mcp.json adapter (Claude Code's rules) never echoes the exception,
+    # since registry inputs may carry credentials.
+    assert "Error configuring MCP server" in output
+    assert "malformed-server -- failed for copilot" in output
+    assert result.returncode != 0
     assert not config_path.exists()

@@ -189,6 +189,6 @@ compile sits between install and run.
   scan over every primitive before deploy. A zero-width character in a
   reference file blocks the install for every consumer. Run
   `apm audit --file .apm/skills/<name>/SKILL.md` while authoring.
-- **Setting `target: vscode` in `apm.yml`.** `vscode` is only an alias
-  that normalizes to `copilot`. Use `targets:` (plural) with slugs from
+- **Setting `target: vscode` in `apm.yml`.** `vscode` is a deprecated
+  alias of `copilot` and warns. Use `targets:` (plural) with slugs from
   the table above, or let auto-detection pick.

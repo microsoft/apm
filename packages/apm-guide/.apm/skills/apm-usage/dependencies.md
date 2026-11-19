@@ -559,8 +559,8 @@ receive that dependency's target-scoped primitives.
 
 Package-level `targets:` (top-level) selects the package's own
 compile/install targets. The older top-level `target:` key is deprecated
-(warning on the consumer manifest only, removal in v1.0); `apm manifest
-migrate` rewrites it and never touches per-dependency `targets:`.
+(warning on the consumer manifest only, naming the exact `targets:`
+replacement; removal in a future release).
 Per-dependency `targets:` (inside a
 `dependencies.apm` entry) selects which active targets receive that
 dependency's target-scoped primitives. They compose via intersection. See
@@ -569,8 +569,9 @@ dependency's target-scoped primitives. They compose via intersection. See
 - Type: list of target keys. Stable targets are `copilot`, `claude`, `grok-build`,
   `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`,
   `opencode`, `agent-skills`, `hermes`, and `grok-bot`. Experimental targets are `openclaw`,
-  `copilot-cowork`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
-  target alias `vscode`, for Copilot-family dependency routing.
+  `copilot-cowork`, `copilot-app`, and `grok-cloud`. `vscode` is a
+  deprecated alias of `copilot` (recorded as `copilot` in the lockfile; the
+  consumer manifest warns); use `copilot`.
 - Default: omitted means all active install targets.
 - Semantics: effective reach is `install_targets INTERSECT dep_targets`.
   A non-empty list narrows reach; it never widens beyond what the install
@@ -629,9 +630,9 @@ dependencies:
       headers:
         X-Custom: "value"
         # Env-var placeholders in headers/env values:
-        #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
+        #   ${VAR} or ${env:VAR}  -> Copilot: preserved as ${VAR} and resolved
         #                            from host env at server-start (no plaintext on disk).
-        #                            VS Code and JetBrains: rewritten to ${env:VAR}
+        #                            JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor: translated to ${env:VAR} and resolved at runtime.
@@ -663,7 +664,7 @@ dependencies:
         #                            entry, switch between ${VAR} and ${env:VAR}
         #                            and reinstall with the same scope/targets.
         #                            Review/back up manual edits to that entry first.
-        #   ${input:<id>}         -> VS Code prompts user at runtime
+        #   ${input:<id>}         -> not supported by any target; use ${VAR}
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;
         # see manifest-schema section 4.2.4 for reinstall preservation semantics.
@@ -704,7 +705,7 @@ dependencies:
 
 Remote transport: `http`/`streamable-http` are Streamable HTTP; registry servers
 take it from `remotes[].type` (missing = Streamable HTTP). Native keys per
-harness: Copilot CLI, Claude, VS Code `type: http|sse` + `url`; Gemini `httpUrl`
+harness: Copilot, Claude `type: http|sse` + `url`; Gemini `httpUrl`
 (Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`; Hermes
 `url`, plus `transport: sse` for SSE (Hermes also keeps stdio `cwd` and extra
 keys such as `timeout` or `auth`). SSE on
@@ -747,11 +748,11 @@ maps that type to the Docker launcher automatically, preserves Docker
 run options before the image, and appends package arguments after the
 image. Options-only `runtimeArguments` (no leading `run`) gain
 `run -i --rm` ahead of them. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
-then PyPI; VS Code selects `npm`, PyPI, then OCI. Docker must be
+then PyPI. Docker must be
 available when the harness starts an OCI server. Do not add per-target
 launcher overrides.
 
-For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
+For Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package
 identity. Legacy `value_hint` arguments remain compatible. Registry

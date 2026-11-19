@@ -610,7 +610,7 @@ class TestTargetParamType:
         a single normalization path.
         """
         result = self.tp.convert(["claude", "vscode"], None, None)
-        assert result == ["claude", "vscode"]
+        assert result == ["claude", "copilot"]
 
     def test_list_input_collapses_aliases_to_string(self):
         """Multi-element list whose entries all alias to one canonical
@@ -627,7 +627,8 @@ class TestTargetParamType:
         assert self.tp.convert("copilot", None, None) == "copilot"
 
     def test_single_vscode(self):
-        assert self.tp.convert("vscode", None, None) == "vscode"
+        """The deprecated vscode alias always resolves to copilot (#3866)."""
+        assert self.tp.convert("vscode", None, None) == "copilot"
 
     def test_single_cursor(self):
         assert self.tp.convert("cursor", None, None) == "cursor"
@@ -696,9 +697,9 @@ class TestTargetParamType:
     # -- Alias deduplication ----------------------------------------------
 
     def test_copilot_vscode_deduplicates(self):
-        """copilot,vscode retains separate MCP configuration destinations."""
+        """copilot,vscode collapse: vscode has no MCP destination of its own (#3866)."""
         result = self.tp.convert("copilot,vscode", None, None)
-        assert result == ["copilot", "vscode"]
+        assert result == "copilot"
 
     def test_copilot_agents_deduplicates(self):
         """copilot,agents collapse to Copilot's canonical target."""
@@ -707,10 +708,10 @@ class TestTargetParamType:
         assert result == "copilot"
 
     def test_copilot_agents_vscode_deduplicates(self):
-        """The legacy agents alias collapses without merging VS Code's destination."""
+        """Both deprecated aliases collapse into copilot."""
         with pytest.warns(DeprecationWarning, match="--target agents"):
             result = self.tp.convert("copilot,agents,vscode", None, None)
-        assert result == ["copilot", "vscode"]
+        assert result == "copilot"
 
     def test_copilot_claude_deduplicates_alias(self):
         """copilot,claude preserves the configured target destinations."""
@@ -997,11 +998,12 @@ class TestPolicyTargetProjection:
         assert "all" not in projected
         assert {"claude", "copilot"} <= set(projected)
 
-    def test_runtime_targets_keep_vscode_distinct(self) -> None:
-        """Policy canonicalization must not move the VS Code MCP destination."""
-        decision = EffectiveTargetDecision(["claude", "vscode"], "apm.yml")
+    @pytest.mark.parametrize("copilot_spelling", ["copilot", "vscode"])
+    def test_runtime_targets_never_yield_vscode(self, copilot_spelling: str) -> None:
+        """Copilot projects to the copilot MCP runtime, never vscode (#3866)."""
+        decision = EffectiveTargetDecision(["claude", copilot_spelling], "apm.yml")
         assert decision.canonical_targets == ("claude", "copilot")
-        assert "vscode" in (decision.runtime_targets or ())
+        assert decision.runtime_targets == ("claude", "copilot")
 
     def test_unmapped_mcp_only_target_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Reject an MCP-only target without a canonical policy mapping."""

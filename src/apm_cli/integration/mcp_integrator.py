@@ -875,19 +875,44 @@ class MCPIntegrator:
         if "copilot" in target_runtimes:
             from apm_cli.factory import ClientFactory
 
+            copilot_user = scope is not InstallScope.PROJECT
             copilot_client = ClientFactory.create_client(
                 "copilot",
                 project_root=project_root_path,
-                user_scope=scope is not InstallScope.PROJECT,
+                user_scope=copilot_user,
             )
-            _clean_json_mcp_config(
-                Path(copilot_client.get_config_path()),
-                expanded_stale,
-                logger,
-                "Copilot CLI config",
-                use_rich=True,
-                fail_on_write_error=fail_on_write_error,
-            )
+            copilot_cfg = Path(copilot_client.get_config_path())
+            if copilot_user:
+                _clean_json_mcp_config(
+                    copilot_cfg,
+                    expanded_stale,
+                    logger,
+                    "Copilot CLI config",
+                    use_rich=True,
+                    fail_on_write_error=fail_on_write_error,
+                )
+            elif runtime is not None or stored_configs:
+                # The project .mcp.json is shared with Claude Code and the user:
+                # remove only entries proven to be APM's, as the Claude cleanup does.
+                if _reject_symlink_config(
+                    copilot_cfg, ".mcp.json", logger, fail_on_write_error=fail_on_write_error
+                ):
+                    return
+                verified_keys = require_removable_mcp_connections(
+                    copilot_client,
+                    stale_names,
+                    stored_configs or {},
+                    (native_hashes or {}).get("copilot"),
+                )
+                _clean_json_mcp_config(
+                    copilot_cfg,
+                    verified_keys,
+                    logger,
+                    ".mcp.json",
+                    trailing_newline=True,
+                    use_rich=True,
+                    fail_on_write_error=fail_on_write_error,
+                )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:
@@ -1389,8 +1414,12 @@ class MCPIntegrator:
             try:
                 if runtime == "copilot":
                     from apm_cli.adapters.client.copilot import CopilotClientAdapter
+                    from apm_cli.adapters.client.copilot_project import (
+                        CopilotProjectClientAdapter,
+                    )
 
                     CopilotClientAdapter.emit_install_run_summary()
+                    CopilotProjectClientAdapter.emit_install_run_summary()
             except Exception:
                 _log.debug("Failed to emit install-run summary", exc_info=True)
 

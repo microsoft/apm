@@ -55,6 +55,15 @@ _INTEGRATION = "src/apm_cli/integration/"
 
 
 _COPILOT_OWNER = "src/apm_cli/adapters/client/copilot.py"
+_COPILOT_PROJECT_OWNER = "src/apm_cli/adapters/client/copilot_project.py"
+_RETIRED_MCP_OWNER = "src/apm_cli/install/mcp/retired_destinations.py"
+_CLIENT_FACTORY = "src/apm_cli/factory.py"
+_MCP_OWNERSHIP = "src/apm_cli/install/mcp/ownership.py"
+_MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
+_SERVICE_INTEGRATION = "src/apm_cli/install/service_integration.py"
+_UPDATE_COMMAND = "src/apm_cli/commands/update.py"
+_MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
+_UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 
 
 _MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator.py"
@@ -299,16 +308,117 @@ def _first_line_after(facts: FileFacts, needle: str, *, after: int) -> int | Non
 
 
 def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]:
-    """Copilot CLI MCP config paths must come from the Copilot adapter.
+    """Copilot MCP config paths and destinations come from the Copilot adapters.
 
     Ports the AC1 guard: the Copilot adapter owns ``mcp-config.json`` under the
     user root that ``integration/targets.py`` selects (``COPILOT_HOME``), the MCP
     integrator constructs clients through ``ClientFactory.create_client``, and
     no other module hard-codes ``.github/mcp.json`` / ``mcp-config.json``.
+
+    The project destination decision (#3866): ``ClientFactory`` routes project
+    ``copilot`` to ``CopilotProjectClientAdapter``, which writes workspace-root
+    ``.mcp.json`` shared with Claude Code (``SHARED_PROJECT_MCP_DESTINATIONS``);
+    only the retired-destination heal names ``.github/mcp.json``. Heal
+    eligibility reads the pre-install lock, because the package phase may
+    already have rewritten the lock with the running version. Every reader of
+    lock MCP claims (install, ``install --mcp``, bundles, uninstall and prune)
+    splits retired-file claims off through ``split_mcp_claims`` first, so no
+    retired claim acts as live ``.mcp.json`` ownership.
     """
     rule_id = "mutation_writes.copilot_cli_mcp_paths"
-    facts_by_path, failures = _read_required(provider, rule_id, (_COPILOT_OWNER, _MCP_INTEGRATOR))
+    facts_by_path, failures = _read_required(
+        provider,
+        rule_id,
+        (
+            _COPILOT_OWNER,
+            _MCP_INTEGRATOR,
+            _COPILOT_PROJECT_OWNER,
+            _CLIENT_FACTORY,
+            _MCP_OWNERSHIP,
+            _MCP_INTEGRATION,
+            _SERVICE_INTEGRATION,
+            _UPDATE_COMMAND,
+            _MCP_COMMAND,
+            _UNINSTALL_ENGINE,
+        ),
+    )
     findings: list[Violation] = list(failures)
+    if not failures:
+        for path, needle, message in (
+            (
+                _CLIENT_FACTORY,
+                'if key == "copilot" and not user_scope:',
+                "ClientFactory must route project-scope copilot to its project adapter",
+            ),
+            (
+                _CLIENT_FACTORY,
+                "return CopilotProjectClientAdapter(project_root=project_root)",
+                "ClientFactory must build project copilot clients as CopilotProjectClientAdapter",
+            ),
+            (
+                _COPILOT_PROJECT_OWNER,
+                'PROJECT_MCP_JSON = ".mcp.json"',
+                "Copilot project MCP servers belong in workspace-root .mcp.json",
+            ),
+            (
+                _COPILOT_PROJECT_OWNER,
+                "return self.project_root / PROJECT_MCP_JSON",
+                "CopilotProjectClientAdapter must write the workspace-root .mcp.json",
+            ),
+            (
+                _COPILOT_PROJECT_OWNER,
+                "class CopilotProjectClientAdapter(ClaudeClientAdapter):",
+                "Copilot and Claude Code must render one shared .mcp.json shape",
+            ),
+            (
+                _MCP_OWNERSHIP,
+                'frozenset({"claude", "copilot"})',
+                "Claude Code and Copilot must share ownership of .mcp.json entries",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "heal_basis = pre_install_lock if pre_install_lock is not None else previous_lock",
+                "retired-destination heal eligibility must read the pre-install lock",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "            apm_version=heal_basis.apm_version,",
+                "retired-destination heal eligibility must read the pre-install lock",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "        split_mcp_claims(\n            old_mcp_target_servers,",
+                "install must split retired MCP claims off before acting on them",
+            ),
+            (
+                _MCP_INTEGRATION,
+                "    retired = split_mcp_claims(\n        previous_targets,",
+                "bundle MCP reconciliation must split retired MCP claims off first",
+            ),
+            (
+                _MCP_COMMAND,
+                "retired = split_mcp_claims(",
+                "install --mcp must split retired MCP claims off before acting on them",
+            ),
+            (
+                _UNINSTALL_ENGINE,
+                "retired = split_mcp_claims(",
+                "uninstall and prune must split retired MCP claims off before cleanup",
+            ),
+            (
+                _SERVICE_INTEGRATION,
+                "pre_install_lock=existing_lock,",
+                "install must pass the pre-install lock to the MCP heal",
+            ),
+            (
+                _UPDATE_COMMAND,
+                "pre_install_lock=existing_lock,",
+                "update must pass the pre-install lock to the MCP heal",
+            ),
+        ):
+            findings.extend(
+                _require(_has_fixed(facts_by_path[path], needle), rule_id, path, message)
+            )
     if not failures:
         findings.extend(
             _require(
@@ -333,7 +443,11 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
         _duplicate_scan(
             provider,
             rule_id=rule_id,
-            paths=_python_paths(provider, under=_SRC, exclude=(_COPILOT_OWNER,)),
+            paths=_python_paths(
+                provider,
+                under=_SRC,
+                exclude=(_COPILOT_OWNER, _COPILOT_PROJECT_OWNER, _RETIRED_MCP_OWNER),
+            ),
             pattern=r"\.github/mcp\.json|mcp-config\.json",
             message="Copilot CLI MCP paths must come from the Copilot adapter",
             exempt=True,

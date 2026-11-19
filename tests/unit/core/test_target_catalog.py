@@ -41,12 +41,12 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
             {
                 "claude",
                 "codex",
+                "copilot",
                 "cursor",
                 "gemini",
                 "grok-build",
                 "kiro",
                 "opencode",
-                "vscode",
                 "windsurf",
             }
         )
@@ -63,9 +63,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
         "agy": "antigravity",
-        "agents": "vscode",
-        "copilot": "vscode",
-        "vscode": "vscode",
+        "agents": "copilot",
     }
     assert (
         frozenset(
@@ -104,7 +102,6 @@ def test_current_runtime_mapping_is_characterized() -> None:
         "agents": "copilot",
         "copilot": "copilot",
         "intellij": "copilot",
-        "vscode": "copilot",
     }
 
 

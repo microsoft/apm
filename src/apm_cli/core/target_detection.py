@@ -17,8 +17,9 @@ Detection priority (highest to lowest):
    - Multiple target folders -> all
    - None exist -> minimal (AGENTS.md only, no folder integration)
 
-"copilot" is the recommended user-facing target name. "vscode" and "agents"
-are accepted as aliases and map to the same internal value.
+"copilot" is the user-facing target name; "agents" is a deprecated alias.
+"vscode" is a deprecated alias of "copilot" (#3866); the internal compile
+family for Copilot is still spelled "vscode".
 """
 
 import warnings
@@ -33,7 +34,10 @@ from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
     accepted_target_values,
+    canonical_target_token,
+    deprecated_target_alias_message,
     expand_all,
+    first_deprecated_target_alias,
     get_target_capability,
     normalize_target_name,
     target_error_values,
@@ -357,7 +361,8 @@ def get_dedup_rules_dir(target: CompileTargetType) -> tuple[str, str] | None:
         return None
     if isinstance(target, str):
         target = TARGET_ALIASES.get(target, target)
-    if target == "vscode":
+    if target in ("vscode", "copilot", "agents"):
+        # "vscode" is the internal Copilot compile family.
         return ".github/instructions", "copilot"
     if target == "antigravity":
         return ".agents/rules", "antigravity"
@@ -479,9 +484,9 @@ def normalize_target_list(
     Handles:
     - ``None`` -> ``None`` (auto-detect)
     - ``"claude"`` -> ``["claude"]``
-    - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
-    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "kiro", "opencode", "vscode", "windsurf"]``
-    - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
+    - ``"agents"`` -> ``["copilot"]``  (alias resolution)
+    - ``"all"`` -> every stable target in ``expand_all("install")``
+    - ``["claude", "copilot"]`` -> ``["claude", "copilot"]``
     - Deduplicates while preserving first-seen order.
 
     Args:
@@ -548,10 +553,10 @@ def parse_target_field(
     * ``None`` -> ``None`` (auto-detect at consumption time -- this is the
       "field absent" path; an apm.yml without ``target:`` lands here).
     * Single token (``"claude"``) -> the same lowercased token as ``str``.
-      Aliases are NOT resolved for solo input -- ``"copilot"`` returns
-      ``"copilot"`` (not the canonical ``"vscode"``) to match the
-      long-standing CLI contract; downstream consumers handle the alias
-      set explicitly.
+      Aliases are NOT resolved for solo input -- ``"agents"`` returns
+      ``"agents"`` to match the long-standing CLI contract; downstream
+      consumers handle the alias set explicitly. The deprecated ``vscode``
+      alias is the exception: it always resolves to ``copilot``.
     * CSV string (``"claude,copilot"``) -> deduplicated ``List[str]`` with
       aliases resolved to canonical names. Collapses to a bare ``str`` if
       after dedup only one canonical token remains.
@@ -612,6 +617,9 @@ def parse_target_field(
     if not raw_parts:
         raise ValueError(_target_error("target value must not be empty", source_path))
 
+    # Deprecated aliases (``vscode``) select their replacement exactly.
+    raw_parts = [canonical_target_token(p) for p in raw_parts]
+
     # ---- validate every token ----
     for p in raw_parts:
         if p not in accepted_target_values():
@@ -652,8 +660,8 @@ def parse_target_field(
         return expanded
 
     # Single-token input is returned as-is (no alias resolution).  This
-    # preserves the long-standing CLI contract where ``--target copilot``
-    # yields ``"copilot"`` rather than the canonical ``"vscode"``; every
+    # preserves the long-standing CLI contract where ``--target agents``
+    # yields ``"agents"`` rather than ``"copilot"``; every
     # downstream consumer (active_targets, agents_compiler,
     # _CROSS_TARGET_MAPS, _get_target_prefixes) already accepts both alias
     # spellings, so resolving here would be a visible behaviour change
@@ -664,12 +672,11 @@ def parse_target_field(
     if len(raw_parts) == 1:
         return raw_parts[0]
 
-    # Multi-token: preserve the distinct Copilot and VS Code MCP destinations
-    # while resolving every other alias to its canonical profile.
+    # Multi-token: resolve every alias to its canonical profile.
     seen: set[str] = set()
     result: list[str] = []
     for p in raw_parts:
-        canonical = p if p in {"copilot", "vscode"} else normalize_target_name(p)
+        canonical = normalize_target_name(p)
         if canonical not in seen:
             seen.add(canonical)
             result.append(canonical)
@@ -686,6 +693,47 @@ def _target_error(message: str, source_path: Path | None) -> str:
     return f"Invalid target: {message}"
 
 
+_deprecated_flag_aliases_warned: set[str] = set()
+
+
+def warn_deprecated_target_alias_flag(
+    value: str | list[str] | None, *, flag: str = "--target"
+) -> None:
+    """Warn once per process when a CLI target flag uses a deprecated alias."""
+    tokens = value.split(",") if isinstance(value, str) else list(value or ())
+    alias = first_deprecated_target_alias(tokens)
+    if alias is None or alias in _deprecated_flag_aliases_warned:
+        return
+    _deprecated_flag_aliases_warned.add(alias)
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(deprecated_target_alias_message(alias, where=flag), symbol="warning", err=True)
+
+
+def canonical_runtime_option(
+    ctx: click.Context | None, param: click.Parameter | None, value: str | None
+) -> str | None:
+    """Click callback: read a deprecated alias passed as ``--runtime`` as its target."""
+    if value is None:
+        return value
+    warn_deprecated_target_alias_flag(value, flag="--runtime")
+    return canonical_target_token(value.strip().lower())
+
+
+def install_runtime_option(func):
+    """``apm install --runtime``: the legacy single-value spelling of ``--target``."""
+    from apm_cli.core.target_catalog import target_help_fragment
+
+    return click.option(
+        "--runtime",
+        callback=canonical_runtime_option,
+        help=(
+            f"Target a specific runtime only. {target_help_fragment('install')} "
+            "(legacy alias for --target, single value only; prefer --target)"
+        ),
+    )(func)
+
+
 class TargetParamType(click.ParamType):
     """Click parameter type accepting comma-separated target values.
 
@@ -696,9 +744,10 @@ class TargetParamType(click.ParamType):
     Examples::
 
         -t claude             -> "claude"
-        -t claude,copilot     -> ["claude", "vscode"]
+        -t claude,copilot     -> ["claude", "copilot"]
         -t all                -> "all"
-        -t copilot,vscode     -> ["vscode"]  (deduped aliases)
+        -t copilot,agents     -> "copilot"  (deduped aliases)
+        -t vscode             -> "copilot"  (deprecated alias; warns once)
     """
 
     name = "target"
@@ -710,7 +759,9 @@ class TargetParamType(click.ParamType):
         ctx: click.Context | None,
     ) -> str | list[str] | None:
         try:
-            return parse_target_field(value)
+            parsed = parse_target_field(value)
+            warn_deprecated_target_alias_flag(value)
+            return parsed
         except ValueError as e:
             # Use the v2 three-section error renderer for unknown targets
             # so that CLI, apm.yml, and auto-detect all share the same
@@ -852,11 +903,9 @@ class EffectiveTargetDecision:
 
         runtimes: list[str] = []
         seen: set[str] = set()
-        for target, capability in _target_capabilities(self.value):
+        for _target, capability in _target_capabilities(self.value):
             runtime = (
-                "vscode"
-                if target == "vscode" and "vscode" in capability.runtimes
-                else capability.name
+                capability.name
                 if capability.name in capability.runtimes
                 else capability.compile_family
                 if capability.compile_family in capability.runtimes
@@ -1036,6 +1085,9 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
+    # Copilot CLI still reads a user's MCP file under .github/, so it stays a
+    # copilot signal although APM now writes .mcp.json (#3866). The root
+    # .mcp.json is not a signal: Claude Code reads it too.
     ("copilot", "file", ".github/mcp.json"),  # architecture-authority-exempt: detection signal
     ("copilot", "dir", ".github/instructions"),
     ("copilot", "dir", ".github/agents"),
@@ -1140,6 +1192,7 @@ def resolve_targets(
     # Priority 1: --target flag
     if flag is not None:
         tokens = [flag] if isinstance(flag, str) else list(flag)
+        tokens = list(dict.fromkeys(canonical_target_token(token) for token in tokens))
         _validate_canonical_v2(tokens)
         return ResolvedTargets(
             targets=sorted(tokens),

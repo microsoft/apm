@@ -52,7 +52,7 @@ targets:
   - cursor
 ```
 
-The `targets:` field takes a YAML list. The older `target:` key is deprecated; run `apm manifest migrate` to update it. See [Manifest schema](../../reference/manifest-schema/#36-target-and-targets).
+The `targets:` field takes a YAML list. The older `target:` key is deprecated; the warning it prints names the `targets:` replacement. See [Manifest schema](../../reference/manifest-schema/#36-target-and-targets).
 
 ## Primitive flow per target
 
@@ -112,11 +112,9 @@ MCP servers declared by the root project under `dependencies.mcp:` or
 Dependency packages contribute only `dependencies.mcp`; their
 `devDependencies.mcp` entries stay in the package author's environment.
 
-- `.mcp.json` at the repo root when `.claude/` exists (Claude Code project scope)
+- `.mcp.json` at the repo root (Copilot CLI and VS Code Copilot; also Claude Code when `.claude/` exists)
 - `.cursor/mcp.json` (Cursor)
 - `.codex/config.toml` (Codex)
-- `.vscode/mcp.json` (VS Code)
-- `.github/mcp.json` (Copilot CLI)
 - `.agents/mcp_config.json` (Antigravity)
 - `~/.hermes/config.yaml` (Hermes, `mcp_servers:` block)
 - `opencode.json` at the repo root when `.opencode/` exists (OpenCode)

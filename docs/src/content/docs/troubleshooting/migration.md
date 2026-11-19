@@ -157,7 +157,7 @@ Adding a new target (e.g. Cursor on a Copilot-only project) is non-destructive:
 
 ```bash
 apm install --target cursor       # one-shot
-# or persist in apm.yml under `target:` and run `apm install`
+# or persist in apm.yml under `targets:` and run `apm install`
 apm compile
 ```
 
@@ -165,7 +165,7 @@ Existing target output is untouched. The new target's directory is created fresh
 
 ### Removing a target
 
-1. Remove the target from `apm.yml` (`target:` field).
+1. Remove the target from `apm.yml` (`targets:` field).
 2. Run `apm install`. APM removes the deployed files for the dropped target.
 3. Run `apm compile` to confirm the project is clean.
 
@@ -205,7 +205,7 @@ See [Registries guide — pitfalls](../../guides/registries/#pitfalls) for env-v
 
 ## 7. Marketplace switchover (hand-rolled MCP -> APM-managed)
 
-If your project has a hand-edited `.mcp.json` (or VS Code `mcp.json`) declaring servers directly:
+If your project has a hand-edited `.mcp.json` (or `.vscode/mcp.json`) declaring servers directly:
 
 1. Move each server into `dependencies.mcp` in `apm.yml`. APM resolves servers from the MCP registry (or as self-defined entries) and wires them per target on install.
 2. Run `apm install`. APM rewrites the target-specific MCP config.

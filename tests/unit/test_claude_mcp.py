@@ -187,6 +187,7 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         so the prefix must be rewritten to ``.claude/skills/`` -- otherwise
         ``.mcp.json`` points at a path that does not exist on disk.
         """
+        (self.root / ".claude/skills/nix-chrome-devtools-mcp").mkdir(parents=True)
         with patch.object(self.adapter, "registry_client") as mock_registry:
             mock_registry.find_server_by_reference.return_value = {
                 "name": "chrome-devtools",

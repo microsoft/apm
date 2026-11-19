@@ -54,7 +54,8 @@ class EdgeSelection:
         return cls(
             parent_chain=tuple(parent_chain),
             skill_subset=_normalized(getattr(dep_ref, "skill_subset", None)),
-            target_subset=_normalized(getattr(dep_ref, "target_subset", None)),
+            target_subset=tuple(canonical_target_subset(getattr(dep_ref, "target_subset", None)))
+            or None,
             alias=getattr(dep_ref, "alias", None),
             allow_insecure=bool(getattr(dep_ref, "allow_insecure", False)),
         )
@@ -183,6 +184,26 @@ def _normalized(subset: Iterable[object] | None) -> tuple[str, ...] | None:
     return tuple(sorted({str(name) for name in subset}))
 
 
+def canonical_target_name(name: str) -> str:
+    """Return the canonical target identifier for a recorded or declared name.
+
+    Aliases resolve to their target (``vscode`` and ``agents`` are
+    ``copilot``). Names the catalog does not know are kept as written, so a
+    lock recorded by another release still reads; parsing rejects them.
+    """
+    from apm_cli.core.target_catalog import normalize_target_name
+
+    try:
+        return normalize_target_name(name)
+    except KeyError:
+        return name
+
+
+def canonical_target_subset(names: Iterable[object] | None) -> list[str]:
+    """Return sorted, deduplicated canonical target identifiers (req-rs-018)."""
+    return sorted({canonical_target_name(str(name).strip().lower()) for name in names or ()})
+
+
 def skill_subset_filter_tokens(skill_subset: Iterable[object] | None) -> set[str] | None:
     """Return match tokens for declared and flattened skill subset names.
 
@@ -251,6 +272,9 @@ def parse_target_subset(targets_raw: object) -> list[str]:
         if not isinstance(raw_name, str) or not raw_name.strip():
             raise ValueError("Each entry in 'targets' must be a non-empty string")
         name = raw_name.strip().lower()
+        # Aliases record as their canonical target: ``vscode`` is ``copilot``.
+        if canonical_target_name(name) in valid_set:
+            name = canonical_target_name(name)
         if name not in valid_set:
             suggestion = _closest_target(name, valid_targets)
             hint = f" Did you mean '{suggestion}'?" if suggestion else ""
@@ -477,6 +501,9 @@ def merge_edge_pairings(
     return SkillTargetSelection(_canonicalize(raw))
 
 
+_TARGET_AXES = frozenset({"targets", "target_subset"})
+
+
 def _normalize_axis(values: Iterable[object] | None, axis: str) -> tuple[str, ...] | None:
     if values is None:
         return None
@@ -487,6 +514,9 @@ def _normalize_axis(values: Iterable[object] | None, axis: str) -> tuple[str, ..
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"Each entry in '{axis}' must be a non-empty string")
         names.append(value.strip())
+    if axis in _TARGET_AXES:
+        # Recorded and declared targets compare by canonical identifier.
+        return tuple(canonical_target_subset(names)) or None
     return tuple(names) or None
 
 

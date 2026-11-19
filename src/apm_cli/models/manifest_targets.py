@@ -12,6 +12,7 @@ separate decisions owned elsewhere.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
@@ -22,8 +23,18 @@ import click
 import yaml
 
 from ..core.apm_yml import parse_targets_field
-from ..core.target_catalog import normalize_target_name
-from ..core.target_detection import parse_target_field
+from ..core.target_catalog import (
+    DEPRECATED_TARGET_ALIASES,
+    canonical_target_token,
+    deprecated_target_alias_message,
+    first_deprecated_target_alias,
+    normalize_target_name,
+)
+from ..core.target_detection import (
+    AgentsTargetDeprecationWarning,
+    EffectiveTargetDecision,
+    parse_target_field,
+)
 
 if TYPE_CHECKING:
     from ..core.scope import InstallScope
@@ -63,16 +74,22 @@ def _consumer_manifest_scope(manifest_path: Path) -> InstallScope | None:
 def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path) -> None:
     """Warn once per process and scope about deprecated keys in a consumer manifest.
 
-    Covers the singular top-level ``target:`` key and the ignored
-    ``compilation.target`` key. Writes to stderr and never changes the exit
-    code, so ``--frozen`` and ``--ci`` runs keep their outcome.
+    Covers the singular top-level ``target:`` key, the ignored
+    ``compilation.target`` key, and a deprecated target alias (``vscode``)
+    under ``target:``, ``targets:`` or a dependency's ``targets:``. Writes to
+    stderr and never changes the exit code, so ``--frozen`` and ``--ci`` runs
+    keep their outcome.
     """
     compilation = data.get("compilation")
+    # An alias under singular ``target:`` is covered by that key's warning,
+    # whose replacement already writes the target the alias selects.
+    alias, alias_key = _deprecated_alias_outside_target(data)
     present = [
         key
         for key, declared in (
             ("target", "target" in data),
             ("compilation.target", isinstance(compilation, Mapping) and "target" in compilation),
+            (alias, alias is not None),
         )
         if declared
     ]
@@ -88,27 +105,78 @@ def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path)
 
     user_scope = scope is InstallScope.USER
     label = ascii(manifest_path.as_posix())[1:-1] if user_scope else "apm.yml"
-    migrate_cmd = "apm manifest migrate --global" if user_scope else "apm manifest migrate"
     for key in pending:
         _deprecated_manifest_keys_warned.add((scope.value, key))
         if key == "target":
+            declaration = ManifestTargetDeclaration.from_mapping(
+                {"target": data["target"]}, manifest_path
+            )
             message = (
-                f"{label} uses the deprecated 'target:' key. Use 'targets:' (a YAML list). "
-                f"Run '{migrate_cmd}' to update it. 'target:' will be removed in v1.0."
+                f"{label} uses the deprecated 'target:' key; 'target:' will be removed in a "
+                "future release in favor of 'targets:'. "
+                + _target_replacement_hint(declaration, user_scope=user_scope)
+            )
+        elif key == "compilation.target":
+            message = (
+                f"{label} sets 'compilation.target', which APM ignores; targets come from "
+                "'targets:' or auto-detection. Delete it; a future release will reject it."
             )
         else:
-            message = (
-                f"{label} sets 'compilation.target', which APM ignores (targets come from "
-                "'targets:' or auto-detection). Delete it by hand; v1.0 will reject it."
-            )
+            message = deprecated_target_alias_message(key, where=label, key=alias_key)
         _rich_warning(message, symbol="warning", err=True)
+
+
+def _deprecated_alias_outside_target(data: Mapping[str, Any]) -> tuple[str | None, str]:
+    """The first deprecated alias under ``targets:`` or a dependency's ``targets:``."""
+    alias = first_deprecated_target_alias(_authored_target_tokens(data.get("targets")))
+    if alias is not None:
+        return alias, "'targets:'"
+    for section in ("dependencies", "devDependencies"):
+        block = data.get(section)
+        entries = block.get("apm") if isinstance(block, Mapping) else None
+        for entry in entries if isinstance(entries, list) else ():
+            if isinstance(entry, Mapping):
+                alias = first_deprecated_target_alias(_authored_target_tokens(entry.get("targets")))
+                if alias is not None:
+                    return alias, "a dependency's 'targets:'"
+    return None, ""
+
+
+def _yaml_flow(value: Any) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(str(item).strip() for item in value) + "]"
+    return ascii(str(value).strip())[1:-1]
+
+
+def _target_replacement_hint(declaration: ManifestTargetDeclaration, *, user_scope: bool) -> str:
+    """Tell the user exactly what to write instead of their ``target:`` value."""
+    value = dict(declaration.fields)["target"]
+    authored = f"target: {_yaml_flow(value)}"
+    replacement = declaration.targets_replacement(user_scope=user_scope)
+    if replacement is None:
+        return (
+            f"'targets:' has no exact equivalent of '{authored}' here; list the targets "
+            "you use, e.g. 'targets: [claude, copilot]'."
+        )
+    if not replacement:
+        return "Delete the empty 'target:' key."
+    hint = f"Replace '{authored}' with 'targets: {_yaml_flow(list(replacement))}'."
+    if declaration.legacy_all:
+        hint += " ('targets: [all]' means auto-detect, not every target.)"
+    alias = first_deprecated_target_alias(_authored_target_tokens(value))
+    if alias is not None:
+        replacement_target = DEPRECATED_TARGET_ALIASES[alias]
+        hint += (
+            f" (`{alias}` is a deprecated alias: replace `{alias}` with `{replacement_target}`.)"
+        )
+    return hint
 
 
 def canonical_target_names(names: Iterable[str]) -> tuple[str, ...]:
     """Resolve declared target names to canonical ones, keeping legacy ``all``.
 
-    The single alias rule for both ``target:`` and ``targets:``: ``vscode``
-    and ``agents`` become ``copilot``.
+    The single alias rule for both ``target:`` and ``targets:``: ``agents``
+    becomes ``copilot``.
     """
     return tuple(
         name if name == _LEGACY_ALL_TARGET else normalize_target_name(name) for name in names
@@ -191,8 +259,6 @@ class ManifestTargetDeclaration:
         if "targets" in data:
             # Also rejects a manifest that declares both keys.
             parsed = parse_targets_field(data)
-            # ``selection`` keeps ``vscode`` for its MCP destination; the
-            # canonical view resolves it to ``copilot`` for both spellings.
             return (list(parsed) or None), canonical_target_names(parsed)
         value = parse_target_field(data.get("target"), source_path=self.source_path)
         values = value if isinstance(value, list) else [value] if isinstance(value, str) else []
@@ -269,6 +335,30 @@ class ManifestTargetDeclaration:
             return []
         return [name.strip() for name in str(value).split(",") if name.strip()]
 
+    def targets_replacement(self, *, user_scope: bool = False) -> tuple[str, ...] | None:
+        """The ``targets:`` list the deprecated ``target:`` warning suggests.
+
+        A thin view over :func:`rewrite_target_names` (the one target rewrite
+        mapping, shared with ``apm init`` re-init), so the suggestion always
+        deploys what the declaration deploys. Singular ``all`` becomes the
+        explicit set install expands it to, because plural ``targets: [all]``
+        means "omitted" (auto-detect) instead.
+
+        Returns ``()`` for an empty ``target:`` (delete the key) and ``None``
+        when no list deploys identically: an invalid value, a token without a
+        ``targets:`` equivalent (``intellij``), a ``targets:`` declaration, or
+        ``all`` in the user manifest (``apm compile -g`` treats it as every
+        known target, wider than any list).
+        """
+        if self.spelling != "target":
+            return None
+        if user_scope and self.legacy_all:
+            return None
+        try:
+            return rewrite_target_names(self) or ()
+        except (ValueError, TypeError, click.UsageError):
+            return None
+
     def validate_for_install(self) -> None:
         """Reject declared targets ``apm install`` cannot deploy.
 
@@ -323,13 +413,16 @@ def rewrite_target_names(declaration: ManifestTargetDeclaration) -> tuple[str, .
         ValueError, click.UsageError: The declaration is invalid (as for install).
         TargetRewriteError: No ``targets:`` list deploys the same targets.
     """
-    import warnings
 
     from ..core.errors import TargetResolutionError
-    from ..core.target_detection import AgentsTargetDeprecationWarning, EffectiveTargetDecision
 
     if declaration.spelling != "target":
-        names = declaration.authored_names()
+        # Deprecated aliases (``vscode``) are written as the target they select.
+        names = list(
+            dict.fromkeys(
+                canonical_target_token(name.lower()) for name in declaration.authored_names()
+            )
+        )
         if not names:
             return None
         # Also refuses a manifest that declares both keys.
@@ -402,13 +495,17 @@ def option_target_names(target: str | list[str] | None) -> list[str] | None:
     _refuse_ide_targets([target] if isinstance(target, str) else target)
 
     from ..core.apm_yml import CANONICAL_TARGETS
-    from ..core.target_catalog import expand_all, get_target_capability
+    from ..core.target_catalog import canonical_target_token, expand_all, get_target_capability
 
     raw_targets = [target] if isinstance(target, str) else list(target)
     seen: set[str] = set()
     manifest_targets: list[str] = []
     for raw_target in raw_targets:
-        expanded = expand_all("install") if raw_target == "all" else [str(raw_target)]
+        expanded = (
+            expand_all("install")
+            if raw_target == "all"
+            else [canonical_target_token(str(raw_target))]
+        )
         for item in expanded:
             capability = get_target_capability(item)
             canonical = (

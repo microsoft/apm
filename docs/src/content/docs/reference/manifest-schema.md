@@ -172,20 +172,19 @@ actionable nudge (the authoring path only).
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
 :::caution[Deprecated: the singular `target:` key]
-`target:` is deprecated in favor of `targets:` (a YAML list) and will be removed in v1.0.
+`target:` is deprecated in favor of `targets:` (a YAML list) and will be removed in a future release.
 When your project `apm.yml` (or `~/.apm/apm.yml`) uses it, APM prints one warning per run
-on stderr; exit codes do not change. Dependency manifests never trigger the warning.
-Run [`apm manifest migrate`](../cli/manifest/) to rewrite the key in place. It keeps
-comments and deploys exactly the same files and MCP configuration:
+on stderr naming the exact replacement; exit codes do not change. Dependency manifests never
+trigger the warning. The suggested replacement deploys the same files and MCP configuration:
 
-| `target:` | `targets:` after migrate |
+| `target:` | Replace with |
 |---|---|
-| `claude,cursor` or `[claude, cursor]` | `[claude, cursor]` |
-| `vscode` | `[vscode]` (MCP config stays in `.vscode/mcp.json`) |
-| `agents` | `[copilot]` |
-| `agy` | `[antigravity]` |
-| `all` | the explicit list `apm install` deploys today; remove the ones you do not use. Refused for `~/.apm/apm.yml`, where `apm compile -g` would narrow; edit it by hand |
-| `intellij`, `copilot-app` | refused: no `targets:` equivalent; remove the token from `target:` and pass `--target <name>` to `apm install` |
+| `claude,cursor` or `[claude, cursor]` | `targets: [claude, cursor]` |
+| `vscode` or `agents` | `targets: [copilot]` |
+| `agy` | `targets: [antigravity]` |
+| `all` | the explicit list `apm install` expands it to (the warning prints it, e.g. `targets: [claude, codex, copilot, cursor, gemini, grok-build, kiro, opencode, windsurf]`); remove the ones you do not use. Not `targets: [all]`, which means omitted (auto-detect) |
+| empty | delete the key |
+| `all` in `~/.apm/apm.yml`, `intellij`, `copilot-app` | no list deploys identically; write a `targets:` list of the targets you use. Pass MCP-only or experimental targets with `--target <name>` to `apm install` |
 :::
 
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
@@ -213,8 +212,10 @@ When a list is specified, only those targets are compiled, installed, and packed
 
 Use `targets:` with a YAML list in new manifests. A scalar remains accepted
 as a one-item compatibility input. Declaring both fields is a parse error.
-The deprecated `target:` key remains supported until v1.0. The `vscode` alias is accepted in either
-form and normalized to `copilot`; `agents` remains a CLI-only alias.
+The deprecated `target:` key still works. `vscode` is a deprecated alias of `copilot` in either
+form: it selects exactly what `copilot` selects, including the project MCP file (root `.mcp.json`),
+is recorded as `copilot` in `apm.lock.yaml`, and prints one warning per run
+(`` apm.yml: replace `vscode` with `copilot` ``). `agents` remains a CLI-only alias.
 MCP-only and experimental `--target` values such as `intellij` and
 `copilot-app` are not manifest targets: `apm install` rejects them in
 `apm.yml` before writing any file.
@@ -583,7 +584,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
-| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`, `grok-bot`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list; `agent-skills` is also accepted by the `grok-bot` target. |
+| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`, `grok-bot`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. `vscode` is accepted as a deprecated alias and recorded as `copilot`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list; `agent-skills` is also accepted by the `grok-bot` target. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
 actionable error to use `ref` for a branch, tag, or commit; `version` belongs
@@ -601,7 +602,7 @@ more parent packages), APM installs it once. Each declaration's `skills:` reach
 only that declaration's `targets:`: a skill deploys to a harness only when one
 declaration selects both, and a declaration that omits a field selects
 everything on it. Order of declaration does not matter. `apm.lock.yaml` records
-the unions as `skill_subset` and `target_subset`, plus `subset_pairings` when
+the unions as `skill_subset` and `target_subset` (canonical target names), plus `subset_pairings` when
 needed. If the declarations use different `alias:` values, the shallowest
 declaration wins and APM prints a warning.
 
@@ -760,7 +761,7 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 |---|---|---|---|---|
 | `name` | `string` | REQUIRED | Non-empty | Server identifier (registry name or custom name). |
 | `transport` | `enum<string>` | Conditional | `stdio`, `sse`, `http`, `streamable-http` | Transport protocol. REQUIRED when `registry: false`. Values are MCP transport names, not URL schemes; remote variants connect over HTTPS. |
-| `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${VAR}`, `${env:VAR}`, or `${input:<id>}` references; see Section 4.2.4. |
+| `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${VAR}` or `${env:VAR}` references; see Section 4.2.4. |
 | `args` | `dict` or `list` | OPTIONAL | | Dict for overlay variable overrides (registry); list for positional args (self-defined). |
 | `version` | `string` | OPTIONAL | | Pin to a specific server version. |
 | `registry` | `bool` or `string` | OPTIONAL | Default: `true` (public registry) | `false` = self-defined (private) server. String = custom registry URL. |
@@ -833,24 +834,22 @@ See [Token injection: GitHub MCP server](../../consumer/install-mcp-servers/#tok
 for the selection order and guidance for repairing existing generated
 configurations.
 
-| Syntax | Source | VS Code | JetBrains Copilot | Copilot CLI / Kiro | Codex / Gemini | Cursor |
-|---|---|---|---|---|---|---|
-| `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Translated to `${env:VAR}` | Native; passed through verbatim | `env`: resolved at install time from env (or interactive prompt). Codex `headers`: see note below | Translated to `${env:VAR}`; resolved by Cursor at runtime |
-| `${env:VAR}` | host environment | Native; passed through verbatim | Native; passed through verbatim | Translated to `${VAR}` | `env`: resolved at install time from env (or interactive prompt). Codex `headers`: see note below | Native; passed through verbatim and resolved at runtime |
-| `${input:<id>}` | user prompt | Native; VS Code prompts at runtime | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead |
-| `<VAR>` (legacy) | host environment | Not recognized | Translated to `${env:VAR}` | Translated to `${VAR}` | Resolved at install time (kept for back-compat) | Translated to `${env:VAR}`; resolved by Cursor at runtime |
+| Syntax | Source | JetBrains Copilot | Copilot / Kiro | Codex / Gemini | Cursor |
+|---|---|---|---|---|---|
+| `${VAR}` | host environment | Translated to `${env:VAR}` | Native; passed through verbatim | `env`: resolved at install time from env (or interactive prompt). Codex `headers`: see note below | Translated to `${env:VAR}`; resolved by Cursor at runtime |
+| `${env:VAR}` | host environment | Native; passed through verbatim | Translated to `${VAR}` | `env`: resolved at install time from env (or interactive prompt). Codex `headers`: see note below | Native; passed through verbatim and resolved at runtime |
+| `${input:<id>}` | user prompt | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead |
+| `<VAR>` (legacy) | host environment | Translated to `${env:VAR}` | Translated to `${VAR}` | Resolved at install time (kept for back-compat) | Translated to `${env:VAR}`; resolved by Cursor at runtime |
 
-- **VS Code** has native `${env:VAR}` and `${input:VAR}` interpolation, so APM emits placeholders rather than baking secrets into `mcp.json`. Bare `${VAR}` is normalized to `${env:VAR}` for you.
 - **JetBrains Copilot** has native `${env:VAR}` interpolation in `mcp.json`; APM normalizes `${VAR}` and legacy `<VAR>` to `${env:VAR}`.
-- **Copilot CLI and Kiro** have native `${VAR}` interpolation in their MCP config files; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
+- **Copilot (project `.mcp.json` and user `mcp-config.json`) and Kiro** have native `${VAR}` interpolation in their MCP config files; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
 - **Codex and Gemini** have no runtime interpolation for `env`, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` there at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
 - **Claude Code** expands `${VAR}` and `${VAR:-default}` in `command`, `args`, `env`, `url` and `headers` of the project-scoped `.mcp.json` when it starts a server. An unset variable without a default stays as literal text, and `claude mcp list` warns about it. At project scope APM keeps these references, normalizing `${env:VAR}` and legacy `<VAR>` to `${VAR}`, keeps static values as authored, and never writes referenced values into `.mcp.json` or `apm.lock.yaml`. Reinstall replaces values an earlier APM release expanded into `.mcp.json` when APM can confirm it wrote them; otherwise the entry is kept and install names the affected fields. User-scope installs (`-g`, `~/.claude.json`) keep resolving references at install time. See [MCP variable compatibility](../mcp-variable-compatibility/) for every harness.
 - **Cursor** resolves `${env:VAR}` references at runtime. APM translates `${VAR}` and legacy `<VAR>` into that native form in `env`, `args`, and `headers`, so referenced values are not written into the project-local Cursor config. This normalization does not cover `command` or `url`; their existing behavior is unchanged.
 - **Codex `headers` are the exception.** Codex does read a remote server's headers from the environment, through dedicated fields rather than from inside `http_headers`, which it documents as static values. APM writes `Authorization: "Bearer ${VAR}"` as `bearer_token_env_var` and a value that is exactly `${VAR}` as `env_http_headers`; Codex resolves both at server start, so no token is written to `config.toml`. A value Codex cannot express that way -- literal text around the reference, or a shell-style default such as `${VAR:-}` -- is skipped with a warning instead of being written as static text.
 - **OpenCode** translates `${VAR}`, `${env:VAR}`, and legacy `<VAR>` to native `{env:VAR}` in remote `headers`, local `environment` (manifest `env`), and command arguments. Already-native references, authored static values, command executables, and URLs stay unchanged. Registry `env` overlays preserve authored values only for declared, emitted keys. Export referenced variables when launching OpenCode: APM writes references, not their resolved values. Keep secrets out of authored static values. See [OpenCode config substitution](https://opencode.ai/docs/config/#env-vars).
-- **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
+- **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy.
 - **Registry-backed servers** - APM auto-generates input prompts from registry metadata only for required variables. Optional variables do not generate prompts or runtime config entries when no value is available. If a user has already edited an optional value in runtime config, reinstall preserves that value rather than overwriting it.
-- **Self-defined servers** - APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
 
 APM does not evaluate GitHub Actions templates (`${{ ... }}`). Codex skips remote headers containing them with a warning.
 
@@ -866,7 +865,6 @@ dependencies:
       headers:
         Authorization: "Bearer ${MY_SECRET_TOKEN}"      # bare env-var
         X-Tenant: "${env:TENANT_ID}"                    # env-prefixed
-        X-Project: "${input:my-server-project}"         # VS Code input prompt
 ```
 
 ---
@@ -1005,7 +1003,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `target` | `enum<string>` | unset | Same values as Section 3.6 | **Deprecated and ignored.** `apm compile` always uses the targets resolved from `--target`, `targets:` (Section 3.6), or auto-detection. APM warns when the project or user manifest sets it; remove it. It will be removed in v1.0. |
+| `target` | `enum<string>` | unset | Same values as Section 3.6 | **Deprecated and ignored.** `apm compile` always uses the targets resolved from `--target`, `targets:` (Section 3.6), or auto-detection. APM warns when the project or user manifest sets it; remove it. A future release will reject it. |
 | `strategy` | `enum<string>` | `distributed` | `distributed`, `single-file` | `distributed` generates per-directory target files (e.g. `AGENTS.md`, `CLAUDE.md`). `single-file` generates one monolithic file at `output`. |
 | `single_file` | `bool` | `false` | | Legacy alias. When `true`, overrides `strategy` to `single-file`. |
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |

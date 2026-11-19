@@ -187,11 +187,24 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     _REMOTE_TRANSPORT_KEYS = frozenset({"type", "url", "headers"})
     _STDIO_TRANSPORT_KEYS = frozenset({"type", "command", "args", "env", "cwd"})
 
-    @classmethod
-    def _rewrite_self_defined_skill_command(cls, command: str) -> str:
-        if isinstance(command, str) and command.startswith(cls._CONVERGED_SKILL_PREFIX):
-            return cls._CLAUDE_SKILL_PREFIX + command[len(cls._CONVERGED_SKILL_PREFIX) :]
-        return command
+    def _rewrite_self_defined_skill_command(self, command: str) -> str:
+        """Point a converged skill launcher at Claude's ``.claude/skills/`` copy.
+
+        At project scope the copy must exist; otherwise the converged path is
+        kept. Copilot renders through this same rule, so the two targets write
+        one identical entry in the shared ``.mcp.json``.
+        """
+        if not isinstance(command, str) or not command.startswith(self._CONVERGED_SKILL_PREFIX):
+            return command
+        rest = command[len(self._CONVERGED_SKILL_PREFIX) :]
+        if not self._is_user_scope():
+            skill = rest.split("/", 1)[0]
+            if (
+                not skill
+                or not (Path(self.project_root) / self._CLAUDE_SKILL_PREFIX / skill).is_dir()
+            ):
+                return command
+        return self._CLAUDE_SKILL_PREFIX + rest
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
         config = super()._format_server_config(server_info, env_overrides, runtime_vars)
@@ -593,12 +606,16 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             )
             ok = self.update_config({config_key: server_config}, managed_fields=managed_fields)
             if not ok:
-                _rich_error(f"Failed to write MCP config for '{config_key}' to Claude Code")
+                _rich_error(
+                    f"Failed to write MCP config for '{config_key}' to {self._client_label}"
+                )
                 return False
             self.written_mcp_hashes[server_url] = fingerprint
             self._record_env_diagnostics(config_key, server_config, previously_baked)
 
-            _rich_success(f"Successfully configured MCP server '{config_key}' for Claude Code")
+            _rich_success(
+                f"Successfully configured MCP server '{config_key}' for {self._client_label}"
+            )
             return True
 
         except Exception:

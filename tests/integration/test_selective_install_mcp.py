@@ -79,6 +79,39 @@ def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list = None):  # 
     lf.write(path)
 
 
+def _record_copilot_writes(path: Path, entries: dict[str, dict]) -> None:
+    """Record each entry as an APM-written Copilot MCP server in the lockfile."""
+    from apm_cli.install.mcp.ownership import mcp_native_hash
+    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+
+    data = load_yaml(path)
+    data["mcp_configs"] = {
+        name: {
+            "name": name,
+            "registry": False,
+            "transport": "stdio",
+            "command": entry["command"],
+            "args": entry["args"],
+        }
+        for name, entry in entries.items()
+    }
+    data["mcp_target_servers"] = {"copilot": sorted(entries)}
+    data["deployments"] = [
+        {
+            "kind": "uri",
+            "target": "mcp",
+            "value": name,
+            "runtime": "copilot",
+            "scope": "project",
+            "owners": ["."],
+            "active_owner": ".",
+            "content_hash": mcp_native_hash(entry),
+        }
+        for name, entry in sorted(entries.items())
+    ]
+    dump_yaml(data, path)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -494,7 +527,7 @@ class TestFullInstallTransitiveMCPIntegration:
 
 class TestStaleRemovalAfterUpdate:
     """When a package drops/renames an MCP server, stale entries must be
-    removed from .github/mcp.json during install --update."""
+    removed from the Copilot project .mcp.json during install --update."""
 
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
@@ -535,21 +568,15 @@ class TestStaleRemovalAfterUpdate:
                 mcp_servers=["ghcr.io/acme/mcp-alpha", "ghcr.io/acme/mcp-beta"],
             )
 
-            # Pre-existing .github/mcp.json has both servers
-            mcp_json = tmp_path / ".github" / "mcp.json"
-            mcp_json.parent.mkdir(parents=True, exist_ok=True)
-            mcp_json.write_text(
-                json.dumps(
-                    {
-                        "mcpServers": {
-                            "ghcr.io/acme/mcp-alpha": {"command": "npx", "args": ["alpha"]},
-                            "ghcr.io/acme/mcp-beta": {"command": "npx", "args": ["beta"]},
-                        }
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+            # Pre-existing Copilot project .mcp.json has both servers, which the
+            # lockfile records as APM-written (the shared file needs that proof).
+            entries = {
+                "ghcr.io/acme/mcp-alpha": {"type": "stdio", "command": "npx", "args": ["alpha"]},
+                "ghcr.io/acme/mcp-beta": {"type": "stdio", "command": "npx", "args": ["beta"]},
+            }
+            mcp_json = tmp_path / ".mcp.json"
+            mcp_json.write_text(json.dumps({"mcpServers": entries}, indent=2), encoding="utf-8")
+            _record_copilot_writes(tmp_path / "apm.lock.yaml", entries)
 
             from apm_cli.cli import cli
 

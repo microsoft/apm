@@ -355,7 +355,7 @@ Two keys control which output runtimes a package compiles and installs to:
 
 - **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
   A scalar remains accepted as a one-item compatibility input.
-- **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
+- **`target:` (deprecated singular form)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form). Still works; warns once per run with the exact `targets:` replacement.
 
 Setting both keys in the same `apm.yml` is a parse error
 (`ConflictingTargetsError`), even when either value is null. A null or empty
@@ -364,18 +364,18 @@ treated as omission for legacy compatibility; an empty string or list is a
 parse error.
 
 Both manifest keys validate target names. The canonical `targets:` form accepts
-canonical names only. The legacy `target:` form also accepts CLI aliases such
-as `vscode` and normalizes them. Invalid values fail at parse time -- they do
+canonical names plus the deprecated `vscode` alias of `copilot`. The legacy
+`target:` form also accepts CLI aliases such as `agents` and normalizes them. Invalid values fail at parse time -- they do
 **not** silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
-| `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
-| `target: vscode` | Legacy alias; normalizes to `copilot` |
-| `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
-| `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
+| `target: copilot` | Deprecated singular form (warns: use `targets: [copilot]`); stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
+| `target: claude,copilot` | Deprecated CSV-string form; aliases are normalized and order is preserved |
+| `target: vscode` / `targets: [vscode]` | Deprecated alias; selects exactly what `copilot` selects and warns |
+| `target: all` | Deprecated; selects every supported target (the warning prints the explicit `targets:` list) |
+| `targets: [all]` | Legacy; treated as omitted (auto-detect) |
 | `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |

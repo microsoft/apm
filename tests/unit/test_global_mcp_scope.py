@@ -270,8 +270,10 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        # vscode should be included at PROJECT scope
-        self.assertIn("vscode", called_runtimes)
+        # VS Code presence selects copilot (root .mcp.json) at PROJECT scope;
+        # vscode is no longer an MCP runtime (#3866).
+        self.assertIn("copilot", called_runtimes)
+        self.assertNotIn("vscode", called_runtimes)
 
     def test_user_scope_explicit_workspace_runtime_returns_zero(self):
         """--global --runtime vscode should warn and return 0."""
@@ -381,8 +383,9 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
                 )
 
         called_runtimes = {call.args[0] for call in mock_install.call_args_list}
-        # vscode should be present (not filtered)
-        self.assertIn("vscode", called_runtimes)
+        # VS Code presence selects copilot, not a vscode runtime (#3866).
+        self.assertIn("copilot", called_runtimes)
+        self.assertNotIn("vscode", called_runtimes)
 
 
 # ---------------------------------------------------------------------------

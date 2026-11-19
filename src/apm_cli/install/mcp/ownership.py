@@ -243,6 +243,14 @@ def compare_native_mcp_connection(
                         native, baseline=expected, requested=requested
                     )
                 matches_baseline = client.matches_managed_server_config(comparison, expected)
+                if not matches_baseline and native_hash is not None and isinstance(native, dict):
+                    # The entry is exactly what APM recorded writing; its render
+                    # moved since (a re-pointed skill launcher), so update it.
+                    matches_baseline = (
+                        mcp_native_hash(client.managed_server_config(native)) == native_hash
+                    )
+                    if matches_baseline:
+                        comparison = native
                 if matches_baseline and managed_fields is not None:
                     managed_fields.update(expected)
             elif native_hash is not None and isinstance(native, dict):
@@ -251,6 +259,13 @@ def compare_native_mcp_connection(
                 if not matches_baseline:
                     # A --frozen heal rewrote the shape but kept the lock receipt.
                     matches_baseline = _healed_since_receipt(
+                        client,
+                        native,
+                        baseline_info,
+                        current=legacy_baseline,
+                        native_hash=native_hash,
+                        render_env=render_env,
+                    ) or _moved_since_receipt(
                         client,
                         native,
                         baseline_info,
@@ -295,6 +310,14 @@ def compare_native_mcp_connection(
                     managed_fields.update(client.managed_server_config(native))
         except (TypeError, ValueError):
             logger.debug("Unusable MCP baseline for %s on %s", name, client.target_name)
+    elif managed and requested is not None and native_hash is not None and isinstance(native, dict):
+        # Install comparison without a stored declaration (a shared-file peer
+        # wrote the entry earlier in this first install): the peer's recorded
+        # fingerprint is the proof. Removal (no request) still needs a baseline.
+        comparable = client.managed_server_config(native)
+        matches_baseline = mcp_native_hash(comparable) == native_hash
+        if matches_baseline and managed_fields is not None:
+            managed_fields.update(comparable)
     if requested is not None:
         requested_native = comparison if matches_baseline else native
         matches_request = (
@@ -432,6 +455,30 @@ def _healed_since_receipt(
     return False
 
 
+def _moved_since_receipt(
+    client: Any,
+    native: dict,
+    info: dict | None,
+    *,
+    current: dict | None,
+    native_hash: str,
+    render_env: dict,
+) -> bool:
+    """Return whether *native* is the current render of a write the receipt proves.
+
+    The recorded fingerprint equals an earlier APM render of the same
+    declaration (for example the retired Copilot project entry a ``--frozen``
+    heal moved to ``.mcp.json`` without rewriting the lockfile), and *native*
+    is exactly what APM renders for it now. Any edit fails the second check.
+    """
+    if info is None or current is None or not client.matches_managed_server_config(native, current):
+        return False
+    return any(
+        mcp_native_hash(legacy) == native_hash
+        for legacy in client.legacy_managed_renders(info, **render_env)
+    )
+
+
 def project_mcp_cleanup_reachable(
     project_root: Path, opt_in_dir: str, *, runtime_scoped: bool
 ) -> bool:
@@ -485,6 +532,110 @@ def require_removable_mcp_connections(
     }
 
 
+# Project-scope runtimes whose adapters write the same native file and render
+# one identical entry per server: Claude Code and Copilot share workspace-root
+# ``.mcp.json`` (#3866). A claim by one is a claim by the others, so neither
+# reads the other's entry as foreign, and retiring one runtime never removes
+# an entry another active runtime still owns.
+SHARED_PROJECT_MCP_DESTINATIONS: tuple[frozenset[str], ...] = (frozenset({"claude", "copilot"}),)
+
+
+def shared_destination_peers(runtime: str, *, user_scope: bool) -> frozenset[str]:
+    """Return the runtimes that write *runtime*'s native MCP file (project scope)."""
+    if user_scope:
+        return frozenset()
+    for group in SHARED_PROJECT_MCP_DESTINATIONS:
+        if runtime in group:
+            return group - {runtime}
+    return frozenset()
+
+
+def claim_shared_destination(
+    managed_target_servers: dict[str, set[str]] | None,
+    native_hashes: dict[str, dict[str, str]] | None,
+    runtime: str,
+    name: str,
+    *,
+    user_scope: bool,
+    written_connections: set[tuple[str, str]] | None = None,
+) -> None:
+    """Adopt a peer's claim on a shared-file entry before comparing it.
+
+    A peer that owns *name* in the same file vouches for the entry, so
+    *runtime* compares it as managed against the peer's fingerprint. When the
+    peer rewrote the entry in this run, or *runtime* recorded no fingerprint of
+    its own (an older lockfile), the peer's fingerprint replaces ours.
+    """
+    if managed_target_servers is None:
+        return
+    for peer in sorted(shared_destination_peers(runtime, user_scope=user_scope)):
+        if name not in managed_target_servers.get(peer, set()):
+            continue
+        owned = name in managed_target_servers.get(runtime, set())
+        peer_wrote = written_connections is not None and (peer, name) in written_connections
+        own_hash = (native_hashes or {}).get(runtime, {}).get(name)
+        if owned and not peer_wrote and own_hash is not None:
+            return
+        managed_target_servers.setdefault(runtime, set()).add(name)
+        peer_hash = (native_hashes or {}).get(peer, {}).get(name)
+        if native_hashes is not None and peer_hash is not None:
+            native_hashes.setdefault(runtime, {})[name] = peer_hash
+        return
+
+
+def peer_wrote_shared_entry(
+    runtime: str,
+    name: str,
+    written_connections: set[tuple[str, str]] | None,
+    *,
+    user_scope: bool,
+) -> bool:
+    """Whether a shared-file peer wrote *name* in this run (so *runtime* is configured too)."""
+    return any(
+        (peer, name) in (written_connections or ())
+        for peer in shared_destination_peers(runtime, user_scope=user_scope)
+    )
+
+
+def inherit_shared_destination_claims(
+    managed_target_servers: dict[str, set[str]],
+    native_hashes: dict[str, dict[str, str]] | None,
+    *,
+    active_runtimes: set[str],
+    user_scope: bool,
+) -> None:
+    """Pass a retiring runtime's shared-file claims to an active peer.
+
+    The entry stays in the shared file, so the active peer owns it from now
+    on instead of reading it as foreign (and the retiring runtime's cleanup
+    keeps it, see :func:`names_owned_by_active_peers`).
+    """
+    for runtime in sorted(set(managed_target_servers) - active_runtimes):
+        for peer in sorted(shared_destination_peers(runtime, user_scope=user_scope)):
+            if peer not in active_runtimes:
+                continue
+            owned = managed_target_servers.setdefault(peer, set())
+            for name in sorted(set(managed_target_servers[runtime]) - owned):
+                owned.add(name)
+                peer_hash = (native_hashes or {}).get(runtime, {}).get(name)
+                if native_hashes is not None and peer_hash is not None:
+                    native_hashes.setdefault(peer, {}).setdefault(name, peer_hash)
+
+
+def names_owned_by_active_peers(
+    runtime: str,
+    names: set[str],
+    active_target_servers: Mapping[str, set[str]],
+    *,
+    user_scope: bool,
+) -> set[str]:
+    """Names in *names* a shared-file peer still owns, so retiring *runtime* keeps them."""
+    kept: set[str] = set()
+    for peer in shared_destination_peers(runtime, user_scope=user_scope):
+        kept |= names & set(active_target_servers.get(peer, ()))
+    return kept
+
+
 def retain_deferred_mcp_claims(
     current: dict[str, set[str]],
     previous: dict[str, set[str]],
@@ -523,8 +674,12 @@ def migrate_legacy_project_target_servers(
     active_runtimes: set[str],
     user_scope: bool,
 ) -> None:
-    """Move legacy project VS Code ownership to the Copilot runtime key."""
-    if user_scope or "copilot" not in active_runtimes or "vscode" in active_runtimes:
+    """Move project ``vscode`` ownership (a removed target, #3866) to ``copilot``.
+
+    Lockfiles written before the removal keep replaying: a server the lock
+    records for ``vscode`` counts as recorded for ``copilot``.
+    """
+    if user_scope or "copilot" not in active_runtimes:
         return
     legacy_servers = target_servers.pop("vscode", set())
     if legacy_servers:
@@ -614,3 +769,84 @@ def adopt_legacy_mcp_target_servers(
             ):
                 adopted.setdefault(runtime, set()).add(name)
     return adopted
+
+
+# Runtimes that always keyed self-defined servers by their full declared name,
+# so a short-name entry there can never be a truncated write by older APM.
+_DECLARED_KEY_RUNTIMES = frozenset({"vscode"})
+
+
+def reconcile_legacy_truncated_key(
+    dep_name: str,
+    runtimes: list[str],
+    *,
+    previously_owned: dict[str, set[str]],
+    previous_native_hashes: dict[str, dict[str, str]],
+    stored_config: dict | None,
+    claimed_keys: set,
+    project_root,
+    user_scope: bool,
+    logger,
+    fail_on_write_error: bool = False,
+) -> None:
+    """Replace or flag the pre-fix truncated config key of a self-defined server.
+
+    Older releases wrote ``com.example/srv`` under its final segment (``srv``).
+    Now that the declared name is the key, the short entry is removed only when
+    the ownership ledger proves APM wrote *dep_name* to that runtime (and, on
+    runtimes with native baselines, that its content is unchanged); otherwise
+    it is left in place and named (never its contents) so the user can decide.
+    """
+    from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.errors import RequiredIntegrationError
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    legacy_key = MCPClientAdapter.determine_config_key(dep_name, None)
+    if legacy_key == dep_name or legacy_key in claimed_keys:
+        return
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    for rt in runtimes:
+        if rt in _DECLARED_KEY_RUNTIMES:
+            continue
+        try:
+            client = ClientFactory.create_client(
+                rt, project_root=project_root, user_scope=user_scope
+            )
+            existing = MCPConflictDetector(client).get_existing_server_configs()
+        except Exception as exc:
+            logger.verbose_detail(f"Skipped legacy MCP entry check for {rt}: {exc}")
+            continue
+        if legacy_key not in existing:
+            continue
+        config_path = client.get_config_path()
+        if dep_name in previously_owned.get(rt, set()):
+            legacy_hash = previous_native_hashes.get(rt, {}).get(dep_name)
+            try:
+                MCPIntegrator.remove_stale(
+                    {legacy_key},
+                    runtime=rt,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                    logger=logger,
+                    scope=scope,
+                    fail_on_write_error=fail_on_write_error,
+                    stored_configs={legacy_key: stored_config} if stored_config else {},
+                    native_hashes={rt: {legacy_key: legacy_hash}} if legacy_hash else None,
+                )
+            except RequiredIntegrationError:
+                logger.warning(
+                    f"Left existing MCP server '{legacy_key}' in {config_path}: it changed "
+                    f"since APM wrote it for '{dep_name}'. Remove it manually if it is "
+                    f"an outdated copy of '{dep_name}'."
+                )
+                continue
+            logger.progress(f"Renamed MCP server '{legacy_key}' to '{dep_name}' in {config_path}")
+        else:
+            logger.warning(
+                f"Left existing MCP server '{legacy_key}' in {config_path}: APM has no "
+                f"record of writing it for '{dep_name}'. Remove it manually if it is "
+                f"an outdated copy of '{dep_name}'."
+            )
