@@ -1176,10 +1176,8 @@ def integrate_local_bundle(
         diagnostics=diagnostics,
         logger=logger,
     )
-    for record in hook_result.scripts:
-        if record not in deployed_hashes:
-            deployed_files.append(record)
-        deployed_hashes[record] = hook_result.script_hashes[record]
+    deployed_files.extend(record for record in hook_result.scripts if record not in deployed_hashes)
+    deployed_hashes.update(hook_result.script_hashes)
     skipped += hook_result.skipped
 
     return {

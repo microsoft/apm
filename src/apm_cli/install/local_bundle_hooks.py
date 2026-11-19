@@ -73,7 +73,12 @@ def integrate_local_bundle_hooks(
 
     if slug_error := bundle_slug_validation_error(slug):
         result.skipped = len(hook_paths)
-        _warn(f"Skipped bundle hooks for unsafe slug {slug!r}: {slug_error}", slug, diagnostics, logger)
+        _warn(
+            f"Skipped bundle hooks for unsafe slug {slug!r}: {slug_error}",
+            slug,
+            diagnostics,
+            logger,
+        )
         return result
     if dry_run:
         if logger is not None:

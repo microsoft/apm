@@ -175,7 +175,9 @@ def _without_local_bundle_entries(hooks: dict[str, Any]) -> dict[str, Any]:
         remaining = [
             entry
             for entry in entries
-            if not (isinstance(entry, dict) and is_local_bundle_hook_source(entry.get("_apm_source")))
+            if not (
+                isinstance(entry, dict) and is_local_bundle_hook_source(entry.get("_apm_source"))
+            )
         ]
         if remaining or not entries:
             kept[event_name] = remaining

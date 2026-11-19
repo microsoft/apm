@@ -208,4 +208,3 @@ def test_pack_names_each_dropped_source_symlink(tmp_path: Path, apm_binary_path:
     assert not (bundle / "skills" / "ls" / "alias.md").exists()
     assert not (bundle / "skills" / "ls" / "guide.md").exists()
     assert "Skipped symlinked source file .apm/skills/ls/real.md" not in text
-
