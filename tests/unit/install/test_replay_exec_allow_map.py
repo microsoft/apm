@@ -63,3 +63,139 @@ def test_gated_entries_use_the_callers_policy_once(project: Path, discovered: li
 def test_without_a_provider_replay_discovers_policy(project: Path, discovered: list[Path]) -> None:
     ReplayExecAllowMap(project).for_dependency(SimpleNamespace(exec_status="denied"))
     assert discovered == [project]
+
+
+def _hook_package(root: Path) -> SimpleNamespace:
+    from apm_cli.deps.lockfile import LockedDependency
+
+    (root / ".apm" / "hooks").mkdir(parents=True)
+    (root / ".apm" / "hooks" / "guard.json").write_text('{"hooks": {}}', encoding="utf-8")
+    lock_dep = LockedDependency(
+        repo_url="_local/hooky", source="local", local_path="../hooky", exec_status="deployed"
+    )
+    return SimpleNamespace(
+        lock_dep=lock_dep,
+        package_info=SimpleNamespace(
+            dependency_ref=lock_dep.to_dependency_ref(), install_path=root
+        ),
+    )
+
+
+@pytest.mark.parametrize("status", [None, "deployed"])
+def test_entry_denied_since_install_replays_gated(
+    project: Path, discovered: list[Path], tmp_path: Path, status: str | None
+) -> None:
+    """A deny no install has reconciled withholds the hooks, so leftovers drift (#3958)."""
+    package = _hook_package(tmp_path / "hooky")
+    package.lock_dep.exec_status = status
+    allow = ReplayExecAllowMap(project, lambda: None).for_dependency(
+        package.lock_dep, package.package_info
+    )
+    assert allow is not None
+    assert "hooks" not in allow.get("../hooky", {})
+
+
+def test_deployed_entry_still_allowed_replays_ungated(
+    project: Path, discovered: list[Path], tmp_path: Path
+) -> None:
+    (project / "apm.yml").write_text(
+        "name: p\nversion: 1.0.0\nexecutables:\n  allow:\n    ../hooky:\n      hooks: true\n",
+        encoding="utf-8",
+    )
+    package = _hook_package(tmp_path / "hooky")
+    gate = ReplayExecAllowMap(project, lambda: None)
+    assert gate.for_dependency(package.lock_dep, package.package_info) is None
+    package.lock_dep.exec_status = None
+    assert gate.for_dependency(package.lock_dep, package.package_info) is None
+
+
+def test_project_self_entry_replays_ungated_under_deny(
+    project: Path, discovered: list[Path], tmp_path: Path
+) -> None:
+    package = _hook_package(tmp_path / "hooky")
+    package.lock_dep.local_path = "."
+    gate = ReplayExecAllowMap(project, lambda: None)
+    assert gate.for_dependency(package.lock_dep, package.package_info) is None
+
+
+@pytest.mark.parametrize(
+    ("recorded", "current", "stale"),
+    [
+        (None, (None,), False),
+        (None, ("deployed",), False),
+        ("deployed", (None,), False),
+        (None, ("gated_pending_approval",), True),
+        ("deployed", ("denied",), True),
+        ("gated_pending_approval", ("deployed",), True),
+        ("denied", ("denied",), False),
+        # A native-capable package agrees when either verdict matches.
+        ("deployed", ("gated_pending_approval", "deployed"), False),
+        ("deployed", ("denied", "denied"), True),
+    ],
+)
+def test_recorded_exec_status_staleness(
+    recorded: str | None, current: tuple[str | None, ...], stale: bool
+) -> None:
+    from apm_cli.install.exec_gate import recorded_exec_status_is_stale
+
+    assert recorded_exec_status_is_stale(recorded, current) is stale
+
+
+def _locked_hook_package(modules: Path, *, codex_native: bool = False) -> SimpleNamespace:
+    from apm_cli.deps.lockfile import LockedDependency
+
+    lock_dep = LockedDependency(
+        repo_url="_local/hooky", source="local", local_path="../hooky", exec_status="deployed"
+    )
+    root = lock_dep.to_dependency_ref().get_install_path(modules)
+    if codex_native:
+        (root / ".codex-plugin").mkdir(parents=True)
+        (root / ".codex-plugin" / "plugin.json").write_text(
+            '{"name": "hooky", "version": "1.0.0"}', encoding="utf-8"
+        )
+        (root / "hooks").mkdir()
+        (root / "hooks" / "hooks.json").write_text('{"hooks": {}}', encoding="utf-8")
+    else:
+        _hook_package(root)
+    return SimpleNamespace(dependencies={lock_dep.get_unique_key(): lock_dep})
+
+
+@pytest.mark.parametrize("codex_native", [False, True], ids=["split", "codex-native"])
+def test_update_probe_flags_a_deny_no_install_reconciled(
+    project: Path, tmp_path: Path, codex_native: bool
+) -> None:
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(modules, codex_native=codex_native)
+    assert lock_exec_decisions_stale(lock, modules, project, policy_provider=lambda: None)
+
+
+def test_update_probe_short_circuits_when_the_decision_holds(project: Path, tmp_path: Path) -> None:
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+
+    (project / "apm.yml").write_text(
+        "name: p\nversion: 1.0.0\nexecutables:\n  allow:\n    ../hooky:\n      hooks: true\n",
+        encoding="utf-8",
+    )
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(modules)
+    assert not lock_exec_decisions_stale(lock, modules, project, policy_provider=lambda: None)
+
+
+def test_update_probe_runs_the_gate_when_policy_is_unavailable(
+    project: Path, tmp_path: Path
+) -> None:
+    from apm_cli.install.exec_gate import ExecPolicyUnavailable, lock_exec_decisions_stale
+
+    (project / "apm.yml").write_text(
+        "name: p\nversion: 1.0.0\nexecutables:\n  allow:\n    ../hooky:\n      hooks: true\n",
+        encoding="utf-8",
+    )
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(modules)
+
+    def unavailable():
+        raise ExecPolicyUnavailable("cache_miss_fetch_fail")
+
+    assert lock_exec_decisions_stale(lock, modules, project, policy_provider=unavailable)
