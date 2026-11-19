@@ -1,12 +1,13 @@
 """Plugin manifest builder -- generates ``plugin.json`` for each target ecosystem.
 
 Triggered when ``apm.yml`` declares a ``target:`` (or ``targets:``) field containing
-``claude`` or ``copilot``.
+``claude``, ``copilot``, or ``codex``.
 
 Supported ecosystems and their output paths
 -------------------------------------------
 * ``claude``  -> ``.claude-plugin/plugin.json``
 * ``copilot`` -> ``.github/plugin/plugin.json``
+* ``codex``   -> ``.codex-plugin/plugin.json``
 
 Only canonical targets that survive :func:`apm_cli.core.apm_yml.parse_targets_field`
 validation are listed here -- there is exactly one source of truth for valid
@@ -55,7 +56,7 @@ def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
 # Constants
 # ---------------------------------------------------------------------------
 
-PLUGIN_MANIFEST_ECOSYSTEMS: frozenset[str] = frozenset({"claude", "copilot"})
+PLUGIN_MANIFEST_ECOSYSTEMS: frozenset[str] = frozenset({"claude", "copilot", "codex"})
 """Target names that trigger plugin manifest generation.
 
 Every entry MUST also be a member of
@@ -68,6 +69,7 @@ permanently dead.
 PLUGIN_ECOSYSTEM_PATHS: dict[str, str] = {
     "claude": ".claude-plugin/plugin.json",
     "copilot": ".github/plugin/plugin.json",
+    "codex": ".codex-plugin/plugin.json",
 }
 """Output path (relative to project root) for each ecosystem's ``plugin.json``."""
 
@@ -366,10 +368,14 @@ def build_plugin_manifest(
       a ``.mcp.json`` is present (with credential-bearing keys stripped).
     * **copilot**: author kept as ``{"name": ...}``; ``mcpServers`` omitted
       (not part of the Copilot plugin manifest schema).
+    * **codex**: the documented Codex compatibility manifest. Declares
+      ``skills: "./skills/"`` and ``mcpServers: "./.mcp.json"`` only when those
+      regular paths exist, so Codex reads the author's own MCP file natively
+      and no server data is copied or translated. No ``interface`` is
+      generated; Codex derives listing text from the identity fields.
 
     Convention directories (``agents/``, ``skills/``, ``commands/``) are
-    auto-discovered by the host, so they are never listed explicitly in the
-    manifest.
+    otherwise auto-discovered by the host, so they are not listed explicitly.
     """
     from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
 
@@ -387,11 +393,39 @@ def build_plugin_manifest(
         mcp_servers = collect_mcp_servers(project_root, logger=logger)
         if mcp_servers:
             manifest["mcpServers"] = mcp_servers
+    elif ecosystem == "codex":
+        _apply_codex_components(project_root, manifest, logger=logger)
     else:
         # copilot -- omit mcpServers
         manifest.pop("mcpServers", None)
 
     return manifest
+
+
+def _is_regular(path: Path, *, directory: bool) -> bool:
+    if path.is_symlink():
+        return False
+    return path.is_dir() if directory else path.is_file()
+
+
+def _apply_codex_components(project_root: Path, manifest: dict, *, logger: Any = None) -> None:
+    """Shape *manifest* as the documented ``.codex-plugin/plugin.json``."""
+    manifest.pop("mcpServers", None)
+    if _is_regular(project_root / "skills", directory=True):
+        manifest["skills"] = "./skills/"
+    if _is_regular(project_root / ".mcp.json", directory=False):
+        manifest["mcpServers"] = "./.mcp.json"
+
+    author = manifest.get("author")
+    missing = [field for field in ("version", "description") if not manifest.get(field)]
+    if not (isinstance(author, dict) and author.get("name")):
+        missing.append("author")
+    if missing:
+        _warn = (
+            "Codex expects " + ", ".join(missing) + " in .codex-plugin/plugin.json; "
+            "add them to apm.yml so Codex lists this plugin with its real identity."
+        )
+        _emit("warning", _warn, logger, "warning")
 
 
 # ---------------------------------------------------------------------------

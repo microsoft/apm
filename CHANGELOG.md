@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lockfiles with diamond `skills:`/`targets:` selections fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3769)
 - With `mcp.transport.allow` set, registry servers on a disallowed or unresolvable transport are blocked; pick `transport:` or update the policy. (#3788)
 
+### Added
+
+- `targets: [codex]` makes `apm pack` write `.codex-plugin/plugin.json`, so Codex marketplace entries install with the package's real version, skills and MCP servers (tested on Codex CLI 0.170.0). (#PR)
+
 ### Deprecated
 
 - The `vscode` target, now an alias of `copilot` in every target field and flag. (#3875)

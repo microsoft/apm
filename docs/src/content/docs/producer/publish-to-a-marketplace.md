@@ -243,6 +243,34 @@ remote entries to `source: url`, and remote subdirectory entries to
 `source: git-subdir`. Claude output also emits `category` on any
 package where it is set, even though only `codex` requires it.
 
+Each Codex entry points at a plugin directory, and Codex reads that
+directory's own manifest. Add `codex` to the package's `targets:` so
+`apm pack` writes `.codex-plugin/plugin.json` with the package's name,
+version, description and author, plus `skills/` and `.mcp.json`
+references when those exist at the package root. See
+[Plugin manifests](../../reference/cli/pack/#plugin-manifests).
+If the directory has neither `.codex-plugin/plugin.json` nor the
+`.claude-plugin/plugin.json` fallback, Codex installs the entry under
+the version `local` and builds a manifest with only the name and category.
+
+```yaml
+# packages/hello/apm.yml
+name: hello
+version: 1.2.3
+description: Greeting workflow
+author: Acme
+targets: [claude, copilot, codex]
+```
+
+```bash
+codex plugin marketplace add ./my-marketplace
+codex plugin add hello@my-marketplace   # installs hello 1.2.3
+```
+
+Tested with Codex CLI 0.170.0 (CLI surface): installation, skills, and
+MCP server configuration. Desktop and hosted Codex, hooks, and agents
+are not covered. Codex keeps its own trust and MCP authentication steps.
+
 The `copilot` output targets the [GitHub Copilot CLI marketplace
 format](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#plugin-source-types)
 (`.github/plugin/marketplace.json` by default). It has no `category`

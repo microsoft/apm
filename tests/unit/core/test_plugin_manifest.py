@@ -142,6 +142,43 @@ class TestBuildPluginManifest:
         assert manifest["description"] == "test plugin"
         assert manifest["author"] == {"name": "Jane Doe"}
 
+    def test_codex_references_native_component_paths(self, tmp_path: Path) -> None:
+        """Codex reads the author's own .mcp.json; no server data is copied (#3077)."""
+        apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
+        _write(tmp_path / "skills" / "hello" / "SKILL.md", "---\nname: hello\n---\n")
+        _write(
+            tmp_path / ".mcp.json",
+            json.dumps({"mcpServers": {"srv": {"command": "node", "env": {"TOKEN": "x"}}}}),
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "codex")
+        assert manifest == {
+            "name": "my-plugin",
+            "version": "1.0.0",
+            "description": "test plugin",
+            "author": {"name": "Jane Doe"},
+            "skills": "./skills/",
+            "mcpServers": "./.mcp.json",
+        }
+
+    def test_codex_omits_absent_or_symlinked_components(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
+        real_skills = tmp_path / "elsewhere"
+        real_skills.mkdir()
+        (tmp_path / "skills").symlink_to(real_skills, target_is_directory=True)
+        manifest = build_plugin_manifest(tmp_path, apm, "codex")
+        assert "skills" not in manifest
+        assert "mcpServers" not in manifest
+        assert "interface" not in manifest
+
+    def test_codex_warns_when_required_identity_is_missing(self, tmp_path: Path) -> None:
+        apm = tmp_path / "apm.yml"
+        _write(apm, "name: my-plugin\n")
+        logger = MagicMock()
+        build_plugin_manifest(tmp_path, apm, "codex", logger=logger)
+        message = logger.warning.call_args.args[0]
+        assert "version, description, author" in message
+        assert ".codex-plugin/plugin.json" in message
+
     def test_claude_strips_credential_env_block(self, tmp_path: Path) -> None:
         apm = _minimal_apm_yml(tmp_path)
         (tmp_path / ".mcp.json").write_text(
@@ -721,7 +758,7 @@ class TestFindOrSynthesizePluginJson:
 class TestModuleConstants:
     def test_plugin_manifest_ecosystems_frozenset(self) -> None:
         assert isinstance(PLUGIN_MANIFEST_ECOSYSTEMS, frozenset)
-        assert {"claude", "copilot"} == PLUGIN_MANIFEST_ECOSYSTEMS
+        assert {"claude", "copilot", "codex"} == PLUGIN_MANIFEST_ECOSYSTEMS
 
     def test_plugin_ecosystem_paths_keys_match_ecosystems(self) -> None:
         assert set(PLUGIN_ECOSYSTEM_PATHS.keys()) == PLUGIN_MANIFEST_ECOSYSTEMS
@@ -731,3 +768,6 @@ class TestModuleConstants:
 
     def test_copilot_path(self) -> None:
         assert PLUGIN_ECOSYSTEM_PATHS["copilot"] == ".github/plugin/plugin.json"
+
+    def test_codex_path(self) -> None:
+        assert PLUGIN_ECOSYSTEM_PATHS["codex"] == ".codex-plugin/plugin.json"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -201,8 +202,9 @@ class TestBuildOrchestrator:
         _write(apm, "name: x\nversion: 0.1.0\ndescription: y\n")
         opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
 
-        with pytest.raises(BuildError, match="Nothing to pack"):
+        with pytest.raises(BuildError, match="Nothing to pack") as excinfo:
             BuildOrchestrator().run(opts)
+        assert "'claude', 'codex', 'copilot'" in str(excinfo.value)
 
     def test_collects_warnings_from_all_producers(self, tmp_path: Path):
         apm = tmp_path / "apm.yml"
@@ -463,6 +465,18 @@ class TestPluginManifestProducer:
         expected = tmp_path / ".github" / "plugin" / "plugin.json"
         assert expected in result.outputs
         assert expected.exists()
+
+    def test_codex_only_targets_produce_codex_plugin_json(self, tmp_path: Path) -> None:
+        """targets: [codex] packs a Codex manifest instead of 'Nothing to pack' (#3077)."""
+        apm = self._apm_yml(tmp_path, "[codex]")
+        assert OutputKind.PLUGIN_MANIFEST in detect_outputs(apm)
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, bundle_format="agent-plugin")
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        expected = tmp_path / ".codex-plugin" / "plugin.json"
+        assert result.outputs == [expected]
+        assert json.loads(expected.read_text(encoding="utf-8"))["version"] == "1.0.0"
 
     def test_default_legacy_mode_produces_both_sidecars(self, tmp_path: Path) -> None:
         apm = tmp_path / "apm.yml"
