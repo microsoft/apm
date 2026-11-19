@@ -98,10 +98,23 @@ def test_org_deny_all_keeps_package_mcp_server_out(tmp_path: Path, apm_binary_pa
     assert "tools-server" not in chain.servers("claude")
 
 
+def _user_scope_executables(home: Path) -> tuple[bool, bool]:
+    claude_json = home / ".claude.json"
+    servers = (
+        json.loads(claude_json.read_text("utf-8")).get("mcpServers", {})
+        if claude_json.exists()
+        else {}
+    )
+    settings = home / ".claude" / "settings.json"
+    hook = settings.exists() and "hi-hooky" in settings.read_text("utf-8")
+    return "tools-server" in servers, hook
+
+
+@pytest.mark.parametrize("gated", [True, False], ids=["gate-on", "gate-off-stray-home-manifest"])
 def test_user_scope_gate_parks_executables_and_frozen_agrees(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, gated: bool
 ) -> None:
-    """#3954: ``executables: {}`` in APM_HOME/apm.yml gates ``install -g`` too."""
+    """#3954: APM_HOME/apm.yml, not ~/apm.yml, is the user-scope gate source."""
     chain = _chain(tmp_path, apm_binary_path)
     home = chain.isolated.home
     (home / ".claude").mkdir(parents=True, exist_ok=True)
@@ -121,23 +134,25 @@ def test_user_scope_gate_parks_executables_and_frozen_agrees(
         "version": "1.0.0",
         "targets": ["claude"],
         "dependencies": {"apm": [str(chain.project / "pkgs" / "tools"), str(hooky)]},
-        "executables": {},
     }
+    if gated:
+        manifest["executables"] = {}
+    else:
+        # A gate in a stray ~/apm.yml must not leak into user scope.
+        stray = "name: stray\nversion: 1.0.0\nexecutables: {}\n"
+        (home / "apm.yml").write_text(stray, encoding="utf-8")
     apm_home = home / ".apm"
     (apm_home / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
 
     chain.ok("install", "-g", "--no-policy")
 
-    claude_json = home / ".claude.json"
-    servers = (
-        json.loads(claude_json.read_text("utf-8")).get("mcpServers", {})
-        if claude_json.exists()
-        else {}
-    )
-    assert "tools-server" not in servers
-    settings = home / ".claude" / "settings.json"
-    assert not settings.exists() or "hi-hooky" not in settings.read_text("utf-8")
-    lock = yaml.safe_load((apm_home / "apm.lock.yaml").read_text("utf-8"))
-    assert "tools-server" in lock["mcp_omissions"]
+    deployed = not gated
+    assert _user_scope_executables(home) == (deployed, deployed)
+    lock_path = apm_home / "apm.lock.yaml"
+    lock = yaml.safe_load(lock_path.read_text("utf-8"))
+    assert ("tools-server" in (lock.get("mcp_omissions") or {})) is gated
 
     chain.ok("install", "-g", "--frozen", "--no-policy")
+
+    assert _user_scope_executables(home) == (deployed, deployed)
+    assert yaml.safe_load(lock_path.read_text("utf-8")) == lock
