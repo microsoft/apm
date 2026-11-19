@@ -37,6 +37,7 @@ from .._helpers import (
     _get_console,
     _rich_blank_line,
 )
+from .staging import report_staged_hash_drift
 from .watcher import _watch_mode
 
 
@@ -921,6 +922,7 @@ def _run_compilation(
     logger.start("Starting context compilation...", symbol="cogs")
 
     _src = source_root or Path(".")
+    report_staged_hash_drift(logger, _src)
 
     # Resolve effective target using the shared helper (mirrors watch-mode path).
     effective_target, detection_reason, config_target = _resolve_effective_target(

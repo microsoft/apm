@@ -436,8 +436,13 @@ For each FOLD item:
   introduces", run the **mutation-break gate**: delete the
   production guard, confirm the new test FAILS, restore the guard.
   Append one entry to `mutation_break_evidence`.
-- If the item is "CHANGELOG entry", edit `CHANGELOG.md` per the
-  Keep-a-Changelog format used by the repo.
+- If the item is "CHANGELOG entry", edit `CHANGELOG.md` per
+  `.github/instructions/changelog.instructions.md`: ONE line under
+  `## [Unreleased]`, user-visible effect first, 25 words or fewer,
+  ending with `(#PR)`; breaking changes go under `### Breaking
+  changes and upgrade notes` with a one-line migration. If a line
+  already describes this change, edit it instead of adding
+  another. Internal-only PRs (tests, CI, refactors) get no line.
 - If the item is "doc drift caused by this change", update the
   Starlight pages under `docs/src/content/docs/` per the doc-sync
   instructions.

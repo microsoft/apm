@@ -241,6 +241,85 @@ def test_frozen_and_audit_share_deployed_hash_verifier(
 
 
 @pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "(staged_hashes if _staged else deployed_hashes)[record] = (",
+            "(deployed_hashes if not _staged else {})[record] = (",
+            id="install-stages-without-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "staged_drift = lock.staged_hash_drift(project_root)",
+            "staged_drift: list[tuple[str, str, str]] = []",
+            id="audit-skips-staged-drift",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/compile/cli.py",
+            "    report_staged_hash_drift(logger, _src)\n",
+            "",
+            id="compile-skips-staged-drift",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "actual = compute_file_hash(file_path)",
+            "actual = hashlib.sha256(file_path.read_bytes()).hexdigest()",
+            id="staged-drift-uses-second-hash-scheme",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            'staged_fallback_hashes[record] = f"sha256:{desired_hash}"',
+            'skipped_hash = f"sha256:{desired_hash}"',
+            id="collision-skipped-staging-left-unhashed",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "lockfile.carry_local_staging_from(self.ctx.existing_lockfile)",
+            "lockfile.local_staged_files = list(self.ctx.existing_lockfile.local_staged_files)",
+            id="declarative-install-drops-staged-hashes",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "staged_drift = lock.staged_hash_drift(project_root)",
+            "lock.local_staged_file_hashes = {}; staged_drift = lock.staged_hash_drift(project_root)",
+            id="audit-writes-staged-hashes-outside-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/compile/watcher.py",
+            '        report_staged_hash_drift(self.logger, Path("."))\n',
+            "",
+            id="watch-recompile-skips-staged-drift",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "if deployed or staged_instructions or staged_fallbacks:",
+            "if deployed or staged_instructions:",
+            id="all-skipped-bundle-drops-fallback-hashes",
+        ),
+        pytest.param(
+            "src/apm_cli/install/manifest_reconcile.py",
+            "    survivors.update(lockfile.local_staged_files)\n",
+            "    survivors.update(lockfile.local_staged_files)\n    lockfile.local_staged_files += []\n",
+            id="non-owner-writes-staged-files",
+        ),
+    ],
+)
+def test_staged_compile_input_drift_routes_through_lockfile_owner(
+    path: str, original: str, replacement: str
+) -> None:
+    """Staged bundle input is hashed and verified by one owner (#3718)."""
+    source = _source(path)
+    assert source.count(original) == 1
+    rule = "install-deployment-bundle-compile-staging"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement", "refused"),
     [
         (

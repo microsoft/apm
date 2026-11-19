@@ -89,7 +89,7 @@ Produce a task DAG per [plan-schema.json](plan-schema.json):
    `files_hint` (the complete set of files/globs it may touch -- the
    wave gate enforces this with `git diff --name-only`, so two tasks in
    a wave must have non-overlapping `files_hint`; assign any shared or
-   generated file to exactly ONE task).
+   generated file, such as `CHANGELOG.md`, to exactly ONE task).
 5. Carry `acceptance_shape` through unchanged. `plan.json` is ALWAYS the
    full current plan. On a re-plan: increment `replan_count`, re-emit
    the failed wave and later waves, mark the superseded waves

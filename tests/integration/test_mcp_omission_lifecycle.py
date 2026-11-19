@@ -221,6 +221,7 @@ def test_skills_only_preserves_admitted_baseline_and_real_drift(
     after = load_yaml(lock_path)
     for field in ("mcp_configs", "mcp_servers", "mcp_config_provenance", "mcp_target_servers"):
         assert after.get(field) == baseline.get(field)
+    assert not after.get("mcp_omissions"), "a kept admitted baseline records no omission"
     assert native.read_bytes() == native_before
     frozen_lock = lock_path.read_bytes()
     refusal = scenario.runner.run(
