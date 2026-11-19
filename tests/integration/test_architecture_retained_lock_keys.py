@@ -22,7 +22,7 @@ RULE = "install-deployment-uninstall-reachability"
             id="prune-bypasses-owner",
         ),
         pytest.param(
-            "src/apm_cli/commands/_helpers.py",
+            "src/apm_cli/install/orphans.py",
             "            if dep.get_unique_key() in retained:",
             "            if dep.depth is not None and dep.depth > 1:",
             id="selector-rederives-depth",

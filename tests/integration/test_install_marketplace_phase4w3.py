@@ -154,7 +154,7 @@ class TestFinalizePhase:
         from apm_cli.install.phases.finalize import run
 
         ctx = self._make_ctx(installed_count=2, logger=None)
-        with patch("apm_cli.commands.install._rich_success") as mock_success:
+        with patch("apm_cli.install.phases.finalize._rich_success") as mock_success:
             result = run(ctx)
         mock_success.assert_called_once()
         assert result.installed_count == 2
@@ -164,7 +164,7 @@ class TestFinalizePhase:
 
         mock_logger = MagicMock()
         ctx = self._make_ctx(installed_count=1, logger=mock_logger)
-        with patch("apm_cli.commands.install._rich_success") as mock_success:
+        with patch("apm_cli.install.phases.finalize._rich_success") as mock_success:
             run(ctx)
         mock_success.assert_not_called()
 
