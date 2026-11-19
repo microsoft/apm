@@ -325,14 +325,15 @@ def recorded_exec_status_is_stale(
 
     A row recorded as gated or denied, or one that is now gated or denied,
     must be re-integrated so install deploys or retires its executables.
-    Unrecorded and deployed rows are both ungated, so they agree. A gated or
-    denied row whose types are now *mixed* is re-integrated too: its one
-    aggregate status cannot show which types changed.
+    Unrecorded and deployed rows are both ungated, so they agree. A denied
+    row whose types are now *mixed* is re-integrated too: ``denied`` hides
+    whether a type it had deployed was denied since. It converges once every
+    declared type is disallowed.
     """
-    from apm_cli.security.executables import TRUST_DEPLOYED
+    from apm_cli.security.executables import TRUST_DENIED, TRUST_DEPLOYED
 
     ungated = {None, TRUST_DEPLOYED}
-    if mixed and recorded not in ungated:
+    if mixed and recorded == TRUST_DENIED:
         return True
     return recorded != current and not (recorded in ungated and current in ungated)
 
@@ -349,8 +350,10 @@ def lock_exec_decisions_stale(
     """Return whether any lock row's executables decision may no longer hold.
 
     ``apm update`` short-circuits when no ref moved; this tells it that an
-    ``apm approve`` / ``apm deny`` (or a policy change) still needs the
-    install gate to deploy or retire executables and rewrite the lock.
+    ``apm approve`` / ``apm deny`` (or a policy change for a package the gate
+    recorded) still needs the install gate to deploy or retire executables
+    and rewrite the lock. With no recorded status and the gate off locally,
+    org policy is not fetched; ``apm install`` applies a newly enabled gate.
     Packages are read the way audit replay reads them, under the *targets*'
     native registration capability. Trust (and *policy_provider*) resolve
     only when a package declares executables. An unreadable package or a
@@ -403,8 +406,8 @@ def lock_exec_decisions_stale(
                 )
             except ExecPolicyUnavailable:
                 return True
-            except Exception:
-                # Let install, which reports the failure, decide this package.
+            except (OSError, ValueError):
+                # An unreadable package: let install, which reports it, decide.
                 return True
             if recorded_exec_status_is_stale(dep.exec_status, status, mixed=mixed):
                 return True

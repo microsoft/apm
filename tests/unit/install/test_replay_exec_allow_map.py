@@ -128,8 +128,9 @@ def test_project_self_entry_replays_ungated_under_deny(
         ("deployed", "denied", False, True),
         ("gated_pending_approval", "deployed", False, True),
         ("denied", "denied", False, False),
-        # One aggregate status cannot show which of a mixed package's types changed.
+        # ``denied`` cannot show whether a mixed package's deployed type changed.
         ("denied", "denied", True, True),
+        ("gated_pending_approval", "gated_pending_approval", True, False),
         ("deployed", "deployed", True, False),
     ],
 )
@@ -141,13 +142,22 @@ def test_recorded_exec_status_staleness(
     assert recorded_exec_status_is_stale(recorded, current, mixed=mixed) is stale
 
 
-def _locked_hook_package(modules: Path, *, codex_native: bool = False) -> SimpleNamespace:
+def _locked_hook_package(
+    modules: Path,
+    *,
+    codex_native: bool = False,
+    status: str | None = "deployed",
+    bin_dir: bool = False,
+) -> SimpleNamespace:
     from apm_cli.deps.lockfile import LockedDependency
 
     lock_dep = LockedDependency(
-        repo_url="_local/hooky", source="local", local_path="../hooky", exec_status="deployed"
+        repo_url="_local/hooky", source="local", local_path="../hooky", exec_status=status
     )
     root = lock_dep.to_dependency_ref().get_install_path(modules)
+    if bin_dir:
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "hooky").write_text("#!/bin/sh\n", encoding="utf-8")
     if codex_native:
         (root / ".codex-plugin").mkdir(parents=True)
         (root / ".codex-plugin" / "plugin.json").write_text(
@@ -204,4 +214,108 @@ def test_update_probe_runs_the_gate_when_policy_is_unavailable(
 
     assert lock_exec_decisions_stale(
         lock, modules, project / "apm.yml", policy_provider=unavailable
+    )
+
+
+def _write_trust(project: Path, block: str) -> None:
+    (project / "apm.yml").write_text(
+        f"name: p\nversion: 1.0.0\nexecutables:\n{block}", encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "trust", "fetched"),
+    [
+        (None, None, False),
+        (None, "  allow:\n    ../hooky:\n      hooks: true\n", True),
+        ("deployed", None, True),
+    ],
+    ids=["never-gated", "local-gate-on", "recorded"],
+)
+def test_update_probe_fetches_policy_only_when_a_gate_applies(
+    project: Path, tmp_path: Path, status: str | None, trust: str | None, fetched: bool
+) -> None:
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+
+    if trust is None:
+        (project / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    else:
+        _write_trust(project, trust)
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(modules, status=status)
+    calls: list[int] = []
+    lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: calls.append(1)
+    )
+    assert bool(calls) is fetched
+
+
+def test_update_probe_reconciles_a_denied_row_whose_types_are_mixed(
+    project: Path, tmp_path: Path
+) -> None:
+    from apm_cli.install.exec_gate import current_exec_decision, lock_exec_decisions_stale
+
+    _write_trust(
+        project,
+        "  allow:\n    ../hooky:\n      hooks: true\n  deny:\n    ../hooky:\n      bin: true\n",
+    )
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(modules, status="denied", bin_dir=True)
+    (dep,) = lock.dependencies.values()
+    from apm_cli.security.executables import exec_trust_context_for_project
+
+    ctx = exec_trust_context_for_project(
+        project / "apm.yml", policy=None, migrate_user_legacy=False
+    )
+    package_info = SimpleNamespace(
+        dependency_ref=dep.to_dependency_ref(),
+        install_path=dep.to_dependency_ref().get_install_path(modules),
+        package=None,
+    )
+    assert current_exec_decision(lambda: ctx, package_info, dep.get_unique_key()) == (
+        "denied",
+        True,
+    )
+    assert lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: None
+    )
+
+    _write_trust(project, "  deny:\n    ../hooky:\n      hooks: true\n      bin: true\n")
+    assert not lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: None
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "stale"),
+    [
+        ("cache_miss_fetch_fail", True),
+        ("garbage_response", True),
+        ("malformed", True),
+        ("hash_mismatch", True),
+        ("raise", True),
+        ("found", False),
+    ],
+)
+def test_update_probe_fails_toward_the_gate_on_unavailable_policy(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, stale: bool
+) -> None:
+    from apm_cli.commands.update import _executables_need_reconcile
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockFile
+
+    _write_trust(project, "  allow:\n    ../hooky:\n      hooks: true\n")
+    modules = tmp_path / "apm_modules"
+    lock = LockFile()
+    lock.dependencies.update(_locked_hook_package(modules).dependencies)
+
+    def _discover(_root, **_kwargs):
+        if outcome == "raise":
+            raise RuntimeError("network down")
+        return SimpleNamespace(outcome=outcome, policy=None)
+
+    monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", _discover)
+    monkeypatch.chdir(project)
+    assert (
+        _executables_need_reconcile(lock, modules, InstallScope.PROJECT, SimpleNamespace()) is stale
     )
