@@ -16,9 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
-- **BREAKING:** Copilot project MCP servers now live in root `.mcp.json`, read by Copilot CLI and Copilot in VS Code; the next `apm install` moves APM-managed entries out of `.github/mcp.json` and `.vscode/mcp.json`. Commit the result. (#3875)
-- If you still use VS Code's deprecated Local mode, which reads only `.vscode/mcp.json`, switch to the Copilot harness. (#3875)
-- `.mcp.json` is shared with Claude Code, so Copilot's `tools` allow-list does not restrict Claude. (#3875)
+- **BREAKING:** Copilot project MCP servers now live in root `.mcp.json`, read by Copilot CLI and Copilot in VS Code; the next `apm install` moves APM-managed entries out of `.github/mcp.json` and `.vscode/mcp.json`. Static `env:` values are written as declared, so review `.mcp.json` before committing it with `apm.lock.yaml` and the cleaned legacy files. (#3875)
+- `.mcp.json` is shared with Claude Code, so Copilot's `tools` allow-list does not restrict Claude; if you use VS Code's deprecated Local mode, which reads only `.vscode/mcp.json`, switch to the Copilot harness. (#3875)
 - Replace the deprecated `vscode` target with `copilot`; lockfiles that recorded `vscode` still install. (#3875)
 - Replace singular `target:` with `targets:`; the warning prints the exact value that deploys the same files. (#3801, #3875)
 - If `apm.yml` sets `default_host:`, shorthand dependencies now resolve against it; write `github.com/owner/repo` for GitHub packages. (#3865)
@@ -50,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` shows `[x]` for failed checks. (#3865)
 - `apm compile --target` for a target with no compile output no longer writes `CLAUDE.md` or `AGENTS.md`. (#3865)
 - `apm publish --package` keeps the host in the package identity, so packages from different hosts no longer collide. (#3865)
-- `apm pack` always embeds an integrity-checked `apm.lock.yaml`, and bundles with an unknown `pack.target` install. (#3865)
+- `apm pack` bundles in the default Claude plugin format embed an integrity-checked `apm.lock.yaml` even without a project lockfile, and bundles with an unknown `pack.target` install. (#3865)
 - CLI messages point to real commands and docs anchors. (#3865)
 - `intellij` is no longer recorded as a target by `apm init`, `apm install` or `apm install -g --mcp`; use `copilot` for JetBrains. (#3873, #3882)
 - Dependency `apm.yml` errors name the dependency and file, and target errors print one status prefix. (#3873)
@@ -67,7 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Azure DevOps installs fall back to your Git credential helper on every path. (#3790)
 - Remote MCP servers keep their native transport per harness, and older APM-written entries heal on the next install. (#3789, #3807)
-- `COPILOT_HOME` now applies to all Copilot user files. (#3782)
+- `COPILOT_HOME` now applies to all Copilot CLI user files. (#3782)
+
+### Breaking changes and upgrade notes
+
+- Lockfiles from 0.36.0 with diamond `skills:`/`targets:` selections fail `apm install --frozen` until you run `apm install` and commit `apm.lock.yaml`. (#3786)
 
 ### Changed
 
@@ -135,7 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public `github.com` subdirectory packages validate through `raw.githubusercontent.com`, saving REST quota. -- by @ShaoLOWu (#3348)
 - `apm install --mcp NAME` without a match names the searched registry and how to choose another. -- by @VedanthB (#2803)
 - `apm install` fails when a same-name MCP server differs in a JSON-config target, keeping your entry. (#3709)
-- `apm install <bundle>` deploys only to the targets declared in `apm.yml`. (#3709)
+- `apm install <bundle>` without `--target` deploys only to the targets declared in `apm.yml`. (#3709)
 - `apm uninstall` without `apm.lock.yaml` no longer removes skill directories. (#3716)
 - `APM_POLICY_DISABLE` accepts only `1`. (#3716)
 - The README and quickstart show how to teach your agent APM with `apm-guide`. (#3776)
