@@ -1283,6 +1283,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local copying bypasses the canonical single-file admission authority.",
     ),
     MutationCase(
+        guard_id="install-deployment-skill-adoption-baseline",
+        rule_id="install-deployment-skill-adoption-baseline",
+        path="src/apm_cli/integration/skill_adoption.py",
+        old="    if ctx.existing_lockfile is None or ctx.downloader is None:\n        return None",
+        new="    if not ctx.update_refs or ctx.existing_lockfile is None:\n        return None",
+        intent="Plain install after an apm.yml ref change loses the locked-source baseline.",
+    ),
+    MutationCase(
         guard_id="install-deployment-skill-layout",
         rule_id="install-deployment-skill-layout",
         path="src/apm_cli/commands/uninstall/engine.py",
