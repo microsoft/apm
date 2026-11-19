@@ -211,7 +211,7 @@ Cause and fix: a newer APM wrote the lockfile. There is no override; upgrade APM
 marketplace 'company' now points at <new-origin>, but apm.lock.yaml recorded 'example-plugin' from <locked-origin>. Nothing was changed. To keep the locked catalog, run: apm marketplace add <locked-origin> --name company ...
 ```
 
-Cause: the alias was re-registered for a different repository than the one `apm.lock.yaml` recorded. Any command that re-resolves a locked entry through the marketplace (`apm update`, `apm install --refresh`, or `apm install` after you change the entry in `apm.yml`) refuses to switch marketplaces silently.
+Cause: the alias was re-registered for a different repository than the one `apm.lock.yaml` recorded. Any command that re-resolves a locked entry through the marketplace (such as `apm update`, `apm install --refresh`, `apm install` after you change the entry in `apm.yml`, or a fresh-checkout install of a package that contributes MCP or LSP servers) refuses to switch marketplaces silently.
 
 Fix: run the `apm marketplace add` command the message prints to restore the locked origin. To switch on purpose, follow the remove, `apm install`, re-add steps it lists.
 
