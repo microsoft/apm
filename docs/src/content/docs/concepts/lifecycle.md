@@ -72,7 +72,7 @@ After narrowing `targets:`, run `apm install` to reconcile obsolete target outpu
 **Common surprises**
 
 - The scan is not optional in normal operation. If you need to land an install with a known critical finding (for example, an upstream package you cannot patch yet), use `--force` and document the exception.
-- Transitive MCP servers are gated behind explicit trust. If a deep dependency declares a new MCP server, re-declare it in your top-level `apm.yml` or use `--trust-transitive-mcp` in trusted environments.
+- Transitive MCP servers are gated behind explicit trust. If a deep dependency declares a new MCP server, re-declare it in your top-level `apm.yml` or pin it with `apm approve <pkg>`; `--trust-transitive-mcp` deploys it for one run only.
 
 **Read more:** [`apm install` reference](/apm/reference/cli/install/), [security](/apm/enterprise/security/), [policy reference](/apm/enterprise/policy-reference/).
 

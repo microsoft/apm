@@ -870,7 +870,9 @@ class TestApproveDenyCommandsIntegration:
 
         data = load_yaml(project / "apm.yml")
         assert "executables" in data
-        assert "risky-pkg#2.0.0" in data["executables"]["allow"]
+        # Pins bind content, so the stored key is version-blind (#3902).
+        grant = data["executables"]["allow"]["risky-pkg"]
+        assert all(pin.startswith("sha256:") for pin in grant["hooks"].values())
 
     def test_approve_all(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -890,8 +892,8 @@ class TestApproveDenyCommandsIntegration:
 
         data = load_yaml(project / "apm.yml")
         allow = data["executables"]["allow"]
-        assert "risky-pkg#2.0.0" in allow
-        assert "tool-pkg#1.0.0" in allow
+        assert "risky-pkg" in allow
+        assert allow["tool-pkg"] == {"bin": True}
 
     def test_approve_nonexistent_package(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner

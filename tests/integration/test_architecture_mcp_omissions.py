@@ -42,8 +42,8 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
         ),
         (
             "src/apm_cli/install/mcp/integration.py",
-            "approve=gate,",
-            "approve=None,",
+            "            admission=admission,\n",
+            "            admission=McpAdmission(None, one_off=True),\n",
         ),
         (
             "src/apm_cli/policy/ci_checks.py",
@@ -51,14 +51,9 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
             "    ).with_recorded_omissions(lock)\n    stored_configs = lock.mcp_configs or {}",
         ),
         (
-            "src/apm_cli/install/service.py",
-            "approve=approve,",
-            "approve=None,",
-        ),
-        (
-            "src/apm_cli/install/mcp/integration.py",
-            "approved = gate(mcp_deps)",
-            "approved = filter_mcp_by_allow_executables(mcp_deps, None, logger)",
+            "src/apm_cli/policy/ci_checks.py",
+            "        exact=False,\n",
+            "        exact=True,\n",
         ),
         (
             "src/apm_cli/install/service.py",
@@ -72,8 +67,8 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
         ),
         (
             "src/apm_cli/install/phases/integrate.py",
-            "executable_context=(effective_allow_map(ctx), True),",
-            "executable_context=(None, True),",
+            'trust_context=getattr(effective_allow_map(ctx), "trust_context", None)',
+            "trust_context=None",
         ),
         (
             "src/apm_cli/integration/mcp_config_view.py",
@@ -86,9 +81,9 @@ def test_mcp_omission_owner_routes_are_intact() -> None:
             "omissions = dict(prepared.omission_view.omissions)",
         ),
         (
-            "src/apm_cli/install/mcp/integration.py",
-            "approved = gate(mcp_deps)",
-            "approved = [d for d in mcp_deps if not (d.resolved_by is not None and d.is_self_defined)]",
+            "src/apm_cli/integration/mcp_config_view.py",
+            "            verdict = admission.admit(subject)\n",
+            "            verdict = admission.admit(replace(subject, exec_gated=False))\n",
         ),
     ],
 )
