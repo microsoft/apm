@@ -110,15 +110,13 @@ def record_native_exec_status(
     if trust_ctx is None:
         return
     from apm_cli.install.exec_gate import resolve_package_key
-    from apm_cli.security.executables import (
-        exec_status_for_declaration,
-        more_severe_exec_status,
-    )
+    from apm_cli.security.executables import more_severe_exec_status
+    from apm_cli.security.trust import package_exec_status
 
     candidate_keys = [resolve_package_key(package_info, package_name)]
     if package_name and package_name not in candidate_keys:
         candidate_keys.append(package_name)
-    status = exec_status_for_declaration(trust_ctx, candidate_keys, exec_types)
+    status = package_exec_status(trust_ctx, tuple(candidate_keys), None, exec_types)
     if status is not None:
         # FOLD, never assign: the exec gate already recorded the worst-case
         # status over ALL exec types found on disk (hooks, canvas, lsp, ...),
@@ -256,7 +254,8 @@ def native_hook_approval(
 
         existing = ctx.package_exec_status.get(package_name)
         ctx.package_exec_status[package_name] = more_severe_exec_status(existing, TRUST_GATED)
-    return verdict.allowed
+    # Per-file pins only narrow the package-level verdict, never widen it.
+    return hooks_approved and verdict.allowed
 
 
 def verify_native_plugin_cache(

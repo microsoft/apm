@@ -119,18 +119,11 @@ def check_executable_approval(
         ):
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:
-            from apm_cli.security.executables import (
-                exec_status_for_declaration,
-                more_severe_exec_status,
-            )
+            from apm_cli.security.trust import package_exec_status
 
-            status = exec_status_for_declaration(
-                ctx.exec_trust_ctx,
-                candidate_keys,
-                tuple(t for t in _decl.exec_types if t not in pinned_status),
+            status = package_exec_status(
+                ctx.exec_trust_ctx, tuple(candidate_keys), _install, _decl.exec_types
             )
-            for pinned in pinned_status.values():
-                status = more_severe_exec_status(status, pinned)
             if status is not None:
                 ctx.package_exec_status[package_name] = status
 

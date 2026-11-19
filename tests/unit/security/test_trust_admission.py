@@ -98,13 +98,17 @@ def test_row4_transitive_pinned_and_matching_is_admitted() -> None:
     assert (verdict.allowed, verdict.layer, verdict.one_off) == (True, "project-allow", False)
 
 
-def test_row5_changed_definition_is_parked_and_one_off_overrides() -> None:
+def test_row5_changed_definition_is_parked_and_one_off_never_reapproves_it() -> None:
     changed = _fp({**SERVER, "args": ["-y", "@acme/search-index@9.9.9"]})
     ctx = _ctx(_pinned())
     verdict = admit(ctx, _subject(fingerprint=changed))
     assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
-    override = admit(ctx, _subject(fingerprint=changed), one_off=True)
-    assert override.allowed and override.one_off
+    # A changed executable always needs a re-approval, even under the flag.
+    gated = admit(ctx, _subject(fingerprint=changed), one_off=True)
+    assert (gated.allowed, gated.reason) == (False, "definition-changed")
+    # A changed registry overlay (not an executable) may run for this run only.
+    overlay = admit(ctx, _subject(fingerprint=changed, gated=False), one_off=True)
+    assert overlay.allowed and overlay.one_off
 
 
 def test_row6_one_off_admits_and_flags_non_persistence() -> None:
@@ -405,3 +409,62 @@ def test_native_plugin_hooks_need_every_file_bound(tmp_path: Path) -> None:
     assert verdict.parked == (("hooks/hooks.json", "definition-changed"),)
     legacy = materialize_exec_map(_ctx({PKG: {"hooks": True}}))
     assert native_hooks_admission(legacy, (PKG,), package) is None
+
+
+def test_native_plugin_deny_wins_with_no_hook_files(tmp_path: Path) -> None:
+    from apm_cli.security.trust import native_hooks_admission
+
+    plugin = tmp_path / "plugin"
+    (plugin / "agents").mkdir(parents=True)
+    policy = ApmPolicy(executables=ExecutablesPolicy(deny=(PKG,)))
+    ctx = _ctx({PKG: {"hooks": {}}}, policy=policy)
+    verdict = native_hooks_admission(materialize_exec_map(ctx), (PKG,), plugin)
+    assert verdict is not None and not verdict.allowed
+    assert verdict.parked == (("*", "denied"),)
+
+
+def test_type_verdicts_report_pins_as_allowed_and_legacy_as_any_content(tmp_path: Path) -> None:
+    from apm_cli.security.trust import package_exec_status, package_type_verdicts
+
+    package = tmp_path / "pkg"
+    hook = _hook_package(package)
+    pin = hook_file_fingerprint(package, hook)
+    pinned = build_exec_trust_context(
+        policy=None,
+        project_data={"executables": {"allow": {PKG: {"hooks": {".apm/hooks/lint.json": pin}}}}},
+    )
+    verdict = package_type_verdicts(pinned, (PKG,), package, ("hooks",))["hooks"]
+    assert (verdict.allowed, verdict.pinned, verdict.layer) == (True, True, "project-allow")
+    assert package_exec_status(pinned, (PKG,), package, ("hooks",)) == "deployed"
+
+    legacy = package_type_verdicts(_ctx({PKG: {"hooks": True}}), (PKG,), package, ("hooks",))
+    assert legacy["hooks"].allowed and legacy["hooks"].content_blind
+
+    policy = ApmPolicy(executables=ExecutablesPolicy(deny=(PKG,)))
+    denied_ctx = build_exec_trust_context(
+        policy=policy,
+        project_data={"executables": {"allow": {PKG: {"hooks": {".apm/hooks/lint.json": pin}}}}},
+    )
+    denied = package_type_verdicts(denied_ctx, (PKG,), package, ("hooks",))["hooks"]
+    assert denied.state == "denied" and "project-allow" in denied.shadowed
+
+
+def test_status_and_install_agree_on_a_changed_registry_overlay(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    overlay = {"name": "search-index", "env": {"K": "${K}"}}
+    (package / "apm.yml").write_text(
+        json.dumps({"name": "pkg", "dependencies": {"mcp": [overlay]}}), encoding="utf-8"
+    )
+    entry = {"name": "search-index", "version": "1.0.0"}
+    pin = mcp_definition_fingerprint(MCPDependency.from_dict(overlay), registry_entry=entry)
+    ctx = _ctx(_pinned(pin))
+    moved = {**entry, "version": "2.0.0"}
+    status = pinned_exec_status(
+        ctx, (PKG,), package, ("mcp",), transitive=True, registry_resolver=lambda _d: moved
+    )
+    assert status == {"mcp": "gated_pending_approval"}
+    same = pinned_exec_status(
+        ctx, (PKG,), package, ("mcp",), transitive=True, registry_resolver=lambda _d: entry
+    )
+    assert same == {"mcp": "deployed"}

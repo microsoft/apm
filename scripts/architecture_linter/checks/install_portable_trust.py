@@ -39,7 +39,13 @@ _ITEM_TOKENS = ("project_items", "user_items", "split_item_grants(", "item_pin("
 _ITEM_PRODUCERS = (_TRUST, _EXECUTABLES)
 
 _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
-    _TRUST: ("def admit(", "def item_pin(", "def hook_file_filter(", "def record_pins("),
+    _TRUST: (
+        "def admit(",
+        "def item_pin(",
+        "def hook_file_filter(",
+        "def record_pins(",
+        "def package_type_verdicts(",
+    ),
     _EXECUTABLES: (
         "return entry.get(exec_type, False) is True",
         "if matches and entry.get(exec_type, False) is True:",
@@ -51,12 +57,19 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
     ),
     "src/apm_cli/install/deployment_plan.py": ("hook_file_admitted=hook_filter,",),
     "src/apm_cli/integration/hook_reintegration.py": ("hook_file_admitted=hook_file_admission(",),
-    "src/apm_cli/commands/approve.py": ("narrowed = record_pins(allow, identity",),
+    "src/apm_cli/commands/approve.py": (
+        "narrowed = record_pins(allow, identity",
+        "return package_type_verdicts(",
+    ),
     "src/apm_cli/install/native_plugin_admission.py": (
         "verdict = native_hooks_admission(allow_executables, keys",
         "hooks_approved = native_hook_approval(",
     ),
 }
+# Type-level resolvers cannot see pins; outside security/ every per-type
+# verdict comes from trust.package_type_verdicts.
+_PIN_BLIND = ("resolve_exec_decision(", "exec_status_for_declaration(")
+_SECURITY = "src/apm_cli/security/"
 # A live-loaded plugin's hooks are admitted per file, never by a bool lookup.
 _NATIVE_ADMISSION = "src/apm_cli/install/native_plugin_admission.py"
 _BOOL_LOOKUPS = ("is_package_approved(", "_map_grants(", "allow_executables.get(")
@@ -129,6 +142,15 @@ def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
         if failures:
             continue
         found = [token for token in _ITEM_TOKENS if _present(facts, token)]
+        if not path.startswith(_SECURITY):
+            found += [
+                token
+                for token in _PIN_BLIND
+                if any(
+                    token in line and not line.lstrip().startswith(("#", "def "))
+                    for line in _lines(facts)
+                )
+            ]
         if found:
             findings.append(
                 _summary(

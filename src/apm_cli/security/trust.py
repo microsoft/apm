@@ -181,10 +181,10 @@ def admit(
         layer, pin = pinned
         if subject.fingerprint is not None and pin == subject.fingerprint:
             return Admission(True, None, layer)
-        if not (one_off and needs_trust):
+        # A one-off run may accept a changed registry overlay for this run,
+        # never a changed executable: that always needs a re-approval.
+        if not (one_off and needs_trust and not subject.exec_gated):
             return Admission(False, REASON_DEFINITION_CHANGED, layer)
-        # The pin is the project's package-level consent; the one-off run
-        # accepts the changed definition for this run only.
         return Admission(True, None, LAYER_ONE_OFF, one_off=True)
 
     if needs_trust and not one_off:
@@ -247,6 +247,8 @@ class McpAdmission:
         self.one_off = one_off
         self.permissive = permissive
         self._registry_resolver = registry_resolver or resolve_registry_entry
+        # Why org policy could not be read, when it could not; callers surface it.
+        self.policy_unavailable: str | None = None
 
     @classmethod
     def admit_all(cls) -> McpAdmission:
@@ -268,6 +270,7 @@ class McpAdmission:
         """Resolve org, project and (optionally) user layers for *project_root*."""
         if trust_context is not None:
             return cls(trust_context, one_off=one_off)
+        admission: McpAdmission
 
         def resolve() -> ExecTrustContext:
             from .executables import exec_trust_context_for_project
@@ -275,19 +278,24 @@ class McpAdmission:
             policy = None
             if not no_policy:
                 from apm_cli.policy.discovery import discover_policy_with_chain
+                from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
 
                 kwargs = {"cache_only": True} if cache_only_policy else {}
                 try:
-                    policy = getattr(
-                        discover_policy_with_chain(project_root, **kwargs), "policy", None
-                    )
-                except Exception:
-                    policy = None
+                    result = discover_policy_with_chain(project_root, **kwargs)
+                except (OSError, ValueError, RuntimeError) as exc:
+                    admission.policy_unavailable = type(exc).__name__
+                else:
+                    policy = getattr(result, "policy", None)
+                    outcome = getattr(result, "outcome", None)
+                    if policy is None and outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
+                        admission.policy_unavailable = str(outcome)
             return exec_trust_context_for_project(
                 project_root, policy=policy, logger=logger, include_user=include_user
             )
 
-        return cls(resolve, one_off=one_off)
+        admission = cls(resolve, one_off=one_off)
+        return admission
 
     @property
     def context(self) -> ExecTrustContext | None:
@@ -445,6 +453,12 @@ def native_hooks_admission(
     ctx = getattr(allow_executables, "trust_context", None)
     if ctx is None or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS):
         return None
+    # Deny wins before any file is considered, even with no hook file at all.
+    if any(
+        resolve_exec_decision(ctx, key, EXEC_TYPE_HOOKS).trust_state == TRUST_DENIED
+        for key in package_keys
+    ):
+        return NativeHooksAdmission(False, (("*", REASON_DENIED),))
     root = install_path.resolve()
     parked: list[tuple[str, str]] = []
     known: set[Path] = set()
@@ -479,8 +493,8 @@ def hooks_package_admissible(allow_executables: Any, package_keys: tuple[str, ..
     )
 
 
-def _package_mcp_subjects(package_keys: tuple[str, ...], install_path: Path) -> list[TrustSubject]:
-    """Return exec-gated (self-defined) MCP subjects a package manifest declares."""
+def package_mcp_declarations(install_path: Path) -> list[Any]:
+    """Parse a package manifest's MCP entries once, through the canonical model."""
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.utils.yaml_io import load_yaml
 
@@ -491,17 +505,47 @@ def _package_mcp_subjects(package_keys: tuple[str, ...], install_path: Path) -> 
         data = {}
     deps = data.get("dependencies") if isinstance(data, dict) else None
     entries = deps.get("mcp") if isinstance(deps, dict) else None
-    subjects = []
+    declarations = []
     for entry in entries if isinstance(entries, list) else ():
-        if not isinstance(entry, dict) or entry.get("registry") is not False:
-            continue
         try:
-            dependency = MCPDependency.from_dict(entry)
-            fingerprint = mcp_definition_fingerprint(dependency)
+            declarations.append(
+                MCPDependency.from_string(entry)
+                if isinstance(entry, str)
+                else MCPDependency.from_dict(entry)
+            )
         except (ValueError, TypeError):
             continue
-        subjects.append(TrustSubject(package_keys, EXEC_TYPE_MCP, dependency.name, fingerprint))
-    return subjects
+    return declarations
+
+
+def is_pinnable_mcp(declaration: Any, *, transitive: bool) -> bool:
+    """Whether a dependency MCP server needs an approval (and so can be pinned)."""
+    return bool(declaration.is_self_defined) or (
+        transitive and bool(declaration.requires_transitive_trust)
+    )
+
+
+def _package_mcp_subjects(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path,
+    *,
+    transitive: bool,
+    registry_resolver: Callable[[Any], dict[str, Any] | None] | None,
+) -> list[TrustSubject]:
+    """Subjects for every pinnable MCP server, built exactly as install builds them."""
+    admission = McpAdmission(ctx, registry_resolver=registry_resolver)
+    locked = _Depth(2 if transitive else 1)
+    return [
+        admission.subject(locked, declaration, package_keys)
+        for declaration in package_mcp_declarations(install_path)
+        if is_pinnable_mcp(declaration, transitive=transitive)
+    ]
+
+
+@dataclass(frozen=True)
+class _Depth:
+    depth: int
 
 
 def pinned_exec_status(
@@ -509,6 +553,9 @@ def pinned_exec_status(
     package_keys: tuple[str, ...],
     install_path: Path,
     exec_types: tuple[str, ...] | list[str],
+    *,
+    transitive: bool = False,
+    registry_resolver: Callable[[Any], dict[str, Any] | None] | None = None,
 ) -> dict[str, str]:
     """Lockfile ``exec_status`` for each declared type whose grants are pinned.
 
@@ -530,7 +577,13 @@ def pinned_exec_status(
                 for hook_file in HookIntegrator().find_hook_files(root)
             ]
         else:
-            subjects = _package_mcp_subjects(package_keys, root)
+            subjects = _package_mcp_subjects(
+                ctx,
+                package_keys,
+                root,
+                transitive=transitive,
+                registry_resolver=registry_resolver,
+            )
         verdicts = [admit(ctx, subject) for subject in subjects]
         if any(verdict.reason == REASON_DENIED for verdict in verdicts):
             result[exec_type] = TRUST_DENIED
@@ -539,6 +592,107 @@ def pinned_exec_status(
         else:
             result[exec_type] = TRUST_GATED
     return result
+
+
+@dataclass(frozen=True)
+class TypeVerdict:
+    """The verdict for one executable type of one package, pins included."""
+
+    allowed: bool
+    state: str
+    layer: str
+    pinned: bool = False
+    content_blind: bool = False
+    shadowed: tuple[str, ...] = ()
+
+
+def _type_decision(ctx: ExecTrustContext, package_keys: tuple[str, ...], exec_type: str):
+    """Best decision across the candidate keys (allowed > denied > gated)."""
+    decisions = [resolve_exec_decision(ctx, key, exec_type) for key in package_keys]
+    for wanted in (lambda d: d.allowed, lambda d: d.trust_state == TRUST_DENIED):
+        for decision in decisions:
+            if wanted(decision):
+                return decision
+    return decisions[0]
+
+
+def package_type_verdicts(
+    ctx: ExecTrustContext,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    transitive: bool = False,
+    registry_resolver: Callable[[Any], dict[str, Any] | None] | None = None,
+) -> dict[str, TypeVerdict]:
+    """Per-type verdicts for one package: the single reader for every status view.
+
+    ``apm policy explain``, ``apm approve --list/--pending``, ``apm doctor``,
+    the exec gate's lockfile ``exec_status`` and native plugin status all read
+    this, so a pinned approval reads the same everywhere it is shown.
+    """
+    from .executables import LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW
+
+    pinned = (
+        pinned_exec_status(
+            ctx,
+            package_keys,
+            install_path,
+            exec_types,
+            transitive=transitive,
+            registry_resolver=registry_resolver,
+        )
+        if install_path is not None
+        else {}
+    )
+    result: dict[str, TypeVerdict] = {}
+    for exec_type in exec_types:
+        decision = _type_decision(ctx, package_keys, exec_type)
+        is_pinned = has_item_pins(ctx, package_keys, exec_type)
+        if decision.trust_state == TRUST_DENIED:
+            shadowed = decision.shadowed_layers + ((LAYER_PROJECT_ALLOW,) if is_pinned else ())
+            result[exec_type] = TypeVerdict(
+                False,
+                TRUST_DENIED,
+                decision.deciding_layer,
+                pinned=is_pinned,
+                shadowed=tuple(dict.fromkeys(shadowed)),
+            )
+        elif exec_type in pinned:
+            state = pinned[exec_type]
+            result[exec_type] = TypeVerdict(
+                state == "deployed", state, LAYER_PROJECT_ALLOW, pinned=True
+            )
+        else:
+            result[exec_type] = TypeVerdict(
+                decision.allowed,
+                decision.trust_state,
+                decision.deciding_layer,
+                content_blind=(
+                    decision.allowed
+                    and exec_type in ITEM_EXEC_TYPES
+                    and decision.deciding_layer in (LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW)
+                ),
+                shadowed=decision.shadowed_layers,
+            )
+    return result
+
+
+def package_exec_status(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+) -> str | None:
+    """Worst-case lockfile ``exec_status`` for a package's declared executables."""
+    from .executables import more_severe_exec_status
+
+    if ctx is None or not exec_types or not ctx.gate_enabled:
+        return None
+    status: str | None = None
+    for verdict in package_type_verdicts(ctx, package_keys, install_path, exec_types).values():
+        status = more_severe_exec_status(status, "deployed" if verdict.allowed else verdict.state)
+    return status
 
 
 # -------------------------------------------------------------------
@@ -585,6 +739,18 @@ def warn_content_blind_grants_once(ctx: ExecTrustContext | None, logger: Any) ->
 # -------------------------------------------------------------------
 # Recording approvals (apm approve and the install prompt)
 # -------------------------------------------------------------------
+
+# The first APM release that reads pinned approvals; older clients fail closed.
+PINNED_GRANTS_MIN_APM = "0.37"
+
+
+def has_any_pins(allow: dict[str, Any]) -> bool:
+    """Whether a stored grant map already holds a pinned item map."""
+    return any(
+        isinstance(entry, dict) and any(isinstance(value, dict) for value in entry.values())
+        for entry in allow.values()
+    )
+
 
 # Env keys whose literal value changes what code loads; always shown in full.
 _CODE_LOADING_ENV = frozenset(
@@ -695,8 +861,6 @@ def package_pins(
     something unverified.
     """
     from apm_cli.integration.hook_integrator import HookIntegrator
-    from apm_cli.models.dependency.mcp import MCPDependency
-    from apm_cli.utils.yaml_io import load_yaml
 
     root = install_path.resolve()
     pins: list[PinnedItem] = []
@@ -716,26 +880,11 @@ def package_pins(
             )
         )
 
-    manifest = root / "apm.yml"
-    try:
-        data = load_yaml(manifest) if manifest.is_file() and not manifest.is_symlink() else {}
-    except Exception:
-        data = {}
-    deps = data.get("dependencies") if isinstance(data, dict) else None
-    entries = deps.get("mcp") if isinstance(deps, dict) else None
     resolver = registry_resolver or resolve_registry_entry
-    for entry in entries if isinstance(entries, list) else ():
-        try:
-            dependency = (
-                MCPDependency.from_string(entry)
-                if isinstance(entry, str)
-                else MCPDependency.from_dict(entry)
-            )
-        except (ValueError, TypeError):
+    for dependency in package_mcp_declarations(root):
+        if not is_pinnable_mcp(dependency, transitive=transitive):
             continue
         needs_registry = not dependency.is_self_defined
-        if needs_registry and not (transitive and dependency.requires_transitive_trust):
-            continue
         registry_entry = None
         if needs_registry:
             registry_entry = resolver(dependency)

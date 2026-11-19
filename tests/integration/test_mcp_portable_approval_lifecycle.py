@@ -417,3 +417,80 @@ def test_native_plugin_legacy_hook_grant_registers_and_warns(
     output = _text(chain.ok("install", "--no-policy"))
     assert _registered(chain)
     assert "not pinned to content: ./pkgs/np (hooks)" in output
+
+
+def test_approve_refusal_exits_nonzero_and_writes_nothing(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """D9 and scripts: an unpinnable registry overlay exits 1 and writes nothing."""
+    chain = _transitive(tmp_path, apm_binary_path)
+    _write(
+        chain.project / "pkgs" / "leaf" / "apm.yml",
+        {
+            "name": "leaf",
+            "version": "1.0.0",
+            "dependencies": {"mcp": [{"name": "io.acme/overlay", "env": {"MODE": "fast"}}]},
+        },
+    )
+    # A closed loopback port: the registry is unreachable without any network.
+    chain.env["MCP_REGISTRY_URL"] = "http://127.0.0.1:9"
+    chain.env["MCP_REGISTRY_ALLOW_HTTP"] = "1"
+    chain.ok("install")
+    before = (chain.project / "apm.yml").read_text(encoding="utf-8")
+
+    result = chain.run("approve", LEAF)
+    assert result.returncode == 1, _text(result)
+    assert "needs registry access to pin" in _text(result)
+    assert "Approved" not in _text(result)
+    assert (chain.project / "apm.yml").read_text(encoding="utf-8") == before
+
+
+def test_user_approval_admits_locally_but_audit_ignores_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """D4: a personal --user pin works on this machine and never satisfies CI."""
+    chain = _transitive(tmp_path, apm_binary_path)
+    chain.ok("install")
+    before = (chain.project / "apm.yml").read_text(encoding="utf-8")
+    chain.ok("approve", "--user", LEAF)
+    assert (chain.project / "apm.yml").read_text(encoding="utf-8") == before
+    chain.ok("install")
+    assert SERVER in chain.servers("claude")
+    check = _audit(chain)
+    assert not check["passed"]
+    assert any("not approved in apm.yml" in detail for detail in check["details"])
+
+
+def test_uninstalling_a_sibling_keeps_a_survivors_pinned_hooks(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The survivor rebuild admits pinned hook files through the same owner."""
+    chain = Chain(tmp_path / "world", apm_binary_path, dirs=(".claude",))
+    _hook_package(chain)
+    other = chain.project / "pkgs" / "other"
+    _write(other / "apm.yml", {"name": "other", "version": "1.0.0"})
+    (other / ".apm" / "hooks").mkdir(parents=True)
+    (other / ".apm" / "hooks" / "o.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [
+                        {"matcher": "Write", "hooks": [{"type": "command", "command": "echo o"}]}
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    chain.write_manifest([], apm=["./pkgs/hk", "./pkgs/other"], targets=["claude"], executables={})
+    chain.ok("install", "--no-policy")
+    _approve(chain, "./pkgs/hk")
+    _approve(chain, "./pkgs/other")
+    chain.ok("install", "--no-policy")
+    settings = chain.project / ".claude" / "settings.json"
+    assert "lint.sh" in settings.read_text(encoding="utf-8")
+
+    chain.ok("uninstall", "./pkgs/other")
+    text = settings.read_text(encoding="utf-8")
+    assert "lint.sh" in text and "echo o" not in text
+    assert _deployed_script(chain).read_text(encoding="utf-8") == "echo lint\n"

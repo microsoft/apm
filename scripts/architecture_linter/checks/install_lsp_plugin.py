@@ -102,7 +102,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "approval = locked_dependency_approval(locked",
                     "approval_identity=approval.identity",
                     "original_identity=approval.original_identity",
-                    "not resolve_exec_decision(ctx, decl.package_key, exec_type).allowed",
+                    "return package_type_verdicts(",
                 ),
                 _EXEC_GATE: (
                     "return dependency_approval_key(dep_ref)",

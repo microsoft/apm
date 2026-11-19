@@ -102,8 +102,9 @@ Each item is then admitted in this order (first match wins):
    only when the project has no pin for that item.
 3. A transitive MCP server that is self-defined, sets its own `registry:`, or
    carries an overlay, with no matching pin -> parked
-   (`untrusted-transitive`). `--trust-transitive-mcp` admits it, and a changed
-   pinned one, for that run only.
+   (`untrusted-transitive`). `--trust-transitive-mcp` admits it for that run
+   only; it also accepts a changed pinned registry overlay for that run, but
+   never a changed self-defined server, which always needs `apm approve`.
 4. Type-level rungs 4-7 above.
 
 When an approved definition changes upstream, install parks the item and
@@ -114,8 +115,10 @@ re-approve commands.
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
 `apm approve <package>` to pin it. `mcp: true` never admits a transitive MCP
-server. A Copilot or Codex native plugin loads every hook file live, so only a
-type-level `hooks: true` admits it; per-file pins do not.
+server. A Copilot or Codex native plugin loads its `hooks/` directory live, so
+it registers only when every hook file matches its pin and `hooks/` holds
+nothing else; otherwise the plugin is not registered and the parked file is
+named.
 
 ### The gate opt-in
 
@@ -135,8 +138,8 @@ the next install will park and asks before writing:
     Continue? [y/N]:
 ```
 
-Without a TTY it writes and keeps the warning. `--user` never turns the gate
-on.
+Without a TTY it writes and keeps the warning; answering `N` writes nothing
+and exits 1. `--user` never turns the gate on.
 
 ## Options
 
@@ -178,6 +181,11 @@ Re-approving replaces the package's pins with the current definitions.
   retry;
 - an item cannot be pinned, for example a transitive registry server while the
   MCP registry is unreachable (`needs registry access to pin`).
+
+It exits 1 when any requested package was refused, or when you decline the
+first-approval prompt (`Nothing written.`), so a script never commits an
+approval that was not recorded. The first pinned approval in a project also
+prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,
 `[changed since approval]`, `[denied]`, or `[not approved]`. `--list` labels

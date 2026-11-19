@@ -132,7 +132,12 @@ def test_approve_original_name_unlocks_replacement_hooks(
 
     apm("approve", "acme/hooky")
     allow = load_yaml(project / "apm.yml")["executables"]["allow"]
-    assert allow == {"acme/hooky": {"hooks": True}, expected_grant: {"hooks": True}}
+    # The selected source is pinned per hook file under its version-blind key.
+    selected = expected_grant.split("#", 1)[0]
+    assert allow["acme/hooky"] == {"hooks": True}
+    assert set(allow) == {"acme/hooky", selected}
+    [(item, pin)] = allow[selected]["hooks"].items()
+    assert item == ".apm/hooks/guard.json" and pin.startswith("sha256:") and len(pin) == 71
     explained = apm("policy", "explain", "acme/hooky")
     assert "verdict: allowed" in explained, explained
 

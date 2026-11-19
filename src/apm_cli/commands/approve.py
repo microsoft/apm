@@ -285,8 +285,6 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
         apm policy explain owner/repo
     """
     manifest = _find_manifest()
-    from ..security.executables import resolve_exec_decision
-
     ctx = _effective_trust_context(manifest, logger=logger)
 
     decl = _find_declaration(_scan_installed_packages(manifest), package)
@@ -302,17 +300,14 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
         return
 
     _rich_echo(f"{decl.package_key}: {decl.summary_line()}")
-    decisions = [
-        resolve_exec_decision(ctx, decl.package_key, exec_type) for exec_type in decl.exec_types
-    ]
-    has_block = any(not decision.allowed for decision in decisions)
-    verdict = "blocked" if has_block else "allowed"
-    _rich_echo(f"  verdict: {verdict}")
-    for exec_type, decision in zip(decl.exec_types, decisions, strict=True):
-        state = "[+] allowed" if decision.allowed else "[x] blocked"
-        _rich_echo(f"  {exec_type:<7} {state}  (layer: {decision.deciding_layer})")
-        if decision.shadowed_layers:
-            _rich_echo(f"          shadowed: {', '.join(decision.shadowed_layers)}")
+    verdicts = _verdicts(ctx, decl)
+    has_block = any(not verdict.allowed for verdict in verdicts.values())
+    _rich_echo(f"  verdict: {'blocked' if has_block else 'allowed'}")
+    for exec_type, verdict in verdicts.items():
+        state = "[+] allowed" if verdict.allowed else "[x] blocked"
+        _rich_echo(f"  {exec_type:<7} {state}  (layer: {_verdict_label(verdict)})")
+        if verdict.shadowed:
+            _rich_echo(f"          shadowed: {', '.join(verdict.shadowed)}")
     if has_block:
         _rich_info(
             f"To trust it: `apm approve {decl.package_name}` "
@@ -321,10 +316,31 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
         )
 
 
+def _verdicts(ctx, decl: ExecutableDeclaration):
+    """Per-type verdicts for one installed package, through the trust owner."""
+    from ..security.trust import package_type_verdicts
+
+    return package_type_verdicts(
+        ctx,
+        (decl.package_key, _identity(decl)),
+        Path(decl.install_path) if decl.install_path else None,
+        decl.exec_types,
+        transitive=decl.depth > 1,
+    )
+
+
+def _verdict_label(verdict) -> str:
+    if verdict.pinned and verdict.allowed:
+        return f"{verdict.layer}, pinned"
+    if verdict.content_blind:
+        return f"{verdict.layer}, any content"
+    if verdict.pinned:
+        return f"{verdict.layer}, pinned, {verdict.state}"
+    return verdict.layer
+
+
 def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
     """Print the effective trust decision + deciding layer per installed package."""
-    from ..security.executables import resolve_exec_decision
-
     ctx = _effective_trust_context(manifest, logger=logger)
 
     declarations = [d for d in _scan_installed_packages(manifest) if d.has_executables]
@@ -341,38 +357,11 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
 
     rows: list[tuple[object, list[tuple[str, object]]]] = []
     allowed_count = blocked_count = 0
-    from ..security.trust import has_item_pins, pinned_exec_status
-
     for decl in declarations:
         row: list[tuple[str, object]] = []
-        keys = (decl.package_key, _identity(decl))
-        pinned = (
-            pinned_exec_status(ctx, keys, Path(decl.install_path), decl.exec_types)
-            if decl.install_path and ctx.gate_enabled
-            else {}
-        )
-        for exec_type in decl.exec_types:
-            decision = resolve_exec_decision(ctx, decl.package_key, exec_type)
-            if exec_type in pinned:
-                allowed = pinned[exec_type] == "deployed"
-                label = "project-allow, pinned" if allowed else pinned[exec_type]
-                decision = (allowed, label)
-            elif (
-                decision.allowed
-                and exec_type in ("hooks", "mcp")
-                and decision.deciding_layer
-                in (
-                    "project-allow",
-                    "user-allow",
-                )
-            ):
-                decision = (True, f"{decision.deciding_layer}, any content")
-            elif not decision.allowed and has_item_pins(ctx, keys, exec_type):
-                decision = (False, "pinned, none match")
-            else:
-                decision = (decision.allowed, decision.deciding_layer)
-            row.append((exec_type, decision))
-            if decision[0]:
+        for exec_type, verdict in _verdicts(ctx, decl).items():
+            row.append((exec_type, (verdict.allowed, _verdict_label(verdict))))
+            if verdict.allowed:
                 allowed_count += 1
             else:
                 blocked_count += 1
@@ -587,8 +576,12 @@ def _echo_pins(decl: ExecutableDeclaration, pins: list, states: dict | None = No
             _rich_echo(f"      {exec_type:<6} {count} {noun} (approved by type)")
 
 
-def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> bool:
-    """List one package's definitions and record pinned approval in *allow*."""
+def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> str | None:
+    """List one package's definitions and record pinned approval in *allow*.
+
+    Returns the success line to print once the store is written, or ``None``
+    when the package was refused.
+    """
     from ..security.trust import record_pins
 
     identity = _identity(decl)
@@ -597,7 +590,7 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> bool:
             f"{identity}: installed files differ from apm.lock.yaml; not approved. "
             "Run 'apm install' to restore them, then retry."
         )
-        return False
+        return None
     pins = _pins_for(decl)
     via = f" (via {decl.parent_name})" if decl.parent_name else ""
     _rich_info(f"{identity}{via} declares:", symbol="info")
@@ -606,7 +599,7 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> bool:
     if unpinnable:
         for pin in unpinnable:
             _rich_error(f"{identity}: cannot pin {pin.exec_type} '{pin.item}': {pin.error}")
-        return False
+        return None
     narrowed = record_pins(allow, identity, decl.exec_types, pins)
     for exec_type in narrowed:
         count = sum(1 for pin in pins if pin.exec_type == exec_type)
@@ -616,11 +609,7 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> bool:
             f"now pinned to {count} {noun}{'s' if count != 1 else ''}",
             symbol="info",
         )
-    _rich_success(
-        f"Approved {identity} at these exact definitions ({_type_counts(decl, pins)})",
-        symbol="check",
-    )
-    return True
+    return f"Approved {identity} at these exact definitions ({_type_counts(decl, pins)})"
 
 
 def _first_approval_parks(
@@ -636,7 +625,6 @@ def _first_approval_parks(
     from ..security.executables import (
         build_exec_trust_context,
         project_executables_gate_enabled,
-        resolve_exec_decision,
     )
 
     data = load_manifest(manifest)
@@ -657,8 +645,8 @@ def _first_approval_parks(
             continue
         blocked = [
             exec_type
-            for exec_type in decl.exec_types
-            if not resolve_exec_decision(after, decl.package_key, exec_type).allowed
+            for exec_type, verdict in _verdicts(after, decl).items()
+            if not verdict.allowed
         ]
         if blocked:
             parked.append((_identity(decl), blocked))
@@ -693,22 +681,46 @@ def _record_and_save(
     *,
     logger: CommandLogger,
 ) -> None:
-    """Record pinned approvals for *declarations* and persist the store once."""
-    recorded = [decl for decl in declarations if _record_declaration(allow, decl)]
-    if not recorded:
-        return
-    if not user_scope:
+    """Record pinned approvals for *declarations* and persist the store once.
+
+    Exits 1 when any requested package could not be pinned or the user
+    declined, so scripts never commit an approval that was not written.
+    """
+    from ..security.trust import PINNED_GRANTS_MIN_APM, has_any_pins
+
+    had_pins = has_any_pins(allow)
+    successes: list[str] = []
+    recorded: list[ExecutableDeclaration] = []
+    refused = 0
+    for decl in declarations:
+        line = _record_declaration(allow, decl)
+        if line is None:
+            refused += 1
+        else:
+            successes.append(line)
+            recorded.append(decl)
+    if successes and not user_scope:
         parked = _first_approval_parks(manifest, recorded, allow, deny, logger=logger)
         if parked and not _confirm_first_approval(parked):
             _rich_info("Nothing written.", symbol="info")
-            return
-    _save_store(manifest, user_scope, allow, deny)
-    share = "" if user_scope else "; commit apm.yml to share"
-    _rich_info(
-        f"Updated {_store_label(user_scope)} ({len(recorded)} approved). "
-        f"Run 'apm install' to deploy{share}.",
-        symbol="info",
-    )
+            sys.exit(1)
+    if successes:
+        _save_store(manifest, user_scope, allow, deny)
+        for line in successes:
+            _rich_success(line, symbol="check")
+        share = "" if user_scope else "; commit apm.yml to share"
+        _rich_info(
+            f"Updated {_store_label(user_scope)} ({len(successes)} approved). "
+            f"Run 'apm install' to deploy{share}.",
+            symbol="info",
+        )
+        if not user_scope and not had_pins and has_any_pins(allow):
+            _rich_info(
+                f"Teammates need APM {PINNED_GRANTS_MIN_APM} or later to read pinned approvals.",
+                symbol="info",
+            )
+    if refused:
+        sys.exit(1)
 
 
 def _item_states(ctx, decl: ExecutableDeclaration, pins: list) -> dict[tuple[str, str], str]:
@@ -736,25 +748,12 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
     """Installed packages with an executable no trust layer currently admits."""
     from dataclasses import replace
 
-    from ..security.executables import resolve_exec_decision
-    from ..security.trust import has_item_pins, pinned_exec_status
-
     ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
-    pending = []
-    for decl in _scan_installed_packages(manifest):
-        keys = (decl.package_key, _identity(decl))
-        pinned = (
-            pinned_exec_status(ctx, keys, Path(decl.install_path), decl.exec_types)
-            if decl.install_path
-            else {}
-        )
-        if any(status != "deployed" for status in pinned.values()) or any(
-            not resolve_exec_decision(ctx, decl.package_key, exec_type).allowed
-            for exec_type in decl.exec_types
-            if not (exec_type in pinned or has_item_pins(ctx, keys, exec_type))
-        ):
-            pending.append(decl)
-    return pending
+    return [
+        decl
+        for decl in _scan_installed_packages(manifest)
+        if any(not verdict.allowed for verdict in _verdicts(ctx, decl).values())
+    ]
 
 
 def scan_installed_executable_packages(manifest: Path) -> list:
