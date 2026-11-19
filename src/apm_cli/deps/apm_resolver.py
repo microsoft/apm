@@ -856,15 +856,17 @@ class APMDependencyResolver:
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
 
-        # #3696: distinct packages that share one host-blind directory are
-        # rejected before their directory is fetched or staged.
-        slots = MaterializationSlots(modules_dir)
-        if self._reject_root_layout_conflicts(
-            tree, [item[0] for item in processing_queue], modules_dir, slots
+        if self._reject_nested_root_declarations(
+            tree, [item[0] for item in processing_queue], modules_dir
         ):
             # Structural manifest error: report it before fetching anything, even
             # if other root declarations would also fail during the walk.
             return tree
+        # #3696: distinct packages that share one host-blind directory are
+        # rejected before their directory is fetched or staged. Each level
+        # claims only selected nodes, so a discarded duplicate declaration's
+        # alias never claims a directory.
+        slots = MaterializationSlots(modules_dir)
 
         # Process dependencies breadth-first with level-batched parallelism.
         #
@@ -1117,15 +1119,13 @@ class APMDependencyResolver:
         self._apply_edge_selections(tree)
         return tree
 
-    @classmethod
-    def _reject_root_layout_conflicts(
-        cls,
+    @staticmethod
+    def _reject_nested_root_declarations(
         tree: DependencyTree,
         root_refs: list[DependencyReference],
         modules_dir: Path,
-        slots: MaterializationSlots,
     ) -> bool:
-        """Record root declarations that cannot coexist in apm_modules."""
+        """Record root declarations whose package directories nest (#3699)."""
         nested = nested_materialization_pairs(root_refs, modules_dir)
         for outer, inner in nested:
             tree.resolution_errors.append(
@@ -1133,9 +1133,7 @@ class APMDependencyResolver:
                 "cannot both be declared in apm.yml: the subdirectory package would be "
                 "installed inside the repository package. Keep only one of them."
             )
-        if nested:
-            return True
-        return cls._reject_shared_slots(tree, slots, ((ref, None) for ref in root_refs))
+        return bool(nested)
 
     @staticmethod
     def _reject_shared_slots(

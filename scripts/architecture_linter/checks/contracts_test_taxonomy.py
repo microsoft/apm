@@ -714,7 +714,7 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         not _present_re(materialization, re.compile(r"^class MaterializationSlots\b"))
         or not _present(resolver, "slots = MaterializationSlots(modules_dir)")
         or not _present(resolver, "collision = slots.claim(dep_ref, parent)")
-        or _count_re(resolver, re.compile(r"_reject_shared_slots\(tree, slots,")) < 2
+        or not _present(resolver, "if self._reject_shared_slots(tree, slots,")
     ):
         findings.append(
             _summary(

@@ -180,6 +180,25 @@ def test_actual_resolver_rejects_ambiguous_original_materialization_slots(
     ]
 
 
+def test_actual_resolver_claims_only_the_selected_alias_destination(tmp_path: Path) -> None:
+    """#3696: a discarded duplicate declaration's alias never claims a directory."""
+    factory = LocalPackageFactory(tmp_path)
+    tool = {"git": "https://github.com/acme/tool"}
+    other = {"git": "https://github.com/acme/other", "alias": "shared"}
+    consumer = factory.create(
+        "consumer",
+        dependencies=({**tool, "alias": "primary"}, {**tool, "alias": "shared"}, other),
+    )
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    assert not any("would both install" in error for error in graph.resolution_errors)
+
+    consumer = factory.create("clash", dependencies=({**tool, "alias": "shared"}, other))
+    graph = APMDependencyResolver().resolve_dependencies(consumer.root)
+    assert any(
+        "would both install to apm_modules/shared" in error for error in graph.resolution_errors
+    )
+
+
 def test_actual_resolver_rejects_ambiguous_original_identities(tmp_path: Path) -> None:
     factory = LocalPackageFactory(tmp_path)
     other = "https://github.com:8443/example/base"
