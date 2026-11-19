@@ -434,3 +434,60 @@ def test_native_plugin_mcp_server_is_loaded_by_claude_not_written_by_apm(
     assert "plugin-tracker" not in claude_mcp_names()
     assert (deployed / ".mcp.json").is_file()
     assert not scenario.trap.exists()
+
+
+def test_native_plugin_deploys_publisher_bytes_not_normalization_output(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """The deployed root is the publisher's tree, byte for byte, and the lock pins it.
+
+    Normalization writes ``apm.yml`` and ``.apm/`` copies (here an inline-hooks
+    rendering and a skill copy) into APM's cache; none of it reaches Claude.
+    """
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("pristine-plugin")
+    source = repository.worktree / "plugins/pristine"
+    (source / ".claude-plugin").mkdir(parents=True)
+    hooks = {"SessionStart": [{"hooks": [{"type": "command", "command": "echo PRISTINE"}]}]}
+    (source / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "pristine", "version": "1.0.0", "hooks": {"hooks": hooks}}),
+        encoding="utf-8",
+    )
+    (source / "skills/review").mkdir(parents=True)
+    (source / "skills/review/SKILL.md").write_text("---\nname: review\n---\nbody\n")
+    revision = factory.commit(repository, message="Pristine native plugin").sha
+    dependency = "fixture/pristine"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "pristine-consumer",
+        "version": "1.0.0",
+        "dependencies": {"apm": [{"git": dependency, "ref": revision, "path": "plugins/pristine"}]},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    result = ApmLifecycleRunner(apm_engine_command).run(
+        ("install", "--global", "--target", "claude"),
+        scenario_id="claude-native-pristine",
+        cwd=isolated.work_root,
+        env=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    def tree(root: Path) -> dict[str, bytes]:
+        return {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    deployed = scenario.plugins / "pristine"
+    assert tree(deployed) == tree(source)
+    cached = next((isolated.config_root / "apm_modules").rglob("plugins/pristine"))
+    assert (cached / "apm.yml").is_file() and (cached / ".apm").is_dir()
+    lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+    assert lock["dependencies"][0]["native_plugin"]["fingerprint"] == compute_native_plugin_hash(
+        source
+    )
