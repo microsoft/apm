@@ -372,7 +372,7 @@ def build_plugin_manifest(
       ``skills: "./skills/"`` and ``mcpServers: "./.mcp.json"`` only when those
       regular paths exist, so Codex reads the author's own MCP file natively
       and no server data is copied or translated. No ``interface`` is
-      generated; Codex derives listing text from the identity fields.
+      generated, so Codex has no listing presentation metadata for it.
 
     Convention directories (``agents/``, ``skills/``, ``commands/``) are
     otherwise auto-discovered by the host, so they are not listed explicitly.

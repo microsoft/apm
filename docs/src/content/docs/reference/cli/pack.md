@@ -285,7 +285,7 @@ The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `
 
 - **Claude:** includes `mcpServers` sourced from `.mcp.json` when that file declares servers that survive credential stripping.
 - **Copilot:** omits `mcpServers`.
-- **Codex:** writes the [Codex compatibility manifest](https://developers.openai.com/plugins/deploy/submission#manifest-fields). It adds `"skills": "./skills/"` when a root `skills/` directory exists and `"mcpServers": "./.mcp.json"` when a root `.mcp.json` exists (symlinks are skipped). Codex reads that file directly, so no MCP server data is copied and no credentials are stripped or rewritten. No `interface` block is generated; Codex derives listing text from `name`, `description`, and `author`. Codex expects `version`, `description`, and `author`; `apm pack` warns when `apm.yml` lacks any of them.
+- **Codex:** writes the [Codex compatibility manifest](https://developers.openai.com/plugins/deploy/submission#manifest-fields). It adds `"skills": "./skills/"` when a root `skills/` directory exists and `"mcpServers": "./.mcp.json"` when a root `.mcp.json` exists (symlinks are skipped). Codex reads that file directly, so no MCP server data is copied and no credentials are stripped or rewritten. No `interface` block is generated, and Codex does not derive one from this manifest, so the plugin has no Codex listing presentation metadata (display name, descriptions, developer). Codex expects `version`, `description`, and `author`; `apm pack` warns when `apm.yml` lacks any of them.
 
 #### Credential stripping (Claude `mcpServers`)
 
