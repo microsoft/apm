@@ -143,6 +143,51 @@ def _module_cache_needs_rehydration(
     return has_locked_dependency
 
 
+def _executables_need_reconcile(
+    lockfile: LockFile | None,
+    modules_dir: Path,
+    scope: InstallScope,
+    apm_package: Any,
+) -> bool:
+    """Return whether a recorded executables decision no longer holds (#3958).
+
+    Lets the no-change short-circuit still run the install gate after an
+    ``apm approve`` / ``apm deny`` so it deploys or retires executables.
+    """
+    if lockfile is None:
+        return False
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root, get_manifest_path
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+    from apm_cli.integration.targets import resolve_audit_targets
+
+    def _policy() -> Any:
+        from apm_cli.install.exec_gate import ExecPolicyUnavailable
+        from apm_cli.policy.discovery import discover_policy_with_chain
+        from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+
+        try:
+            fetch = discover_policy_with_chain(get_deploy_root(scope))
+        except Exception as exc:
+            raise ExecPolicyUnavailable(str(exc)) from exc
+        # Unknown policy fails toward running the install gate, which then
+        # applies the configured fetch-failure posture.
+        if getattr(fetch, "outcome", "") in POLICY_RESOLUTION_FAILURE_OUTCOMES:
+            raise ExecPolicyUnavailable(fetch.outcome)
+        return getattr(fetch, "policy", None)
+
+    return lock_exec_decisions_stale(
+        lockfile,
+        modules_dir,
+        get_manifest_path(scope),
+        policy_provider=_policy,
+        targets=resolve_audit_targets(
+            get_deploy_root(scope), user_scope=scope is _Scope.USER, lockfile=lockfile
+        ),
+        fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+    )
+
+
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
     """Build the downloader used for authoritative revision-pin ref checks."""
     return GitHubPackageDownloader(auth_resolver=AuthResolver())
@@ -793,7 +838,12 @@ def _run_dep_update_locked(
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            if not _cache_rehydration_required:
+            if _exec_reconcile_required:
+                logger.info(
+                    "Executables approvals changed since the last install; "
+                    "reconciling deployed executables."
+                )
+            elif not _cache_rehydration_required:
                 retained_count = len(revision_pin_resolution.skips)
                 if retained_count:
                     noun = "pin" if retained_count == 1 else "pins"
@@ -847,6 +897,9 @@ def _run_dep_update_locked(
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
+    )
+    _exec_reconcile_required = not _cache_rehydration_required and _executables_need_reconcile(
+        _existing_lock, _modules_dir, scope, apm_package
     )
 
     try:
@@ -982,7 +1035,9 @@ def _run_dep_update_locked(
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif plan_state.cache_rehydration_requested and installed:
             logger.success(
-                "Restored dependency cache without changing refs.",
+                "Reconciled executables without changing refs."
+                if _exec_reconcile_required
+                else "Restored dependency cache without changing refs.",
                 symbol="check",
             )
         elif revision_pin_updates:

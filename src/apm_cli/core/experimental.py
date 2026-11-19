@@ -109,7 +109,7 @@ FLAGS: dict[str, ExperimentalFlag] = {
         hint=(
             "Author a canvas under .apm/extensions/<name>/extension.mjs, then "
             "'apm install' deploys it to .github/extensions/. Dependency-provided "
-            "canvases are executable and blocked unless approved via allowExecutables "
+            "canvases are executable and blocked unless approved via executables.allow "
             "in apm.yml and 'apm approve <pkg>'. See "
             "https://microsoft.github.io/apm/integrations/canvas/"
         ),

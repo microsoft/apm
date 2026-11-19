@@ -39,7 +39,7 @@ def _admit(root: Path, **overrides):
 
 
 def test_native_admission_never_silently_reduces_unapproved_mcp(tmp_path):
-    with pytest.raises(CodexNativeError, match="allowExecutables"):
+    with pytest.raises(CodexNativeError, match=r"executables\.allow"):
         _admit(tmp_path, approvals={})
 
 
@@ -52,7 +52,7 @@ def test_native_admission_requires_whole_bundle_and_user_scope(tmp_path):
 
 def test_native_admission_gates_hidden_native_root_executables(tmp_path):
     (tmp_path / "hooks").mkdir()
-    with pytest.raises(CodexNativeError, match="allowExecutables"):
+    with pytest.raises(CodexNativeError, match=r"executables\.allow"):
         _admit(tmp_path)
 
 

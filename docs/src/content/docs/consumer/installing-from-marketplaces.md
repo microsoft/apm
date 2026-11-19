@@ -103,8 +103,9 @@ plus where it was found:
   rather than use stale data. `apm marketplace update` refreshes the cached
   list and nothing else.
 - The name `contoso` is local to your machine. If it later points at a
-  different marketplace, `apm update` fails and names both origins instead of
-  switching.
+  different marketplace, `apm update`, `apm install <plugin>@contoso` (with or
+  without `-g`), `apm outdated` and any other re-resolution fail and name both
+  origins instead of switching.
 
 `source_url` records the origin; the digest records provenance and is not a
 trust anchor.
@@ -159,7 +160,9 @@ The plugin appears with its primitive counts. Commit `apm.yml` and
   `apm outdated` to see it, then `apm update`.
 - **Refused bare cross-repo source on `*.ghe.com`.** The entry would fall back
   to public `github.com`, so APM refuses it as a dependency-confusion risk.
-  Ask the publisher to host-qualify the entry.
+  Ask the publisher to host-qualify the entry. A bare `owner/repo` is accepted
+  when your `GITHUB_HOST` is the marketplace host, because it then resolves
+  to that host.
 - **The plugin installs but is incomplete in Claude Code.** See
   [Install plugins](../install-plugins/#known-gaps).
 

@@ -86,7 +86,9 @@ apm install ./dist/review-skills-1.1.0.zip --target copilot
 ```
 
 APM checks the files against the hashes `apm pack` recorded in the bundle,
-deploys them and records them in `apm.lock.yaml`. It does not edit `apm.yml`. To build one, see
+deploys them and records them in `apm.lock.yaml`. It does not edit `apm.yml`. A reinstall
+removes bundle MCP and LSP servers that are no longer shipped, are denied or are not
+approved. To build one, see
 [Build a plugin](../../producer/build-a-plugin/).
 
 ## Transport selection

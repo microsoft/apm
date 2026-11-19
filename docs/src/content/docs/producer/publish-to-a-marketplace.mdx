@@ -138,6 +138,11 @@ To serve several audiences from one repository, give each its own folder with an
 `apm.yml`, and have consumers register each file with `--path`. Separate files
 organize discovery; they are not access control.
 
+On GitHub Enterprise Cloud (`*.ghe.com`), consumers refuse an entry whose bare
+`owner/repo` would fall back to public `github.com`, unless their `GITHUB_HOST` is the
+marketplace host. An entry that points at the marketplace repository itself is always
+accepted. Host-qualify every other entry, for example `contoso.ghe.com/contoso/review-skills`.
+
 ## Keep it current
 
 ```bash frame="terminal"

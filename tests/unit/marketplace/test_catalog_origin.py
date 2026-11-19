@@ -89,3 +89,15 @@ def test_conflict_remediation_quotes_the_locked_origin() -> None:
     unsafe = str(MarketplaceOriginConflictError("company", "plugin", "https://x/$(rm)", _B))
     assert "apm marketplace add" in unsafe
     assert "run: apm marketplace add" not in unsafe or "'https://x/$(rm)'" in unsafe
+
+
+def test_row_level_check_refuses_a_rebound_alias_and_accepts_legacy_rows(registered) -> None:
+    """``apm outdated`` checks the row it already holds through the same owner (#3959)."""
+    registered(_B)
+    (row,) = _lock(_A).dependencies.values()
+    with pytest.raises(MarketplaceOriginConflictError) as exc:
+        catalog_origin.require_locked_row_origin(row)
+    assert _A in str(exc.value) and _B in str(exc.value)
+
+    (legacy,) = _lock(None).dependencies.values()
+    catalog_origin.require_locked_row_origin(legacy)

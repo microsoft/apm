@@ -1185,20 +1185,24 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
 
     logger.start(f"Updating {noun}...")
 
+    from ...install.service import InstallService
+
     try:
-        install_result = _install_apm_dependencies(
-            apm_package,
-            update_refs=True,
-            verbose=verbose,
-            only_packages=only_pkgs,
-            force=force,
-            parallel_downloads=parallel_downloads,
-            logger=logger,
-            auth_resolver=auth_resolver,
-            target=target,
-            scope=scope,
-            legacy_skill_paths=legacy_skill_paths,
-        )
+        # Update intent revalidates marketplace catalogs, as `apm update` does (#3961).
+        with InstallService.catalog_freshness(update_refs=True, refresh=False):
+            install_result = _install_apm_dependencies(
+                apm_package,
+                update_refs=True,
+                verbose=verbose,
+                only_packages=only_pkgs,
+                force=force,
+                parallel_downloads=parallel_downloads,
+                logger=logger,
+                auth_resolver=auth_resolver,
+                target=target,
+                scope=scope,
+                legacy_skill_paths=legacy_skill_paths,
+            )
     except Exception as e:
         logger.error(f"Update failed: {e}")
         if not verbose:

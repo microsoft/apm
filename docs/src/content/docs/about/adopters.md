@@ -12,6 +12,7 @@ endorsement. The source of truth is
 | ENCAMINA | Consultancy, end user | Governs skills, instructions, agents and MCP configurations across initiatives in Azure DevOps and GitHub. |
 | EPAM | Consultancy, contributor, end user | Uses, contributes to and consults on APM. |
 | Grupo Universal | End user | Packages and distributes agent skills, prompts and MCP configurations across internal projects. |
+| Lloyds Banking Group | End user | Distributes AI skills to its developers with APM. |
 | oh-my-agent | Project | Publishes its multi-agent harness as an APM package from a single plugin.json. |
 | PRODYNA SE | Consultancy, contributor, end user | Uses, contributes to and consults on APM. |
 | Sopra Steria | End user | Uses APM. |

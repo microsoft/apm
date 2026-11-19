@@ -141,3 +141,109 @@ def test_stamp_and_gate_share_one_version_owner():
 def test_running_version_always_accepts_its_own_stamp(tmp_path, running):
     running("0.25.0.dev1")
     assert_writable(_lock(tmp_path, "apm_version: 0.25.0.dev1\n"))
+
+
+@pytest.fixture
+def stamping(monkeypatch, running):
+    """The running CLI is 0.40.0 for both the stamp and the gate."""
+    from apm_cli.deps import lockfile as lockfile_module
+
+    running("0.40.0")
+    monkeypatch.setattr(lockfile_module, "installed_apm_version", lambda: "0.40.0")
+    return _recorded_stamp
+
+
+def _recorded_stamp(path: Path) -> str | None:
+    import re
+
+    match = re.search(r"(?m)^apm_version: (.*)$", path.read_text(encoding="utf-8"))
+    return match.group(1) if match else None
+
+
+def _older_lock(tmp_path: Path, lock: LockFile) -> Path:
+    path = tmp_path / "apm.lock.yaml"
+    path.write_text(lock.to_yaml(), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("with_timestamp", [False, True], ids=["plain", "legacy-timestamp"])
+def test_changed_write_stamps_the_running_cli(tmp_path, stamping, with_timestamp):
+    """Any writer that changes a lockfile records this CLI, not the loaded stamp (#3962)."""
+    path = _older_lock(
+        tmp_path,
+        LockFile(
+            apm_version="0.1.0",
+            generated_at="2020-01-01T00:00:00+00:00" if with_timestamp else None,
+            mcp_servers=["old"],
+        ),
+    )
+    lock = LockFile.read(path)
+    lock.mcp_servers = ["new"]
+    lock.write(path)
+    assert stamping(path) == "0.40.0"
+
+
+def test_semantic_noop_write_keeps_the_recorded_stamp(tmp_path, stamping):
+    path = _older_lock(tmp_path, LockFile(apm_version="0.1.0", mcp_servers=["same"]))
+    LockFile.read(path).write(path)
+    assert stamping(path) == "0.1.0"
+
+
+def test_new_lockfile_is_stamped(tmp_path, stamping):
+    path = tmp_path / "apm.lock.yaml"
+    LockFile().write(path)
+    assert stamping(path) == "0.40.0"
+
+
+def test_write_against_a_passed_existing_lockfile_stamps_changes(tmp_path, stamping):
+    path = _older_lock(tmp_path, LockFile(apm_version="0.1.0"))
+    existing = LockFile.read(path)
+    from dataclasses import replace
+
+    replace(existing, mcp_servers=["new"]).write(path, existing_lockfile=existing)
+    assert stamping(path) == "0.40.0"
+
+
+def test_untranslated_mcp_claims_keep_their_recorded_stamp(tmp_path, stamping):
+    """A pre-0.37 lock's copilot claims mean what its stamp says until translated."""
+    path = _older_lock(
+        tmp_path,
+        LockFile(
+            apm_version="0.36.0",
+            mcp_servers=["foo"],
+            mcp_target_servers={"copilot": ["foo"]},
+        ),
+    )
+    lock = LockFile.read(path)
+    lock.lsp_servers = ["added"]
+    lock.write(path)
+    assert stamping(path) == "0.36.0"
+
+
+def test_new_mcp_claims_on_an_older_lock_are_stamped(tmp_path, stamping):
+    path = _older_lock(tmp_path, LockFile(apm_version="0.36.0"))
+    lock = LockFile.read(path)
+    lock.mcp_servers = ["foo"]
+    lock.mcp_target_servers = {"copilot": ["foo"]}
+    lock.write(path)
+    assert stamping(path) == "0.40.0"
+
+
+def test_null_generator_warns_on_read(tmp_path, running, monkeypatch):
+    """A read-only read of ``apm_version: null`` warns like any unverifiable stamp."""
+    from apm_cli.utils import console
+
+    warnings: list[str] = []
+    monkeypatch.setattr(console, "_rich_warning", lambda message, **_: warnings.append(message))
+    LockFile.read(_lock(tmp_path, "apm_version: null\n"))
+    assert len(warnings) == 1
+    assert "apm_version 'null' is not a valid APM version" in warnings[0]
+
+
+def test_missing_generator_does_not_warn_on_read(tmp_path, running, monkeypatch):
+    from apm_cli.utils import console
+
+    warnings: list[str] = []
+    monkeypatch.setattr(console, "_rich_warning", lambda message, **_: warnings.append(message))
+    LockFile.read(_lock(tmp_path, ""))
+    assert warnings == []

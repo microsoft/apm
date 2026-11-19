@@ -294,7 +294,11 @@ def install_local_bundle(
         staged_instructions = result.get("staged_files", [])
         # Issue #1207 D2.c: legacy Claude bundle MCP metadata is routed through
         # MCPIntegrator.install. Native Agent Plugins fail at the deployment boundary.
-        bundle_mcp_present = bool(bundle_mcp_deps)
+        # A Claude bundle always reconciles its owner, so a reinstall that ships
+        # no approved MCP retires the servers it wired earlier (#3956).
+        bundle_mcp_present = (
+            bool(bundle_mcp_deps) or bundle_info.format == BundleFormat.CLAUDE_PLUGIN.value
+        )
 
         if dry_run:
             logger.dry_run_notice(

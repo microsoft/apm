@@ -381,8 +381,9 @@ On a `*.ghe.com` marketplace, a plugin source of any type (`github`,
 as a dependency-confusion risk (#1326)
 before APM contacts the package repository or writes any file. This applies to
 `apm install name@marketplace`, `apm.yml` entries, transitive declarations, and
-`apm update`. Locked entries replay without the catalog; run `apm update` to
-re-check entries an older APM locked.
+`apm update`. Bare entries are admitted when `GITHUB_HOST` is the marketplace
+host. Locked entries replay without the catalog; run
+`apm update` to re-check entries an older APM locked.
 
 Once the lockfile records an entry, `apm install` and `apm install --frozen`
 replay its locked commit without reading the catalog or needing the
@@ -418,8 +419,9 @@ and full locked-commit requirements.
 The lock also records the catalog origin as `source_url` (and a
 `source_digest`) for every remote catalog kind, including Git; local catalogs
 record neither. The alias is machine-local: if it now points at a different
-origin, re-resolving the entry (for example `apm update`) fails and names both
-origins; `apm install` keeps replaying the locked catalog. Restore the alias with `apm marketplace add <locked-origin>
+origin, re-resolving the entry (`apm update`, `apm install <plugin>@<alias>`,
+`apm outdated`) fails and names both origins; `apm install` keeps replaying the
+locked catalog. Restore the alias with `apm marketplace add <locked-origin>
 --name <alias>`; to switch, remove the entry from `apm.yml`, run `apm install`,
 add it back and run `apm install` again. Only the origin is compared, not the
 catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain

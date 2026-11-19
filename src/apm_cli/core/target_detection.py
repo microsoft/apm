@@ -1162,7 +1162,11 @@ def _validate_canonical_v2(tokens: list[str]) -> None:
 
     for token in tokens:
         if token not in CANONICAL_TARGETS:
-            raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
+            from apm_cli.core.target_catalog import advertised_manifest_target_names
+
+            raise UnknownTargetError(
+                render_unknown_target_error(token, sorted(advertised_manifest_target_names()))
+            )
 
 
 def resolve_targets(

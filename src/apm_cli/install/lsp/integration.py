@@ -462,6 +462,7 @@ def prepare_lsp_integration(
             effective_allow_executables = resolve_project_exec_allow_map(
                 project_root,
                 apm_package,
+                user_scope=user_scope,
                 executable_context=executable_context,
                 no_policy=no_policy,
                 logger=logger,

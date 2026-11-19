@@ -168,6 +168,20 @@ def installed_apm_version() -> str:
         return "unknown"
 
 
+def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> bool:
+    """Whether *lock* carries forward MCP claims whose meaning only its stamp records.
+
+    Until the MCP phase translates a pre-0.37 lock's ``copilot``/``vscode``
+    claims (and stamps the running version itself), restamping would make the
+    retired-destination heal skip them.
+    """
+    if existing is None or lock.apm_version != existing.apm_version:
+        return False
+    from ..install.mcp.retired_destinations import lock_holds_untranslated_mcp_claims
+
+    return lock_holds_untranslated_mcp_claims(existing.apm_version, existing.mcp_target_servers)
+
+
 def resolve_reproducible_timestamp(
     explicit: str | None,
     lockfile_generated_at: str | None,
@@ -1167,6 +1181,7 @@ class LockFile:
     _deployments_present: bool = field(default=False, repr=False, compare=False)
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
     _lsp_target_servers_present: bool = field(default=False, repr=False, compare=False)
+    _apm_version_null: bool = field(default=False, repr=False, compare=False)
 
     # Root replacement rules (issue #3180).  Stores the full normalized rule
     # table including dormant rules so frozen validation can compare declared
@@ -1567,6 +1582,7 @@ class LockFile:
             generated_at=data.get("generated_at"),
             apm_version=data.get("apm_version"),
         )
+        lock._apm_version_null = "apm_version" in data and data["apm_version"] is None
         for dep_data in data.get("dependencies", []):
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         lock.mcp_servers = list(data.get("mcp_servers", []))
@@ -1641,6 +1657,11 @@ class LockFile:
         timestamp in a future APM version, but for now it preserves backward
         compatibility with older APM builds that expect the field. This method
         may mutate ``self.generated_at`` to preserve or refresh that metadata.
+
+        A substantive write (or a new lockfile) records the running CLI in
+        ``self.apm_version`` so the generator gate sees who last changed it;
+        only a lock still carrying untranslated pre-0.37 MCP claims keeps its
+        recorded version until the MCP phase translates them.
         Callers that already loaded the destination can pass ``existing_lockfile``
         to avoid parsing the same bytes again.
         """
@@ -1662,22 +1683,25 @@ class LockFile:
             except (yaml.YAMLError, ValueError):
                 existing_data = None
             existing = None
-            if isinstance(existing_data, dict) and existing_data.get("generated_at") is not None:
-                legacy_timestamp_present = True
+            if isinstance(existing_data, dict):
+                legacy_timestamp_present = existing_data.get("generated_at") is not None
                 try:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
                     )
                 except UnsupportedLockfileVersionError:
-                    raise
+                    if legacy_timestamp_present:
+                        raise
+                    existing = None
                 except LockfileFormatError:
                     existing = None
         elif isinstance(existing_lockfile, _ExistingLockfileUnset):
             existing = None
         else:
             existing = existing_lockfile
+        unchanged = existing is not None and self.is_semantically_equivalent(existing)
         if existing is not None and existing.generated_at is not None:
-            if self.is_semantically_equivalent(existing):
+            if unchanged:
                 self.generated_at = existing.generated_at
             else:
                 self.generated_at = datetime.now(UTC).isoformat()
@@ -1685,6 +1709,9 @@ class LockFile:
             self.generated_at = datetime.now(UTC).isoformat()
         else:
             self.generated_at = None
+        if not unchanged and not _keeps_untranslated_mcp_stamp(self, existing):
+            # The generator gate's only signal: whoever changes it owns it (#3962).
+            self.apm_version = installed_apm_version()
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
         atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
@@ -1706,7 +1733,8 @@ class LockFile:
             raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
         from .lockfile_generator import warn_if_newer
 
-        warn_if_newer(path, lock.apm_version)
+        # An explicit ``apm_version: null`` is unverifiable, unlike an absent one.
+        warn_if_newer(path, "null" if lock._apm_version_null else lock.apm_version)
         return lock
 
     @classmethod

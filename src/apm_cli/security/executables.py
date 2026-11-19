@@ -1090,7 +1090,7 @@ def build_effective_exec_map(
 
 
 def exec_trust_context_for_project(
-    project_root: Path,
+    manifest_path: Path,
     *,
     policy: Any | None,
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
@@ -1098,11 +1098,15 @@ def exec_trust_context_for_project(
     migrate_user_legacy: bool = True,
     include_user: bool = True,
 ) -> ExecTrustContext:
-    """Resolve project, user, and policy executable trust through one owner."""
+    """Resolve project, user, and policy executable trust through one owner.
+
+    *manifest_path* is the scope's ``apm.yml`` itself, never a directory the
+    caller picked: under ``-g`` it is ``APM_HOME/apm.yml``, which the home
+    directory (the user-scope source and deploy root) does not hold (#3954).
+    """
     from apm_cli.models.manifest_io import load_manifest
 
     project_data: dict[str, Any] | None = None
-    manifest_path = project_root / "apm.yml"
     if manifest_path.is_file():
         data = load_manifest(manifest_path)
         if isinstance(data, dict):
@@ -1124,6 +1128,13 @@ def exec_trust_context_for_project(
     return ctx
 
 
+def project_manifest_path(project_root: Path) -> Path:
+    """Return the project-scope manifest that holds *project_root*'s trust layer."""
+    from apm_cli.constants import APM_YML_FILENAME
+
+    return Path(project_root) / APM_YML_FILENAME
+
+
 def effective_exec_map_for_project(
     project_root: Path,
     *,
@@ -1135,7 +1146,7 @@ def effective_exec_map_for_project(
     """Materialize the canonical trust context for one project."""
     return materialize_exec_map(
         exec_trust_context_for_project(
-            project_root,
+            project_manifest_path(project_root),
             policy=policy,
             fallback_allow_executables=fallback_allow_executables,
             logger=logger,
@@ -1148,6 +1159,7 @@ def resolve_project_exec_allow_map(
     project_root: Path,
     apm_package: Any,
     *,
+    user_scope: bool,
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
     logger: Any | None = None,
@@ -1157,6 +1169,8 @@ def resolve_project_exec_allow_map(
     Reuses a map the caller already resolved (``executable_context`` is
     ``(map, resolved)``); otherwise resolves org policy (unless disabled),
     project, and user layers through :func:`effective_exec_map_for_project`.
+    Org policy is discovered from *project_root*; the grants are read from
+    the scope's manifest (``$APM_HOME/apm.yml`` at user scope).
     """
     allow_map, resolved = executable_context
     if resolved:
@@ -1166,8 +1180,10 @@ def resolve_project_exec_allow_map(
         from apm_cli.policy.discovery import discover_policy_with_chain
 
         policy = getattr(discover_policy_with_chain(project_root), "policy", None)
+    from apm_cli.core.scope import manifest_root
+
     return effective_exec_map_for_project(
-        project_root,
+        manifest_root(project_root, user_scope=user_scope),
         policy=policy,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         logger=logger,

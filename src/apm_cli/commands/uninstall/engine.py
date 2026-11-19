@@ -621,6 +621,8 @@ def _resolve_marketplace_packages(
     # the first entry whose provenance differs from the requested marketplace.
     exact_index: dict[tuple[str, str], str] = {}
     plugin_index: dict[str, list[tuple[str, str]]] = {}
+    # Case-insensitive rows for the origin check, matched like marketplace_rows.
+    origin_rows: dict[tuple[str, str], list] = {}
     if lockfile is not None:
         for dep in lockfile.dependencies.values():
             mp = dep.marketplace_plugin_name
@@ -631,6 +633,7 @@ def _resolve_marketplace_packages(
             exact_key = (via, mp)
             exact_index.setdefault(exact_key, canonical_key)
             plugin_index.setdefault(mp, []).append((via, canonical_key))
+            origin_rows.setdefault((via.casefold(), mp.casefold()), []).append(dep)
 
     for package in packages:
         parsed = parse_marketplace_ref(package)
@@ -670,6 +673,13 @@ def _resolve_marketplace_packages(
                     symbol="search",
                 )
                 try:
+                    from ...marketplace.catalog_origin import require_locked_row_origin
+
+                    # #3959: a rebound alias fails closed before any catalog I/O.
+                    for locked in origin_rows.get(
+                        (marketplace_name.casefold(), plugin_name.casefold()), ()
+                    ):
+                        require_locked_row_origin(locked, marketplace_name=marketplace_name)
                     resolution = resolve_marketplace_plugin(
                         plugin_name, marketplace_name, auth_resolver=auth_resolver
                     )
@@ -1473,7 +1483,7 @@ def _sync_integrations_after_uninstall(
     _allow_executables = None
     if target_survivor_plan:
         _allow_executables = resolve_project_exec_allow_map(
-            project_root, apm_package, logger=logger
+            project_root, apm_package, user_scope=user_scope, logger=logger
         )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 

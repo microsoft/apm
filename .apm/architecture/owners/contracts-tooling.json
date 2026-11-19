@@ -103,11 +103,21 @@
       "guards": ["contracts-tooling-project-yaml-write-delegation"]
     },
     {
+      "id": "lifecycle-script-firing-gate",
+      "decision": "Whether a discovered lifecycle script may fire (APM_NO_SCRIPTS, org executables.deny_all, project script trust)",
+      "owner": "core/lifecycle_scripts.py (build_runner_from_context is the only LifecycleScriptRunner constructor)",
+      "selectors": ["src/apm_cli/core/lifecycle_scripts.py"],
+      "guards": ["contracts-tooling-lifecycle-script-gate"]
+    },
+    {
       "id": "lockfile-generator-compatibility",
       "decision": "Whether the running CLI may write, replay or certify a lockfile another APM generated (apm_version)",
-      "owner": "deps/lockfile_generator.py (assert_writable, check_current_cli, require_current_cli, warn_if_newer); utils/version_checker.py (release_precedence) orders versions",
+      "owner": "deps/lockfile_generator.py (assert_writable, check_current_cli, require_current_cli, warn_if_newer); utils/version_checker.py (release_precedence) orders versions; deps/lockfile.py (LockFile.write) stamps apm_version",
       "selectors": ["src/apm_cli/deps/lockfile_generator.py"],
-      "guards": ["contracts-tooling-lockfile-generator-gate"]
+      "guards": [
+        "contracts-tooling-lockfile-generator-gate",
+        "contracts-tooling-lockfile-generator-stamp"
+      ]
     },
     {
       "id": "read-only-lockfile-path",
