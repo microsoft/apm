@@ -340,7 +340,11 @@ def install_local_bundle(
             from ..core.deployment_ledger import DeploymentLedgerCodec
 
             DeploymentLedgerCodec.record_local_bundle_files(
-                lockfile, deployed, deployed_hashes, staged=staged_instructions
+                lockfile,
+                deployed,
+                deployed_hashes,
+                staged=staged_instructions,
+                staged_hashes=result.get("staged_file_hashes", {}),
             )
 
             # Auto-migrate legacy per-client skill paths (#737).

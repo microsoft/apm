@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Instructions that `apm install <bundle>` stages for Codex, Gemini or OpenCode are now hash-checked: if one is edited before `apm compile`, compile warns and `apm audit --ci` fails with `hash-drift` until `apm install <bundle> --force` restages it. Lockfiles from earlier versions record the hash on the next bundle install (#PRNUM)
 - The MCP retired-shape heal lifecycle test now asserts the 0.37 `mcp.transport.allow` contract (a registry SSE remote outside the allow list is blocked before any write). (#3877)
 - `apm install` policy blocks print one violation per offending dependency or MCP server, naming it, and the hint names what to remove, add or pin (for a transitive MCP server, the direct apm.yml dependency that brings it in, even through deeper chains) instead of telling you to remove the check name from apm.yml (#3865)
 - `apm install <pkg> --dry-run` without an `apm.yml` no longer writes one in project scope; it prints `Would create apm.yml`, as `-g` already did (#3865)

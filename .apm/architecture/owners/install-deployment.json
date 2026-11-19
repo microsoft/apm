@@ -3,8 +3,8 @@
   "owners": [
     {
       "id": "local-bundle-compile-staging",
-      "decision": "Local bundle instructions staged under apm_modules/<slug>/.apm/ for compile-only targets are lockfile-proven compile input, never deployment claims",
-      "owner": "deps/lockfile.py (local_staging_slug, LockFile.local_staged_files, local_staging_slugs, absent_staging_slugs, retire_local_staging -- apm prune is the only retirement path) written by core/deployment_ledger.py (record_local_bundle_files staged=) from install/services.py (integrate_local_bundle staged_files)",
+      "decision": "Local bundle instructions staged under apm_modules/<slug>/.apm/ for compile-only targets are lockfile-proven, hash-bound compile input, never deployment claims",
+      "owner": "deps/lockfile.py (local_staging_slug, LockFile.local_staged_files, local_staged_file_hashes, local_staging_slugs, absent_staging_slugs, retire_local_staging -- apm prune is the only retirement path; staged_hash_drift is the only staged-content verifier, used by apm audit content-integrity and apm compile) written by core/deployment_ledger.py (record_local_bundle_files staged=, staged_hashes=) from install/services.py (integrate_local_bundle staged_files, staged_file_hashes via compute_file_hash)",
       "selectors": ["src/apm_cli/install/local_bundle_handler.py"],
       "guards": ["install-deployment-bundle-compile-staging"]
     },

@@ -308,6 +308,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         "lsp_target_servers",
         "lsp_config_provenance",
         "local_deployed_file_hashes",
+        "local_staged_file_hashes",
     )
     for field_name in list_fields:
         if field_name in data and data[field_name] is None:
@@ -1122,6 +1123,8 @@ class LockFile:
     # Local bundle compile input under apm_modules/<slug>/.apm/ (#3705): proves
     # a staging root for ``apm compile`` without being a deployment claim.
     local_staged_files: list[str] = field(default_factory=list)
+    # ``sha256:<hex>`` per staged path, from the deployed-file hash owner (#3718).
+    local_staged_file_hashes: dict[str, str] = field(default_factory=dict)
     deployment_ledger: DeploymentLedger = field(
         default_factory=lambda: DeploymentLedger(records={})
     )
@@ -1241,6 +1244,33 @@ class LockFile:
         self.local_staged_files = [
             path for path in self.local_staged_files if Path(path).parts[:2] not in removed
         ]
+        self.local_staged_file_hashes = {
+            path: digest
+            for path, digest in self.local_staged_file_hashes.items()
+            if path in self.local_staged_files
+        }
+
+    def staged_hash_drift(self, project_root: Path) -> list[tuple[str, str, str]]:
+        """Return ``(path, expected, actual)`` for staged files changed since install (#3718).
+
+        Hashes come from the deployed-file owner (``compute_file_hash``). A
+        path without a recorded hash (pre-#3718 lockfiles), outside a staging
+        root, missing, or symlinked makes no drift claim: compile reads none.
+        """
+        from ..utils.content_hash import compute_file_hash
+
+        drift: list[tuple[str, str, str]] = []
+        for path in sorted(self.local_staged_files):
+            expected = self.local_staged_file_hashes.get(path)
+            if expected is None or local_staging_slug(path) is None or ".." in Path(path).parts:
+                continue
+            file_path = project_root / path
+            if file_path.is_symlink() or not file_path.is_file():
+                continue
+            actual = compute_file_hash(file_path)
+            if actual != expected:
+                drift.append((path, expected, actual))
+        return drift
 
     def project_self_entry(self) -> LockedDependency:
         """Build the virtual self-entry for the project's own local content.
@@ -1390,6 +1420,10 @@ class LockFile:
                 )
             if self.local_staged_files:
                 data["local_staged_files"] = sorted(self.local_staged_files)
+            if self.local_staged_file_hashes:
+                data["local_staged_file_hashes"] = dict(
+                    sorted(self.local_staged_file_hashes.items())
+                )
             if self.replacements is not None:
                 data["replacements"] = self.replacements
             from ..utils.yaml_io import yaml_to_str
@@ -1463,6 +1497,7 @@ class LockFile:
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
         lock.local_staged_files = list(data.get("local_staged_files", []))
+        lock.local_staged_file_hashes = dict(data.get("local_staged_file_hashes") or {})
         # Root replacement rules (issue #3180).  ``None`` = no replacement
         # section in lockfile; ``[]`` = explicitly cleared replacement state.
         raw_replacements = data.get("replacements")
@@ -1732,6 +1767,7 @@ class LockFile:
             sorted(self.local_deployed_files) == sorted(other.local_deployed_files)
             and dict(self.local_deployed_file_hashes) == dict(other.local_deployed_file_hashes)
             and sorted(self.local_staged_files) == sorted(other.local_staged_files)
+            and dict(self.local_staged_file_hashes) == dict(other.local_staged_file_hashes)
         )
 
     @classmethod

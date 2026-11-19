@@ -691,6 +691,9 @@ class LockfileBuilder:
                 current_targets=self.ctx.targets or (),
             )
             lockfile.local_staged_files = list(self.ctx.existing_lockfile.local_staged_files)
+            lockfile.local_staged_file_hashes = dict(
+                self.ctx.existing_lockfile.local_staged_file_hashes
+            )
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(
                     self.ctx.existing_lockfile.dependencies["."]

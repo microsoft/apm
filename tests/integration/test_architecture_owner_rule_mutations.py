@@ -241,6 +241,49 @@ def test_frozen_and_audit_share_deployed_hash_verifier(
 
 
 @pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "(staged_hashes if _staged else deployed_hashes)[record] = (",
+            "(deployed_hashes if not _staged else {})[record] = (",
+            id="install-stages-without-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "staged_drift = lock.staged_hash_drift(project_root)",
+            "staged_drift: list[tuple[str, str, str]] = []",
+            id="audit-skips-staged-drift",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/compile/cli.py",
+            "    _report_staged_hash_drift(logger, _src)\n",
+            "",
+            id="compile-skips-staged-drift",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "actual = compute_file_hash(file_path)",
+            "actual = hashlib.sha256(file_path.read_bytes()).hexdigest()",
+            id="staged-drift-uses-second-hash-scheme",
+        ),
+    ],
+)
+def test_staged_compile_input_drift_routes_through_lockfile_owner(
+    path: str, original: str, replacement: str
+) -> None:
+    """Staged bundle input is hashed and verified by one owner (#3718)."""
+    source = _source(path)
+    assert source.count(original) == 1
+    rule = "install-deployment-bundle-compile-staging"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement", "refused"),
     [
         (

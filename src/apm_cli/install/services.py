@@ -839,7 +839,8 @@ def integrate_local_bundle(
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
         ``deployed_file_hashes`` (dict[str, str]), ``staged_files``
-        (compile input under ``apm_modules/``, never a deployment claim), ``skipped`` (int), and per-primitive counters
+        (compile input under ``apm_modules/``, never a deployment claim),
+        ``staged_file_hashes`` (dict[str, str]), ``skipped`` (int), and per-primitive counters
         (``skills``, ``agents``, ``commands``, ...).
     """
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
@@ -899,6 +900,7 @@ def integrate_local_bundle(
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
     staged_files: list[str] = []
+    staged_hashes: dict[str, str] = {}
     skipped = 0
 
     # py-arch-2: Filter bundle-metadata files (plugin.json, .mcp.json) out of
@@ -1151,10 +1153,10 @@ def integrate_local_bundle(
             # ``compute_deployed_hashes`` writes, so stale-cleanup provenance
             # checks compare equal. IM4: a real deploy hashes the on-disk bytes
             # after LF normalization; a dry run previews the same digest.
-            if not _staged:
-                deployed_hashes[record] = (
-                    f"sha256:{desired_hash}" if dry_run else compute_file_hash(dest)
-                )
+            # Staged compile input is hash-bound the same way (#3718).
+            (staged_hashes if _staged else deployed_hashes)[record] = (
+                f"sha256:{desired_hash}" if dry_run else compute_file_hash(dest)
+            )
             if logger:
                 logger.verbose_detail(
                     f"[dry-run] would deploy {record}" if dry_run else f"deployed {record}"
@@ -1164,6 +1166,7 @@ def integrate_local_bundle(
         "deployed_files": deployed_files,
         "deployed_file_hashes": deployed_hashes,
         "staged_files": staged_files,
+        "staged_file_hashes": staged_hashes,
         "skipped": skipped,
         "skills": 0,
         "agents": 0,
