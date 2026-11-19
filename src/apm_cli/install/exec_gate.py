@@ -270,8 +270,11 @@ class ReplayExecAllowMap:
     withholds them too (#3924). Fully deployed entries replay ungated.
     """
 
-    def __init__(self, project_root: Path) -> None:
+    def __init__(
+        self, project_root: Path, *, no_policy: bool = False, policy_override: str | None = None
+    ) -> None:
         self._project_root = project_root
+        self._policy = {"no_policy": no_policy, "policy_override": policy_override}
         self._resolved = False
         self._map: builtins.dict[str, builtins.dict[str, bool]] | None = None
 
@@ -286,6 +289,6 @@ class ReplayExecAllowMap:
 
             manifest_path = self._project_root / "apm.yml"
             manifest = APMPackage.from_apm_yml(manifest_path) if manifest_path.is_file() else None
-            self._map = resolve_project_exec_allow_map(self._project_root, manifest)
+            self._map = resolve_project_exec_allow_map(self._project_root, manifest, **self._policy)
             self._resolved = True
         return self._map

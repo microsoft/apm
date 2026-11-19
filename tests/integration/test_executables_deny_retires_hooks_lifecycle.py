@@ -128,6 +128,9 @@ def test_gating_a_package_retires_its_deployed_hooks(
 
     apm("install", "--no-policy")
     assert _hook_residue(project), "the hook must deploy before it is gated"
+    deployed_configs = {
+        path: path.read_bytes() for path in _project_files(project) if path.suffix == ".json"
+    }
 
     if gate_off == "deny":
         apm("deny", "../hooky")
@@ -150,3 +153,11 @@ def test_gating_a_package_retires_its_deployed_hooks(
 
     audit = apm("audit", "--ci", "--no-policy")
     assert "Drift detected" not in audit, audit
+
+    if target == "claude":
+        # A denied hook still registered (e.g. by an older CLI) fails the audit.
+        for path, content in deployed_configs.items():
+            path.write_bytes(content)
+        leftover = apm("audit", "--ci", "--no-policy", expect=1)
+        assert "Drift detected" in leftover, leftover
+        assert ".claude/settings.json" in leftover, leftover

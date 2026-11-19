@@ -104,6 +104,9 @@ class ReplayConfig:
     scratch_root: Path | None = None
     modules_root: Path | None = None
     user_scope: bool = False
+    # The audit's policy selection, applied to the replayed executables gate.
+    no_policy: bool = False
+    policy_override: str | None = None
 
 
 @dataclass(frozen=True)
@@ -637,7 +640,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     replayed_count = 0
     from apm_cli.install.exec_gate import ReplayExecAllowMap
 
-    gated_allow_map = ReplayExecAllowMap(project_root)
+    gated_allow_map = ReplayExecAllowMap(
+        project_root, no_policy=config.no_policy, policy_override=config.policy_override
+    )
     local_parent_index = build_local_parent_index(lock)
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
@@ -849,6 +854,7 @@ def diff_scratch_against_project(
     # is compared through hook_ownership; sidecars compare all owned content
     # while ignoring JSON object-key ordering from the live merge.
     from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
+    from apm_cli.integration.hook_ownership import apm_owned_hook_entries_remain
 
     merge_config_specs = merge_hook_config_projection_specs(targets)
     merge_sidecar_paths = {sidecar_path for sidecar_path, _ in merge_config_specs.values()}
@@ -997,6 +1003,11 @@ def diff_scratch_against_project(
                     package=tracked.get(rel, ""),
                 )
             )
+        elif (spec := merge_config_specs.get(rel)) and apm_owned_hook_entries_remain(
+            project_root / rel, project_root / spec[0], spec[1]
+        ):
+            # Replay deploys no hooks here, yet APM-owned entries remain (#3924).
+            findings.append(DriftFinding(path=rel, kind="modified", package=""))
         # else: untracked governed file -- ignore (user authored).
 
     return findings

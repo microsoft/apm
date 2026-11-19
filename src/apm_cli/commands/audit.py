@@ -626,7 +626,12 @@ def _audit_ci_gate(
 
     fail_fast = not no_fail_fast
 
-    materialization = resolve_ci_audit_materialization(cfg.project_root, verbose=cfg.verbose)
+    materialization = resolve_ci_audit_materialization(
+        cfg.project_root,
+        verbose=cfg.verbose,
+        no_policy=no_policy,
+        policy_override=policy_source or None,
+    )
     prepared_replay = materialization.prepared_replay
     prepared_replay_error = materialization.error
 
@@ -802,6 +807,8 @@ def _audit_ci_gate(
                         cache_only=prepared_replay is None,
                         verbose=cfg.verbose,
                         prepared_replay=prepared_replay,
+                        no_policy=no_policy,
+                        policy_override=policy_source or None,
                     )
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":

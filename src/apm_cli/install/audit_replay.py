@@ -78,6 +78,8 @@ def prepare_ci_audit_replay(
     project_root: Path,
     *,
     verbose: bool = False,
+    no_policy: bool = False,
+    policy_override: str | None = None,
 ) -> PreparedCiAuditReplay:
     """Prepare one lock-pinned scratch replay for ``apm audit --ci`` consumers."""
     project_root = project_root.resolve()
@@ -124,6 +126,8 @@ def prepare_ci_audit_replay(
         scratch_root=scratch_root,
         modules_root=modules_root,
         user_scope=user_scope,
+        no_policy=no_policy,
+        policy_override=policy_override,
     )
     stderr_context = (
         contextlib.nullcontext() if verbose else contextlib.redirect_stderr(io.StringIO())
@@ -153,6 +157,8 @@ def resolve_ci_audit_materialization(
     project_root: Path,
     *,
     verbose: bool = False,
+    no_policy: bool = False,
+    policy_override: str | None = None,
 ) -> CiAuditMaterialization:
     """Decide how ``apm audit --ci`` reaches installed package materialization.
 
@@ -190,7 +196,12 @@ def resolve_ci_audit_materialization(
         )
     try:
         return CiAuditMaterialization(
-            prepared_replay=prepare_ci_audit_replay(project_root, verbose=verbose)
+            prepared_replay=prepare_ci_audit_replay(
+                project_root,
+                verbose=verbose,
+                no_policy=no_policy,
+                policy_override=policy_override,
+            )
         )
     except CiAuditReplayError as exc:
         return CiAuditMaterialization(error=str(exc))
