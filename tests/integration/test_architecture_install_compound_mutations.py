@@ -927,6 +927,42 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "src/apm_cli/commands/uninstall/cli.py",
         append="\n\ndef _first_section(package, dev_deps):\n    return package in dev_deps\n",
     ),
+    CompoundMutation(
+        "audit-package-selection-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "        selection = select_installed_lock_key(package, manifest, lockfile)",
+            "        selection = None",
+        ),
+    ),
+    CompoundMutation(
+        "audit-package-second-selector",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        append=(
+            "\n\ndef _lock_key_for(package):\n"
+            "    return parse_dependency_entry(package).get_unique_key()\n"
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-uninstall-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    selected, _refused = _validate_uninstall_packages(",
+            "    selected, _refused = _validate_uninstall_packages_disabled(",
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-shared-candidates",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "    return had_dev_section, prod_deps, dev_deps, manifest_dependency_entries(data)",
+            "    return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]",
+        ),
+    ),
     *(
         CompoundMutation(
             f"replacement-owner-{method}",

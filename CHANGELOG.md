@@ -42,9 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `targets:` on `dependencies.mcp` entries now limits which targets get each server, is never written into native config, and target-scoped installs keep servers declared elsewhere. (closes #2606, #3951)
+- Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native Agent Plugin is installed. (closes #3901, #3946)
 - Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)
 - `apm install` removes hooks a package deployed earlier once `apm deny` or a removed approval gates them, and names a denied package as denied. (#3944)
 - `apm uninstall plugin@marketplace` removes object-form `{name, marketplace}` entries from `apm.yml`, offline, with their lock row and files. (closes #3928, #3933)
+- `apm audit PACKAGE` accepts `plugin@marketplace` and the `_local/<name>` key from `apm deps list`, selecting offline exactly as `apm uninstall` does. (closes #3953, #3968)
 - Marketplace entries in `apm.yml`, transitive marketplace dependencies and `apm update` now refuse bare cross-repo `repo:` on `*.ghe.com` marketplaces, as CLI installs already did. (closes #3913, #3923)
 - `*.ghe.com` marketplaces now refuse bare cross-repo `git-subdir`, `gitlab` and `url` sources too, not only `type: github`. (closes #3937, #3942)
 - A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm update` fails naming both, and duplicate registrations warn. (closes #3912, #3917)
