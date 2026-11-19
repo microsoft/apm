@@ -268,7 +268,10 @@ selection or catalog provenance records a new resolution time.
 `resolved_commit` pins the installed bytes. Audit requires this locked evidence
 for version selections; it neither guesses a tag pattern nor re-resolves the
 catalog. `discovered_via` + `marketplace_plugin_name` associate a declaration
-with one locked coordinate, not a durable catalog trust identity.
+with one locked coordinate, not a durable catalog trust identity. Install
+replays that coordinate without contacting the catalog while the declaration's
+`name`, `marketplace` and `version` still match it; `apm update` resolves the
+catalog again.
 
 `source_url` is that identity: the catalog's canonical origin, recorded for
 every remote catalog kind (hosted `marketplace.json`, GitHub, GitLab, Azure

@@ -29,6 +29,42 @@ def test_marketplace_locked_evidence_routes_through_owners() -> None:
         ("drift.py", "marketplace_ref_mismatch(dep_ref, locked_dep)", "None"),
         ("drift.py", "satisfies_range(version, spec)", "True"),
         ("marketplace/resolver.py", "build_tag_regex(", "re.compile("),
+        (
+            "drift.py",
+            "or marketplace_ref_mismatch(dep_ref, locked_dep) is not None",
+            "or False",
+        ),
+        (
+            "drift.py",
+            "_owns_locked_servers(lockfile, locked_dep, replayed.get_install_path(Path()))",
+            "False",
+        ),
+        ("drift.py", "package_lsp_owner(owner) for owner", "owner for owner"),
+        (
+            "drift.py",
+            "{mcp_package_owner(locked_dep.name, package_dir=package_dir)}",
+            "{locked_dep.name}",
+        ),
+        ("drift.py", "locked_dep.to_edge_reference(dep_ref)", "locked_dep.to_dependency_ref()"),
+        (
+            "install/lsp/integration.py",
+            "package_lsp_owner(dependency.resolved_by)",
+            'f"package:{dependency.resolved_by}"',
+        ),
+        (
+            "integration/mcp_config_view.py",
+            "declarer = mcp_package_owner(package.name, package_dir=manifest_path.parent)",
+            "declarer = package.name or manifest_path.parent.name",
+        ),
+        ("deps/reachability.py", "locked.to_edge_reference(ref)", "locked.to_dependency_ref()"),
+        ("deps/apm_resolver.py", "locked_marketplace_replay(\n", "_skip_replay(\n"),
+        ("deps/apm_resolver.py", "frozen_marketplace_refusal(decision)", "None"),
+        (
+            "deps/apm_resolver.py",
+            "        decision = locked_marketplace_replay(",
+            "        resolve_marketplace_plugin(dep_ref)\n"
+            "        decision = locked_marketplace_replay(",
+        ),
     ],
 )
 def test_marketplace_locked_evidence_guard_rejects_bypasses(

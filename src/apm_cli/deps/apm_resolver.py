@@ -647,7 +647,12 @@ class APMDependencyResolver:
     def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
         """Resolve a marketplace dependency to a concrete DependencyReference.
 
-        Uses :func:`resolve_marketplace_plugin` to look up the plugin in the
+        A declaration that still matches its lock row is replayed from the
+        lock before any catalog, alias or registration I/O
+        (:func:`~apm_cli.drift.locked_marketplace_replay`); ``--frozen``
+        refuses a declaration with no matching lock row instead of asking the
+        marketplace. Otherwise uses
+        :func:`resolve_marketplace_plugin` to look up the plugin in the
         registered marketplace and returns a resolved git-backed reference.
         Prefers the structured ``dependency_reference`` from the resolution
         when available (GitLab-class hosts, in-marketplace subdirectory
@@ -663,8 +668,23 @@ class APMDependencyResolver:
             MarketplaceNotFoundError: Marketplace is not registered.
             PluginNotFoundError: Plugin not found in the marketplace.
             MarketplaceFetchError: Network/auth error fetching marketplace data.
-            ValueError: Invalid marketplace or plugin configuration.
+            ValueError: Invalid marketplace or plugin configuration, or a
+                frozen or offline run without a matching lock row.
         """
+        from apm_cli.drift import frozen_marketplace_refusal, locked_marketplace_replay
+
+        decision = locked_marketplace_replay(
+            dep_ref,
+            self._existing_lockfile,
+            update_refs=self._update_refs,
+            modules_dir=self._apm_modules_dir,
+        )
+        if decision.reference is not None:
+            _logger.debug("Replaying %s from apm.lock.yaml", dep_ref.get_display_name())
+            return decision.reference
+        refusal = frozen_marketplace_refusal(decision) if self._frozen else None
+        if refusal is not None:
+            raise refusal
         if self._read_only:
             raise ValueError("Marketplace lookup is not available in an offline dependency preview")
         from apm_cli.marketplace.catalog_origin import require_locked_catalog_origin

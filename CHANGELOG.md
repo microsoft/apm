@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude plugin MCP and LSP servers record `${CLAUDE_PLUGIN_ROOT}` portably, so `--frozen` and `audit --ci` pass in any clone; commit the one-time `apm.lock.yaml` diff. (#3900)
 - `apm install` works again when APM is installed without dev extras; it no longer fails with "No module named 'packaging'". (#3909)
 - Upgrading to root `.mcp.json` after `--only apm`, a failed install or `--frozen` no longer strands or disowns APM's MCP entries. (#3899, #3909)
+- `apm install` and `apm install --frozen` replay locked marketplace dependencies without contacting the catalog; only new or changed entries and `apm update` read it. (closes #3911, #3915)
 - Instructions `apm install <bundle>` stages for Codex, Gemini or OpenCode are hash-checked, so edits before `apm compile` report `hash-drift`. (#3898)
 - `apm install <bundle>` registers a plugin bundle's hooks like a source install once its exact key is approved, and installing another package no longer removes local-bundle files. (#3897)
 - `apm approve <pkg>` on a dependency redirected by `replace:` now grants its selected source, so the next `apm install` deploys its hooks. -- by @MohammedAlkindi (#3742)

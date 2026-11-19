@@ -49,6 +49,7 @@ Scope / non-goals
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from dataclasses import replace as _dataclass_replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -150,6 +151,118 @@ def marketplace_ref_mismatch(
     elif spec != locked_dep.resolved_ref:
         return f"manifest ref '{spec}' != lockfile ref '{locked_dep.resolved_ref or '(missing)'}'"
     return None
+
+
+def locked_marketplace_row(
+    dep_ref: DependencyReference, lockfile: LockFile | None
+) -> LockedDependency | None:
+    """Return the lock row an unchanged marketplace declaration still matches.
+
+    The row must be the lock's single association for the declaration's
+    ``{name, marketplace}``, carry no replacement binding, and satisfy
+    :func:`marketplace_ref_mismatch`. Never performs catalog I/O.
+    """
+    if lockfile is None or getattr(dep_ref, "is_marketplace", False) is not True:
+        return None
+    locked_dep = lockfile.get_dependency(dep_ref.get_unique_key())
+    if (
+        locked_dep is None
+        or locked_dep.replacement is not None
+        or marketplace_ref_mismatch(dep_ref, locked_dep) is not None
+    ):
+        return None
+    return locked_dep
+
+
+def _owns_locked_servers(
+    lockfile: LockFile, locked_dep: LockedDependency, package_dir: Path
+) -> bool:
+    """True when the lock records MCP or LSP servers contributed by *locked_dep*.
+
+    Each kind's owner token comes from its provenance writer: MCP names the
+    declaring package, LSP uses the lock key or, on a first install, the
+    package's ``apm_modules``-relative *package_dir*.
+    """
+    from apm_cli.install.lsp.integration import package_lsp_owner
+    from apm_cli.integration.mcp_config_view import mcp_package_owner
+
+    mcp_owners = {mcp_package_owner(locked_dep.name, package_dir=package_dir)}
+    lsp_owners = {
+        package_lsp_owner(owner) for owner in (locked_dep.get_unique_key(), package_dir.as_posix())
+    }
+    for owners, provenance in (
+        (mcp_owners, lockfile.mcp_config_provenance),
+        (lsp_owners, lockfile.lsp_config_provenance),
+    ):
+        for recorded in (provenance or {}).values():
+            tokens = recorded if isinstance(recorded, list) else [recorded]
+            if owners.intersection(tokens):
+                return True
+    return False
+
+
+MARKETPLACE_REPLAYED = "replayed"
+MARKETPLACE_UNLOCKED = "unlocked"
+MARKETPLACE_UPDATE = "update"
+MARKETPLACE_CATALOG_METADATA = "catalog-metadata"
+
+
+@dataclass(frozen=True)
+class MarketplaceReplay:
+    """Outcome of the replay-vs-re-resolve decision for one declaration."""
+
+    reason: str
+    reference: DependencyReference | None = None
+
+
+def locked_marketplace_replay(
+    dep_ref: DependencyReference,
+    lockfile: LockFile | None,
+    *,
+    update_refs: bool = False,
+    modules_dir: Path | None = None,
+) -> MarketplaceReplay:
+    """Decide whether a marketplace declaration replays its lock row (#3911).
+
+    Single owner of "replay vs re-resolve" for object-form marketplace
+    declarations. A row found by :func:`locked_marketplace_row` replays
+    without catalog, alias or registration I/O (``replayed``); the row's
+    commit and hashes then pin the download. New, changed, ambiguous,
+    replacement-bound or under-evidenced entries are ``unlocked`` and
+    ``apm update`` / ``--refresh`` (*update_refs*) is ``update``; both
+    resolve through the marketplace.
+
+    ``catalog-metadata`` keeps today's behavior for one case: catalog entries
+    may define MCP or LSP servers inline, and the lock cannot rebuild that
+    metadata, so a row whose package owns locked servers replays only while
+    its materialized copy under *modules_dir* exists.
+    """
+    if update_refs:
+        return MarketplaceReplay(MARKETPLACE_UPDATE)
+    locked_dep = locked_marketplace_row(dep_ref, lockfile)
+    if locked_dep is None:
+        return MarketplaceReplay(MARKETPLACE_UNLOCKED)
+    replayed = locked_dep.to_edge_reference(dep_ref)
+    if modules_dir is not None and replayed.get_install_path(modules_dir).is_dir():
+        return MarketplaceReplay(MARKETPLACE_REPLAYED, replayed)
+    if _owns_locked_servers(lockfile, locked_dep, replayed.get_install_path(Path())):
+        return MarketplaceReplay(MARKETPLACE_CATALOG_METADATA)
+    return MarketplaceReplay(MARKETPLACE_REPLAYED, replayed)
+
+
+def frozen_marketplace_refusal(decision: MarketplaceReplay) -> ValueError | None:
+    """Return the ``--frozen`` refusal for a declaration the lock cannot replay.
+
+    Only an unlocked declaration is refused; ``catalog-metadata`` rows keep
+    reading the catalog because only it holds their server definitions.
+    """
+    if decision.reason != MARKETPLACE_UNLOCKED:
+        return None
+    return ValueError(
+        "--frozen replays marketplace dependencies from apm.lock.yaml only, and "
+        "no locked entry matches this declaration. Run 'apm install' without "
+        "--frozen, then commit apm.lock.yaml"
+    )
 
 
 def _routes_to_locked_proxy(dep_ref: DependencyReference, locked_dep: Any) -> bool:
