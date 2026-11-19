@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,6 +82,16 @@ RETIRED_PROJECT_MCP_DESTINATIONS: tuple[RetiredMcpDestination, ...] = (
 
 # The first release whose lockfile ownership for ``copilot`` means ``.mcp.json``.
 _FIRST_ROOT_MCP_JSON_RELEASE = (0, 37)
+# PEP 440 public version (optional ``v`` and epoch) plus local label, as
+# recorded in ``apm_version``; only the leading release numbers are read.
+_PEP440_RELEASE_PREFIX = re.compile(
+    r"^v?(?:\d+!)?(\d+)(?:\.(\d+))?(?:\.\d+)*"
+    r"(?:[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?\d*)?"
+    r"(?:-\d+|[-_.]?(?:post|rev|r)[-_.]?\d*)?"
+    r"(?:[-_.]?dev[-_.]?\d*)?"
+    r"(?:\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?$",
+    re.IGNORECASE,
+)
 
 
 def lock_predates_root_mcp_json(apm_version: str | None) -> bool:
@@ -91,13 +102,12 @@ def lock_predates_root_mcp_json(apm_version: str | None) -> bool:
     """
     if not isinstance(apm_version, str) or not apm_version:
         return True
-    from packaging.version import InvalidVersion, Version
-
-    try:
-        release = Version(apm_version).release
-    except InvalidVersion:
+    # Stdlib only: ``packaging`` is not a runtime dependency (#3908).
+    match = _PEP440_RELEASE_PREFIX.match(apm_version.strip())
+    if match is None:
         return False
-    return tuple(release[:2]) < _FIRST_ROOT_MCP_JSON_RELEASE
+    release = (int(match.group(1)), int(match.group(2) or 0))
+    return release < _FIRST_ROOT_MCP_JSON_RELEASE
 
 
 def lock_holds_untranslated_mcp_claims(
