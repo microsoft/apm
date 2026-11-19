@@ -262,7 +262,7 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
     exclusion_calls = _named_calls(handler_nodes, "filter_excluded_mcp_runtimes")
     dry_run_validation_calls = _named_calls(handler_nodes, "_validate_mcp_dry_run_entry")
     registry_validation_calls = _attribute_calls(command_nodes, "prevalidate_registry_dependencies")
-    bootstrap_calls = _named_calls(command_nodes, "_create_minimal_apm_yml")
+    bootstrap_calls = _named_calls(command_nodes, "write_minimal_manifest")
     manifest_write_calls = _named_calls(command_nodes, "add_mcp_to_apm_yml")
     manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
     apm_dir_calls = _named_calls(handler_nodes, "get_apm_dir")

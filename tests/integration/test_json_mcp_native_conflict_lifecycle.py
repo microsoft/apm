@@ -24,8 +24,7 @@ INSTALL = ("install", "--no-policy")
 
 # target -> (config path, dot dir that opts the project in, servers path, user entry)
 TARGETS = {
-    "vscode": (".vscode/mcp.json", ".vscode", ("servers",), {"command": "usercmd"}),
-    "copilot": (".github/mcp.json", ".github", ("mcpServers",), {"command": "usercmd"}),
+    "copilot": (".mcp.json", ".github", ("mcpServers",), {"command": "usercmd"}),
     "cursor": (".cursor/mcp.json", ".cursor", ("mcpServers",), {"command": "usercmd"}),
     "gemini": (".gemini/settings.json", ".gemini", ("mcpServers",), {"command": "usercmd"}),
     "kiro": (".kiro/settings/mcp.json", ".kiro", ("mcpServers",), {"command": "usercmd"}),

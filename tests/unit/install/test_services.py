@@ -366,6 +366,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
@@ -390,6 +391,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info2,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg2",
@@ -443,6 +445,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 logger=logger,
@@ -492,6 +495,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 logger=logger,
@@ -541,6 +545,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 logger=logger,
@@ -589,6 +594,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="my-awesome-pkg",
@@ -643,6 +649,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=diagnostics,
                 package_name="diag-pkg",
@@ -703,6 +710,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="prompts-only-pkg",

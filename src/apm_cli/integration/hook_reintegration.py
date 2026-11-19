@@ -22,6 +22,7 @@ def build_hook_reintegration_source_plan(
         package_info,
         allow_executables,
     )[0]
+    # Hooks only: this plan never deploys skills, so no skill selection applies.
     source_plan = DeployableSourcePlan.create(
         package_info,
         targets,

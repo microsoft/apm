@@ -160,10 +160,10 @@ def check_token(token: str, host: str, host_kind: str) -> tuple[str, int | None]
     if host_kind in _GITHUB_KINDS:
         url = f"{api_base}/user"
         headers = {
-            "Authorization": f"token {token}",
             "Accept": "application/vnd.github+json",
             "User-Agent": "apm-cli",
         }
+        headers.update(AuthResolver.github_rest_headers(token))
     else:
         url = f"{api_base}/user"
         headers = {"User-Agent": "apm-cli"}

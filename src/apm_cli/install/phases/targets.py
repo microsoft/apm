@@ -19,41 +19,32 @@ if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
 
 
-def _package_field(apm_package: Any, name: str) -> Any:
-    """Return a real APMPackage field without treating MagicMock attrs as set."""
-    if apm_package is None:
-        return None
-    try:
-        attrs = vars(apm_package)
-    except TypeError:
-        attrs = {}
-    if name in attrs:
-        return attrs[name]
-    value = getattr(apm_package, name, None)
-    if type(value).__module__ == "unittest.mock":
-        return None
-    return value
-
-
 def _package_target_value(apm_package: Any) -> str | list[str] | None:
-    """Read singular target or plural targets from the parsed package model."""
-    from apm_cli.core.apm_yml import parse_targets_field
+    """Return the package's declared target selection from the declaration owner."""
+    from apm_cli.models.apm_package import package_target_selection
 
-    target = _package_field(apm_package, "target")
-    targets = _package_field(apm_package, "targets")
-    if target is not None and targets is not None:
-        parse_targets_field({"target": target, "targets": targets})
-    if targets is not None:
-        parsed = parse_targets_field({"targets": targets})
-        return parsed if parsed else None
-    return target
+    return package_target_selection(apm_package)
 
 
 def _raise_target_usage_error(ctx: Any, exc: Exception) -> None:
     """Render target field user errors consistently before exiting."""
     if ctx.logger:
-        ctx.logger.error(str(exc), symbol="")
+        ctx.logger.error(str(exc), symbol="error")
     raise SystemExit(2) from exc
+
+
+def reject_undeployable_manifest_targets(apm_package: Any, logger: Any) -> None:
+    """Exit 2 before any write when the manifest declares a target install cannot deploy."""
+    from apm_cli.core.errors import TargetResolutionError
+    from apm_cli.models.apm_package import package_target_declaration
+
+    try:
+        package_target_declaration(apm_package).validate_for_install()
+    except TargetResolutionError as exc:
+        if logger:
+            logger.error(str(exc), symbol="error")
+            logger.render_summary()
+        raise SystemExit(2) from exc
 
 
 def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
@@ -86,31 +77,16 @@ def _normalize_runtime_target_aliases(tokens: Iterable[str]) -> list[str]:
 
 
 def _read_yaml_targets(ctx) -> list[str] | None:
-    """Read targets/target from raw apm.yml using v2 parser.
+    """Return the names the package manifest restricts deployment to.
 
-    Returns a list of canonical target names, or None if neither key
-    is present.  Raises ConflictingTargetsError if both keys appear.
+    ``None`` when nothing restricting is declared (including legacy ``all``).
+    Raises ConflictingTargetsError if both keys appear.
     """
     if ctx.apm_package is None:
         return None
-    apm_yml_path = getattr(ctx.apm_package, "package_path", None)
-    if apm_yml_path is None:
-        return _as_yaml_targets(_package_target_value(ctx.apm_package))
-    manifest = apm_yml_path / "apm.yml"
-    if not manifest.exists():
-        return _as_yaml_targets(_package_target_value(ctx.apm_package))
-    try:
-        from apm_cli.utils.yaml_io import load_yaml
+    from apm_cli.models.apm_package import package_target_declaration
 
-        data = load_yaml(manifest)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    from apm_cli.core.apm_yml import parse_targets_field
-
-    result = parse_targets_field(data)
-    return result if result else None
+    return package_target_declaration(ctx.apm_package).restriction()
 
 
 def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
@@ -443,7 +419,7 @@ def _resolve_targets_by_scope(
         )
     except _click.UsageError as exc:
         if ctx.logger:
-            ctx.logger.error(str(exc), symbol="")
+            ctx.logger.error(str(exc), symbol="error")
         raise SystemExit(2) from exc
 
     from apm_cli.utils.console import _rich_info
@@ -574,9 +550,9 @@ def run(ctx: InstallContext) -> None:
     # per-client root_dir instead of the converged .agents/ directory.
     # ------------------------------------------------------------------
     if ctx.legacy_skill_paths:
-        from apm_cli.integration.targets import apply_legacy_skill_paths
+        from apm_cli.integration.skill_layout import resolve_skill_layout
 
-        _targets = apply_legacy_skill_paths(_targets)
+        _targets = resolve_skill_layout(_targets, legacy_skill_paths=True)
 
     # ------------------------------------------------------------------
     # Initialize integrators

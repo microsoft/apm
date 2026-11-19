@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from .object_fields import apply_optional_dependency_fields
+from .subsets import EdgeSelection, merge_edge_selections
 
 if TYPE_CHECKING:
     from ..apm_package import APMPackage
@@ -258,6 +259,16 @@ class ReplacementBinding:
             if not binding.requests:
                 binding.original = replace(edge, alias=original.alias)
             binding.record(edge, request["parent"], request["dev"])
+        if len(binding.requests) > 1:
+            # The node carries the merged selection of every incoming edge (#3735).
+            merged = merge_edge_selections(
+                EdgeSelection((), request.skills, request.targets) for request in binding.requests
+            )
+            binding.original = replace(
+                binding.original,
+                skill_subset=None if merged.skill_subset is None else list(merged.skill_subset),
+                target_subset=None if merged.target_subset is None else list(merged.target_subset),
+            )
         return binding
 
     def local_source_path(self, consumer_root: Path | None = None) -> Path:

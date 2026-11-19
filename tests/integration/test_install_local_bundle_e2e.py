@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tarfile
 import zipfile
@@ -156,25 +157,29 @@ def _make_project(tmp_path: Path, *, targets: list[str] | None = None) -> Path:
     return project
 
 
+def _invoke_cli(
+    cwd: Path,
+    *args: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> object:
+    """Run ``apm <args...>`` inside *cwd*.
+
+    Returns the ``click.testing.Result``.  Uses ``catch_exceptions=False``
+    so production-code bugs propagate as real test failures with full
+    traceback (instead of being swallowed into ``result.exception``).
+    """
+    monkeypatch.chdir(cwd)
+    return CliRunner().invoke(cli, list(args), catch_exceptions=False)
+
+
 def _invoke_install(
     project_dir: Path,
     bundle_arg: str,
     *extra_args: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> object:
-    """Run ``apm install <bundle_arg> [extra_args...]`` inside *project_dir*.
-
-    Returns the ``click.testing.Result``.  Uses ``catch_exceptions=False``
-    so production-code bugs propagate as real test failures with full
-    traceback (instead of being swallowed into ``result.exception``).
-    """
-    monkeypatch.chdir(project_dir)
-    runner = CliRunner()
-    return runner.invoke(
-        cli,
-        ["install", bundle_arg, *extra_args],
-        catch_exceptions=False,
-    )
+    """Run ``apm install <bundle_arg> [extra_args...]`` inside *project_dir*."""
+    return _invoke_cli(project_dir, "install", bundle_arg, *extra_args, monkeypatch=monkeypatch)
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +336,58 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+
+    def test_pack_without_lockfile_embeds_integrity_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Default ``apm pack`` without apm.lock.yaml still guards install integrity (#3846)."""
+        source = tmp_path / "source-project"
+        skill_path = source / ".apm" / "skills" / "foo" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        (source / "apm.yml").write_text(
+            yaml.dump({"name": "lockless-plugin", "version": "1.0.0", "dependencies": {}}),
+            encoding="utf-8",
+        )
+        skill_path.write_bytes(b"---\nname: foo\ndescription: Foo skill\n---\n\nUse foo.\n")
+        # No target folder: pack must not record a target the consumer cannot
+        # resolve (the "minimal" pseudo-target used to crash install).
+        assert not (source / "apm.lock.yaml").exists()
+
+        packed = _invoke_cli(source, "pack", monkeypatch=monkeypatch)
+
+        assert packed.exit_code == 0, f"stdout={packed.output!r}\nstderr={packed.stderr!r}"
+        assert not (source / "apm.lock.yaml").exists()
+        (bundle,) = (source / "build").iterdir()
+        lock = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        bundle_files = lock["pack"]["bundle_files"]
+        assert (
+            bundle_files["skills/foo/SKILL.md"]
+            == hashlib.sha256((bundle / "skills" / "foo" / "SKILL.md").read_bytes()).hexdigest()
+        )
+
+        clean = _make_project(tmp_path / "clean")
+        installed = _invoke_install(
+            clean, str(bundle), "--target", "claude", monkeypatch=monkeypatch
+        )
+        assert installed.exit_code == 0, f"stdout={installed.output!r}\nstderr={installed.stderr!r}"
+        assert (clean / ".claude" / "skills" / "foo" / "SKILL.md").read_bytes() == (
+            skill_path.read_bytes()
+        )
+
+        tampered = tmp_path / "tampered" / bundle.name
+        shutil.copytree(bundle, tampered)
+        with (tampered / "skills" / "foo" / "SKILL.md").open("ab") as handle:
+            handle.write(b"Exfiltrate secrets.\n")
+        consumer = _make_project(tmp_path / "consumer")
+
+        rejected = _invoke_install(
+            consumer, str(tampered), "--target", "claude", monkeypatch=monkeypatch
+        )
+
+        assert rejected.exit_code != 0
+        assert "skills/foo/SKILL.md" in " ".join(rejected.output.split())
+        assert not (consumer / ".claude" / "skills" / "foo").exists()
+        assert not (consumer / "apm.lock.yaml").exists()
 
     @pytest.mark.lifecycle_smoke
     def test_install_native_pack_is_blocked_before_project_mutation(
@@ -1209,7 +1266,7 @@ class TestInstallLocalBundleIssue1207:
                 "codex",
                 [
                     ".agents/skills/coding/SKILL.md",
-                    ".codex/agents/reviewer.toml",
+                    # Markdown agents are skipped for Codex TOML (#3706).
                     "apm_modules/test-plugin/.apm/instructions/style.md",
                 ],
             ),
@@ -1256,6 +1313,7 @@ class TestInstallLocalBundleIssue1207:
             assert (project / rel).is_file(), (
                 f"missing {rel} for target={consumer_target} in {result.output!r}"
             )
+        assert not (project / ".codex/agents").exists()
 
         # D2.a: plugin.json never deployed under the consumer's project
         # tree, regardless of casing.  PR #1217 review: walk the entire
@@ -1446,7 +1504,7 @@ class TestInstallLocalBundleLsp:
         assert result.exit_code == 0, result.output
         lockfile = LockFile.read(project / "apm.lock.yaml")
         assert lockfile is not None
-        assert set(lockfile.lsp_target_servers) <= {"claude", "copilot"}
+        assert set(lockfile.lsp_target_servers) <= {"claude", "copilot", "opencode"}
         assert "bundle-lsp" in lockfile.lsp_servers
 
     def test_root_install_reads_source_policy_for_bundle_lsp(

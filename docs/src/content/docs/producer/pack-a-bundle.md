@@ -8,7 +8,10 @@ to a registry. It is a directory (or archive -- `.zip` by default, `.tar.gz` via
 `--archive-format tar.gz`) containing a
 `plugin.json`, your primitive folders, and an embedded `apm.lock.yaml` that
 pins every file by SHA-256. Build it with one command from a project that has
-`apm.yml`:
+`apm.yml`. Run `apm install` first when you have dependencies: their content is
+packed from the project's lockfile. A project with only local primitives and
+no lockfile still gets an embedded `apm.lock.yaml` in the default format;
+`--format agent-plugin` requires the lockfile:
 
 ```bash
 apm pack
@@ -28,7 +31,7 @@ the registry resolver entirely.
 By default `apm pack` writes a Claude Code plugin directory under `./build/`:
 
 ```
-build/<your-package>/
+build/<your-package>-<version>/
 +-- plugin.json
 +-- agents/
 +-- skills/
@@ -37,18 +40,17 @@ build/<your-package>/
 +-- hooks.json         # first-party hook configuration, when present
 +-- .claude-plugin/
 |   +-- plugin.json    # native Claude hook discovery, when hooks are present
-+-- apm.lock.yaml      # embedded: pins every file by SHA-256
++-- apm.lock.yaml      # always embedded: pins every file by SHA-256
 ```
 
 The success line tells you exactly what to share:
 
 ```
 $ apm pack
-[+] Packed 7 file(s) -> build/my-pkg
-[>] Plugin bundle ready -- contains plugin.json plus plugin-native
-    directories (agents/, skills/, commands/, ...) and an embedded
-    apm.lock.yaml for install-time integrity verification.
-[i] Share with: apm install build/my-pkg
+[*] Packed 7 file(s) -> build/my-pkg-1.0.0
+[i] Claude plugin bundle ready -- contains plugin.json, plugin-native
+    directories, and an embedded apm.lock.yaml for integrity verification.
+[i] Share with: apm install build/my-pkg-1.0.0
 ```
 
 Pass `--format agent-plugin` instead to opt into a portable [Agent Plugins v1](../../reference/cli/pack/#agent-plugin-bundle---format-agent-plugin)
@@ -162,7 +164,12 @@ side, `apm install <bundle>` rehashes every file and rejects the bundle if:
 
 The manifest is the source of truth. Tampering after pack time is detected
 before any file lands in the project. You do not configure this -- it runs on
-every `apm install <bundle>`.
+every `apm install <bundle>` that carries the manifest.
+
+Bundles produced by older APM versions (or by other tools) may have no
+manifest: `apm install <bundle>` then skips the integrity check with a
+warning, or fails when policy sets `security.integrity.require_hashes: true`.
+Repack them with `apm pack` so they carry hashes.
 
 ## Distribution paths
 

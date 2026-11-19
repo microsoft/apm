@@ -31,8 +31,8 @@ class TestRichBlankLineNoConsole:
         from apm_cli.commands._helpers import _rich_blank_line
 
         with (
-            patch("apm_cli.commands._helpers._get_console", return_value=None),
-            patch("apm_cli.commands._helpers.click") as mock_click,
+            patch("apm_cli.utils.themed_console._get_console", return_value=None),
+            patch("apm_cli.utils.themed_console.click") as mock_click,
         ):
             _rich_blank_line()
 
@@ -196,9 +196,9 @@ class TestUpdateGitignoreReadError:
             return real_open(path, mode, *args, **kwargs)
 
         with (
-            patch("apm_cli.commands._helpers.GITIGNORE_FILENAME", str(gitignore)),
+            patch("apm_cli.install.helpers.gitignore.GITIGNORE_FILENAME", str(gitignore)),
             patch("builtins.open", side_effect=patched_open),
-            patch("apm_cli.commands._helpers._rich_warning") as mock_warn,
+            patch("apm_cli.install.helpers.gitignore._rich_warning") as mock_warn,
         ):
             _update_gitignore_for_apm_modules(logger=None)
 
@@ -225,9 +225,9 @@ class TestUpdateGitignoreWriteError:
             return real_open(path, mode, *args, **kwargs)
 
         with (
-            patch("apm_cli.commands._helpers.GITIGNORE_FILENAME", str(gitignore)),
+            patch("apm_cli.install.helpers.gitignore.GITIGNORE_FILENAME", str(gitignore)),
             patch("builtins.open", side_effect=patched_open),
-            patch("apm_cli.commands._helpers._rich_warning") as mock_warn,
+            patch("apm_cli.install.helpers.gitignore._rich_warning") as mock_warn,
         ):
             _update_gitignore_for_apm_modules(logger=None)
 

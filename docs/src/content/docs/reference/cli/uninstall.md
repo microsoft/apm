@@ -121,13 +121,14 @@ What gets removed, in order:
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
 
-When uninstall rebuilds a surviving package's loose skills, APM records those
-actual writes locally and binds them after the final lockfile update succeeds.
+When uninstall rebuilds a surviving package's loose skills, it deploys only the
+skills that package selects with `skills:`, as `apm install` does. APM records
+those actual writes locally and binds them after the final lockfile update succeeds.
 Later installs can update the survivor without treating its unchanged files as
 user edits. Removed-output receipts are retired before survivor copies; failed
 removals do not retire evidence. Receipt failures are reported, not ignored.
 
-### Claude Code and Codex profiles
+### Harness profiles
 
 Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
 removes a package's files and lockfile rows only under the selected
@@ -139,7 +140,8 @@ profiles share the package loses files: selecting a Claude profile leaves
 `~/.hermes` (and other targets such as `~/.agents`) untouched, and the reverse.
 The selected profile is matched by path; symlinks are not resolved.
 Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
-Codex agents and hooks.
+Codex agents and hooks, and Copilot CLI homes selected by `COPILOT_HOME` (or
+`~/.copilot`) for Copilot instructions, agents and hooks.
 
 `Cleaned N stale deployed files for DEPENDENCY` identifies the affected
 dependency, not the deletion location. An absolute local path in that message
@@ -212,6 +214,8 @@ When marketplace notation (`name@marketplace`) falls through to the registry (St
 ### No-lockfile behavior
 
 If `apm.lock.yaml` is not present, marketplace notation has no offline anchor: Stage 1 finds nothing, and the supply-chain guard cannot cross-check the registry result. APM still attempts registry resolution and proceeds if the canonical matches an entry in `apm.yml`, but this path has weaker integrity guarantees. A local `_local/<name>` key also has no persisted mapping without the lockfile, so use its exact declared path or run `apm install` to regenerate the lockfile first.
+
+Without a lockfile, nothing proves which skill directories APM deployed, so uninstall (project and `-g`) removes no skill directories and prints a notice. Run `apm install` first to restore lockfile ownership if you want deployed skills cleaned up.
 
 `--dry-run` keeps the uninstall engine read-only, but `pre-uninstall` lifecycle scripts still run and may have their own side effects. Registry fallback and shared-slot staging are skipped, so marketplace refs not already in the lockfile cannot be previewed and a real shared-slot uninstall can still fail validation; use `owner/repo` notation or re-run without `--dry-run`.
 

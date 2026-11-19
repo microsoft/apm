@@ -403,6 +403,11 @@ requirements:
     section: "7.7"
     conformance_class: consumer
     notes: "full-SHA update extensions deterministically select the highest eligible non-prerelease annotated tag, retain pins with no eligible tag, persist git-literal provenance, and stop before writes on malformed or failed remote resolution"
+  - id: req-rs-018
+    keyword: MUST
+    section: "7.4.1"
+    conformance_class: consumer
+    notes: "multi-edge skills x targets selections merge by exact per-edge pairing with all absorbing per axis, independent of order and depth; lock records unions plus canonical subset_pairings only when the flat product over-selects; inconsistent records and frozen selection changes fail"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"

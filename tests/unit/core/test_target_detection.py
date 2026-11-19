@@ -11,12 +11,14 @@ from apm_cli.core.target_detection import (
     EXPERIMENTAL_TARGETS,
     MCP_ONLY_TARGETS,
     VALID_TARGET_VALUES,
+    EffectiveTargetDecision,
     TargetParamType,
     can_dedup_agents_md_instructions,
+    canonical_policy_target_name,
+    canonical_policy_target_names,
     detect_target,
     get_dedup_rules_dir,
     get_target_description,
-    normalize_policy_targets,
     normalize_target_list,
     should_compile_agents_md,
     should_compile_claude_md,
@@ -608,7 +610,7 @@ class TestTargetParamType:
         a single normalization path.
         """
         result = self.tp.convert(["claude", "vscode"], None, None)
-        assert result == ["claude", "vscode"]
+        assert result == ["claude", "copilot"]
 
     def test_list_input_collapses_aliases_to_string(self):
         """Multi-element list whose entries all alias to one canonical
@@ -625,7 +627,8 @@ class TestTargetParamType:
         assert self.tp.convert("copilot", None, None) == "copilot"
 
     def test_single_vscode(self):
-        assert self.tp.convert("vscode", None, None) == "vscode"
+        """The deprecated vscode alias always resolves to copilot (#3866)."""
+        assert self.tp.convert("vscode", None, None) == "copilot"
 
     def test_single_cursor(self):
         assert self.tp.convert("cursor", None, None) == "cursor"
@@ -694,9 +697,9 @@ class TestTargetParamType:
     # -- Alias deduplication ----------------------------------------------
 
     def test_copilot_vscode_deduplicates(self):
-        """copilot,vscode retains separate MCP configuration destinations."""
+        """copilot,vscode collapse: vscode has no MCP destination of its own (#3866)."""
         result = self.tp.convert("copilot,vscode", None, None)
-        assert result == ["copilot", "vscode"]
+        assert result == "copilot"
 
     def test_copilot_agents_deduplicates(self):
         """copilot,agents collapse to Copilot's canonical target."""
@@ -705,10 +708,10 @@ class TestTargetParamType:
         assert result == "copilot"
 
     def test_copilot_agents_vscode_deduplicates(self):
-        """The legacy agents alias collapses without merging VS Code's destination."""
+        """Both deprecated aliases collapse into copilot."""
         with pytest.warns(DeprecationWarning, match="--target agents"):
             result = self.tp.convert("copilot,agents,vscode", None, None)
-        assert result == ["copilot", "vscode"]
+        assert result == "copilot"
 
     def test_copilot_claude_deduplicates_alias(self):
         """copilot,claude preserves the configured target destinations."""
@@ -896,6 +899,12 @@ class TestTargetParamType:
             assert target == "agent-skills"
             assert reason == "apm.yml target"
 
+    @pytest.mark.parametrize("name", sorted(EXPERIMENTAL_TARGETS))
+    def test_explicit_experimental_target_is_honored(self, name, tmp_path):
+        """Experimental targets are not replaced by folder auto-detection (#3842)."""
+        (tmp_path / ".claude").mkdir()
+        assert detect_target(tmp_path, explicit_target=name) == (name, "explicit --target flag")
+
     # -- B2: 'all,agent-skills' is allowed; 'all,claude' still rejected ----
 
     def test_all_combined_with_agent_skills_allowed(self):
@@ -958,36 +967,85 @@ class TestIntelliJConstantGuards:
             assert t in result
 
 
-class TestNormalizePolicyTargets:
-    """Direct contract tests for MCP-only policy target normalization."""
+class TestPolicyTargetProjection:
+    """Contract tests for the compilation-target policy projection (#3732)."""
 
     @pytest.mark.parametrize(
         ("value", "expected"),
         [
             (None, None),
-            ("intellij", "copilot"),
-            (["intellij", "claude"], ["copilot", "claude"]),
-            (["intellij", "copilot"], ["copilot"]),
+            ("intellij", ("copilot",)),
+            (["intellij", "claude"], ("copilot", "claude")),
+            (["intellij", "copilot"], ("copilot",)),
+            ("vscode", ("copilot",)),
+            ("agents", ("copilot",)),
+            ("agy", ("antigravity",)),
+            (["claude", "vscode"], ("claude", "copilot")),
         ],
     )
-    def test_normalizes_shape_and_deduplicates(
+    def test_decision_projects_aliases_and_mcp_only_targets(
         self,
         value: str | list[str] | None,
-        expected: str | list[str] | None,
+        expected: tuple[str, ...] | None,
     ) -> None:
-        """Normalize MCP-only values while preserving scalar/list shape."""
-        assert normalize_policy_targets(value) == expected
+        """The decision projection resolves aliases and MCP-only targets."""
+        assert EffectiveTargetDecision(value, "apm.yml").canonical_targets == expected
+
+    def test_decision_expands_all(self) -> None:
+        """``all`` projects to every target an install deploys."""
+        projected = EffectiveTargetDecision("all", "apm.yml").canonical_targets
+        assert projected is not None
+        assert "all" not in projected
+        assert {"claude", "copilot"} <= set(projected)
+
+    @pytest.mark.parametrize("copilot_spelling", ["copilot", "vscode"])
+    def test_runtime_targets_never_yield_vscode(self, copilot_spelling: str) -> None:
+        """Copilot projects to the copilot MCP runtime, never vscode (#3866)."""
+        decision = EffectiveTargetDecision(["claude", copilot_spelling], "apm.yml")
+        assert decision.canonical_targets == ("claude", "copilot")
+        assert decision.runtime_targets == ("claude", "copilot")
 
     def test_unmapped_mcp_only_target_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Reject an MCP-only target without a canonical policy mapping."""
+        from dataclasses import replace
+
+        real = target_detection.get_target_capability
         monkeypatch.setattr(
             target_detection,
-            "MCP_ONLY_TARGETS",
-            frozenset({*MCP_ONLY_TARGETS, "unmapped-mcp"}),
+            "get_target_capability",
+            lambda name: replace(real(name), primitive_profile=None),
         )
 
         with pytest.raises(RuntimeError, match="has no canonical policy mapping"):
-            normalize_policy_targets("unmapped-mcp")
+            _ = EffectiveTargetDecision("intellij", "apm.yml").canonical_targets
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [
+            (None, None),
+            ((), ()),
+            (("vscode", "claude"), ("copilot", "claude")),
+            (("Copilot", "agents"), ("copilot",)),
+            (("all",), None),
+            (("claude", "all"), None),
+            (("agy", "unknown-tool"), ("antigravity", "unknown-tool")),
+        ],
+    )
+    def test_policy_names_canonicalize(
+        self,
+        values: tuple[str, ...] | None,
+        expected: tuple[str, ...] | None,
+    ) -> None:
+        """Policy allow lists compare on profiles; ``all`` means unrestricted."""
+        assert canonical_policy_target_names(values) == expected
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(None, None), ("vscode", "copilot"), ("all", "all"), ("claude", "claude")],
+    )
+    def test_policy_enforce_canonicalizes(self, value: str | None, expected: str | None) -> None:
+        """A single enforced target resolves its alias; ``all`` is kept."""
+        assert canonical_policy_target_name(value) == expected
 
 
 # ---------------------------------------------------------------------------

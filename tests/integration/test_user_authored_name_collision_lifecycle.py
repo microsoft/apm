@@ -46,6 +46,15 @@ def _assert_bytes(root: Path, expected: dict[str, bytes], step: str) -> None:
         assert path.read_bytes() == data, f"{step}: user file {relative} was rewritten"
 
 
+def _case_sensitive(directory: Path) -> bool:
+    probe = directory / "case-probe"
+    probe.mkdir()
+    try:
+        return not (directory / "CASE-PROBE").exists()
+    finally:
+        probe.rmdir()
+
+
 def _edit_package(package: Path) -> None:
     for path in (package / ".apm").rglob("*.md"):
         path.write_text(path.read_text(encoding="ascii") + "Package v2.\n", encoding="ascii")
@@ -167,11 +176,25 @@ def test_identity_and_case_only_collisions_survive_full_chain(
         },
     )
 
+    case_only = {
+        ".github/instructions/Global.instructions.md",
+        ".github/agents/REV.agent.md",
+        ".claude/commands/Hello.md",
+    }
+    case_sensitive = _case_sensitive(project)
+
     installed = scenario.run(*INSTALL, cwd=project)
     _assert_bytes(project, user, "install")
     assert "local files exist" in output(installed)
-    claimed = {path.lower() for path in deployed_files(project)}
-    assert not {path.lower() for path in user} & claimed
+    claimed = set(deployed_files(project))
+    assert not set(user) & claimed
+    folded_overlap = {path.lower() for path in user} & {path.lower() for path in claimed}
+    if case_sensitive:
+        # Case-only names are distinct files here; APM deploys its own
+        # spelling beside the user's file, which stays untouched.
+        assert folded_overlap == {path.lower() for path in case_only}
+    else:
+        assert not folded_overlap
 
     _edit_package(package)
     scenario.run(*INSTALL, cwd=project)
@@ -230,7 +253,7 @@ def test_identical_user_hook_and_root_context_survive_uninstall_and_compile_clea
 def test_jsonc_mcp_configs_are_never_rewritten_from_scratch(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """VS Code, Copilot, Gemini and Kiro configs with comments fail closed, bytes intact."""
+    """Copilot, Gemini and Kiro configs with comments fail closed, bytes intact."""
     scenario = Scenario.create(tmp_path, apm_binary_path)
     write(
         tmp_path / "pkg/apm.yml",
@@ -238,13 +261,12 @@ def test_jsonc_mcp_configs_are_never_rewritten_from_scratch(
         "    - name: pkgsrv\n      registry: false\n      transport: stdio\n"
         "      command: pkgcmd\n",
     )
-    project = write_project(tmp_path / "proj", ("vscode", "copilot", "gemini", "kiro"))
+    project = write_project(tmp_path / "proj", ("copilot", "gemini", "kiro"))
     servers = (
         '{\n  // user comment\n  "mcpServers": {"mine": {"command": "mine"}},\n  "theme": "x"\n}\n'
     )
     configs = {
-        ".vscode/mcp.json": '{\n  // user comment\n  "servers": {"mine": {"command": "mine"}}\n}\n',
-        ".github/mcp.json": servers,
+        ".mcp.json": servers,
         ".gemini/settings.json": servers,
         ".kiro/settings/mcp.json": servers,
     }
@@ -255,11 +277,9 @@ def test_jsonc_mcp_configs_are_never_rewritten_from_scratch(
     assert output(refused).count("Could not parse") >= len(configs), output(refused)
 
     for relative in configs:
-        key = "servers" if relative.startswith(".vscode") else "mcpServers"
-        write(project / relative, json.dumps({key: {"mine": {"command": "mine"}}}) + "\n")
+        write(project / relative, json.dumps({"mcpServers": {"mine": {"command": "mine"}}}) + "\n")
     scenario.run(*INSTALL, cwd=project)
     scenario.run("uninstall", "../pkg", cwd=project)
     for relative in configs:
-        key = "servers" if relative.startswith(".vscode") else "mcpServers"
         data = json.loads((project / relative).read_text(encoding="utf-8"))
-        assert set(data[key]) == {"mine"}, relative
+        assert set(data["mcpServers"]) == {"mine"}, relative

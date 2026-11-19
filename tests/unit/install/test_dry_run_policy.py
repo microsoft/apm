@@ -592,13 +592,18 @@ class TestDryRunNoiseCap:
     """D2: dry-run preview capped at _DRY_RUN_PREVIEW_LIMIT per bucket."""
 
     def _make_check_result(self, n_details: int, check_name: str = "deny-list"):
-        """Build a CheckResult with *n_details* detail lines."""
-        details = [f"pkg-{i}: denied by policy" for i in range(1, n_details + 1)]
+        """Build a CheckResult naming *n_details* denied dependencies."""
+        from apm_cli.policy.models import PolicySubject
+
+        subjects = tuple(
+            PolicySubject(f"pkg-{i}", "denied by policy") for i in range(1, n_details + 1)
+        )
         return CheckResult(
             name=check_name,
             passed=False,
             message=f"{n_details} deps denied",
-            details=details,
+            details=[f"{s.ref}: {s.reason}" for s in subjects],
+            subjects=subjects,
         )
 
     def _make_failing_audit(self, n_details: int):

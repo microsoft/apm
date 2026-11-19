@@ -9,13 +9,21 @@
       "guards": ["registry-delegation-target-vocabulary"]
     },
     {
+      "id": "manifest-target-declaration",
+      "decision": "Package manifest target declaration: target:/targets: spelling, token validation, legacy all, the views readers consume, the deprecated target: and vscode-alias warnings, and the one target rewrite mapping (rewrite_target_names) that the target: warning shows and apm init re-init writes",
+      "owner": "models/manifest_targets.py (ManifestTargetDeclaration, targets_replacement, rewrite_target_names, verify_rewritten_manifest, read_manifest_target_declaration, _warn_deprecated_manifest_keys) via models/apm_package.py (APMPackage.target_declaration, package_target_declaration); used by the apm init re-init (commands/init.py, commands/_helpers.py)",
+      "selectors": ["src/apm_cli/models/manifest_targets.py"],
+      "guards": ["registry-delegation-manifest-target-declaration"]
+    },
+    {
       "id": "effective-install-target-selection",
-      "decision": "Effective install target selection",
-      "owner": "core/target_detection.py (EffectiveTargetDecision)",
+      "decision": "Effective target selection and its compilation-target policy projection",
+      "owner": "core/target_detection.py (EffectiveTargetDecision.canonical_targets, canonical_policy_target_names)",
       "selectors": ["src/apm_cli/core/target_detection.py"],
       "guards": [
         "registry-delegation-install-target-selection",
-        "registry-delegation-audit-target-selection"
+        "registry-delegation-audit-target-selection",
+        "registry-delegation-policy-target-projection"
       ]
     },
     {
@@ -83,6 +91,13 @@
       "guards": ["registry-delegation-bootstrap-project-name"]
     },
     {
+      "id": "manifest-bootstrap-writer",
+      "decision": "Minimal apm.yml bootstrap config and writer shared by apm init, install auto-bootstrap and install --mcp, so the install layer never imports the commands layer",
+      "owner": "models/manifest_bootstrap.py (bootstrap_config, write_minimal_manifest); commands/_helpers.py re-exports the historical names",
+      "selectors": ["src/apm_cli/models/manifest_bootstrap.py"],
+      "guards": ["registry-delegation-install-layering"]
+    },
+    {
       "id": "user-invocable-resolution",
       "decision": "Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
       "owner": "primitives/models.py (resolve_user_invocable)",
@@ -109,6 +124,16 @@
       "owner": "core/scope.py (get_apm_home)",
       "selectors": ["src/apm_cli/core/scope.py"],
       "guards": ["registry-delegation-apm-home-resolution"]
+    },
+    {
+      "id": "harness-user-root-resolution",
+      "decision": "Harness user-root variables (COPILOT_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR, HERMES_HOME): defaults, absolute-only values and the selected user root",
+      "owner": "integration/targets.py (USER_ROOT_VARIABLES, configured_user_root, resolve_user_root)",
+      "selectors": [
+        "src/apm_cli/integration/canvas_integrator.py",
+        "src/apm_cli/commands/uninstall/profile_scope.py"
+      ],
+      "guards": ["registry-delegation-harness-user-root-resolution"]
     },
     {
       "id": "process-interrupt-signals",

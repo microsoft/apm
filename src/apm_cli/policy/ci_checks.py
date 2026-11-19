@@ -101,8 +101,7 @@ def _check_ref_consistency(
     lock: LockFile,
 ) -> CheckResult:
     """Verify manifest refs match the lockfile's resolved ref and commit."""
-    from ..deps.revision_pins import is_full_revision_pin
-    from ..drift import detect_ref_change, marketplace_ref_mismatch
+    from ..drift import detect_ref_change, marketplace_ref_mismatch, revision_pin_mismatch
     from ..install.plan import lockfile_satisfies_replacements
     from ..models.dependency.replacement import project_manifest_dependencies
 
@@ -130,13 +129,8 @@ def _check_ref_consistency(
                 mismatches.append(f"{display}: {reason}")
                 requires_update = True
             continue
-        if is_full_revision_pin(dep_ref.reference) and (
-            locked_dep.resolved_commit != dep_ref.reference
-        ):
-            mismatches.append(
-                f"{key}: manifest commit '{dep_ref.reference}' != "
-                f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
-            )
+        if pin_reason := revision_pin_mismatch(dep_ref.reference, locked_dep):
+            mismatches.append(f"{key}: {pin_reason}")
             requires_update = True
             continue
         if detect_ref_change(dep_ref, locked_dep):
@@ -152,7 +146,7 @@ def _check_ref_consistency(
             passed=True,
             message="All dependency refs match lockfile",
         )
-    repair_command = "apm install --update" if requires_update else "apm install"
+    repair_command = "apm update" if requires_update else "apm install"
     n = len(mismatches)
     noun = "mismatch" if n == 1 else "mismatches"
     return CheckResult(
@@ -381,8 +375,16 @@ def _check_skill_subset_consistency(
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
 ) -> CheckResult:
-    """Verify skill subsets match the lockfile and real package tree."""
+    """Verify locked selections match what the declared graph merges to.
+
+    Every locked dependency's ``skill_subset``/``target_subset`` must equal
+    the merge (canonical owner: ``merge_edge_selections``) of every edge the
+    project's ``apm.yml`` and the materialized packages' manifests declare
+    for it (#3735). A selection that cannot be recomputed is reported as
+    unverified, never passed.
+    """
     from ..constants import APM_MODULES_DIR
+    from ..deps.reachability import declared_node_selections
 
     if prepared_replay_error is not None:
         return CheckResult(
@@ -396,32 +398,67 @@ def _check_skill_subset_consistency(
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR
     )
+    declared = declared_node_selections(
+        lock,
+        project_root,
+        modules_root,
+        manifest.get_apm_dependencies(),
+        dev_refs=manifest.get_dev_apm_dependencies(),
+    )
     mismatches: list[str] = []
-    marketplace_index = lock.marketplace_index()
-    for dep_ref in manifest.get_all_apm_dependencies():
-        key = dep_ref.get_unique_key()
-        locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
-        if locked_dep is None:
-            continue
-        if not dep_ref.skill_subset and not locked_dep.skill_subset:
-            continue
-        manifest_subset = sorted(dep_ref.skill_subset) if dep_ref.skill_subset else []
-        lock_subset = sorted(locked_dep.skill_subset) if locked_dep.skill_subset else []
-        if manifest_subset != lock_subset:
-            mismatches.append(
-                f"{key}: manifest skills {manifest_subset} != lockfile skill_subset {lock_subset}"
-            )
-            continue
+    for locked_dep in lock.get_package_dependencies():
+        key = locked_dep.get_unique_key()
+        lock_skills = sorted(locked_dep.skill_subset or ())
+        lock_targets = sorted(locked_dep.target_subset or ())
         missing = _missing_recorded_skill_subset_paths(
             modules_root,
-            dep_ref,
+            locked_dep.to_dependency_ref(),
             locked_dep.package_type,
-            lock_subset,
+            lock_skills,
         )
         if missing:
             mismatches.append(
                 f"{key}: recorded skill subset path(s) not found in package tree: "
                 f"{', '.join(missing)}"
+            )
+            continue
+        selection = declared.selections.get(key)
+        expected_skills = list(selection.skill_subset or ()) if selection else []
+        expected_targets = list(selection.target_subset or ()) if selection else []
+        # An unrestricted declaration absorbs any declaration the walk could
+        # not read, so only then is an incomplete walk still conclusive.
+        absorbed = (
+            selection is not None
+            and selection.skill_subset is None
+            and selection.target_subset is None
+        )
+        if selection is None or (not declared.complete and not absorbed):
+            mismatches.append(
+                f"{key}: selection unverified -- the manifests that declare it could "
+                "not all be read"
+            )
+            continue
+        if lock_skills != expected_skills:
+            mismatches.append(
+                f"{key}: declared skills {expected_skills} != lockfile skill_subset {lock_skills}"
+            )
+            continue
+        if lock_targets != expected_targets:
+            mismatches.append(
+                f"{key}: declared targets {expected_targets} != lockfile target_subset "
+                f"{lock_targets}"
+            )
+            continue
+        try:
+            locked_pairing = locked_dep.selection()
+        except ValueError as exc:
+            mismatches.append(f"{key}: invalid lockfile subset_pairings -- {exc}")
+            continue
+        if locked_pairing != selection.lock_selection():
+            mismatches.append(
+                f"{key}: declared skill-target pairing "
+                f"{_pairing_summary(selection.lock_selection())} != lockfile "
+                f"{_pairing_summary(locked_pairing)}"
             )
 
     if not mismatches:
@@ -437,6 +474,15 @@ def _check_skill_subset_consistency(
             f"{len(mismatches)} skill subset mismatch(es) -- regenerate lockfile (apm install)"
         ),
         details=mismatches,
+    )
+
+
+def _pairing_summary(pairing) -> str:
+    """Render a selection as ``targets: skills`` groups ('all' for an omitted axis)."""
+    return "; ".join(
+        f"{', '.join(p.targets) if p.targets else 'all targets'}: "
+        f"{', '.join(p.skills) if p.skills else 'all skills'}"
+        for p in pairing.pairings
     )
 
 

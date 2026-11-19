@@ -629,3 +629,19 @@ def test_install_policy_gate_blocks_selected_source_before_publication(
     assert not (tmp_path / "apm.lock.yaml").exists()
     assert not list((tmp_path / "apm_modules").rglob("apm.yml"))
     assert not (tmp_path / ".github/instructions/selected.instructions.md").exists()
+
+
+def test_replaced_dependency_replays_the_locked_skill_target_pairing(tmp_path: Path) -> None:
+    """#3763: replay of a replaced source keeps the locked per-edge pairing."""
+    from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+    _, locked, _ = _locked(tmp_path, {"git": "https://github.com/fork/MixedRepo", "ref": "main"})
+    pairing = merge_edge_pairings([(["alpha"], ["claude"]), (["gamma"], ["copilot"])])
+    locked.skill_subset = list(pairing.skill_subset)
+    locked.target_subset = list(pairing.target_subset)
+    locked.subset_pairings = pairing.to_lock_records()
+
+    replayed = LockedDependency.from_dict(locked.to_dict()).to_dependency_ref()
+
+    assert replayed.replacement is not None
+    assert replayed.subset_pairings == pairing

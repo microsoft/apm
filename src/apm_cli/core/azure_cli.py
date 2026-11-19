@@ -107,6 +107,12 @@ class AzureCliBearerProvider:
         # within this process, matching the prior behaviour.
         self._cache: dict[str, tuple[str, float | None]] = {}
         self._lock = threading.Lock()
+        # #3753: keep the last acquisition failure and the tenant lookup so
+        # diagnostics report the real az reason with one ``az`` call.
+        self._last_error: AzureCliBearerError | None = None
+        self._tenant_cached = False
+        self._tenant_id: str | None = None
+        self._tenant_lock = threading.Lock()
 
     # -- public API ---------------------------------------------------------
 
@@ -158,16 +164,36 @@ class AzureCliBearerProvider:
                     kind="az_not_found",
                 )
 
-            token, expires_at = self._run_get_access_token()
+            try:
+                token, expires_at = self._run_get_access_token()
+            except AzureCliBearerError as exc:
+                self._last_error = exc
+                raise
+            self._last_error = None
             self._cache[self.ADO_RESOURCE_ID] = (token, expires_at)
             return token
+
+    @property
+    def last_error(self) -> AzureCliBearerError | None:
+        """Return the most recent token-acquisition failure, if any."""
+        return self._last_error
 
     def get_current_tenant_id(self) -> str | None:
         """Return the active Entra tenant ID (best-effort).
 
         Uses ``az account show --query tenantId -o tsv``.  Returns ``None``
-        on any failure -- this method never raises.
+        on any failure -- this method never raises. The answer is cached for
+        the life of the provider (one ``az`` call per process).
         """
+        # Singleflight: concurrent diagnostics wait for one ``az`` call.
+        with self._tenant_lock:
+            if not self._tenant_cached:
+                self._tenant_id = self._lookup_tenant_id()
+                self._tenant_cached = True
+            return self._tenant_id
+
+    def _lookup_tenant_id(self) -> str | None:
+        """Run ``az account show`` once; never raises."""
         # Explicit early-return when az was not resolved at __init__: avoids
         # passing None as argv[0] to subprocess.run (which would TypeError
         # and only be swallowed by the broad except below). Mirrors the
@@ -196,6 +222,10 @@ class AzureCliBearerProvider:
         """
         with self._lock:
             self._cache.clear()
+            self._last_error = None
+        with self._tenant_lock:
+            self._tenant_cached = False
+            self._tenant_id = None
 
     # -- internals ----------------------------------------------------------
 

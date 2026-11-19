@@ -84,6 +84,7 @@ _RID_GIT_URL_VALIDATION_ROUTING = "transport-platform-git-url-rewrite-routing-va
 _RID_GIT_URL_REWRITE = "transport-platform-git-url-rewrite-safety"
 _RID_GIT_URL_RECOVERY = "transport-platform-git-url-rewrite-recovery"
 _RID_ARTIFACTORY_NETRC = "transport-platform-artifactory-netrc-isolation"
+_RID_CREDENTIAL_ORIGIN = "transport-platform-credential-origin-scope"
 
 
 _AUTH_OWNER = "src/apm_cli/core/auth.py"
@@ -93,6 +94,10 @@ _HOST_PROVIDER_LOCK_SEED_CONSUMER = "src/apm_cli/deps/tiered_ref_resolver.py"
 _HOST_REFERENCE_OWNER = "src/apm_cli/models/dependency/host_virtual.py"
 _ARTIFACTORY_NETRC_OWNER = "src/apm_cli/deps/artifactory_entry.py"
 _ARTIFACTORY_NETRC_CONSUMER = "src/apm_cli/deps/download_strategies.py"
+_CREDENTIAL_HEADER_OWNER = "src/apm_cli/utils/http_credentials.py"
+_REGISTRY_ORIGIN_OWNER = "src/apm_cli/deps/registry_proxy.py"
+_MARKETPLACE_HTTP_CONSUMER = "src/apm_cli/marketplace/client.py"
+_GITHUB_MCP_HOST_CONSUMER = "src/apm_cli/adapters/client/copilot.py"
 
 
 _PUBLIC_GH_CONSUMERS: tuple[str, ...] = (
@@ -349,8 +354,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             "src/apm_cli/deps/github_downloader_validation.py",
             (
                 "downloader.auth_resolver.git_env_for_remote(",
-                "downloader.auth_resolver.execute_with_bearer_fallback(",
-                "downloader.auth_resolver.build_ado_bearer_git_env(",
+                "downloader.auth_resolver.try_with_fallback(",
             ),
         ),
         (
@@ -380,16 +384,15 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
         (
             "src/apm_cli/install/validation.py",
             (
-                "auth_resolver.execute_with_bearer_fallback(",
-                "auth_resolver.build_ado_bearer_git_env(",
+                "run_result = auth_resolver.try_with_fallback(",
+                "base_env=ado_downloader.git_env,",
             ),
         ),
         (
             "src/apm_cli/deps/clone_engine.py",
             (
                 "host.auth_resolver.git_env_for_remote(",
-                "host.auth_resolver.execute_with_bearer_fallback(",
-                "host.auth_resolver.build_ado_bearer_git_env(",
+                'host.auth_resolver.try_with_fallback(\n                        dep_host or "dev.azure.com",',
                 "attempt.effective_url or attempt_url,\n                    base_env=host.git_env,",
             ),
         ),
@@ -397,7 +400,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             "src/apm_cli/deps/git_reference_resolver.py",
             (
                 "host.auth_resolver.git_env_for_remote(",
-                "host.auth_resolver.execute_with_bearer_fallback(",
+                "host.auth_resolver.try_with_fallback(",
                 "transport_attempt.effective_url or rewrite_candidate,\n"
                 "                base_env=host.git_env,",
             ),
@@ -764,7 +767,7 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
             (
                 "self.trust_env = False",
                 "def rebuild_auth(",
-                "self.should_strip_auth(",
+                "strip_cross_origin_credential_headers(self, prepared_request, response)",
             ),
             "Artifactory requests must preserve redirects without ambient netrc auth",
         )
@@ -775,7 +778,8 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
             inv,
             _RID_ARTIFACTORY_NETRC,
             _ARTIFACTORY_NETRC_CONSUMER,
-            (("sub", "allow_netrc=False", 3, "eq"),),
+            # Three Artifactory paths plus the Azure DevOps Items API download.
+            (("sub", "allow_netrc=False", 4, "eq"),),
             "Every Artifactory resilient GET path must suppress ambient netrc auth",
         )
     )
@@ -787,6 +791,59 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
             _ARTIFACTORY_NETRC_CONSUMER,
             ("from .artifactory_entry import _NoNetrcSession",),
             "Download strategies must reuse the Artifactory netrc-isolation owner",
+        )
+    )
+    return tuple(findings)
+
+
+def _check_credential_origin_scope(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Credentials attach only to the origin they were configured or built for."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    contracts: tuple[tuple[str, tuple[str, ...], str], ...] = (
+        (
+            _CREDENTIAL_HEADER_OWNER,
+            (
+                '"PRIVATE-TOKEN"',
+                "def strip_cross_origin_credential_headers(",
+                "session.should_strip_auth(",
+                "class CredentialScopedSession(",
+            ),
+            "http_credentials.py must own cross-origin credential header removal",
+        ),
+        (
+            _REGISTRY_ORIGIN_OWNER,
+            ("def headers_for(", "if not self.serves(scheme, host):"),
+            "RegistryConfig must scope the registry token to its configured origin",
+        ),
+        (
+            _ARTIFACTORY_NETRC_CONSUMER,
+            ("return cfg.headers_for(scheme, host)",),
+            "Artifactory downloads must request registry headers per target origin",
+        ),
+        (
+            _MARKETPLACE_HTTP_CONSUMER,
+            ("_HTTP_SESSION = CredentialScopedSession()",),
+            "Marketplace fetches must reuse the credential-scoped session",
+        ),
+        (
+            _GITHUB_MCP_HOST_CONSUMER,
+            ("hostname = unambiguous_https_hostname(url)",),
+            "GitHub MCP token injection must use the parser-agreed host",
+        ),
+    )
+    for path, needles, message in contracts:
+        findings.extend(
+            _require_subs(provider, inv, _RID_CREDENTIAL_ORIGIN, path, needles, message)
+        )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_CREDENTIAL_ORIGIN,
+            _ARTIFACTORY_NETRC_CONSUMER,
+            (("sub", ".get_headers()", 0, "eq"),),
+            "Artifactory downloads must not attach registry headers without an origin check",
         )
     )
     return tuple(findings)
@@ -1845,6 +1902,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_ARTIFACTORY_NETRC,),
         description="Artifactory HTTP requests exclude ambient netrc credentials.",
         check=_check_artifactory_netrc_isolation,
+    ),
+    Rule(
+        id=_RID_CREDENTIAL_ORIGIN,
+        group=GROUP,
+        guard_ids=(_RID_CREDENTIAL_ORIGIN,),
+        description="Credentials attach only to the origin they were configured for.",
+        check=_check_credential_origin_scope,
     ),
     Rule(
         id=_RID_HOST_CRED,

@@ -464,6 +464,44 @@ class TestRunMcpIntegrationPolicyBlock:
         mock_mcp.update_lockfile.assert_not_called()
 
     @patch(_PATCH_TARGET)
+    def test_policy_block_hint_names_direct_dependency_from_view(self, mock_mcp):
+        """#3835 review: the merged-set preflight hints the direct apm.yml
+        entry the view traced, not the declaring package's display name."""
+        from apm_cli.install.mcp.integration import PreparedMcpIntegration
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+        name = "io.github.untrusted/evil-transitive"
+        evil_dep = MCPDependency(name=name, transport="stdio", resolved_by="parent-pkg")
+        view = CurrentMcpConfigView(
+            dependencies=(evil_dep,),
+            configs={},
+            provenance={name: "parent-pkg"},
+            problems=(),
+            brought_in_by={name: "acme/parent-pkg"},
+        )
+        logger = _make_logger()
+
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=self._fetch_result(),
+            ),
+            patch.object(logger, "policy_violation") as mock_violation,
+            pytest.raises(PolicyBlockError),
+        ):
+            run_mcp_integration(
+                **_base_kwargs(
+                    mcp_deps=[evil_dep],
+                    logger=logger,
+                    prepared=PreparedMcpIntegration([evil_dep], view, None),
+                )
+            )
+
+        assert {c.kwargs["declared_by"] for c in mock_violation.call_args_list} == {
+            "acme/parent-pkg"
+        }
+
+    @patch(_PATCH_TARGET)
     def test_no_policy_flag_skips_preflight_and_installs(self, mock_mcp):
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1

@@ -95,7 +95,7 @@ Three fields matter day one:
 `.apm/` when that directory exists, or supported plugin-native directories at
 the project root otherwise. The
 `targets:` block is commented out so APM auto-detects the harnesses
-present in your repo (`.github/`, `.claude/`, `.cursor/`, etc.). For the
+present in your repo (`.github/copilot-instructions.md`, `.claude/`, `.cursor/`, etc.). For the
 full schema, see [Package anatomy](/apm/concepts/package-anatomy/).
 
 ## 3. Install a package
@@ -121,7 +121,7 @@ Output (abridged):
 [*] Installed 2 APM dependencies in 1.4s.
 ```
 
-Three things were written:
+These paths were written:
 
 ```
 my-agent/
@@ -199,6 +199,16 @@ runtime CLIs. Declare a `scripts:` entry in `apm.yml` and execute it
 with `apm run <name>`. It is optional, off the critical path, and
 not required to use any installed package. See
 [Run scripts](/apm/consumer/run-scripts/) if you want to wire one up.
+:::
+
+:::tip[Teach your agent APM]
+Install the [official guide](https://github.com/microsoft/apm/tree/main/packages/apm-guide),
+an expert agent plus the `apm-usage` skill, so your coding agent can answer
+APM questions and run APM commands for you:
+
+```bash
+apm install microsoft/apm/packages/apm-guide#v0.36.1
+```
 :::
 
 <CardGrid>

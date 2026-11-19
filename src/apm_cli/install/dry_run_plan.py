@@ -20,7 +20,7 @@ from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.security.executables import filter_lsp_by_allow_executables
 
 if TYPE_CHECKING:
-    from apm_cli.commands.install import InstallContext
+    from apm_cli.install.command_context import InstallContext
 
 
 @dataclass(frozen=True)

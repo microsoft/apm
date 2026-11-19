@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from apm_cli.commands.install import InstallLogger
+    from apm_cli.core.command_logger import InstallLogger
     from apm_cli.deps.lockfile import LockFile
 
 

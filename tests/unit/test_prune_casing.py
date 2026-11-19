@@ -151,7 +151,7 @@ def test_prune_ambiguous_casing_fails_before_cleanup(
     reader = CaseSensitiveMaterializationReader(
         Path("apm_modules"), ("microsoft/apm", "Microsoft/APM")
     )
-    with patch("apm_cli.commands._helpers.CachedMaterializationPathReader", return_value=reader):
+    with patch("apm_cli.install.orphans.CachedMaterializationPathReader", return_value=reader):
         try:
             result = CliRunner().invoke(cli, ["prune", *(["--dry-run"] if dry_run else [])])
         finally:
@@ -180,7 +180,7 @@ def test_prune_complete_paths_with_portable_reader_seam(
     reader = CaseSensitiveMaterializationReader(modules, relatives)
     monkeypatch.chdir(tmp_path)
     with (
-        patch("apm_cli.commands._helpers.CachedMaterializationPathReader", return_value=reader),
+        patch("apm_cli.install.orphans.CachedMaterializationPathReader", return_value=reader),
         patch("apm_cli.commands.prune._scan_installed_packages", return_value=list(relatives)),
     ):
         try:
@@ -217,7 +217,7 @@ def test_prune_distinguishes_unrelated_owner_prefixes(
     github = DependencyReference.parse("microsoft/apm")
     relatives = ("microsoft/apm", other.get_install_path(tmp_path).relative_to(tmp_path).as_posix())
     reader = CaseSensitiveMaterializationReader(tmp_path, relatives)
-    with patch("apm_cli.commands._helpers.CachedMaterializationPathReader", return_value=reader):
+    with patch("apm_cli.install.orphans.CachedMaterializationPathReader", return_value=reader):
         assert _build_expected_install_paths(
             [github, other], None, tmp_path, preserve_installed_case=True
         ) == set(relatives)

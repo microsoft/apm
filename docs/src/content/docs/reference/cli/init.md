@@ -45,9 +45,9 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `--format text\|json\|yaml` | `text` | Select discovery report format. Used with `--discover`. |
 | `--apply`, `--write` | off | After discovery, create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Requires consent unless `--yes` is set. |
 | `-g`, `--global` | off | Discover user-scope packages. Applied local references use installer-compatible absolute or home-rooted paths, not project-relative paths. |
-| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
+| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name: 1-64 lowercase letters, digits, dots, or hyphens; must start and end with a letter or digit, with no `..` or `--`. |
 | `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
-| `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`; `all` expands the default stable set. |
+| `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and the explicit-only `hermes` and `grok-bot`; `all` expands the default stable set. |
 | `--name` | directory name | Project name written to `apm.yml` for in-place init. Same rules as `PROJECT_NAME`. Ignored, with a warning, when `PROJECT_NAME` is given. |
 | `--description` | auto-detected | Project description written to `apm.yml`. |
 | `--version` | `1.0.0` (`0.1.0` with `--plugin --yes`) | Project version written to `apm.yml`. Must not be empty. An explicit value is kept in plugin mode. |
@@ -62,9 +62,12 @@ They cannot be combined with `--discover`.
 Target precedence: `--target` flag > interactive prompt > auto-detect at
 compile time (used with `--yes` or in non-TTY shells).
 
-`init` writes only manifest-safe stable targets. For example, `--target agents`,
-`--target vscode`, and the MCP-only `--target intellij` persist the canonical
-`copilot` identifier, while `--target all` expands to the default stable set.
+`init` writes only manifest-safe stable targets, canonicalizing aliases first.
+For example, `--target agents` and `--target vscode` persist `copilot`,
+`--target agy` persists `antigravity`, and `--target all` expands to the
+default stable set. `--target intellij` names an IDE, not a target: `init`
+exits `1` before writing anything (use `copilot` for GitHub Copilot in
+JetBrains IDEs).
 Experimental selectors such as `grok-cloud` are accepted by the shared CLI
 target parser but are not persisted in `apm.yml`; enable them, then select them
 with `apm install --target grok-cloud`.
@@ -164,7 +167,14 @@ the author and target harness remain responsible for compliance.
   path for teammates who run `apm install`. Global references use absolute or
   home-rooted paths accepted by the installer.
 - **Target seeding on re-init:** when `apm.yml` exists, the prompt
-  pre-checks targets read from its existing `target:` field.
+  pre-checks targets read from its existing `targets:` list, or from the
+  legacy `target:` field rewritten to an equivalent `targets:` list (for
+  example, `agents` becomes `copilot` and `agy` becomes `antigravity`). A
+  legacy target with no `targets:`
+  equivalent (such as `intellij`) is not carried over: `--yes` and
+  non-interactive runs exit `1` before writing; pass `--target` to choose
+  targets explicitly. The rewritten manifest is parsed back before it is
+  written.
 - **Codex hint:** if `.codex/` is present, suggests
   `--target agent-skills` to also deploy skills to `.agents/skills/`.
 - **Existing plugin sources:** when plugin-native directories such as
@@ -181,6 +191,7 @@ the author and target harness remain responsible for compliance.
   - Instructions already exist: no mention (suppressed entirely).
 - **Exit codes:** `0` on success or a declined plain-init prompt; `1` on invalid
   project or plugin name, empty `--version`, refused discovery apply, declined discovery consent,
+  an existing legacy target with no `targets:` equivalent on a non-interactive re-init,
   or unhandled error. Discovery consent refusal leaves files unchanged.
   Invalid option combinations, including `--discover --target` and
   `--discover` with a metadata flag, exit `2`.

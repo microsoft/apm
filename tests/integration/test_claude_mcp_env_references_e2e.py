@@ -230,25 +230,27 @@ def test_mixed_targets_use_their_own_native_representation(
     claude_project: Scenario, apm_binary_path: Path
 ) -> None:
     project, env, _isolated = claude_project
-    for signal in (".cursor", ".github", ".vscode"):
+    for signal in (".cursor", ".github"):
         (project / signal).mkdir()
     _write_apm_yml(project, [SELF_DEFINED_STDIO])
 
-    result = _install(apm_binary_path, project, env, "--target", "claude,cursor,copilot,vscode")
+    result = _install(apm_binary_path, project, env, "--target", "claude,cursor,copilot")
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
+    # Claude Code and Copilot share .mcp.json: one identical entry, two owners.
     configs = {
         "claude": project / ".mcp.json",
         "cursor": project / ".cursor" / "mcp.json",
-        "copilot": project / ".github" / "mcp.json",
-        "vscode": project / ".vscode" / "mcp.json",
     }
     loaded = {name: json.loads(path.read_text(encoding="utf-8")) for name, path in configs.items()}
     assert loaded["claude"]["mcpServers"]["refs-stdio"]["env"]["TOKEN"] == "${E2E_TOKEN}"
     assert loaded["cursor"]["mcpServers"]["refs-stdio"]["env"]["TOKEN"] == "${env:E2E_TOKEN}"
-    assert loaded["copilot"]["mcpServers"]["refs-stdio"]["env"]["TOKEN"] == "${E2E_TOKEN}"
-    assert loaded["vscode"]["servers"]["refs-stdio"]["env"]["TOKEN"] == "${env:E2E_TOKEN}"
+    for retired in (".github/mcp.json", ".vscode/mcp.json"):
+        assert not (project / retired).exists(), retired
+    lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    owners = lock["mcp_target_servers"]
+    assert owners["claude"] == owners["copilot"] == ["refs-stdio"], owners
     _assert_no_value([path.read_text() for path in configs.values()] + [output], SECRET)
 
 

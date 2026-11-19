@@ -108,7 +108,10 @@ def _assert_install_denies(result: CommandResult) -> None:
     output = result.stdout + result.stderr
     assert result.returncode == 1, output
     assert "Install blocked by org policy" in output, output
-    assert f"{_DENIED}: denied by pattern: {_DENIED}" in output, output
+    flat = " ".join(output.split())
+    # One violation per denied dependency, naming it (#3835).
+    assert f"Policy violation: github.com/{_DENIED} -- denied by pattern: {_DENIED}" in flat, output
+    assert f"remove `github.com/{_DENIED}` from apm.yml" in flat, output
 
 
 def _denylist_check(report: dict) -> dict:

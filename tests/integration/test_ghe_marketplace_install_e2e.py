@@ -341,7 +341,7 @@ class TestCrossRepoFailClosedIntegration:
                 "apm_cli.commands.install._validate_package_exists",
                 return_value=True,
             ) as mock_validate,
-            patch("apm_cli.install.validation.requests.get") as mock_http_get,
+            patch("apm_cli.install.validation._github_api_get") as mock_http_get,
             patch(
                 "apm_cli.install.validation.requests.head",
                 create=True,
@@ -363,7 +363,7 @@ class TestCrossRepoFailClosedIntegration:
         )
         # (2) HTTP-layer defense-in-depth: even if a future refactor moves
         # validation elsewhere, no outbound probe should fire on the gated
-        # path. Patching at ``apm_cli.install.validation.requests.{get,head}``
+        # path. Patching at ``apm_cli.install.validation._github_api_get`` and ``requests.head``
         # catches any caller that still reaches the validator module.
         assert mock_http_get.call_count == 0
         assert mock_http_head.call_count == 0

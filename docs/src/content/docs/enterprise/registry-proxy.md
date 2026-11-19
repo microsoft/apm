@@ -76,13 +76,15 @@ export PROXY_REGISTRY_ONLY=1                 # block direct VCS fallback
 | Variable | Purpose |
 |---|---|
 | `PROXY_REGISTRY_URL` | Full proxy base including any path prefix. When set, all GitHub archives route here. |
-| `PROXY_REGISTRY_TOKEN` | Bearer token sent on proxy requests. Independent of `GITHUB_APM_PAT`. |
+| `PROXY_REGISTRY_TOKEN` | Bearer token sent on proxy requests. Independent of `GITHUB_APM_PAT`. Sent only to the scheme and host of `PROXY_REGISTRY_URL`; explicit-FQDN dependencies on any other host get no proxy token. |
 | `PROXY_REGISTRY_ONLY` | `1` blocks direct VCS fallback at runtime and on lockfile replay. |
 | `PROXY_REGISTRY_ALLOW_HTTP` | `1` silences the plaintext-token warning when the proxy is on `http://`. Use only inside an isolated network. |
 
 Deprecated aliases `ARTIFACTORY_BASE_URL`, `ARTIFACTORY_APM_TOKEN`, and
 `ARTIFACTORY_ONLY` still work but emit `DeprecationWarning`. Migrate to
-the `PROXY_REGISTRY_*` names.
+the `PROXY_REGISTRY_*` names. `ARTIFACTORY_APM_TOKEN` is used only
+together with `PROXY_REGISTRY_URL` (or `ARTIFACTORY_BASE_URL`); without a
+proxy URL it is ignored and APM prints one warning.
 
 ### Bypass prevention
 
@@ -92,14 +94,13 @@ proxy-routed dependency. On replay, an entry pinned to a direct VCS
 host aborts the install:
 
 ```text
-ERROR: PROXY_REGISTRY_ONLY=1 but the following lockfile entries are
-locked to direct VCS hosts and would bypass the proxy:
-  - acme/security-baseline (host: github.com)
-Run 'apm install --update' to re-resolve through the proxy.
+[x] PROXY_REGISTRY_ONLY is set but the lockfile contains dependencies locked to direct VCS sources:
+[x]   - acme/security-baseline (host: github.com)
+[x] Run 'apm update' to re-resolve through the registry, or unset PROXY_REGISTRY_ONLY.
 ```
 
-`apm install --update` re-resolves through the active proxy and
-rewrites `apm.lock.yaml`.
+`apm update` re-resolves through the active proxy and
+rewrites `apm.lock.yaml` (`apm update -g` at user scope).
 
 ### Coverage
 
@@ -110,15 +111,17 @@ rewrites `apm.lock.yaml`.
 | `apm install --mcp` (MCP servers) | No -- separate registry |
 | `apm marketplace` (`marketplace.json` fetch) | Yes; falls back to GitHub Contents API unless `PROXY_REGISTRY_ONLY=1` |
 | Policy file fetch (`apm-policy.yml`) | No -- uses the GitHub API directly |
-| Ref/version enumeration (`apm view <pkg> versions`, `apm outdated`, semver ranges) | No -- the proxy exposes no listing surface; never queries the upstream host when `PROXY_REGISTRY_ONLY=1` |
+| Ref/version enumeration (`apm view <pkg> versions`, `apm outdated`, semver ranges) | No -- APM fetches exact versions only and does not use vendor listing APIs; never queries the upstream host when `PROXY_REGISTRY_ONLY=1` |
 | Ref-to-SHA lookup (GitHub commits API) | No -- skipped when `PROXY_REGISTRY_ONLY=1`; the lockfile records the ref name |
 
 ### Version enumeration and semver ranges
 
-The proxy serves a package only at a ref it is given
-(`{base}/{owner}/{repo}/zip/refs/tags/{ref}`); it has no endpoint that
-lists the available tags. Resolving a semver range therefore needs a
-version listing that only the upstream host can provide.
+APM fetches a package through the proxy only at a ref it is given
+(`{base}/{owner}/{repo}/zip/refs/tags/{ref}`). By design it does not
+list versions through the proxy or call vendor listing APIs (for example
+Artifactory's). A semver range needs a version listing, which APM gets
+from the upstream host or from a registry that implements the APM
+Registry HTTP API.
 
 With `PROXY_REGISTRY_ONLY=1`, APM does not query the upstream host for
 that listing. The consequences are:
@@ -145,11 +148,20 @@ Pin exact versions when running registry-only:
 dependencies:
   apm:
     - myorg/my-package#v1.4.0   # exact upstream tag; resolves through the proxy
-    # - myorg/my-package#1.4.x  # needs a listing the proxy cannot serve
+    # - myorg/my-package#1.4.x  # a range needs a version listing; fails in registry-only mode
 ```
 
-Unset `PROXY_REGISTRY_ONLY` if you need range resolution and can reach
-the upstream host.
+Two routes are supported in registry-only mode:
+
+- **Exact pins plus lockfile replay.** Pin the exact upstream tag; once
+  `apm.lock.yaml` records it, installs replay without a listing.
+- **A server that implements the APM Registry HTTP API.** Its
+  [`GET /v1/packages/{owner}/{repo}/versions`](../../reference/registry-http-api/#31-get-v1packagesownerrepoversions--list-versions)
+  endpoint lists versions, so semver ranges resolve. See
+  [Registries](../../guides/registries/) (experimental).
+
+Unset `PROXY_REGISTRY_ONLY` if you need range resolution from the
+upstream host and can reach it.
 
 ### Nested-group repos (GitLab subgroups behind the proxy)
 
@@ -316,10 +328,10 @@ and `apm cache clean`.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `RuntimeError: PROXY_REGISTRY_ONLY is set but no Artifactory proxy is configured for '<dep>'` | `PROXY_REGISTRY_ONLY=1` with no `PROXY_REGISTRY_URL`, or dep is on an unproxied host (ADO, MCP) | Set `PROXY_REGISTRY_URL`, or unset `PROXY_REGISTRY_ONLY` for that dep type |
-| `Cannot resolve the range '<constraint>' for '<dep>' in registry-only mode` | A semver range needs a tag listing the proxy cannot serve; see [Version enumeration and semver ranges](#version-enumeration-and-semver-ranges) | Pin the exact upstream tag (`#v1.4.0`), or unset `PROXY_REGISTRY_ONLY` |
-| `Cannot list versions for '<dep>' in registry-only mode` | `apm view <pkg> versions` needs a tag listing the proxy cannot serve | Unset `PROXY_REGISTRY_ONLY` to list versions; pin the exact upstream tag to install |
+| `Cannot resolve the range '<constraint>' for '<dep>' in registry-only mode` | A semver range needs a tag listing; APM does not list versions through the proxy; see [Version enumeration and semver ranges](#version-enumeration-and-semver-ranges) | Pin the exact upstream tag (`#v1.4.0`) and commit `apm.lock.yaml`, install from a registry that implements the APM Registry HTTP API, or unset `PROXY_REGISTRY_ONLY` |
+| `Cannot list versions for '<dep>' in registry-only mode` | `apm view <pkg> versions` needs a tag listing, which APM does not fetch through the proxy | Unset `PROXY_REGISTRY_ONLY` to list versions; pin the exact upstream tag to install |
 | `apm outdated` shows git deps as `unknown` with `PROXY_REGISTRY_ONLY=1` | Ref enumeration is suppressed rather than querying the upstream host | Expected; check for updates with the mode unset |
-| `ERROR: ... locked to direct VCS hosts` | Lockfile predates the proxy | `apm install --update` |
+| `PROXY_REGISTRY_ONLY is set but the lockfile contains dependencies locked to direct VCS sources` | Lockfile predates the proxy | `apm update` |
 | HTTP 401/403 from the proxy | Missing or invalid `PROXY_REGISTRY_TOKEN` | Verify the token has read on the upstream repo path |
 | `git clone` hangs through the proxy | `HTTPS_PROXY` not set in the env that runs `git` | Export it in the shell that invokes `apm install`; CI secrets often miss this |
 | `TLS verification failed` | Corporate proxy CA is not trusted by the OS store | Install the CA into the OS trust store, or set additive `APM_EXTRA_CA_BUNDLE` to retain public trust. Use `REQUESTS_CA_BUNDLE` only for intentional full replacement; see [SSL / TLS issues](../../troubleshooting/ssl-issues/) |
@@ -328,6 +340,7 @@ and `apm cache clean`.
 | `Invalid zip archive` with a body that starts `<!DOCTYPE html>` and is ~17KB | Upstream returned a sign-in page; proxy cached the HTML | Configure upstream credentials on the registry remote, purge the cache, then refetch |
 | 3-segment dep (`group/sub/project`) fails with HTTP 404 from the proxy | APM treated `project` as a virtual sub-path | Set `PROXY_REGISTRY_ONLY=1`; see [Nested-group repos](#nested-group-repos-gitlab-subgroups-behind-the-proxy) |
 | HTTP 404 on every ref of an existing GitLab project | Default branch is `master`, APM defaults to `main` | Pin the ref: `<repo>#master` in `apm.yml` |
+| `registry redirected outside the configured registry (<origin>); refusing` | A gateway in front of a dedicated registry (`registries:`) redirected to another host, port or base path. APM follows only same-origin redirects under the registry URL | Point `registries.<name>.url` at the origin that serves the API, or configure the gateway to pass `%2F` through (Envoy `KEEP_UNCHANGED`). See [Registry HTTP API redirects](../../reference/registry-http-api/#17-redirects) |
 | Upstream URL in `X-Artifactory-Origin-Remote-Path` has a duplicated group name | The remote's "Repository Path Prefix" is prepending a segment that's also in the request | Clear the prefix field on the remote |
 
 When the proxy serves an archive that APM rejects, for example because a member is a symlink or the body is not a zip, the error reports that archive's URL (and the reason, where available) after `Archive error:`, even if later fallback URLs return HTTP 404.

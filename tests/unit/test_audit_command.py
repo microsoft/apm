@@ -82,7 +82,7 @@ def lockfile_project(tmp_path):
         lockfile_version: '1'
         generated_at: '2025-01-01T00:00:00Z'
         dependencies:
-          - repo_url: https://github.com/test/test-pkg
+          - repo_url: test/test-pkg
             resolved_ref: main
             resolved_commit: abc123
             deployed_files:
@@ -311,18 +311,61 @@ class TestLockfileMode:
         result = runner.invoke(audit, [])
         assert result.exit_code == 1
 
-    def test_package_filter(self, runner, lockfile_project, monkeypatch):
+    @pytest.mark.parametrize(
+        "package",
+        [
+            "test/test-pkg",
+            "https://github.com/test/test-pkg",
+            "github.com/test/test-pkg",
+            "test/test-pkg#main",
+        ],
+    )
+    def test_package_filter_normalizes_install_forms(
+        self, runner, lockfile_project, monkeypatch, package
+    ):
+        """#3840: install forms resolve to the lockfile key, as uninstall does."""
         monkeypatch.chdir(lockfile_project)
-        # Filter by repo URL (the lockfile key)
-        result = runner.invoke(audit, ["https://github.com/test/test-pkg"])
+        result = runner.invoke(audit, [package])
         # Should still find the warning in guide.md
         assert result.exit_code == 2
 
-    def test_package_filter_not_found(self, runner, lockfile_project, monkeypatch):
+    @pytest.mark.parametrize("package", ["acme/x", "gitlab.com/acme/x"])
+    def test_package_filter_resolves_under_manifest_default_host(
+        self, runner, tmp_path, monkeypatch, package
+    ):
+        """#3843: shorthand resolves against apm.yml ``default_host`` like install."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+        (tmp_path / "apm.yml").write_text(
+            "name: project\nversion: 1.0.0\ndefault_host: gitlab.com\n"
+            "dependencies:\n  apm:\n    - acme/x\n",
+            encoding="utf-8",
+        )
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="acme/x",
+                host="gitlab.com",
+                deployed_files=[".github/prompts/x.md"],
+            )
+        )
+        lock.write(tmp_path / "apm.lock.yaml")
+        (tmp_path / ".github" / "prompts").mkdir(parents=True)
+        (tmp_path / ".github" / "prompts" / "x.md").write_text("Hidden\u200b\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(audit, [package])
+
+        # The package's deployed file is scanned: warning -> exit 2.
+        assert result.exit_code == 2, result.output
+        assert "not installed" not in result.output
+
+    def test_package_filter_not_found_fails(self, runner, lockfile_project, monkeypatch):
+        """#3840: an unknown package exits non-zero so a CI typo cannot pass."""
         monkeypatch.chdir(lockfile_project)
-        result = runner.invoke(audit, ["nonexistent-pkg"])
-        assert result.exit_code == 0
-        assert "not found" in result.output.lower()
+        result = runner.invoke(audit, ["test/typo-pkg"])
+        assert result.exit_code == 1
+        assert "not installed" in result.output
 
     def test_dir_entries_scanned_recursively(
         self,

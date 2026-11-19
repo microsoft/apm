@@ -1,5 +1,6 @@
 """Bundle unpacker  -- extracts and verifies APM bundles."""
 
+import os
 import shutil
 import tempfile
 import zipfile
@@ -240,25 +241,17 @@ def unpack_bundle(
                 pack_meta=pack_meta,
             )
 
-        # 4. Copy target files to output_dir (additive, no deletes)
+        # 4. Copy target files to output_dir (additive, no deletes).
+        # Every destination is validated before the first write.
+        from ..utils.path_security import has_symlink_component
+
         output_dir = Path(output_dir)
-        output_dir_resolved = output_dir.resolve()
+        destinations = _validated_unpack_destinations(unique_files, source_dir, output_dir)
         skipped = 0
-        for rel_path in unique_files:
-            # Guard against absolute paths or path-traversal entries in deployed_files
-            p = Path(rel_path)
-            if p.is_absolute() or rel_path.startswith("/") or ".." in p.parts:
-                raise ValueError(
-                    f"Refusing to unpack unsafe path from bundle lockfile: {rel_path!r}"
-                )
-            dest = output_dir / rel_path
-            if not dest.resolve().is_relative_to(output_dir_resolved):
-                raise ValueError(
-                    f"Refusing to unpack path that escapes output directory: {rel_path!r}"
-                )
+        for rel_path, dest in destinations:
             src = source_dir / rel_path
-            if src.is_symlink():
-                # Security: skip symlinks to prevent scanning bypass
+            if has_symlink_component(source_dir, src):
+                # Never read through a linked bundle path.
                 skipped += 1
                 continue
             if not src.exists():
@@ -287,3 +280,50 @@ def unpack_bundle(
         # Clean up temp dir if we created one
         if cleanup_temp and temp_dir is not None:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _validated_unpack_destinations(
+    rel_paths: list[str], source_dir: Path, output_dir: Path
+) -> list[tuple[str, Path]]:
+    """Return ``(rel_path, destination)`` pairs, refusing unmanaged destinations.
+
+    Bundle files land only under known integration directories of
+    *output_dir*, never through a symlinked path component. Directory
+    entries are checked file by file, since their copy merges into any
+    existing destination tree; nested directories (including empty ones)
+    are checked as well.
+    """
+    from ..integration.base_integrator import BaseIntegrator
+    from ..integration.targets import get_integration_prefixes
+    from ..utils.path_security import has_symlink_component
+
+    output_dir_resolved = output_dir.resolve()
+    allowed_prefixes = tuple(p for p in get_integration_prefixes() if "://" not in p)
+    destinations: list[tuple[str, Path]] = []
+    for rel_path in rel_paths:
+        p = Path(rel_path)
+        if p.is_absolute() or rel_path.startswith("/") or ".." in p.parts:
+            raise ValueError(f"Refusing to unpack unsafe path from bundle lockfile: {rel_path!r}")
+        dest = output_dir / rel_path
+        if dest.is_symlink() or not BaseIntegrator.validate_deploy_path(
+            rel_path,
+            output_dir,
+            allowed_prefixes=allowed_prefixes,
+            resolved_project_root=output_dir_resolved,
+        ):
+            raise ValueError(
+                "Refusing to unpack path outside managed integration directories "
+                f"of the output directory: {rel_path!r}"
+            )
+        src = source_dir / rel_path
+        if src.is_dir() and not has_symlink_component(source_dir, src):
+            for walk_root, dirs, files in os.walk(src):
+                for name in (*dirs, *files):
+                    dest_file = dest / Path(walk_root).relative_to(src) / name
+                    if has_symlink_component(output_dir, dest_file):
+                        raise ValueError(
+                            "Refusing to unpack through a symlinked path in the output "
+                            f"directory: {rel_path!r}"
+                        )
+        destinations.append((rel_path, dest))
+    return destinations

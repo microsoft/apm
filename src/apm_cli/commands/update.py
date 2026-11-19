@@ -44,6 +44,8 @@ Flags
   for multiple targets. The generated command help lists every accepted
   value. Overrides ``apm.yml targets:``, the saved config target, and
   auto-detection.
+* ``--legacy-skill-paths`` -- keep per-client skill paths instead of
+  ``.agents/skills/`` (env fallback: ``APM_LEGACY_SKILL_PATHS``).
 
 These flags make ``apm update`` a strict superset of the deprecated
 ``apm deps update`` (issue #1525). ``apm install --update`` remains the
@@ -82,9 +84,15 @@ from ..install.errors import (
     RequiredIntegrationError,
 )
 from ..install.locking import serialized_lifecycle
+from ..install.lsp.integration import LspPreflight
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
-from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
+from ._helpers import (
+    UnknownPackageError,
+    _find_apm_yml,
+    resolve_requested_packages,
+    trust_transitive_mcp_option,
+)
 
 if TYPE_CHECKING:
     from ..core.command_logger import CommandLogger
@@ -235,6 +243,7 @@ def _run_mcp_lsp_integration(
     effective_allow_executables: dict[str, dict[str, bool]] | None = None,
     effective_allow_resolved: bool = False,
     force: bool = False,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -247,6 +256,7 @@ def _run_mcp_lsp_integration(
     """
     from apm_cli.core.scope import InstallScope, get_modules_dir
     from apm_cli.install.lsp import run_lsp_integration
+    from apm_cli.install.lsp.integration import lsp_target_config, prepare_lsp_integration
     from apm_cli.install.mcp import run_mcp_integration
     from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
     from apm_cli.policy.install_preflight import PolicyBlockError
@@ -264,17 +274,29 @@ def _run_mcp_lsp_integration(
         old_mcp_configs = dict(existing_lock.mcp_configs)
         old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
         old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
-    trusted_transitive_configs = {
-        name: (old_mcp_provenance[name], config)
-        for name, config in old_mcp_configs.items()
-        if name in old_mcp_provenance and config.get("registry") is False
-    }
 
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
+    # Declared LSP without a capable target fails before any MCP write (#3727).
+    apm_config = lsp_target_config(apm_package)
+    prepared_lsp = prepare_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=lock_path,
+        project_root=project_root,
+        should_install=True,
+        logger=logger,
+        existing_lock=existing_lock,
+        user_scope=user_scope,
+        target_context=(apm_config, effective_target, scope),
+        target_decision=target_decision,
+        diagnostics=diagnostics,
+        executable_context=(effective_allow_executables, effective_allow_resolved),
+    )
+    prepared_lsp.require_capable_target()
 
     try:
-        _mcp_count, mcp_apm_config = run_mcp_integration(
+        _mcp_count, _mcp_apm_config = run_mcp_integration(
             apm_package=apm_package,
             mcp_deps=apm_package.get_all_mcp_dependencies(),
             apm_modules_path=apm_modules_path,
@@ -283,7 +305,7 @@ def _run_mcp_lsp_integration(
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
             old_mcp_target_servers=old_mcp_target_servers,
-            trusted_transitive_configs=trusted_transitive_configs,
+            trust_transitive_mcp=trust_transitive_mcp,
             project_root=project_root,
             user_scope=user_scope,
             should_install=True,
@@ -293,6 +315,8 @@ def _run_mcp_lsp_integration(
             explicit_target=effective_target,
             target_decision=target_decision,
             scope=scope,
+            executable_context=(effective_allow_executables, effective_allow_resolved),
+            pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
         logger.error(
@@ -312,12 +336,13 @@ def _run_mcp_lsp_integration(
         should_install=True,
         logger=logger,
         diagnostics=diagnostics,
-        target_context=(mcp_apm_config, effective_target, scope),
+        target_context=(apm_config, effective_target, scope),
         target_decision=target_decision,
         fail_on_write_error=True,
         effective_allow_executables=effective_allow_executables,
         effective_allow_resolved=effective_allow_resolved,
         force=force,
+        prepared=prepared_lsp,
     )
 
 
@@ -330,6 +355,7 @@ def _handle_service_only_update(
     logger: InstallLogger,
     verbose: bool,
     force: bool,
+    trust_transitive_mcp: bool = False,
 ) -> bool:
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
@@ -372,6 +398,7 @@ def _handle_service_only_update(
             logger=logger,
             verbose=verbose,
             force=force,
+            trust_transitive_mcp=trust_transitive_mcp,
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
@@ -436,7 +463,10 @@ def _handle_service_only_update(
     "check_only",
     is_flag=True,
     default=False,
-    help="(Deprecated) Forwarded to 'apm self-update --check' when run outside an apm.yml project; rejected inside a project.",
+    help=(
+        "(Deprecated) Forwarded to 'apm self-update --check' (ignored with --global). "
+        "Use 'apm update --dry-run' to preview dependency changes."
+    ),
     hidden=True,
 )
 @click.option(
@@ -451,6 +481,17 @@ def _handle_service_only_update(
         "(--target > apm.yml targets: > apm config set target ... > auto-detect)."
     ),
 )
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Env: APM_LEGACY_SKILL_PATHS=1."
+    ),
+)
+@trust_transitive_mcp_option
 @click.pass_context
 @serialized_lifecycle
 def update(
@@ -464,6 +505,8 @@ def update(
     parallel_downloads: int,
     check_only: bool,
     target: str | list[str] | None,
+    legacy_skill_paths: bool,
+    trust_transitive_mcp: bool,
 ) -> None:
     """Refresh APM dependencies to the latest matching refs.
 
@@ -475,6 +518,7 @@ def update(
         apm update -g                   # Refresh user-scope deps (~/.apm/)
     """
     from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.integration.targets import should_use_legacy_skill_paths
 
     if global_:
         # User scope: operate on $APM_HOME/apm.yml. The cwd manifest walk and
@@ -553,6 +597,8 @@ def update(
         packages=packages,
         force=force,
         parallel_downloads=parallel_downloads,
+        legacy_skill_paths=legacy_skill_paths or should_use_legacy_skill_paths(),
+        trust_transitive_mcp=trust_transitive_mcp,
     )
 
 
@@ -567,6 +613,8 @@ def _run_dep_update(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    legacy_skill_paths: bool = False,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Serialize update with every other mutation of the same workspace."""
     from apm_cli.core.scope import InstallScope
@@ -582,6 +630,8 @@ def _run_dep_update(
         packages=packages,
         force=force,
         parallel_downloads=parallel_downloads,
+        legacy_skill_paths=legacy_skill_paths,
+        trust_transitive_mcp=trust_transitive_mcp,
     )
 
 
@@ -596,6 +646,8 @@ def _run_dep_update_locked(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    legacy_skill_paths: bool = False,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
@@ -605,8 +657,9 @@ def _run_dep_update_locked(
     against the discovered project root, not the caller's cwd.
 
     ``scope`` selects project vs user deployment (defaults to project).
-    ``packages`` narrows the refresh to the named dependencies; ``force``
-    and ``parallel_downloads`` mirror the install-pipeline flags.
+    ``packages`` narrows the refresh to the named dependencies; ``force``,
+    ``parallel_downloads`` and ``legacy_skill_paths`` mirror the
+    install-pipeline flags.
     """
     import os
 
@@ -651,6 +704,7 @@ def _run_dep_update_locked(
         logger=logger,
         verbose=verbose,
         force=force,
+        trust_transitive_mcp=trust_transitive_mcp,
     ):
         return
 
@@ -812,6 +866,8 @@ def _run_dep_update_locked(
             logger=logger,
             plan_callback=_plan_callback,
             target=target,
+            legacy_skill_paths=legacy_skill_paths,
+            lsp_preflight=LspPreflight(),
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -828,7 +884,7 @@ def _run_dep_update_locked(
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
-    except (DirectDependencyError, PolicyViolationError) as e:
+    except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
         _rich_error(str(e))
         sys.exit(1)
     except click.UsageError:
@@ -887,6 +943,7 @@ def _run_dep_update_locked(
                 effective_allow_executables=getattr(result, "exec_allow_map", None),
                 effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
                 force=force,
+                trust_transitive_mcp=trust_transitive_mcp,
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))

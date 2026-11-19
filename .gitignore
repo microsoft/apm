@@ -80,6 +80,9 @@ apm_modules/
 build/tmp/
 scout-pipeline-result.png
 .copilot/
+# Upgrade fixtures replay real Copilot user homes written by tagged releases.
+!tests/fixtures/upgrade_0361/**/.copilot/
+!tests/fixtures/user_global_update_audit/**/.copilot/
 # Cursor MCP config (may contain auth tokens)
 .cursor/mcp.json
 .playwright-mcp/

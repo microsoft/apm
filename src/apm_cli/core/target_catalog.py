@@ -28,6 +28,43 @@ class TargetCapability:
 
 _TARGET_COMMANDS = frozenset({"compile", "install", "update"})
 
+# Deprecated target aliases, mapped to the target they select. ``vscode``
+# (#3866) selects ``copilot`` exactly, including its project MCP destination
+# (workspace-root ``.mcp.json``); it has no destination of its own. Every
+# parser canonicalises it to the replacement, so lockfiles, policy and
+# detection only ever see ``copilot``. The consumer manifest and the CLI flags
+# warn once per process (:func:`deprecated_target_alias_message`).
+DEPRECATED_TARGET_ALIASES: Mapping[str, str] = MappingProxyType({"vscode": "copilot"})
+
+
+def deprecated_target_alias_message(
+    token: str, *, where: str | None = "apm.yml", key: str = ""
+) -> str:
+    """Return the once-per-process warning for a deprecated target alias.
+
+    *where* names the file (omitted for CLI flags); *key* the field holding it.
+    """
+    location = f" in {key}" if key else ""
+    message = (
+        f"replace `{token}` with `{DEPRECATED_TARGET_ALIASES[token]}`{location}; "
+        f"`{token}` is deprecated and will be removed in a future release."
+    )
+    return f"{where}: {message}" if where else message
+
+
+def canonical_target_token(token: str) -> str:
+    """Return *token* with a deprecated alias replaced by the target it selects."""
+    return DEPRECATED_TARGET_ALIASES.get(token, token)
+
+
+def first_deprecated_target_alias(tokens: Iterable[object]) -> str | None:
+    """Return the first deprecated target alias in *tokens* (case-insensitive)."""
+    for token in tokens:
+        name = str(token).strip().lower()
+        if name in DEPRECATED_TARGET_ALIASES:
+            return name
+    return None
+
 
 def _capability(
     name: str,
@@ -141,11 +178,11 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
         _capability(
             "copilot",
             "GitHub Copilot native .github configuration",
-            aliases=("vscode", "agents"),
+            aliases=("agents",),
             in_all=True,
             primitive_profile="copilot",
             compile_family="vscode",
-            runtimes=("copilot", "vscode", "agents"),
+            runtimes=("copilot", "agents"),
         ),
         _capability(
             "copilot-app",
@@ -248,6 +285,9 @@ def get_target_capability(name_or_alias: str) -> TargetCapability:
     for candidate in TARGET_CAPABILITIES.values():
         if name_or_alias in candidate.aliases:
             return candidate
+    replacement = DEPRECATED_TARGET_ALIASES.get(name_or_alias)
+    if replacement is not None:
+        return TARGET_CAPABILITIES[replacement]
     raise KeyError(name_or_alias)
 
 
@@ -265,6 +305,7 @@ def accepted_target_values(command: str | None = None) -> frozenset[str]:
     values = {
         value for capability in capabilities for value in (capability.name, *capability.aliases)
     }
+    values.update(DEPRECATED_TARGET_ALIASES)
     values.add("all")
     return frozenset(values)
 
@@ -276,7 +317,7 @@ def manifest_target_names() -> frozenset[str]:
         for capability in TARGET_CAPABILITIES.values()
         if capability.experimental_flag is None and not capability.mcp_only
     }
-    names.add("vscode")
+    names.update(DEPRECATED_TARGET_ALIASES)
     return frozenset(names)
 
 

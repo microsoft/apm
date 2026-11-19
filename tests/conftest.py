@@ -56,9 +56,10 @@ def _ensure_home_env(home: Path) -> None:
 
 
 _ensure_home_env(_TMP_HOME)
-# User-scope Codex roots honor CODEX_HOME; keep a developer's value from
-# redirecting tests that expect the default ~/.codex root.
-os.environ.pop("CODEX_HOME", None)
+# User-scope harness roots honor these variables; keep a developer's value
+# from redirecting tests that expect the default roots.
+for _user_root_variable in ("CODEX_HOME", "COPILOT_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"):
+    os.environ.pop(_user_root_variable, None)
 # A developer's APM_HOME must not redirect user-scope metadata during tests.
 os.environ.pop("APM_HOME", None)
 
@@ -161,3 +162,32 @@ def _hermetic_copilot_plugin_capability():
     finally:
         with contextlib.suppress(ValueError):
             reset_native_registration(token)
+
+
+class _OfflineMcpRegistryClient:
+    registry_url = "https://mcp-registry.invalid"
+
+    def find_server_by_reference(self, name):
+        raise ConnectionError("MCP registry lookups are disabled in tests")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_mcp_transport_lookup():
+    """Keep policy transport resolution off the public MCP registry.
+
+    Policy ``mcp.transport.allow`` resolves registry servers through
+    ``mcp_transport_resolution._registry_client``; tests that need a
+    registry patch that seam with their own fake. Restored by hand (not
+    ``monkeypatch``) so this autouse fixture does not reorder other
+    fixtures' monkeypatch teardown.
+    """
+    from apm_cli.integration import mcp_transport_resolution
+
+    original = mcp_transport_resolution._registry_client
+    mcp_transport_resolution.clear_registry_info_memo()
+    mcp_transport_resolution._registry_client = lambda registry_url: _OfflineMcpRegistryClient()
+    try:
+        yield
+    finally:
+        mcp_transport_resolution._registry_client = original
+        mcp_transport_resolution.clear_registry_info_memo()

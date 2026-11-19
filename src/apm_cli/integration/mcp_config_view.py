@@ -26,6 +26,7 @@ from apm_cli.integration._shared import deduplicate_deps
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.validation import PackageType, detect_package_type
+from apm_cli.security.executables import locked_dependency_approval_keys
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -66,6 +67,11 @@ class CurrentMcpConfigView:
     omissions: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     refusable_names: frozenset[str] = frozenset()
     pending_packages: frozenset[str] = frozenset()
+    # Transitive server name -> lock key of the single direct (apm.yml)
+    # dependency that brings it in. Unlike ``provenance`` (the declaring
+    # package's display name) this is an entry the user can remove; servers
+    # whose chain is ambiguous or unknown are absent.
+    brought_in_by: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def derive(
@@ -77,7 +83,6 @@ class CurrentMcpConfigView:
         trust_transitive_self_defined: bool,
         diagnostics: DiagnosticCollector | None = None,
         logger: _McpViewLogger | None = None,
-        trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
         include_dependency_mcp: bool = True,
         allow_pending: bool | None = None,
         active_package_keys: frozenset[str] | None = None,
@@ -90,20 +95,25 @@ class CurrentMcpConfigView:
         """
         project_root = root.package_path or Path.cwd()
         with ExitStack() as scratch:
-            package_deps, problems, fingerprints, omissions, refusable, pending_packages = (
-                _collect_locked_dependencies(
-                    lockfile,
-                    modules_root,
-                    project_root,
-                    scratch=scratch,
-                    trust_transitive_self_defined=trust_transitive_self_defined,
-                    diagnostics=diagnostics,
-                    logger=logger,
-                    trusted_transitive_configs=trusted_transitive_configs,
-                    include_dependency_mcp=include_dependency_mcp,
-                    allow_pending=allow_pending,
-                    active_package_keys=active_package_keys,
-                )
+            (
+                package_deps,
+                problems,
+                fingerprints,
+                omissions,
+                refusable,
+                pending_packages,
+                brought_in_by,
+            ) = _collect_locked_dependencies(
+                lockfile,
+                modules_root,
+                project_root,
+                scratch=scratch,
+                trust_transitive_self_defined=trust_transitive_self_defined,
+                diagnostics=diagnostics,
+                logger=logger,
+                include_dependency_mcp=include_dependency_mcp,
+                allow_pending=allow_pending,
+                active_package_keys=active_package_keys,
             )
         # Root is the authoring project: both prod and dev MCP are intentionally
         # included here (behaviour introduced in #1780). Transitive package deps
@@ -128,6 +138,11 @@ class CurrentMcpConfigView:
                 name: evidence for name, evidence in omissions.items() if name not in configs
             },
             refusable_names=frozenset(refusable - root_names),
+            brought_in_by={
+                name: key
+                for name, key in brought_in_by.items()
+                if key is not None and name not in root_names
+            },
         )
 
     def omission_evidence(self, lockfile: LockFile) -> dict[str, dict[str, str]]:
@@ -245,6 +260,59 @@ def _admitted_names(lockfile: LockFile) -> set[str]:
     )
 
 
+class _DirectDependencyIndex:
+    """Trace locked packages through their recorded parents to apm.yml entries.
+
+    ``resolved_by`` holds the parent's lock key (replacement-enabled locks) or
+    its canonical repo URL (legacy locks), so both forms are resolved here.
+    """
+
+    def __init__(self, lockfile: LockFile) -> None:
+        self._lockfile = lockfile
+        self._by_repo_url: dict[str, list[str]] = {}
+        for key, dependency in lockfile.dependencies.items():
+            if key != ".":
+                self._by_repo_url.setdefault(dependency.repo_url, []).append(key)
+        self._memo: dict[str, frozenset[str] | None] = {}
+
+    def _parent_keys(self, identity: str) -> list[str]:
+        if identity in self._lockfile.dependencies:
+            return [identity]
+        if self._lockfile.replacements is not None:
+            parent = self._lockfile.get_dependency(identity)
+            return [parent.get_unique_key()] if parent is not None else []
+        return self._by_repo_url.get(identity, [])
+
+    def roots(self, key: str, visiting: frozenset[str] = frozenset()) -> frozenset[str] | None:
+        """Return the direct dependency keys that bring in *key*, or None if unknown."""
+        if key in self._memo:
+            return self._memo[key]
+        dependency = self._lockfile.dependencies.get(key)
+        if dependency is None or key in visiting:
+            return None
+        visiting = visiting | {key}
+        found: set[str] = set()
+        for parent in dependency.parent_keys:
+            if parent is None:
+                if dependency.depth > 1:
+                    return self._remember(key, None)
+                found.add(key)
+                continue
+            candidates = self._parent_keys(parent)
+            if not candidates:
+                return self._remember(key, None)
+            for candidate in candidates:
+                parent_roots = self.roots(candidate, visiting)
+                if parent_roots is None:
+                    return self._remember(key, None)
+                found |= parent_roots
+        return self._remember(key, frozenset(found) or None)
+
+    def _remember(self, key: str, value: frozenset[str] | None) -> frozenset[str] | None:
+        self._memo[key] = value
+        return value
+
+
 def _declaration_fingerprint(dependency: LockedDependency, declaration: MCPDependency) -> str:
     """Bind intent to canonical package identity, immutable source and exact declaration."""
     payload = {
@@ -313,21 +381,6 @@ def _log_skipped_dev_mcp(
             f"Skipping {skipped_count} author-only MCP server(s) from "
             f"'{declarer}'; transitive devDependencies.mcp do not propagate"
         )
-
-
-def _matches_trusted_transitive_config(
-    dependency: MCPDependency,
-    declarer: str,
-    trusted_configs: Mapping[str, tuple[str, Mapping[str, Any]]] | None,
-) -> bool:
-    """Return whether this package's unchanged config was trusted before."""
-    if trusted_configs is None:
-        return False
-    trusted = trusted_configs.get(dependency.name)
-    if trusted is None:
-        return False
-    stored_declarer, stored_config = trusted
-    return stored_declarer == declarer and dependency.to_dict() == stored_config
 
 
 def _fallback_manifest_path(
@@ -484,7 +537,6 @@ def _collect_locked_dependencies(
     trust_transitive_self_defined: bool,
     diagnostics: DiagnosticCollector | None,
     logger: _McpViewLogger | None = None,
-    trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
     include_dependency_mcp: bool = True,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
@@ -495,10 +547,15 @@ def _collect_locked_dependencies(
     dict[str, dict[str, str]],
     set[str],
     set[str],
+    dict[str, str | None],
 ]:
-    """Collect MCP declarations from only package manifests named by the lockfile."""
+    """Collect MCP declarations from only package manifests named by the lockfile.
+
+    The last element maps each collected server to the single direct
+    dependency key that brings it in, or None when that is not unique/known.
+    """
     if lockfile is None:
-        return [], [], {}, {}, set(), set()
+        return [], [], {}, {}, set(), set(), {}
 
     collected: list[MCPDependency] = []
     problems: list[McpSourceProblem] = []
@@ -506,6 +563,8 @@ def _collect_locked_dependencies(
     omissions: dict[str, dict[str, str]] = {}
     refusable: set[str] = set()
     pending_packages: set[str] = set()
+    direct_roots: dict[str, set[str] | None] = {}
+    direct_index = _DirectDependencyIndex(lockfile)
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
     native_ownership_cache: dict[Path, frozenset[str]] = {}
@@ -661,16 +720,16 @@ def _collect_locked_dependencies(
                 dependency, authored_declarations[mcp_dependency.name]
             )
             fingerprints.setdefault(mcp_dependency.name, fingerprint)
-            if mcp_dependency.is_self_defined and dependency.depth > 1:
+            if mcp_dependency.requires_transitive_trust and dependency.depth > 1:
                 refusable.add(mcp_dependency.name)
             if not include_dependency_mcp:
                 omissions.setdefault(
                     mcp_dependency.name, {"declaration": fingerprint, "reason": "only-apm"}
                 )
                 continue
-            if mcp_dependency.is_self_defined:
+            if mcp_dependency.requires_transitive_trust:
                 if dependency.depth == 1:
-                    if logger is not None:
+                    if logger is not None and mcp_dependency.is_self_defined:
                         logger.progress(
                             f"Trusting direct dependency MCP '{mcp_dependency.name}' "
                             f"from '{declarer}'"
@@ -681,33 +740,57 @@ def _collect_locked_dependencies(
                             f"Trusting self-defined MCP server '{mcp_dependency.name}' "
                             f"from transitive package '{declarer}' (--trust-transitive-mcp)"
                         )
-                elif _matches_trusted_transitive_config(
-                    mcp_dependency,
-                    declarer,
-                    trusted_transitive_configs,
-                ):
-                    if logger is not None:
-                        logger.verbose_detail(
-                            f"Preserving unchanged trusted MCP server "
-                            f"'{mcp_dependency.name}' from '{declarer}'"
-                        )
                 else:
                     omissions.setdefault(
                         mcp_dependency.name,
                         {"declaration": fingerprint, "reason": "untrusted-transitive"},
                     )
-                    message = (
-                        f"Transitive package '{declarer}' declares self-defined MCP server "
-                        f"'{mcp_dependency.name}' (registry: false). Re-declare it in your "
-                        "apm.yml or use --trust-transitive-mcp."
-                    )
+                    message = _untrusted_transitive_mcp_message(declarer, mcp_dependency)
                     if diagnostics is not None:
                         diagnostics.warn(message)
                     elif logger is not None:
                         logger.warning(message)
                     continue
-            collected.append(replace(mcp_dependency, resolved_by=declarer))
-    return collected, problems, fingerprints, omissions, refusable, pending_packages
+            collected.append(
+                replace(
+                    mcp_dependency,
+                    resolved_by=declarer,
+                    approval_keys=locked_dependency_approval_keys(dependency),
+                )
+            )
+            roots = direct_index.roots(package_key)
+            known = direct_roots.setdefault(mcp_dependency.name, set())
+            if roots is None or known is None:
+                direct_roots[mcp_dependency.name] = None
+            else:
+                known.update(roots)
+    brought_in_by = {
+        name: next(iter(roots)) if roots is not None and len(roots) == 1 else None
+        for name, roots in direct_roots.items()
+    }
+    return (
+        collected,
+        problems,
+        fingerprints,
+        omissions,
+        refusable,
+        pending_packages,
+        brought_in_by,
+    )
+
+
+def _untrusted_transitive_mcp_message(declarer: str, dependency: MCPDependency) -> str:
+    """Return the warning for a transitive MCP declaration skipped without trust."""
+    if dependency.is_self_defined:
+        detail = "self-defined MCP server"
+        suffix = " (registry: false)"
+    else:
+        detail = "MCP server"
+        suffix = " with a custom registry or configuration overlay"
+    return (
+        f"Transitive package '{declarer}' declares {detail} '{dependency.name}'{suffix}. "
+        "Re-declare it in your apm.yml or use --trust-transitive-mcp."
+    )
 
 
 def _collect_unlocked_compat(
@@ -729,12 +812,8 @@ def _collect_unlocked_compat(
         # Only collect prod MCP from packages; devDependencies.mcp are scoped to
         # the package author's own environment (#2340).
         for dependency in package.get_mcp_dependencies():
-            if dependency.is_self_defined and not trust_transitive_self_defined:
-                message = (
-                    f"Transitive package '{declarer}' declares self-defined MCP server "
-                    f"'{dependency.name}' (registry: false). Re-declare it in your apm.yml "
-                    "or use --trust-transitive-mcp."
-                )
+            if dependency.requires_transitive_trust and not trust_transitive_self_defined:
+                message = _untrusted_transitive_mcp_message(declarer, dependency)
                 if diagnostics is not None:
                     diagnostics.warn(message)
                 elif logger is not None:
@@ -767,7 +846,7 @@ def _collect_transitive_compat(
         )
     project_root = lock_path.parent if lock_path is not None else Path.cwd()
     with ExitStack() as scratch:
-        dependencies, _, _, _, _, _ = _collect_locked_dependencies(
+        dependencies, *_ = _collect_locked_dependencies(
             lockfile,
             modules_root,
             project_root,

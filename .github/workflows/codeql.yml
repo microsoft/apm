@@ -15,7 +15,7 @@ on:
 jobs:
   analyze:
     name: Analyze
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.language == 'python' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       security-events: write
       contents: read

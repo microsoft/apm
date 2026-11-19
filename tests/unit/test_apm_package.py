@@ -558,3 +558,109 @@ class TestInvalidDependencyTypes:
         deps = pkg.get_apm_dependencies()
         assert len(deps) == 1
         assert deps[0].repo_url == "owner/repo1"
+
+
+class TestManifestDefaultHost:
+    """OpenAPM req-mf-019: shorthand deps resolve against ``default_host:`` (#3843)."""
+
+    def _deps(self, tmp_path: Path, **extra) -> APMPackage:
+        data = {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "dependencies": {"apm": ["acme/x", "github.com/acme/y"]},
+            "devDependencies": {"apm": ["acme/dev-tool"]},
+            **extra,
+        }
+        return APMPackage.from_apm_yml(_write_apm_yml(tmp_path, data))
+
+    def test_shorthand_resolves_against_manifest_default_host(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        pkg = self._deps(tmp_path, default_host="gitlab.com")
+
+        shorthand, fqdn = pkg.get_apm_dependencies()
+        assert pkg.default_host == "gitlab.com"
+        assert (shorthand.host, shorthand.repo_url) == ("gitlab.com", "acme/x")
+        assert shorthand.get_identity() == "gitlab.com/acme/x"
+        assert fqdn.host == "github.com"
+        assert pkg.get_dev_apm_dependencies()[0].host == "gitlab.com"
+
+    def test_omitted_default_host_keeps_env_contract(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        pkg = self._deps(tmp_path)
+
+        assert pkg.default_host is None
+        assert pkg.get_apm_dependencies()[0].host == "ghe.example.com"
+
+    @pytest.mark.parametrize(
+        "value", ["https://gitlab.com", "gitlab.com/acme", "gitlab.com:8443", "", 42]
+    )
+    def test_rejects_non_hostname_value(self, tmp_path, value):
+        with pytest.raises(ValueError, match="default_host"):
+            self._deps(tmp_path, default_host=value)
+
+    def test_nested_manifest_does_not_inherit_parent_default_host(self, tmp_path):
+        from apm_cli.utils.github_host import manifest_default_host_scope
+
+        with manifest_default_host_scope("gitlab.com"):
+            pkg = self._deps(tmp_path)
+
+        assert pkg.get_apm_dependencies()[0].host == "github.com"
+
+    def test_manifest_entry_strips_only_the_manifest_default_host(self, monkeypatch):
+        from apm_cli.utils.github_host import manifest_default_host_scope
+
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        with manifest_default_host_scope("gitlab.com"):
+            gitlab = DependencyReference.parse("https://gitlab.com/acme/x.git")
+            github = DependencyReference.parse("https://github.com/acme/y")
+            assert gitlab.to_apm_yml_entry() == "acme/x"
+            assert github.to_apm_yml_entry() == "github.com/acme/y"
+            # Canonical identity strings stay manifest-independent.
+            assert gitlab.to_canonical() == "gitlab.com/acme/x"
+            assert github.to_canonical() == "acme/y"
+
+    @pytest.mark.parametrize(
+        ("manifest_host", "qualified", "entry", "identity"),
+        [
+            (
+                "gitlab.com",
+                "gitlab.com/group/sub/repo#v1",
+                "group/sub/repo#v1",
+                ("group/sub/repo", None),
+            ),
+            ("gitlab.com", "gitlab.com/acme/x", "acme/x", ("acme/x", None)),
+            (
+                "gitlab.com",
+                "gitlab.com/acme/x/prompts/a.prompt.md",
+                "acme/x/prompts/a.prompt.md",
+                ("acme/x", "prompts/a.prompt.md"),
+            ),
+            (
+                "gitlab.com",
+                "gitlab.com/my.group/repo",
+                "gitlab.com/my.group/repo",
+                ("my.group/repo", None),
+            ),
+            (
+                "dev.azure.com",
+                "dev.azure.com/org/project/repo",
+                "org/project/repo",
+                ("org/project/repo", None),
+            ),
+            (None, "github.com/acme/y/skills/foo", "acme/y/skills/foo", ("acme/y", "skills/foo")),
+        ],
+    )
+    def test_manifest_entry_round_trips_repository_boundary(
+        self, monkeypatch, manifest_host, qualified, entry, identity
+    ):
+        from apm_cli.utils.github_host import manifest_default_host_scope
+
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        expected_host = manifest_host or "github.com"
+        with manifest_default_host_scope(manifest_host):
+            dep = DependencyReference.parse(qualified)
+            assert dep.to_apm_yml_entry() == entry
+            reparsed = DependencyReference.parse(entry)
+        for ref in (dep, reparsed):
+            assert (ref.host, ref.repo_url, ref.virtual_path) == (expected_host, *identity)
+        assert reparsed.get_identity() == dep.get_identity()

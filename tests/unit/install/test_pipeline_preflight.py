@@ -72,6 +72,11 @@ def _make_resolver(
     del dep_ctx.source
     resolver.resolve_for_dep.return_value = dep_ctx
     resolver.build_error_context.return_value = "    Diagnostic payload"
+
+    def _single_attempt(_host, operation, **_kwargs):
+        return operation(dep_ctx.token, dict(dep_ctx.git_env))
+
+    resolver.try_with_fallback.side_effect = _single_attempt
     return resolver
 
 
@@ -169,6 +174,26 @@ class TestPreflightAuthCheckTimeout:
         resolver = _make_resolver()
         # Should complete without raising
         _preflight_auth_check(ctx, resolver, verbose=False)
+
+    @patch("subprocess.run")
+    def test_ado_probe_timeout_is_an_outcome_not_a_success(self, mock_run: MagicMock) -> None:
+        """The auth chain must see a timeout, never a value it would approve (#3765)."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired(["git"], 30)
+        seen: list[BaseException] = []
+
+        def _attempt(_host, operation, **_kwargs):
+            try:
+                return operation("pat", {})
+            except subprocess.TimeoutExpired as exc:
+                seen.append(exc)
+                raise
+
+        resolver = _make_resolver()
+        resolver.try_with_fallback.side_effect = _attempt
+        _preflight_auth_check(_make_ctx(), resolver, verbose=False)
+        assert seen, "the ADO probe returned a timeout sentinel to the auth chain"
 
 
 # ---------------------------------------------------------------------------
@@ -456,3 +481,25 @@ class TestRunInstallPipelineExceptionContracts:
             with pytest.raises(error_type) as raised:
                 run_install_pipeline(pkg, target="claude")
         assert raised.value is collision
+
+
+@pytest.mark.parametrize("token", ["intellij", "copilot-app"])
+def test_pipeline_rejects_undeployable_manifest_target_before_any_write(
+    token: str, tmp_path, monkeypatch
+) -> None:
+    """Direct pipeline callers get the CLI promise: exit 2 before writing anything."""
+    from apm_cli.install.pipeline import run_install_pipeline
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    manifest = tmp_path / "apm.yml"
+    dump_yaml({"name": "p", "version": "1.0.0", "target": token}, manifest)
+    pkg = APMPackage.from_apm_yml(manifest)
+    monkeypatch.chdir(tmp_path)
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+
+    with pytest.raises(SystemExit) as excinfo:
+        run_install_pipeline(pkg)
+
+    assert excinfo.value.code == 2
+    assert sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")) == before

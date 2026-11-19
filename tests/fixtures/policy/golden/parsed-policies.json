@@ -802,7 +802,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false
@@ -1219,7 +1219,7 @@
       },
       "target": {
         "allow": [
-          "vscode"
+          "copilot"
         ],
         "enforce": null
       }
@@ -1525,11 +1525,7 @@
         "enforce": "distributed"
       },
       "target": {
-        "allow": [
-          "vscode",
-          "claude",
-          "all"
-        ],
+        "allow": null,
         "enforce": null
       }
     },
@@ -1585,7 +1581,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false

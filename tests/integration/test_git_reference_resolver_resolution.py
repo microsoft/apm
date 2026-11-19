@@ -24,11 +24,8 @@ def _make_host() -> MagicMock:
     host.auth_resolver = MagicMock()
     host.auth_resolver._build_git_env.return_value = {"AUTH": "bearer"}
     host.auth_resolver.git_env_for_context.return_value = host.git_env
-    host.auth_resolver.execute_with_bearer_fallback.side_effect = (
-        lambda dep_ref, primary, bearer, is_auth_failure: MagicMock(
-            outcome=primary(),
-            bearer_attempted=False,
-        )
+    host.auth_resolver.try_with_fallback.side_effect = lambda _host, operation, **kwargs: operation(
+        "mytoken", kwargs.get("base_env") or host.git_env
     )
     host.auth_resolver.build_error_context.return_value = "auth help"
     host.auth_resolver.classify_host.return_value = MagicMock(display_name="Generic Git")
@@ -154,25 +151,26 @@ class TestListRemoteRefs:
         host._parse_ls_remote_output.assert_called_once_with(output)
         host._sort_remote_refs.assert_called_once_with(parsed_refs)
 
-    def test_ado_basic_token_uses_bearer_fallback(self) -> None:
+    def test_ado_ls_remote_runs_inside_the_auth_chain(self) -> None:
         host = _make_host()
         dep = _make_dep(host_name="dev.azure.com", ado=True)
         mock_git = MagicMock()
         auth_error = GitCommandError("ls-remote", 128, stderr="Authentication failed")
+        envs: list[dict] = []
 
-        def _ls_remote(*args, **kwargs):
-            env = kwargs["env"]
-            if env == host.git_env:
+        def _ls_remote(*_args, **kwargs):
+            envs.append(kwargs["env"])
+            if kwargs["env"] == host.git_env:
                 raise auth_error
             return "f" * 40 + "\trefs/heads/main\n"
 
-        def _fallback(dep_ref, primary, bearer, is_auth_failure):
-            primary_outcome = primary()
-            assert is_auth_failure(primary_outcome) is True
-            outcome = bearer("jwt-token")
-            return MagicMock(outcome=outcome, bearer_attempted=True)
+        def _chain(_host, operation, **kwargs):
+            try:
+                return operation("stale-pat", kwargs["base_env"])
+            except GitCommandError:
+                return operation("jwt-token", {"AUTH": "bearer"})
 
-        host.auth_resolver.execute_with_bearer_fallback.side_effect = _fallback
+        host.auth_resolver.try_with_fallback.side_effect = _chain
         mock_git.ls_remote.side_effect = _ls_remote
         host._parse_ls_remote_output.return_value = [MagicMock()]
 
@@ -180,15 +178,13 @@ class TestListRemoteRefs:
             refs = GitReferenceResolver(host).list_remote_refs(dep)
 
         assert refs == host._parse_ls_remote_output.return_value
-        host.auth_resolver.execute_with_bearer_fallback.assert_called_once()
-        host.auth_resolver._build_git_env.assert_called_once_with(
-            "jwt-token",
-            scheme="bearer",
-            host_kind="ado",
-            base_env=host.git_env,
-        )
+        host.auth_resolver.try_with_fallback.assert_called_once()
+        assert envs[-1] == {"AUTH": "bearer"}
+        kwargs = host.auth_resolver.try_with_fallback.call_args.kwargs
+        assert kwargs["path"] == dep.repo_url
+        assert kwargs["base_env"] == host.git_env
 
-    def test_ado_without_token_skips_bearer_fallback(self) -> None:
+    def test_ado_without_token_still_routes_through_the_auth_chain(self) -> None:
         host = _make_host()
         host._resolve_dep_token.return_value = None
         dep = _make_dep(host_name="dev.azure.com", ado=True)
@@ -198,7 +194,7 @@ class TestListRemoteRefs:
         with patch("apm_cli.deps.github_downloader.git.cmd.Git", return_value=mock_git):
             GitReferenceResolver(host).list_remote_refs(dep)
 
-        host.auth_resolver.execute_with_bearer_fallback.assert_not_called()
+        host.auth_resolver.try_with_fallback.assert_called_once()
 
     def test_generic_host_error_mentions_ssh_and_credential_helper(self) -> None:
         host = _make_host()
@@ -238,7 +234,7 @@ class TestListRemoteRefs:
             org="owner",
             port=None,
             dep_url="owner/repo",
-            bearer_also_failed=False,
+            attempts=None,
         )
 
     def test_github_host_error_uses_auth_resolver_context(self) -> None:
@@ -260,29 +256,27 @@ class TestListRemoteRefs:
             org="octo",
             port=None,
             dep_url="octo/repo",
-            bearer_also_failed=False,
+            attempts=None,
         )
 
-    def test_ado_bearer_failure_sets_bearer_also_failed_flag(self) -> None:
+    def test_ado_exhausted_chain_passes_attempt_log_to_diagnostics(self) -> None:
+        from apm_cli.core.auth_chain import AdoAuthChainExhaustedError, AuthAttemptLog
+
         host = _make_host()
         dep = _make_dep(host_name="dev.azure.com", repo_url="org/repo", ado=True)
-        mock_git = MagicMock()
-        auth_error = GitCommandError("ls-remote", 128, stderr="Authentication failed")
-
-        def _fallback(dep_ref, primary, bearer, is_auth_failure):
-            primary()
-            return MagicMock(outcome=("err", auth_error), bearer_attempted=True)
-
-        host.auth_resolver.execute_with_bearer_fallback.side_effect = _fallback
-        mock_git.ls_remote.side_effect = auth_error
+        attempts = AuthAttemptLog()
+        host.auth_resolver.try_with_fallback.side_effect = AdoAuthChainExhaustedError(
+            "Azure DevOps authentication failed. Tried in order: ADO_APM_PAT was rejected",
+            attempts=attempts,
+        )
 
         with (
-            patch("apm_cli.deps.github_downloader.git.cmd.Git", return_value=mock_git),
+            patch("apm_cli.deps.github_downloader.git.cmd.Git", return_value=MagicMock()),
             pytest.raises(RuntimeError),
         ):
             GitReferenceResolver(host).list_remote_refs(dep)
 
-        assert host.auth_resolver.build_error_context.call_args.kwargs["bearer_also_failed"] is True
+        assert host.auth_resolver.build_error_context.call_args.kwargs["attempts"] is attempts
 
     def test_error_message_includes_sanitized_git_error(self) -> None:
         host = _make_host()

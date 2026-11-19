@@ -499,9 +499,12 @@ class TestInstallCommandAutoBootstrap:
 
             # Should show what would be added
             assert result.exit_code == 0
-            assert "Would add" in result.output or "Dry run" in result.output
-            # Dry-run preserves the bootstrap configuration for the next run.
-            assert Path("apm.yml").exists()
+            assert "Dry run: Would create apm.yml" in result.output
+            assert "Created apm.yml" not in result.output
+            # Dry-run plans against a temporary manifest and writes nothing (#3836).
+            assert not Path("apm.yml").exists()
+            assert not Path("apm.lock.yaml").exists()
+            assert not Path("apm_modules").exists()
 
     def test_positional_local_package_dry_run_previews_validated_addition(self):
         """Dry-run renders a validated local addition without changing the project."""
@@ -528,6 +531,47 @@ class TestInstallCommandAutoBootstrap:
             assert not Path("apm.lock.yaml").exists()
             assert not Path("apm_modules").exists()
             assert not Path(".github").exists()
+
+    def test_local_package_dry_run_without_manifest_writes_nothing(self):
+        """Project-scope dry-run bootstrap plans against a temp manifest (#3836)."""
+        with self._chdir_tmp():
+            local_package = Path("local-package")
+            local_package.mkdir()
+            (local_package / "apm.yml").write_text(
+                "name: local-package\nversion: 1.0.0\n",
+                encoding="utf-8",
+            )
+
+            result = self.runner.invoke(
+                cli, ["install", "./local-package", "--dry-run", "--target", "claude"]
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "Dry run: Would create apm.yml" in result.output
+            assert "Dry run: Would set targets: claude (in apm.yml)" in result.output
+            assert "Created apm.yml" not in result.output
+            assert "./local-package" in result.output
+            assert sorted(p.name for p in Path.cwd().iterdir()) == ["local-package"]
+
+    def test_dry_run_without_manifest_resolves_local_paths_from_project(self):
+        """The temp preview manifest must not move local-path resolution (#3836)."""
+        with self._chdir_tmp():
+            for name, deps in (
+                ("local-package", "dependencies:\n  apm:\n    - ../dep2\n"),
+                ("dep2", ""),
+            ):
+                Path(name).mkdir()
+                (Path(name) / "apm.yml").write_text(
+                    f"name: {name}\nversion: 1.0.0\n{deps}", encoding="utf-8"
+                )
+
+            result = self.runner.invoke(
+                cli, ["install", "./local-package", "--dry-run", "--target", "claude"]
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "../dep2 -> install" in result.output
+            assert sorted(p.name for p in Path.cwd().iterdir()) == ["dep2", "local-package"]
 
     def test_positional_dry_run_excludes_unrequested_manifest_dependencies(self):
         """Dry-run renders and counts only the requested positional package."""
@@ -716,7 +760,7 @@ class TestValidationFailureReasonMessages:
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
         return_value=None,
     )
-    @patch("apm_cli.install.validation.requests.get")
+    @patch("apm_cli.install.validation._github_api_get")
     def test_verbose_validation_failure_calls_build_error_context(self, mock_get, _mock_cred):
         """When GitHub validation fails in verbose mode, build_error_context should be invoked."""
         mock_get.return_value = MagicMock(ok=False, status_code=404, reason="Not Found", headers={})
@@ -1423,7 +1467,7 @@ class TestGenericHostSshFirstValidation:
 
         from apm_cli.commands.install import _validate_package_exists
 
-        with patch("apm_cli.install.validation.requests.get") as mock_get:
+        with patch("apm_cli.install.validation._github_api_get") as mock_get:
             mock_get.return_value = MagicMock(
                 ok=False, status_code=404, reason="Not Found", headers={}
             )
@@ -2304,12 +2348,15 @@ class TestInstallMcpFlag:
         assert install_call.kwargs["target_decision"].value == ["claude"]
         assert install_call.kwargs["target_decision"].source == "auto-detect"
 
-    def test_global_mcp_rejects_workspace_only_target_before_manifest_write(
+    def test_global_mcp_deprecated_vscode_target_selects_global_copilot(
         self, tmp_path, monkeypatch
     ):
+        """vscode is a deprecated alias of copilot, which is global-capable (#3866)."""
+        from apm_cli.core import target_detection
+
+        # The flag warning fires once per process; re-arm it for this invocation.
+        monkeypatch.setattr(target_detection, "_deprecated_flag_aliases_warned", set())
         fake_home = tmp_path / "home"
-        user_apm_dir = fake_home / ".apm"
-        user_manifest = user_apm_dir / "apm.yml"
         project = tmp_path / "project"
         project.mkdir()
         monkeypatch.chdir(project)
@@ -2330,15 +2377,19 @@ class TestInstallMcpFlag:
         with (
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
         ):
             result = self.runner.invoke(cli, argv[1:])
 
-        assert result.exit_code == 2, (result.output, result.exception)
-        assert "enable selected experimental targets" not in result.output
-        assert "vscode; source: --target flag" in result.output
-        assert "choose a global-capable --target" in result.output
-        assert "Skipped workspace-only runtimes" not in result.output
-        assert not user_manifest.exists()
+        assert result.exit_code == 0, (result.output, result.exception)
+        decision = run_mcp_install.call_args.kwargs["target_decision"]
+        assert decision.source == "--target flag"
+        assert decision.canonical_targets == ("copilot",)
+        assert decision.runtime_targets == ("copilot",)
+        output = " ".join(result.output.split())
+        assert "replace `vscode` with `copilot`" in output
+        assert "choose a global-capable --target" not in output
+        assert "Skipped workspace-only runtimes" not in output
 
     def test_global_mcp_accepts_explicit_hermes_target(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
@@ -2381,11 +2432,11 @@ class TestInstallMcpFlag:
             }
         ]
 
-    def test_global_mcp_rejects_unsupported_saved_target_without_fallback(
+    def test_global_mcp_saved_vscode_target_selects_copilot_without_fallback(
         self, tmp_path, monkeypatch
     ):
+        """A saved deprecated vscode default selects copilot, not auto-detected claude."""
         fake_home = tmp_path / "home"
-        user_manifest = fake_home / ".apm" / "apm.yml"
         project = tmp_path / "project"
         project.mkdir()
         (project / ".claude").mkdir()
@@ -2404,17 +2455,18 @@ class TestInstallMcpFlag:
 
         with (
             patch.object(Path, "home", return_value=fake_home),
-            patch("apm_cli.config.get_install_target", return_value="vscode"),
+            patch("apm_cli.config.get_config", return_value={"install_target": "vscode"}),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
         ):
             result = self.runner.invoke(cli, argv[1:])
 
-        assert result.exit_code == 2
-        assert "enable selected experimental targets" not in result.output
-        assert "vscode; source: apm config target" in result.output
-        assert "choose a global-capable --target" in result.output
+        assert result.exit_code == 0, (result.output, result.exception)
+        decision = run_mcp_install.call_args.kwargs["target_decision"]
+        assert decision.source == "apm config target"
+        assert decision.canonical_targets == ("copilot",)
+        assert decision.runtime_targets == ("copilot",)
         assert "Skipped workspace-only runtimes" not in result.output
-        assert not user_manifest.exists()
 
     def test_global_mcp_filters_mixed_target_set_before_dispatch(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
@@ -2462,11 +2514,12 @@ class TestInstallMcpFlag:
         assert result.exit_code == 0, result.output
         assert excluded.exit_code == 0, excluded.output
         first_call, excluded_call = run_mcp_install.call_args_list
+        # The deprecated vscode alias selects global-capable copilot (#3866).
         decision = first_call.kwargs["target_decision"]
-        assert decision.value == ["claude"]
-        assert first_call.kwargs["initial_manifest_config"]["targets"] == ["claude"]
+        assert decision.value == ["copilot", "claude"]
+        assert first_call.kwargs["initial_manifest_config"]["targets"] == ["copilot", "claude"]
         assert excluded_call.kwargs["target_decision"].value == ["claude"]
-        assert "Skipped workspace-only runtimes at user scope: vscode" in result.output
+        assert "Skipped workspace-only runtimes" not in result.output
         assert "Skipped workspace-only runtimes" not in excluded.output
 
     def test_global_mcp_bootstrap_config_omits_git_author(self, tmp_path, monkeypatch):

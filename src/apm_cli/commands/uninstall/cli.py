@@ -29,6 +29,7 @@ from .engine import (
     _preflight_uninstall_survivors,
     _project_transitive_orphans,
     _remove_packages_from_disk,
+    _shrink_surviving_selections,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
@@ -157,6 +158,22 @@ def _sync_integrations_for_manifest(
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
         logger.verbose_detail(traceback.format_exc().rstrip())
         return default_outcome, sync_err
+
+
+def _enter_manifest_host_scope(stack: contextlib.ExitStack, data: dict, logger) -> None:
+    """Resolve shorthand against the manifest's ``default_host`` (req-mf-019, #3843).
+
+    Uninstall must parse declarations exactly as ``apm install`` recorded them,
+    so ``apm uninstall acme/x`` finds the ``gitlab.com/acme/x`` lock entry.
+    """
+    from ...models.dependency.manifest_host import manifest_host_scope_for
+
+    try:
+        scope = manifest_host_scope_for(data)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    stack.enter_context(scope)
 
 
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
@@ -479,6 +496,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
     staged_local_refreshes = {}
     apm_package = None
     registration_token = _publish_native_registration(deploy_root, scope, manifest_path)
+    host_scope = contextlib.ExitStack()
     try:
         # Check if apm.yml exists
         if not manifest_path.exists():
@@ -510,6 +528,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         except Exception as e:
             logger.error(f"Failed to read {apm_yml_path}: {e}")
             sys.exit(1)
+        _enter_manifest_host_scope(host_scope, data, logger)
 
         # Track whether devDependencies was synthesised so we don't leave
         # an empty section behind for projects that never used --dev.
@@ -686,6 +705,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             orphan_removed, actual_orphans = _cleanup_transitive_orphans(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
             )
+            # Survivors whose selection shrinks are redeployed in full below.
+            refreshed_survivor_keys |= _shrink_surviving_selections(
+                lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
+            )
         except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:
             _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
             sys.exit(1)
@@ -699,14 +722,18 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 SelectedCleanupOutcome,
                 reconcile_target_deployed_files,
             )
-            from ...integration.targets import resolve_targets
+            from ...integration.skill_layout import (
+                recorded_deployed_paths,
+                resolve_reintegration_targets,
+            )
             from ...utils.diagnostics import DiagnosticCollector
 
             cleanup_target_names = list(APMPackage.from_apm_yml(manifest_path).canonical_targets)
-            cleanup_targets = resolve_targets(
+            cleanup_targets = resolve_reintegration_targets(
                 deploy_root,
                 user_scope=scope is InstallScope.USER,
                 explicit_target=cleanup_target_names or None,
+                recorded_paths=recorded_deployed_paths(lockfile),
             )
             cleanup_keys = removed_keys | builtins.set(projected_orphans) | profile_keys
             cleanup_outcome = SelectedCleanupOutcome()
@@ -980,6 +1007,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.error(f"Error uninstalling packages: {e}")
         sys.exit(1)
     finally:
+        host_scope.close()
         _retire_native_registration(registration_token)
         _cleanup_staged_local_refreshes(staged_local_refreshes, modules_dir)
 

@@ -102,7 +102,7 @@ def test_native_findings_identify_only_the_offending_field(
         if ci_mode:
             assert f"unicode: .claude/settings.json{expected}" in " ".join(result.output.split())
         return
-    report = json.loads(result.output)
+    report = json.loads(result.stdout)
     if output_format == "json":
         if ci_mode:
             check = next(c for c in report["checks"] if c["name"] == "content-integrity")
@@ -269,6 +269,26 @@ def test_policy_extends_resolves_relative_to_policy_root():
         "host class",
         "MUST NOT extend a\npolicy fetched from any other host class",
     )
+
+
+@pytest.mark.req("req-pl-006")
+@pytest.mark.parametrize(
+    ("parent", "child", "expected"),
+    [
+        ("block", "warn", "block"),
+        ("block", None, "block"),
+        ("warn", "block", "block"),
+        ("warn", "warn", "warn"),
+    ],
+)
+def test_policy_fetch_failure_merges_stricter_wins(parent, child, expected):
+    from apm_cli.policy.inheritance import merge_policies
+    from apm_cli.policy.schema import ApmPolicy
+
+    assert_spec_contains("Stricter wins (`block` > `warn`; unset is the `warn` default)")
+    child_policy = ApmPolicy() if child is None else ApmPolicy(fetch_failure=child)
+    merged = merge_policies(ApmPolicy(fetch_failure=parent), child_policy)
+    assert merged.fetch_failure == expected
 
 
 @pytest.mark.req("req-pl-007")
@@ -913,7 +933,7 @@ def test_explicit_policy_ref_that_cannot_load_fails_closed(tmp_path, monkeypatch
 
     with (
         patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=requests.exceptions.ConnectionError(),
         ),
         patch("apm_cli.policy.discovery._fetch_github_contents") as remote,

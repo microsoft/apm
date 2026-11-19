@@ -6,6 +6,8 @@ sidebar:
 
 APM works without tokens for public packages on github.com. Authentication is needed for private repositories, enterprise hosts (`*.ghe.com`, GHES), GitLab (private or API access), and Azure DevOps.
 
+To see which credential APM resolves for a GitHub or GitLab host, or to create one if there is none, run `apm auth <host>` (for example `apm auth github.com`). See [`apm auth`](../../reference/cli/auth/).
+
 ## CLI bootstrap and release lookup
 
 Installing or updating the CLI queries public release metadata authenticated-first when an environment token is available, with narrowly scoped anonymous recovery for a rejected token. This is separate from private-package authentication and anonymous-first public-package Git operations. See [Public release metadata](../installation/#public-release-metadata) for token precedence and retry restrictions.
@@ -347,12 +349,36 @@ apm install dev.azure.com/myorg/myproject/myrepo
 3. Path-scoped `git credential fill` (Git Credential Manager / OS keychain)
 4. If the helper is empty or rejected: an auth-failed error naming the attempted steps
 
-`apm marketplace check` uses this same chain for an ADO `marketplace.sourceBase`.
-Azure CLI credentials are passed to `git ls-remote` as a bearer Authorization
-header, never embedded in the repository URL. Initial resolution selects the
-PAT or bearer; the helper is an operation-time retry after HTTP 401/403 or a
-recognized Git authentication failure. The repository path lets GCM select
-a stored account. DNS, TLS, and timeout failures do not unlock fill.
+Every Azure DevOps operation uses this chain: install validation, clone,
+ref and tag resolution, `apm install --update` pre-flight, single-file
+downloads, org policy discovery, and marketplace fetches. `apm marketplace
+check` uses it for an ADO `marketplace.sourceBase` too.
+
+Each step runs only when the previous one was an authentication failure.
+APM treats these Azure DevOps answers as authentication failures:
+
+- HTTP 401 or 403
+- a redirect to the Azure DevOps sign-in service (for example `*.vssps.visualstudio.com/_signin`)
+- an HTML sign-in page returned instead of the requested file (HTTP 200 or 203)
+- a Git authentication error such as `terminal prompts disabled`
+
+DNS, TLS, timeout, and not-found failures stop the chain and are reported as is.
+
+Credentials are sent as an `Authorization` header, never embedded in the
+repository URL. Azure DevOps requests use only the credential chosen by the
+auth chain; an unrelated `~/.netrc` entry does not replace it. The helper
+step asks `git credential fill` for the repository path
+(`org/project/_git/repo`) so GCM can select the stored account, and sends
+the returned credential as HTTP Basic `username:password`, as Git does. APM
+asks once per repository per run. Like Git, APM then reports the result to
+the helper: `git credential approve` after the credential worked, or
+`git credential reject` after Azure DevOps refused it with HTTP 401, so GCM can
+replace an expired credential. A 403, a sign-in redirect, or a network, TLS,
+or not-found failure is not reported. Each report happens at most once per
+repository per run, never for `ADO_APM_PAT` or `az` tokens, and a helper
+failure never fails the command. When stdin is not a terminal or `CI` is set,
+APM sets `GCM_INTERACTIVE=0`, so an unattended run never waits for a browser
+or dialog.
 
 **Stale-PAT fallback:** if `ADO_APM_PAT` is rejected with HTTP 401/403 or a
 recognized Git authentication failure, APM tries an available `az` bearer.
@@ -368,11 +394,22 @@ marketplace version resolution, and `apm install --update`. If you have a stale
 `ADO_APM_PAT` but an active `az login` session, the ref lookup succeeds
 transparently via the bearer retry.
 
-If the helper retry is exhausted, the diagnostic names only the attempted
-steps. Refresh the PAT, run `az login`, or
-store a repository credential in Git Credential Manager, then retry.
+If the helper retry is exhausted, the error lists every step in order and
+what happened to it, for example:
 
-**Verbose output** (`--verbose`) shows which source was used per host:
+```
+Azure DevOps authentication failed. Tried in order: ADO_APM_PAT is not set;
+az CLI bearer could not get a token (ERROR: AADSTS50076: ...); git credential
+fill returned no credential (for dev.azure.com/org/project/_git/repo).
+```
+
+Refresh the PAT, run `az login`, or store a repository credential in Git
+Credential Manager, then retry. When `az` is installed but cannot issue a
+token, APM shows the reason Azure CLI reported (such as an `AADSTS` code)
+instead of claiming Azure DevOps rejected a token.
+
+**Verbose output** (`--verbose`) shows which source was used per host and
+each chain step:
 
 ```
 [i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)
@@ -421,10 +458,10 @@ For GitHub and GHES, APM sends repository API requests with `Authorization: toke
 
 | Package source | Host | Auth behavior | Fallback |
 |---|---|---|---|
-| Bare shorthand | `default_host()` | Host-class-specific chain above | Depends on classified host |
-| `github.com/org/repo` | github.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
-| `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars -> `gh auth token` -> credential fill | Auth-only (no public repos) |
-| GHES via `GITHUB_HOST` | ghes.company.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| Bare shorthand | manifest `default_host:`, else `GITHUB_HOST`, else `github.com` | Host-class-specific chain above | Depends on classified host |
+| `github.com/org/repo` | github.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| `contoso.ghe.com/org/repo` | *.ghe.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Auth-only (no public repos) |
+| GHES via `GITHUB_HOST` | ghes.company.com | Per-org env var -> global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
 | GitLab (`gitlab.com` or host listed in `GITLAB_HOST` / `APM_GITLAB_HOSTS`) | gitlab.com or self-managed | HTTPS/API: `GITLAB_APM_PAT` -> `GITLAB_TOKEN` -> credential helper; REST uses `PRIVATE-TOKEN`; SSH uses native SSH auth; GitHub env vars excluded | Sparse-fetch REST requires exhausted same-origin effective HTTPS; otherwise native transport access |
 | `dev.azure.com/org/proj/repo` | ADO (cloud) | `ADO_APM_PAT` -> AAD bearer via `az` -> git credential fill | Auth-only |
 | ADO Server via `ADO_HOST` / `APM_ADO_HOSTS` | on-prem ADO | `ADO_APM_PAT` -> git credential fill | Auth-only |

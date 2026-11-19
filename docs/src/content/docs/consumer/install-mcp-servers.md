@@ -31,7 +31,7 @@ consumer's target config, lockfile provenance, or audit baseline.
 This keeps package-author debug servers out of consumer tool lists.
 
 MCP servers live under `dependencies.mcp:` (or
-`devDependencies.mcp:`). Three forms are valid -- pick the one that
+`devDependencies.mcp:`). Four forms are valid -- pick the one that
 matches the source you have:
 
 ```yaml
@@ -80,7 +80,7 @@ allowlists, `package:` selection) is in
 ## Adding a server from the CLI
 
 `apm install --mcp NAME` writes the entry into `apm.yml` for you,
-then runs install. Three shapes match the three manifest forms:
+then runs install. Three shapes match the registry, stdio, and remote forms:
 
 ```bash
 # Registry
@@ -117,7 +117,7 @@ the `apm.yml` source of truth does not.
 Self-defined servers (`registry: false`) are written under their exact
 declared `name`, including names with a slash such as `com.example/server`.
 Registry servers such as `io.github.github/github-mcp-server` keep the short
-`github-mcp-server` key in every target except VS Code. If an older APM release
+`github-mcp-server` key in every target. If an older APM release
 wrote a self-defined server under its final segment, `apm install` removes that
 entry only when APM's recorded ownership proves it wrote it (and, for Claude
 Code and Codex, that it is unchanged); otherwise it leaves the entry and prints
@@ -135,7 +135,7 @@ selects Docker automatically, keeps Docker run options before the image,
 and places package arguments after the image. When `runtimeArguments`
 list only Docker options, APM adds `run -i --rm` ahead of them. Copilot, Codex, Gemini,
 and related adapters prefer packages in `npm`, OCI, then PyPI order.
-VS Code prefers `npm`, PyPI, then OCI. OCI packages require Docker to be
+OCI packages require Docker to be
 available when the harness starts the server; no per-target launcher
 configuration is needed.
 
@@ -144,11 +144,8 @@ per variable and displays that default as the suggested answer. Press Enter
 to accept it or provide an override. Secret defaults remain accepted on
 Enter but are never displayed. For OCI/Docker launchers, non-secret selected
 values replace every `{variable}` reference across the package's runtime and
-package arguments before the native config is written. VS Code renders secret
-variables as target-native secret-input references instead, so secret bytes
-never enter `mcp.json`. A required variable without a collected value or
-default declines that target configuration; VS Code treats `workspaceFolder`
-as its built-in `${workspaceFolder}` token.
+package arguments before the native config is written. A required variable
+without a collected value or default declines that target configuration.
 
 For a self-defined Codex stdio connection at project scope (`.codex/config.toml`),
 an `env` value written as exactly `KEY: ${KEY}` or `KEY: ${env:KEY}` under the
@@ -182,7 +179,7 @@ declarations omit it; switching to HTTP removes incompatible stdio fields.
 This exception permits updates, not foreign adoption or cleanup. Edits to a
 declared `cwd` or other managed fields still require reconciliation.
 
-For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
+For Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package
 identity. Legacy `value_hint` arguments remain supported. Registry
@@ -192,10 +189,9 @@ unresolved required entries fail closed.
 
 | Harness | File | Scope | Format |
 |---|---|---|---|
-| GitHub Copilot CLI | `.github/mcp.json` | project | JSON `mcpServers` |
+| GitHub Copilot (CLI and VS Code) | `.mcp.json` (shared with Claude Code) | project | JSON `mcpServers` |
 | GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
-| VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
-| Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
+| Claude Code | `.mcp.json` (project, only if `.claude/` exists) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` (project, only if `.cursor/` exists) or `~/.cursor/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank and absolute; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
@@ -287,12 +283,12 @@ and plugin. Servers then install like `apm.yml`-declared self-defined servers.
 
 ## Resolve a connection name conflict
 
-For every JSON-config target (VS Code, Copilot CLI, Cursor, Gemini, Kiro,
-OpenCode, Windsurf, Antigravity) and for Claude and Codex, a normal package
-update or root override updates an unchanged managed connection. A differing
-native entry is preserved, the affected target is named, and install exits
-`1`; it is never reported as "already configured". JetBrains and Hermes still
-skip an existing connection by name.
+For every JSON-config target (Copilot, Cursor, Gemini, Kiro,
+OpenCode, Windsurf, Antigravity) and for Claude, Codex and Hermes, a normal
+package update or root override updates an unchanged managed connection. A
+differing native entry is preserved, the affected target is named, and install
+exits `1`; it is never reported as "already configured". JetBrains still skips
+an existing connection by name.
 Successful writes, including registry entries written before a later
 self-defined conflict, remain recorded. This is not a whole-command rollback.
 
@@ -339,11 +335,30 @@ write.
 The same effective decision drives package, MCP, and LSP phases; APM does
 not re-resolve each phase independently.
 
-At project scope, the `copilot` target writes MCP state to
-`.github/mcp.json`, which Copilot CLI discovers from the repository. The
-`vscode` target writes only `.vscode/mcp.json`. At global scope, `copilot`
-writes `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when
-`COPILOT_HOME` is unset.
+At project scope, the `copilot` target writes MCP servers to the
+workspace-root `.mcp.json` (top-level `mcpServers`), which both Copilot CLI and
+VS Code's Copilot read. The deprecated `vscode` alias selects the same file;
+APM no longer writes `.vscode/mcp.json` or `.github/mcp.json`. At global scope,
+`copilot` writes `$COPILOT_HOME/mcp-config.json`, or
+`~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset.
+
+Claude Code reads the same `.mcp.json`. When both `copilot` and `claude` are
+active, they write one identical entry per server in Claude Code's shape
+(`type: stdio`, `http` or `sse`; `${VAR}` references kept), merge per server,
+never overwrite a server you authored, and each record ownership in
+`apm.lock.yaml`. Removing one of the two targets keeps an entry the other still
+uses. Claude Code writes `.mcp.json` only when `.claude/` exists; `copilot`
+always writes it.
+
+On the first `apm install` (including `--frozen`) of a project whose lockfile
+was written by APM 0.36 or earlier, APM moves the entries it wrote to
+`.github/mcp.json` (old `copilot`) or `.vscode/mcp.json` (old `vscode`) into
+`.mcp.json`. It moves an entry only when its recorded fingerprint, or what that
+release rendered for the same self-defined declaration, proves APM wrote it
+unchanged. Entries you authored or edited stay where they are, and APM prints
+a [warning naming them](../../troubleshooting/common-errors/#-kept-mcp-server-name-in-githubmcpjson).
+APM deletes one of those files only if it created it: every server in it was
+APM's and nothing but empty scaffolding (such as `"inputs": []`) remains.
 
 **Portability boundary:** A committed target list makes lockfile MCP ownership
 deterministic across machines with different installed harnesses. If `targets:`
@@ -379,8 +394,9 @@ permissions to check. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to
-`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set, otherwise
-`~/.copilot/mcp-config.json`; Claude Code to
+`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set to an absolute
+path, otherwise `~/.copilot/mcp-config.json` (relative values are rejected);
+Claude Code to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
 non-whitespace absolute path (both for installation and stale server cleanup). Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
@@ -395,16 +411,15 @@ Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
 and JetBrains Copilot to its OS-specific user config).
 When the user-scope manifest declares a `targets:` field (or the CLI passes
 `--target`), only the matching runtimes receive the config write. When no CLI
-target, user-scope manifest target, or saved `apm config target` restricts
+target, user-scope manifest target, or saved `apm config set target` value restricts
 targets, all detected user-scope-capable runtimes are configured.
-The workspace-only VS Code target is skipped with a warning
-when a mixed target set also contains a global-capable runtime. If none of the
+If none of the
 selected targets supports user scope, the command exits `2` before changing the
 user manifest, lockfile, or runtime configuration. The direct command creates
 or updates `~/.apm/apm.yml`; it does not fall back to the current project's
 manifest. With `--dry-run`, it previews the user-scope entry and runtime
 targets without creating that manifest, lockfile, or runtime configuration.
-APM leaves an existing JSON MCP config (Copilot, VS Code, Claude Code,
+APM leaves an existing JSON MCP config (Copilot, Claude Code,
 Cursor, OpenCode, Gemini, Kiro) untouched and reports that target as failed
 when it cannot parse the file as JSON (for example, JSONC comments or a
 trailing comma). It also refuses a project MCP config that is a symbolic link,
@@ -425,6 +440,38 @@ MCP defines two transport families. APM exposes both:
   remote endpoint. Requires `url:` (http or https only -- websockets
   and `file://` are rejected). Use `--header KEY=VALUE` (repeatable)
   for HTTP headers such as `Authorization`.
+
+### Remote transport per harness
+
+`http` and `streamable-http` both mean Streamable HTTP; `sse` is the legacy
+HTTP+SSE transport. For a registry server, APM reads the transport from the
+registry's `remotes[].type` (a missing value means Streamable HTTP). `apm mcp
+show` prints the same transport. Each harness gets its own native keys:
+
+| Harness | Streamable HTTP | SSE |
+|---|---|---|
+| Copilot, Claude Code | `type: http`, `url` | `type: sse`, `url` |
+| Gemini CLI | `httpUrl` | `url` |
+| Antigravity | `serverUrl` | not supported |
+| Codex CLI | `url` | not supported |
+| Cursor, Windsurf, JetBrains Copilot | `type: http`, `url` | `type: http`, `url` |
+| Hermes | `url` | `url`, `transport: sse` |
+| Kiro | `url` | `url` |
+| OpenCode | `type: remote`, `url` | `type: remote`, `url` |
+
+When a harness does not support the transport, APM prints one warning naming
+the server and the harness, skips that harness, and continues; the server is
+not recorded for that harness and the install exits `0`, including under
+`apm install --frozen`.
+
+Entries an earlier APM release wrote in a shape the table above replaced (for
+example Antigravity `httpUrl`, `type: http` for an SSE server, or a Hermes
+entry missing `transport: sse`, `cwd` or extra keys) are rewritten
+on the next `apm install`, `apm update` or `apm install --frozen`, even when
+`apm.yml` did not change. APM rewrites only entries it can prove it wrote; a
+same-name entry you added yourself is preserved and reported as a conflict.
+Extra fields cannot add a second endpoint: `extra:` keys named `url`,
+`httpUrl` or `serverUrl` are dropped.
 
 Codex requires HTTPS for non-loopback remote endpoints. Plain HTTP is
 accepted only for literal loopback addresses such as `localhost`,
@@ -486,7 +533,7 @@ a token source and applies the target's auth behavior described below.
 
 The server is identified as "GitHub" only when it satisfies **both** of
 these narrow checks
-([copilot.py:1004](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1004)):
+(`_is_github_server` in [copilot.py](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py)):
 
 1. The server name (case-insensitive) is one of:
    `github-mcp-server`, `github`, `github-mcp`,
@@ -524,7 +571,7 @@ credential value is not written into the generated config. Literal-only
 targets keep their existing automatic-token behavior. If none of the
 listed variables is set, no automatic header is added.
 
-Except for Claude Code's project `.mcp.json` (see below), reinstalling the
+Except for the project `.mcp.json` that Claude Code and Copilot share (see below), reinstalling the
 same declaration does not automatically repair credentials already written to
 runtime config. Follow
 [Repairing existing credentials](#repairing-existing-credentials) to preserve
@@ -539,7 +586,7 @@ Re-run `apm install --mcp NAME ...` against an existing declaration in `apm.yml`
 | Situation | Behaviour |
 |---|---|
 | New `NAME` | Appended to `dependencies.mcp`. |
-| Existing `NAME`, identical config | No-op. Logs `unchanged`. |
+| Existing `NAME`, identical config | Leaves `apm.yml` unchanged and re-checks runtime configs (`already declared; checking integrations`). |
 | Existing `NAME`, different config, TTY | Prompts to replace. |
 | Existing `NAME`, different config, CI | Refuses with exit 2. Re-run with `--force`. |
 

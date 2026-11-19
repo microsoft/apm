@@ -58,6 +58,9 @@ backfills one from the other:
   exclusively in `apm.yml`.
 - `name` and `version` must be non-empty strings. Quote numeric versions so
   YAML does not parse them as numbers.
+- `apm.yml` must not use YAML anchors or aliases (`&name`, `*name`, or
+  `<<: *name`). Every command that reads the manifest refuses one with the
+  file and line (OpenAPM req-mf-020(b)); write each value out in full.
 
 The corrected OpenAPM v0.1 candidate uses
 `https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.48.schema.json`
@@ -352,7 +355,7 @@ Two keys control which output runtimes a package compiles and installs to:
 
 - **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
   A scalar remains accepted as a one-item compatibility input.
-- **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
+- **`target:` (deprecated singular form)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form). Still works; warns once per run with the exact `targets:` replacement.
 
 Setting both keys in the same `apm.yml` is a parse error
 (`ConflictingTargetsError`), even when either value is null. A null or empty
@@ -361,18 +364,18 @@ treated as omission for legacy compatibility; an empty string or list is a
 parse error.
 
 Both manifest keys validate target names. The canonical `targets:` form accepts
-canonical names only. The legacy `target:` form also accepts CLI aliases such
-as `vscode` and normalizes them. Invalid values fail at parse time -- they do
+canonical names plus the deprecated `vscode` alias of `copilot`. The legacy
+`target:` form also accepts CLI aliases such as `agents` and normalizes them. Invalid values fail at parse time -- they do
 **not** silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
-| `target: claude,copilot` | CSV-string sugar; aliases are normalized and order is preserved |
-| `target: vscode` | Legacy alias; normalizes to `copilot` |
-| `targets: [vscode]` | **Parse error** -- plural form requires canonical `copilot` |
-| `target: all` / `targets: [all]` | Legacy universal spelling; treated as no package restriction |
+| `target: copilot` | Deprecated singular form (warns: use `targets: [copilot]`); stable values include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills` |
+| `target: claude,copilot` | Deprecated CSV-string form; aliases are normalized and order is preserved |
+| `target: vscode` / `targets: [vscode]` | Deprecated alias; selects exactly what `copilot` selects and warns |
+| `target: all` | Deprecated; selects every supported target (the warning prints the explicit `targets:` list) |
+| `targets: [all]` | Legacy; treated as omitted (auto-detect) |
 | `targets: [all, claude]` | Legacy compatibility treats the field as omitted and warns; remove `all` and list intended canonical targets |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []`, `targets: ""`, or `targets: null` | **Parse error** -- remove the line if you meant auto-detect |
@@ -899,7 +902,7 @@ registered from another host or a local path.
 
 ```bash
 # 1. Initialize a package project
-apm init my-package --plugin
+apm plugin init my-package
 
 # 2. Add primitives to .apm/ subdirectories
 #    (instructions, agents, prompts, skills, etc.)
@@ -994,9 +997,9 @@ Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
 - The user wants to convert an ad-hoc list of plugins into a proper index.
 
 `apm marketplace init` appends a `marketplace:` block to the project's
-`apm.yml` and creates `.claude-plugin/`. It does NOT scaffold a standalone
-`marketplace.yml`. Use `apm init --marketplace` when starting a brand-new
-project that will publish its own marketplace.
+`apm.yml`, scaffolding `apm.yml` if it is missing. It does NOT scaffold a
+standalone `marketplace.yml`. `apm init --marketplace` is deprecated; use
+`apm marketplace init` for a brand-new marketplace project too.
 
 ### apm.yml `marketplace:` block
 

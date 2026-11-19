@@ -49,6 +49,7 @@ _LOCKED_DEPENDENCY_VALUES = {
     "allow_insecure": True,
     "skill_subset": ["alpha", "beta"],
     "target_subset": ["copilot"],
+    "subset_pairings": None,
     "resolved_url": "https://registry.example.invalid/consume-contract.tgz",
     "resolved_hash": f"sha256:{'e' * 64}",
     "constraint": "^1.0.0",
@@ -83,6 +84,7 @@ _RECONSTRUCTED_LOCK_FIELDS = {
     "allow_insecure",
     "skill_subset",
     "target_subset",
+    "subset_pairings",
     "replacement",
 }
 

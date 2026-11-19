@@ -736,6 +736,18 @@ class TestInitTargetPrompt:
             assert "claude" in data["targets"]
             assert "cursor" in data["targets"]
 
+    def test_init_target_flag_persists_canonical_alias(self):
+        """--target agy persists the canonical antigravity name (#3842)."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(
+                cli,
+                ["init", "--yes", "--target", "agy"],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            data = yaml.safe_load(Path("apm.yml").read_text(encoding="utf-8"))
+            assert data["targets"] == ["antigravity"]
+
     def test_init_target_flag_invalid(self):
         """S5b: --target invalid, exit code non-zero, error message."""
         with self.runner.isolated_filesystem():

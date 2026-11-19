@@ -54,7 +54,7 @@ Write `KEY` to `$APM_HOME/config.json`. Validates the value before writing:
 - `self-update.channel` must be `stable` or `prerelease`.
 - `self-update.install-dir` is optional on Unix. When set, it is expanded and stored absolute, then passed as `APM_INSTALL_DIR` when the environment variable is absent. It must match the existing launcher; leaving it unset preserves the detected installation. Windows behavior is unchanged.
 - `copilot-cowork-skills-dir` must be absolute after expansion; the directory itself does not need to exist.
-- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. Embedded credentials, invalid ports, query strings, fragments, and other schemes are rejected. Configured `http://` endpoints require `MCP_REGISTRY_ALLOW_HTTP=1` when used.
+- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. Embedded credentials, invalid ports, query strings, fragments, and other schemes are rejected. A persisted `http://` endpoint needs no `MCP_REGISTRY_ALLOW_HTTP=1` opt-in.
 - Boolean keys reject anything outside the accepted truthy/falsy strings.
 
 ### `apm config unset KEY`
@@ -65,7 +65,6 @@ Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supporte
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
 | `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` selects the latest stable release; `prerelease` selects the newest non-draft prerelease. Both pass the selected release to the installer as one normalized `VERSION`. `APM_SELF_UPDATE_CHANNEL` overrides config. |
 | `self-update.install-dir` | path | unset | Optional launcher preference; `APM_INSTALL_DIR` overrides it. On Unix, a set value must match the existing launcher and unset preserves it; neither migrates. Windows uses the installer destination/default. |
@@ -81,6 +80,10 @@ Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supporte
 | `registry.<name>.url` | URL | unset | Base URL for registry `<name>`. Requires `registries` experimental flag. |
 | `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `$APM_HOME/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
 | `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
+
+### Deprecated keys
+
+`auto-integrate` has no effect: no command reads it. `apm config get` and `apm config set` still accept it, so existing scripts keep working, but print a deprecation warning; `set` stores the value and reports `Stored auto-integrate=<value> (no effect)` instead of a success line. It is not listed in the config summary and will be removed in a future release.
 
 ### Resolution order
 
@@ -151,13 +154,6 @@ Show everything:
 
 ```bash
 apm config
-```
-
-Read and write `auto-integrate`:
-
-```bash
-apm config get auto-integrate
-apm config set auto-integrate false
 ```
 
 Persist a default install target:
@@ -271,13 +267,12 @@ See [External scanners](../../../integrations/external-scanners/).
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
-Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `github_auth_first`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
+Internal JSON keys use snake_case (`install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `github_auth_first`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
 
 ## Related
 
 - [`apm install`](../install/) -- consumes `target`, `temp-dir`, and `allow-protocol-fallback` / `prefer-ssh` / `github-auth-first`.
 - [`apm self-update`](../self-update/) -- consumes `self-update.channel` and `self-update.install-dir`.
-- [`apm compile`](../compile/) -- affected by `auto-integrate`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
 - [Environment variables](../../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK` and `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys; `APM_GITHUB_AUTH_FIRST` is the env-var equivalent of the credential-order `github-auth-first` key.
 - [Registries](../../../guides/registries/) -- full private registry setup guide.

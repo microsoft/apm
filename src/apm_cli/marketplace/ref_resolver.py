@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..core.auth_outcome import AuthAttemptFailed
 from ..deps.git_remote_ops import tag_commit_shas
 from ..utils.git_env import redact_git_diagnostic, run_git_text
 from ..utils.github_host import (
@@ -34,7 +36,6 @@ from ..utils.github_host import (
     build_https_clone_url,
     build_ssh_url,
     default_host,
-    is_ado_auth_failure_signal,
     is_azure_devops_hostname,
     is_visualstudio_legacy_hostname,
 )
@@ -125,13 +126,13 @@ class RemoteRef:
     peeled_sha: str | None = None  # commit behind an annotated tag, when advertised
 
 
-class _RemoteAttemptError(RuntimeError):
+class _RemoteAttemptError(AuthAttemptFailed):
     """Carry one failed ls-remote result through AuthResolver fallback."""
 
     def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
-        self.result = result
         super().__init__(
-            redact_git_diagnostic(result.stderr or f"git ls-remote exited {result.returncode}")
+            redact_git_diagnostic(result.stderr or f"git ls-remote exited {result.returncode}"),
+            result=result,
         )
 
 
@@ -512,6 +513,44 @@ class RefResolver:
                         )
                     except _RemoteAttemptError as exc:
                         result = exc.result
+                elif self._ado_chain_eligible():
+                    org, _project, _repo = _ado_coordinates_from_owner_repo(
+                        host=self._host,
+                        owner_repo=owner_repo,
+                    )
+
+                    def _ado_attempt(
+                        _token: str | None,
+                        attempt_env: dict[str, str],
+                    ) -> subprocess.CompletedProcess[str]:
+                        # auth-delegated: try_with_fallback walks PAT -> az
+                        # bearer -> path-scoped helper and classifies failures.
+                        attempt = _run_remote(attempt_env)
+                        if attempt.returncode != 0:
+                            raise _RemoteAttemptError(attempt)
+                        return attempt
+
+                    try:
+                        result = self._auth_resolver.try_with_fallback(
+                            self._host,
+                            _ado_attempt,
+                            org=org,
+                            port=self._port,
+                            path=owner_repo,
+                            remote_url=url,
+                            base_env=self._git_env,
+                        )
+                    except _RemoteAttemptError as exc:
+                        result = exc.result
+                    except AdoAuthChainExhaustedError as exc:
+                        raise GitLsRemoteError(
+                            package="",
+                            summary=str(exc),
+                            hint=(
+                                "Set ADO_APM_PAT, run 'az login', or store a repository "
+                                "credential in Git Credential Manager."
+                            ),
+                        ) from exc
                 else:
                     result = _run_remote(env)
             except subprocess.TimeoutExpired:
@@ -526,15 +565,6 @@ class RefResolver:
                     summary=f"Failed to run git ls-remote for '{owner_repo}'.",
                     hint=f"Ensure git is installed and on PATH. Error: {exc}",
                 )
-
-            fallback_refs = self._retry_rejected_ado_pat(
-                result,
-                owner_repo,
-                remote_url=remote_url,
-            )
-            if fallback_refs is not None:
-                self._cache.put(cache_key, fallback_refs)
-                return fallback_refs
 
             if result.returncode != 0:
                 stderr = redact_git_diagnostic(result.stderr)
@@ -560,78 +590,13 @@ class RefResolver:
             self._cache.put(cache_key, refs)
             return refs
 
-    def _retry_rejected_ado_pat(
-        self,
-        result: subprocess.CompletedProcess,
-        owner_repo: str,
-        *,
-        remote_url: str | None = None,
-    ) -> list[RemoteRef] | None:
-        """Retry one rejected ADO basic credential with an Azure CLI bearer."""
-        eligible = (
-            result.returncode != 0
-            and self._auth_resolver is not None
-            and self._auth_target is not None
-            and self._auth_scheme == "basic"
-            and bool(self._token)
+    def _ado_chain_eligible(self) -> bool:
+        """Return whether ls-remote must run under the AuthResolver ADO chain."""
+        return (
+            self._auth_resolver is not None
             and is_azure_devops_hostname(self._host)
             and self._transport_scheme != "ssh"
         )
-        if not eligible:
-            return None
-
-        def _bearer_op(bearer: str) -> list[RemoteRef]:
-            from apm_cli.core.auth import AuthResolver
-
-            base_env = (
-                dict(self._git_env)
-                if self._git_env is not None
-                else (
-                    self._auth_resolver.hardened_git_base_env()
-                    if self._auth_resolver is not None
-                    and callable(
-                        getattr(
-                            self._auth_resolver,
-                            "hardened_git_base_env",
-                            None,
-                        )
-                    )
-                    else AuthResolver._build_git_env()
-                )
-            )
-            bearer_env = AuthResolver._build_git_env(
-                bearer,
-                scheme="bearer",
-                host_kind="ado",
-                base_env=base_env,
-            )
-            resolver = RefResolver(
-                timeout_seconds=self._timeout,
-                offline=self._offline,
-                stderr_translator_enabled=self._stderr_translator,
-                host=self._host,
-                token=bearer,
-                auth_scheme="bearer",
-                git_env=bearer_env,
-                port=self._port,
-            )
-            try:
-                return resolver.list_remote_refs(owner_repo, remote_url=remote_url)
-            finally:
-                resolver.close()
-
-        fallback = self._auth_resolver.execute_with_bearer_fallback(
-            self._auth_target,
-            lambda: result,
-            _bearer_op,
-            lambda outcome: (
-                getattr(outcome, "returncode", 0) != 0
-                and is_ado_auth_failure_signal(getattr(outcome, "stderr", ""))
-            ),
-        )
-        if isinstance(fallback.outcome, list):
-            return fallback.outcome
-        return None
 
     # -----------------------------------------------------------------
     # Single-ref resolution (no cache)

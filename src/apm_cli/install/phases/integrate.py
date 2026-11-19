@@ -645,6 +645,12 @@ def run(ctx: InstallContext) -> None:
     if apm_modules_dir is None:
         raise RuntimeError("Resolution must set apm_modules_dir before integration")
 
+    # LSP capability gate (#3727): declared LSP servers with no capable target
+    # fail before this phase deploys anything to a target.
+    from apm_cli.install.lsp.integration import preflight_lsp_targets
+
+    preflight_lsp_targets(ctx)
+
     # Direct dep keys: used to distinguish direct vs transitive failures
     # so direct failures can be surfaced immediately.
     direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
@@ -731,6 +737,7 @@ def run(ctx: InstallContext) -> None:
     if ctx.frozen and ctx.existing_lockfile is not None:
         from apm_cli.install.service import InstallService
 
+        InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
         InstallService.enforce_hydrated_mcp(
             ctx.apm_package,
             ctx.existing_lockfile,

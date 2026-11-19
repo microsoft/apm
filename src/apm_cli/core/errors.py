@@ -1,8 +1,9 @@
 """Error hierarchy and renderers for target resolution (#1154).
 
 All error classes inherit from ``click.UsageError`` so Click surfaces
-exit code 2 automatically. Renderers return ASCII-only strings with
-a three-section structure:
+exit code 2 automatically. Renderers return plain ASCII text with no status
+symbol: the CLI output owner (Click's ``Error:`` or ``CommandLogger.error``'s
+``[x]``) adds exactly one. They use a three-section structure:
   (a) headline (what APM saw)
   (b) actionable commands (>= 3 lines starting with 'apm ')
   (c) apm.yml snippet
@@ -74,7 +75,7 @@ def render_no_harness_error(project_root: Path | None = None) -> str:
     Convergence item 10: simplified copy with discovery-before-action.
     """
     return (
-        "[x] No harness detected\n"
+        "No harness detected\n"
         "\n"
         f"APM scanned for harness markers ({_SIGNAL_LIST})"
         " but found none in this project.\n"
@@ -98,7 +99,7 @@ def render_ambiguous_error(project_root: Path | None, detected: list[str]) -> st
     """Render the 3-section error for 'multiple harnesses detected'."""
     detected_csv = ", ".join(detected)
     return (
-        f"[x] Multiple harnesses detected: {detected_csv}\n"
+        f"Multiple harnesses detected: {detected_csv}\n"
         "\n"
         f"APM found signals for {detected_csv} but cannot decide which\n"
         "to deploy to. Pin your target explicitly.\n"
@@ -138,7 +139,7 @@ def render_unknown_target_error(
     display_value = value.strip("[]'\" ") or value or "<empty>"
     if command == "compile":
         return (
-            f"[x] Unknown target '{display_value}'\n"
+            f"Unknown target '{display_value}'\n"
             "\n"
             f"Valid targets: {valid_csv}\n"
             "\n"
@@ -149,7 +150,7 @@ def render_unknown_target_error(
             "  apm compile --dry-run"
         )
     return (
-        f"[x] Unknown target '{display_value}'\n"
+        f"Unknown target '{display_value}'\n"
         "\n"
         f"Valid targets: {valid_csv}\n"
         "\n"
@@ -169,7 +170,7 @@ def render_unknown_target_error(
 def render_conflicting_schema_error() -> str:
     """Render the 3-section error for target/targets mutex."""
     return (
-        "[x] Cannot use both 'target:' and 'targets:' in apm.yml\n"
+        "Cannot use both 'target:' and 'targets:' in apm.yml\n"
         "\n"
         "Use the canonical plural form:\n"
         "\n"

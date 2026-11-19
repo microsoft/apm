@@ -16,12 +16,13 @@ The full slot-by-slot capability table lives in [Targets matrix](../../reference
 | Target               | Marker / signal                     | Notes                                  |
 |----------------------|--------------------------------------|----------------------------------------|
 | VS Code + Copilot    | `.github/copilot-instructions.md`    | Native instructions, prompts, agents   |
-| Claude Code          | `.claude/`                           | Skills, agents, commands, MCP          |
+| Claude Code          | `.claude/`                           | Rules, skills, agents, commands, hooks, MCP |
 | Grok Build           | `.grok/`                             | Rules, agents, commands, skills        |
-| Cursor               | `.cursor/`                           | Rules, commands, MCP                   |
-| Codex CLI            | `.codex/`                            | Skills, MCP                            |
+| Cursor               | `.cursor/`                           | Rules, agents, commands, skills, hooks, MCP |
+| Codex CLI            | `.codex/`                            | Skills, agents, hooks, MCP             |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | Antigravity CLI      | explicit `--target antigravity`       | Rules, skills, hooks, MCP              |
+| Hermes               | explicit `--target hermes`           | Skills, compiled instructions, MCP     |
 | OpenCode             | `.opencode/`                         | Agents, commands, skills, compiled instructions, MCP |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Agents + Skills + Hooks + MCP |
@@ -39,19 +40,19 @@ apm targets                    # list detected and supported targets
 apm install --target claude    # force a specific target
 ```
 
-If no marker is present, APM emits the `[x] No harness detected` error - see [Common errors](../../troubleshooting/common-errors/).
+If no marker is present, APM emits the `No harness detected` error - see [Common errors](../../troubleshooting/common-errors/).
 
 To pin targets in the manifest:
 
 ```yaml
 # apm.yml
-target:
+targets:
   - claude
   - copilot
   - cursor
 ```
 
-The `target:` field accepts either a YAML list or a CSV string. See [Manifest schema](../../reference/manifest-schema/#target).
+The `targets:` field takes a YAML list. The older `target:` key is deprecated; the warning it prints names the `targets:` replacement. See [Manifest schema](../../reference/manifest-schema/#36-target-and-targets).
 
 ## Primitive flow per target
 
@@ -91,8 +92,8 @@ Or pin in `apm.yml` and rerun install.
 ### Remove a target
 
 1. Edit `apm.yml` to drop the target from `target:`.
-2. `apm prune` to remove APM-managed files for the dropped target.
-3. `apm install && apm compile` to verify.
+2. `apm install` to remove APM-managed files for the dropped target.
+3. `apm compile` to refresh compiled context files.
 
 See [Migration paths -> target migration](../../troubleshooting/migration/#5-target-migration).
 
@@ -111,10 +112,11 @@ MCP servers declared by the root project under `dependencies.mcp:` or
 Dependency packages contribute only `dependencies.mcp`; their
 `devDependencies.mcp` entries stay in the package author's environment.
 
-- `.mcp.json` at the repo root when `.claude/` exists (Claude Code project scope)
+- `.mcp.json` at the repo root (Copilot CLI and VS Code Copilot; also Claude Code when `.claude/` exists)
 - `.cursor/mcp.json` (Cursor)
 - `.codex/config.toml` (Codex)
-- `.vscode/mcp.json` (VS Code)
+- `.agents/mcp_config.json` (Antigravity)
+- `~/.hermes/config.yaml` (Hermes, `mcp_servers:` block)
 - `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
 - `.gemini/settings.json` (Gemini)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
@@ -198,7 +200,7 @@ Pinpoint behaviour, slot layout, and known limits per target:
 
 | Symptom                                       | Where to look                                                              |
 |-----------------------------------------------|----------------------------------------------------------------------------|
-| `[x] No harness detected`                     | [Common errors](../../troubleshooting/common-errors/)                          |
+| `No harness detected`                         | [Common errors](../../troubleshooting/common-errors/)                          |
 | Compile produced no output                    | [Compile zero-output](../../troubleshooting/compile-zero-output-warning/)      |
 | Wrong target picked, multiple harnesses       | [`apm targets`](../../reference/cli/targets/)                                  |
 | MCP server not appearing in tool              | [MCP servers guide](../../consumer/install-mcp-servers/)                       |

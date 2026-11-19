@@ -2,13 +2,45 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shlex
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 WorkflowNode = dict[str, Any]
+
+_ENV_REFERENCE = re.compile(r"^\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
+
+
+def run_bash(script: str, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Execute an extracted workflow step with its declared test environment."""
+    # Windows' ambient bash.exe can be the WSL launcher, not Git Bash.
+    search_path = None
+    if sys.platform == "win32":
+        program_files = os.environ.get("PROGRAMFILES")
+        if not program_files:
+            raise FileNotFoundError(
+                "Workflow contract tests require PROGRAMFILES to locate Git for Windows Bash"
+            )
+        search_path = str(Path(program_files) / "Git" / "bin")
+    executable = shutil.which("bash", path=search_path)
+    if executable is None:
+        recovery = "install Git for Windows" if sys.platform == "win32" else "install bash on PATH"
+        raise FileNotFoundError(f"Workflow contract tests require native Bash; {recovery}")
+    return subprocess.run(
+        (executable, "-c", script),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, **env},
+        timeout=30,
+    )
 
 
 def load_workflow(path: Path) -> WorkflowNode:
@@ -56,13 +88,20 @@ def effective_env(
     job: WorkflowNode,
     step: WorkflowNode,
 ) -> dict[str, Any]:
-    """Merge workflow, job, and step environments using Actions precedence."""
+    """Merge workflow, job, and step environments using Actions precedence.
+
+    A value that is exactly ``${{ env.NAME }}`` resolves against the scopes
+    above it, as Actions does, so contracts see the effective string.
+    """
     merged: dict[str, Any] = {}
     for node in (workflow, job, step):
         env = node.get("env", {})
         if not isinstance(env, dict):
             raise AssertionError("workflow env must be a mapping")
-        merged.update(env)
+        outer = dict(merged)
+        for key, value in env.items():
+            reference = _ENV_REFERENCE.match(value) if isinstance(value, str) else None
+            merged[key] = outer.get(reference.group(1), value) if reference else value
     return merged
 
 

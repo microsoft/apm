@@ -20,7 +20,7 @@ apm pack [OPTIONS]
 - `target:` (or `targets:`) field containing `claude` or `copilot` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
 
-The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time.
+The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time. In the default Claude plugin format, a project with no `apm.lock.yaml` (for example `dependencies: {}` with only local primitives) still gets an embedded lockfile with an empty dependency list and the full `bundle_files` manifest. `--format agent-plugin` and `--format apm` require the project lockfile.
 
 Bundles are target-agnostic. The consumer's project decides where files land at install time -- the bundle carries no harness binding. Flags whose scope does not match the detected outputs are silent no-ops, not errors, so the same `apm pack` invocation works in CI across projects that produce only a bundle, only a marketplace, or both.
 
@@ -181,7 +181,7 @@ A Claude Code plugin directory under `--output`. Contains:
 
 ### Agent Plugin bundle (`--format agent-plugin`)
 
-An explicit opt-in. `apm pack --format agent-plugin` emits a strict, portable [Agent Plugins v1](https://agent-plugins.org) bundle instead of the Claude-compatible layout above. `--format plugin` does **not** select this bundle -- it is a compatibility alias for the Claude plugin bundle below.
+An explicit opt-in. `apm pack --format agent-plugin` emits a strict, portable [Agent Plugins v1](https://agent-plugins.org) bundle instead of the Claude-compatible layout above. `--format plugin` does **not** select this bundle -- it is a compatibility alias for the Claude plugin bundle above.
 
 - `plugin.json` -- identifies the pinned Agent Plugins v1 schema (`$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"`), synthesised from `apm.yml` the same way as the Claude plugin manifest.
 - `skills/` -- standard skill bundles. This is the **only** primitive directory the Agent Plugin bundle carries.
@@ -250,7 +250,7 @@ fail before writing with uncertifiable remote metadata. `--check-clean` also fai
 
 ### Plugin manifests
 
-Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
+Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target-and-targets) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
 
 | Ecosystem | Output path |
 |---|---|
@@ -259,7 +259,7 @@ Ship one APM package; consumers get a native plugin for their tool of choice. Wh
 
 This runs for the default Claude plugin build (`--claude-plugin`, or `--format plugin|claude|claude-plugin`, since `plugin` is a compatibility alias for the Claude plugin bundle). Under an
 explicit `--format agent-plugin` build, the Claude ecosystem
-manifest is skipped -- if `target:` names only `claude` and the project has no
+manifest is skipped -- if `targets:` names only `claude` and the project has no
 other agent sources, `apm pack --format agent-plugin` fails and tells you to use
 `apm pack --claude-plugin` instead.
 
@@ -269,7 +269,7 @@ Add one line to `apm.yml` and pack:
 # apm.yml
 name: my-plugin
 version: 1.0.0
-target: claude
+targets: [claude]
 ```
 
 ```bash
@@ -319,8 +319,8 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 | Code | Meaning |
 |---|---|
 | `0` | Success. Requested artifacts written, planned with `--dry-run`, or validated without writes by `--check-clean`. |
-| `1` | Build or runtime error: network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
-| `2` | `apm.yml` schema validation error. |
+| `1` | Build or runtime error: invalid or unparseable `apm.yml` (including marketplace config and `target:` / `targets:` conflicts), network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
+| `2` | Usage error: unknown option or conflicting flags (for example two bundle format selectors, or `--archive-format` without `--archive`). |
 | `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
 | `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file), or remote Claude metadata could not be fetched to certify the comparison. |
 | `5` | `--strict-metadata` failed: remote marketplace metadata was unavailable, so APM did not write the artifact. |

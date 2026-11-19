@@ -23,6 +23,65 @@ Fix: run `apm init` to scaffold a manifest, or `cd` into the project that owns t
 
 See also: [`apm init` reference](../../reference/cli/init/)
 
+### `[!] apm.yml uses the deprecated 'target:' key`
+
+```
+[!] apm.yml uses the deprecated 'target:' key; 'target:' will be removed in a future release in favor of 'targets:'. Replace 'target: claude,copilot' with 'targets: [claude, copilot]'.
+```
+
+Cause: the project `apm.yml` (or `~/.apm/apm.yml`) declares the singular `target:` key. It still works, prints once per run on stderr, and does not change the exit code.
+
+Fix: make the replacement the warning prints and commit it. It deploys the same files. If the warning says `targets:` has no exact equivalent (for example `target: intellij`), write a `targets:` list of the targets you use and pass `--target intellij` to `apm install`.
+
+See also: [Manifest schema: targets](../../reference/manifest-schema/#36-target-and-targets)
+
+### `` [!] apm.yml: replace `vscode` with `copilot` ``
+
+```
+[!] apm.yml: replace `vscode` with `copilot` in 'targets:'; `vscode` is deprecated and will be removed in a future release.
+```
+
+Cause: the project `apm.yml` or `~/.apm/apm.yml` uses `vscode` under `targets:` or a dependency's `targets:` (under `target:`, the `target:` warning above covers it). `--target vscode` and `--runtime vscode` print the same warning prefixed with the flag (`--target: replace ...`). `vscode` selects exactly what `copilot` selects; the exit code does not change.
+
+Fix: replace `vscode` with `copilot`.
+
+### `[!] Kept MCP server '<name>' in .github/mcp.json`
+
+```
+[!] Kept MCP server 'my-server' in .github/mcp.json because it was changed after APM wrote it. Copilot now uses the 'my-server' in .mcp.json, which APM writes from apm.yml; put your changes in apm.yml and delete this entry.
+```
+
+Cause: Copilot project MCP servers now live in the root `.mcp.json`, which takes precedence over `.github/mcp.json`. On upgrade, `apm install` moves the entries an older APM wrote to `.github/mcp.json` or `.vscode/mcp.json`; entries you edited stay put, but Copilot now uses the `.mcp.json` copy.
+
+Fix: move your changes into the server's declaration in `apm.yml`, run `apm install`, and delete the entry from the named file.
+
+See also: [Install MCP servers: Copilot project file](../../consumer/install-mcp-servers/#how-targets-gates-which-configs-get-written)
+
+### `<path>/apm.yml uses the YAML anchor '&<name>' on line <n>`
+
+```
+[x] /home/me/project/apm.yml uses the YAML anchor '&shared' on line 4. apm.yml must not use YAML anchors (&name) or aliases (*name). Write the value out in full wherever it is used, then retry.
+```
+
+Cause: `apm.yml` defines a YAML anchor (`&name`) or reuses one with an alias (`*name`), including `<<: *name` merge keys. OpenAPM manifests forbid both, so `apm install`, `apm compile`, `apm audit`, `apm init` and every other command that reads the manifest refuse it before changing any file. The message names the file and the first offending line; the same error reports an alias as `YAML alias '*<name>'`.
+
+Fix: delete the `&name` marker and replace each `*name` with a copy of the value it pointed to, then re-run the command.
+
+See also: [Manifest schema](../../reference/manifest-schema/)
+
+### `'intellij' is an IDE, not a target, so apm.yml cannot record it`
+
+```
+[x] 'intellij' is an IDE, not a target, so apm.yml cannot record it. Use '--target copilot' for GitHub Copilot in JetBrains IDEs; once apm.yml exists, '--target intellij' writes JetBrains MCP config.
+[i] Nothing was written.
+```
+
+Cause: a command that creates or rewrites `apm.yml` (`apm init --target`, or `apm install <pkg> --target` / `apm install -g --mcp NAME --target` with no manifest yet) was given `intellij`. `intellij` selects JetBrains Copilot's user-scope MCP config; it is not a `targets:` value, so APM stops before writing anything.
+
+Fix: use `--target copilot` for GitHub Copilot in JetBrains IDEs. To also write JetBrains MCP config, create `apm.yml` first (`apm init`), then run `apm install --mcp NAME --target intellij`.
+
+See also: [`apm install`](../../reference/cli/install/)
+
 ### `lockfile not found at <path>; run 'apm install' to generate it`
 
 ```
@@ -41,7 +100,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: not found in lockfile
-1 ref mismatch(es) -- run 'apm install' to update lockfile
+1 ref mismatch -- run 'apm update' to update lockfile
 ```
 
 Cause: a dependency exists in `apm.yml` but has no entry in `apm.lock.yaml`. Most often hit in CI when the lockfile was not regenerated after editing the manifest.
@@ -54,7 +113,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: manifest ref 'v2' != lockfile ref 'v1'
-N ref mismatch(es) -- run 'apm install' to update lockfile
+N ref mismatches -- run 'apm install' to update lockfile
 ```
 
 Cause: the version or ref pinned in `apm.yml` was changed without re-running install. The lockfile is stale.
@@ -86,13 +145,15 @@ See also: [Install failures](../install-failures/)
 ```
 [x] Content hash mismatch for <owner>/<repo>: expected <sha>, got <sha>.
 The downloaded content differs from the lockfile record. This may
-indicate a supply-chain attack. Use 'apm install --update' to accept
-new content and update the lockfile.
+indicate a supply-chain attack. Use 'apm update <owner>/<repo>' to accept
+new content for this package and re-pin it in the lockfile.
 ```
+
+At user scope the hint names `apm update -g <owner>/<repo>`. For a transitive dependency it names the full `apm update`, since only direct dependencies can be targeted.
 
 Cause: the bytes APM downloaded for a locked dependency do not match the `content_hash` recorded in `apm.lock.yaml`. Usually a force-pushed tag, a mutated branch, or a tampered mirror. Older APM versions on Windows also recorded CRLF hashes when Git's host settings (`core.autocrlf=true`, or `core.eol`, which defaults to CRLF on Windows, for `.gitattributes` `text=auto` files) expanded LF-committed files. Current APM pins `core.autocrlf=false` and `core.eol=lf` on its dependency checkouts and rematerializes older cache shards, but `--frozen` cannot rewrite a lockfile that already stored that CRLF hash.
 
-Fix: investigate the upstream package before accepting. If the change is legitimate, run `apm install --update` to re-pin and commit the new hash. `--update` can advance mutable refs, so review the SHA and `content_hash` diff before committing. If the lockfile was generated by a pre-fix Windows CLI, rematerialize the affected package from a fresh consumer workspace (or delete the cached/installed copy) and regenerate with `apm install --update` or `apm lock --update`. Bare `apm lock` does not rewrite an existing CRLF hash.
+Fix: investigate the upstream package before accepting. If the change is legitimate, run the command the hint names (`apm update <owner>/<repo>`) to re-pin and commit the new hash. `apm update` can advance mutable refs, so review the SHA and `content_hash` diff before committing. If the lockfile was generated by a pre-fix Windows CLI, rematerialize the affected package from a fresh consumer workspace (or delete the cached/installed copy) and regenerate with `apm update` or `apm lock --update`. Bare `apm lock` does not rewrite an existing CRLF hash.
 
 See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 
@@ -113,12 +174,12 @@ See also: [Policy debugging](../policy-debugging/)
 (message similar to)
 
 ```
-[x] Refusing to install from unapproved host(s): <host>.
+[x] Re-run with --allow-insecure-host <host> to allow transitive HTTP dependencies from unapproved host(s): <host>.
 ```
 
-Cause: a dependency resolves to a host outside the configured allowlist.
+Cause: a transitive dependency uses an `http://` URL on a host you have not approved for this install.
 
-Fix: add the host to the allowlist, or pass `--allow-insecure-host <host>` for a one-off install. Do not bypass the allowlist in CI.
+Fix: switch the dependency to HTTPS, or, if you trust the host, re-run with `--allow-insecure-host <host>` (repeat per host). Do not bypass this check in CI.
 
 See also: [Policy debugging](../policy-debugging/)
 
@@ -136,9 +197,9 @@ See also: [Install failures](../install-failures/)
 
 ## Compile
 
-### `No primitives matched`
+### `Compilation completed but produced no output files`
 
-(message similar to) printed when compile produces zero output.
+Printed when compile produces zero output.
 
 Cause: no primitives in the project (or filtered subset) match the active target's compilation rules. Common causes: wrong `--target`, missing frontmatter, glob filter matched nothing, or org policy stripped everything.
 
@@ -146,7 +207,9 @@ Fix: run `apm compile --dry-run --verbose` to see what was discovered and why ea
 
 See also: [Compile zero-output warning](../compile-zero-output-warning/), [`apm compile` reference](../../reference/cli/compile/)
 
-### `[x] No harness detected`
+Target-resolution errors print with `Error:` or `[x]` in front, depending on the command.
+
+### `No harness detected`
 
 ```
 [x] No harness detected
@@ -158,7 +221,7 @@ Fix: pass `--target <harness>` on the command, or declare `targets:` in `apm.yml
 
 See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matrix](../../reference/targets-matrix/)
 
-### `[x] Multiple harnesses detected: <a>, <b>`
+### `Multiple harnesses detected: <a>, <b>`
 
 Cause: APM found markers for more than one harness and cannot pick.
 
@@ -166,10 +229,11 @@ Fix: pin a target with `--target <harness>` or declare `targets:` in `apm.yml`. 
 
 See also: [`apm targets` reference](../../reference/cli/targets/)
 
-### `[x] Unknown target '<value>'`
+### `Unknown target '<value>'`
 
 ```
-[x] Unknown target '<value>'
+Error: Unknown target '<value>'
+
 Valid targets: claude, copilot, cursor, ...
 ```
 
@@ -197,7 +261,7 @@ See also: [Policy debugging](../policy-debugging/), [`apm audit` reference](../.
 
 Cause: the org policy file fetched from the configured source does not match the pinned hash. Either the policy was updated upstream and the pin is stale, or the source was tampered with.
 
-Fix: confirm the upstream change is legitimate, then update the policy pin in your APM config to the new hash.
+Fix: confirm the upstream change is legitimate, then update `policy.hash` in `apm.yml` to the new hash.
 
 See also: [Policy debugging](../policy-debugging/)
 
@@ -212,7 +276,7 @@ Available scripts in apm.yml: <list>
 
 Cause: `apm run <name>` could not match `<name>` to a script in `apm.yml`, an auto-discovered prompt file, or an installable virtual package.
 
-Fix: check the available scripts list printed under the error. To list discoverable prompts, run `apm list`. To install a remote prompt, use `apm install <owner>/<repo>/path/to/prompt.prompt.md`.
+Fix: check the available scripts list printed under the error (`apm list` shows the same scripts). The error also lists where APM looks for prompts. To install a remote prompt, use `apm install <owner>/<repo>/path/to/prompt.prompt.md`.
 
 See also: [`apm run` reference](../../reference/cli/run/), [`apm list` reference](../../reference/cli/list/)
 
@@ -250,11 +314,12 @@ path instead.
 
 See also: [Install failures](../install-failures/), [Authentication](../../getting-started/authentication/)
 
-### `Authentication failed for <host>`
+### `Authentication failed for <operation> on <host>`
 
 ```
-[x] Authentication failed for <host>
-... -- check `gh auth status` and `GITHUB_APM_PAT`
+Authentication failed for <operation> on <host>.
+No token available.
+Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'.
 ```
 
 Cause: the remote host rejected APM's credentials, or no credentials were available. Token resolution order for GitHub: per-org `GITHUB_APM_PAT_<ORG>`, then `GITHUB_APM_PAT`, then `GITHUB_TOKEN`, then `GH_TOKEN`, then `gh auth token`, then git credential helpers.
@@ -284,7 +349,7 @@ See also: [SSL issues](../ssl-issues/)
 
 ### Network timeout or host unreachable
 
-(no fixed string; surfaces as `requests` / git transport errors after the 15s API or 30s git timeout)
+(no fixed string; surfaces as `requests` / git transport errors after a timeout)
 
 Cause: the host is unreachable, the proxy is down, or DNS is failing.
 

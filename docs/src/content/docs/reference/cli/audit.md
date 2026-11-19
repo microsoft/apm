@@ -19,12 +19,15 @@ apm audit [PACKAGE] [OPTIONS]
 - **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. In a project checkout with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, CI mode prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without mutating the checkout. Local dependencies must remain available at their declared paths. Windows long and native 8.3 spellings of the same project use the same project scope. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
 Global audit also checks resolved external deployment roots such as
-`HERMES_HOME` and `CLAUDE_CONFIG_DIR`. Default audit compares tracked files in
+`HERMES_HOME`, `CLAUDE_CONFIG_DIR` and `COPILOT_HOME`. Default audit compares tracked files in
 those roots for drift. `apm audit --ci` also scans target-governed external
 subtrees for content integrity. Neither mode modifies those roots.
 Auditing the user metadata workspace (`~/.apm`) still requires its installed
-`apm_modules/`; if missing, restore it with `apm install --global`. Project
-scratch replay does not enable cold replay for global installations.
+`apm_modules/` when `apm.lock.yaml` records packages or local bundle staging;
+if missing, restore it with `apm install --global`. A user lockfile with only MCP/LSP servers or your
+own `~/.apm` content needs no `apm_modules/`, so `apm audit --ci` passes after
+`apm update -g` as it does after `apm install -g`. Project scratch replay does
+not enable cold replay for global installations.
 Scratch replay preserves each scope's installed-source layout so relative
 links, including Kiro prompt links, compare against their deployed equivalents.
 
@@ -86,7 +89,13 @@ files are not covered by this content comparison.
 
 This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
-`PACKAGE`, when supplied, scans one installed dependency by its lockfile key (the repo URL), so only files recorded for that package are included. Omit it to scan deployed files across the whole project. See [Baseline CI checks](../../baseline-checks/#content-integrity) for the exact lockfile, target-directory, symlink, and `.apm/` scope boundaries.
+`PACKAGE`, when supplied, scans one installed dependency, so only files recorded for that package are included. Pass the dependency key from `apm.lock.yaml` (`owner/repo` for GitHub, `host/owner/repo` for other hosts) or any form `apm uninstall` accepts, such as `https://github.com/owner/repo`, `github.com/owner/repo` or `owner/repo#ref`; APM normalizes it to the lockfile key. A package that matches no installed dependency fails with exit `1`, so a typo in a CI gate cannot pass silently:
+
+```text
+[x] Package 'test/typo-pkg' is not installed: no matching dependency in apm.lock.yaml. Run 'apm deps list' to see installed packages.
+```
+
+Omit `PACKAGE` to scan deployed files across the whole project. See [Baseline CI checks](../../baseline-checks/#content-integrity) for the exact lockfile, target-directory, symlink, and `.apm/` scope boundaries.
 
 ## Options
 
@@ -163,7 +172,7 @@ apm audit
 ### Scan a specific installed package
 
 ```bash
-apm audit https://github.com/owner/repo
+apm audit owner/repo
 ```
 
 ### Scan an arbitrary file outside APM
@@ -359,6 +368,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 - `--no-drift` cannot be combined with `--strip` or `--file`.
 - `--ci` cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`.
 - `--ci` does not support `--format markdown`.
+- `--format json`, `sarif` or `markdown` (including a format inferred from `--output`) cannot be combined with `--strip` or `--dry-run`.
 - `--external` cannot be combined with `--strip`, `--dry-run`, or `--ci`; `--external-sarif` requires `--external sarif`; `--external-llm` / `--no-external-llm` and `--external-args` require `--external`.
 
 ## Exit codes
@@ -368,7 +378,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | Clean, info-only findings, advisory drift without `security.audit.fail_on_drift`, an advisory cache-miss skip, or successful `--strip`. |
-| `1` | Critical findings, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, or drift-check failures promoted by `security.audit.fail_on_drift`. |
+| `1` | Critical findings, `PACKAGE` not installed, incomplete primitive coverage (including unreadable parents), refused `--strip` remediation, invalid canonical deployment-owner references, or drift-check failures promoted by `security.audit.fail_on_drift`. |
 | `2` | Warning-only findings, or usage error (mutually exclusive flags). |
 | `3` | Configuration or infrastructure error (feature not enabled, scanner not found, malformed SARIF). |
 

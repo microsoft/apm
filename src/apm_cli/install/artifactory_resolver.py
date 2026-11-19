@@ -43,6 +43,7 @@ from apm_cli.utils.github_host import (
     iter_artifactory_boundary_candidates,
     sanitize_token_url_in_message,
 )
+from apm_cli.utils.http_credentials import unfollowed_redirect_request
 
 _ARTIFACTORY_BOUNDARY_UNRESOLVED = (
     "Artifactory host/path did not resolve to a reachable repository archive. "
@@ -98,12 +99,7 @@ def _candidate_archive_status(
     last_exc: BaseException | None = None
     for url in urls:
         try:
-            # ``allow_redirects=False`` keeps the Bearer token from leaking to
-            # any host the proxy might redirect us to.  3xx is still existence
-            # proof -- the server confirmed the resource by issuing a redirect.
-            r = requests.head(
-                url, headers=headers, timeout=timeout, verify=verify, allow_redirects=False
-            )
+            r = _head_probe(url, headers=headers, timeout=timeout, verify=verify)
         except requests.RequestException as exc:
             last_exc = exc
             continue
@@ -124,6 +120,18 @@ def _candidate_archive_status(
     return _CandidateStatus.MISSING, None
 
 
+def _head_probe(
+    url: str, *, headers: dict[str, str], timeout: int, verify: bool | str
+) -> requests.Response:
+    """HEAD one archive URL; a redirect is never followed, only reported.
+
+    The origin-bounded owner refuses any hop away from *url*, so credentials
+    stay on the probed resource. 3xx is still existence proof -- the server
+    confirmed the resource by issuing a redirect.
+    """
+    return unfollowed_redirect_request("HEAD", url, headers=headers, timeout=timeout, verify=verify)
+
+
 def _proxy_probe_headers(
     dep_ref: DependencyReference,
     auth_resolver,
@@ -142,7 +150,7 @@ def _proxy_probe_headers(
     if is_mode_1:
         ctx = auth_resolver.resolve_for_dep(dep_ref)
         if ctx and getattr(ctx, "token", None):
-            headers["Authorization"] = f"Bearer {ctx.token}"
+            headers.update(AuthResolver.bearer_headers(ctx.token))
         return headers
     # Mode 2: proxy-scoped token only.
     from ..deps.registry_proxy import RegistryConfig

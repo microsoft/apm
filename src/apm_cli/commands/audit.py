@@ -473,6 +473,7 @@ def _preview_strip(
     if console:
         try:
             from rich.table import Table
+            from rich.text import Text
 
             table = Table(
                 show_header=True,
@@ -490,7 +491,7 @@ def _preview_strip(
                 crit = sum(1 for f in strippable if f.severity == "critical")
                 warn = sum(1 for f in strippable if f.severity == "warning")
                 table.add_row(
-                    rel_path,
+                    Text(rel_path),
                     str(crit) if crit else "-",
                     str(warn) if warn else "-",
                     str(len(strippable)),
@@ -539,10 +540,11 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             table.add_column("Message", style="white")
 
             for check in ci_result.checks:
+                # Text, not markup: Rich would parse "[x]" as a tag (#3845).
                 status = (
-                    f"[green]{STATUS_SYMBOLS['check']}[/green]"
+                    Text(STATUS_SYMBOLS["check"], style="green")
                     if check.passed
-                    else f"[red]{STATUS_SYMBOLS['cross']}[/red]"
+                    else Text(STATUS_SYMBOLS["cross"], style="red")
                 )
                 table.add_row(status, Text(check.name), Text(printable_ascii_text(check.message)))
 
@@ -618,33 +620,15 @@ def _audit_ci_gate(
     """
     logger = cfg.logger
 
+    from ..install.audit_replay import resolve_ci_audit_materialization
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
     fail_fast = not no_fail_fast
 
-    prepared_replay = None
-    prepared_replay_error = None
-    if (cfg.project_root / "apm.yml").exists() and not (cfg.project_root / "apm_modules").exists():
-        from ..core.scope import get_workspace_deploy_root
-        from ..deps.lockfile import get_lockfile_path
-        from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
-
-        if get_lockfile_path(cfg.project_root).exists():
-            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve():
-                prepared_replay_error = (
-                    "installed package materialization is missing at "
-                    f"{cfg.project_root / 'apm_modules'}; run 'apm install --global' "
-                    "to restore it"
-                )
-            else:
-                try:
-                    prepared_replay = prepare_ci_audit_replay(
-                        cfg.project_root,
-                        verbose=cfg.verbose,
-                    )
-                except CiAuditReplayError as exc:
-                    prepared_replay_error = str(exc)
+    materialization = resolve_ci_audit_materialization(cfg.project_root, verbose=cfg.verbose)
+    prepared_replay = materialization.prepared_replay
+    prepared_replay_error = materialization.error
 
     # Always run baseline checks
     ci_result = run_baseline_checks(
@@ -750,6 +734,8 @@ def _audit_ci_gate(
                     f"[x] {cause} (policy.fetch_failure_default=block)",
                     err=True,
                 )
+                if fetch_result.discovery_hint:
+                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
                 sys.exit(1)
             else:
                 click.echo(
@@ -757,6 +743,8 @@ def _audit_ci_gate(
                     "(set policy.fetch_failure_default=block in apm.yml to fail closed)",
                     err=True,
                 )
+                if cfg.verbose and fetch_result.discovery_hint:
+                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
                 fetch_result = None
 
     if fetch_result is not None and fetch_result.found:
@@ -966,7 +954,9 @@ def _resolve_fail_on_drift(project_root: Path) -> bool:
     hard failure. Discovery is invoked by the caller only when drift was
     actually detected, keeping the no-drift common path free of extra work.
     """
-    if os.environ.get("APM_POLICY_DISABLE"):
+    from ..policy.discovery import policy_disabled_by_env
+
+    if policy_disabled_by_env():
         return False
     try:
         from ..policy.discovery import discover_policy_with_chain
@@ -978,6 +968,72 @@ def _resolve_fail_on_drift(project_root: Path) -> bool:
     if policy is None:
         return False
     return bool(policy.security.audit.fail_on_drift)
+
+
+def _project_manifest_host_scope(project_root: Path, logger):
+    """Return the project apm.yml ``default_host:`` scope, or exit 1 if invalid.
+
+    No apm.yml means no override (req-mf-019, #3843).
+    """
+    from ..constants import APM_YML_FILENAME
+    from ..models.dependency.manifest_host import manifest_host_scope_for
+    from ..models.manifest_io import load_manifest
+
+    manifest_path = project_root / APM_YML_FILENAME
+    try:
+        data = load_manifest(manifest_path) if manifest_path.is_file() else None
+    except Exception as e:
+        logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
+        sys.exit(1)
+    try:
+        return manifest_host_scope_for(data)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+
+def _require_installed_package_key(
+    package: str, lockfile: LockFile | None, logger, project_root: Path
+) -> str:
+    """Return the ``apm.lock.yaml`` key for *package* or exit 1 (#3840).
+
+    Accepts the lockfile key itself or any form ``apm uninstall`` accepts
+    (URL, ``host/owner/repo``, ``owner/repo#ref``), normalized through the
+    dependency-selection owner under the project manifest's ``default_host:``,
+    exactly as install recorded it. An unknown package fails so a typo in a CI
+    gate cannot pass silently.
+    """
+    from ..models.dependency.selection import parse_dependency_entry
+
+    installed = lockfile.dependencies if lockfile is not None else {}
+    if package in installed:
+        return package
+    try:
+        with _project_manifest_host_scope(project_root, logger):
+            key = parse_dependency_entry(package).get_unique_key()
+    except (ValueError, TypeError, AttributeError, KeyError):
+        key = None
+    if key is not None and key in installed:
+        return key
+    logger.error(
+        f"Package '{package}' is not installed: no matching dependency in apm.lock.yaml. "
+        "Run 'apm deps list' to see installed packages."
+    )
+    sys.exit(1)
+
+
+def _reject_invalid_manifest(project_root: Path, logger: CommandLogger) -> None:
+    """Refuse an apm.yml every command refuses, before scanning or stripping."""
+    from ..models.manifest_io import InvalidManifestError, read_manifest_text
+
+    manifest_path = project_root / "apm.yml"
+    if not manifest_path.is_file():
+        return
+    try:
+        read_manifest_text(manifest_path)
+    except InvalidManifestError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
 
 
 def _audit_content_scan(
@@ -1034,6 +1090,8 @@ def _audit_content_scan(
 
         try:
             lockfile = LockFile.read(lockfile_path)
+            if package:
+                package = _require_installed_package_key(package, lockfile, logger, project_root)
             owner_violations = (
                 DeploymentLedgerCodec.owner_reference_violations(lockfile)
                 if lockfile is not None
@@ -1055,9 +1113,7 @@ def _audit_content_scan(
 
         if files_scanned == 0 and not coverage and not external and not owner_violations:
             if package:
-                logger.warning(
-                    f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
-                )
+                logger.warning(f"Package '{package}' has no deployed files -- nothing to scan")
             elif effective_format == "text":
                 logger.progress("No recognized deployed primitives found -- nothing to scan")
             if effective_format == "text":
@@ -1518,6 +1574,9 @@ def audit(  # noqa: PLR0913 -- Click handler
             "--policy requires --ci mode. "
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
+
+    if not file_path:
+        _reject_invalid_manifest(project_root, logger)
 
     _audit_content_scan(
         cfg,

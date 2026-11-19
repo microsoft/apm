@@ -13,7 +13,6 @@ Targets uncovered branches in:
 - integrate (virtual file skip, skill_subset with native SKILL.md, bundle path,
   sub-skills standalone)
 - sync_remove_skills (errors, cowork skips)
-- _clean_orphaned_skills (lockfile ownership skip, error increment)
 """
 
 from __future__ import annotations
@@ -836,106 +835,6 @@ class TestIntegrateSkillBundleDedup:
 
 
 # ---------------------------------------------------------------------------
-# sync_remove_skills -- errors increment (line 1362)
-# ---------------------------------------------------------------------------
-
-
-class TestSyncRemoveSkillsErrors:
-    """Error during skill dir removal increments error count."""
-
-    def test_remove_error_increments_errors(self, tmp_path: Path) -> None:
-        integrator = SkillIntegrator()
-        skills_dir = tmp_path / ".github" / "skills"
-        orphan = skills_dir / "orphan-skill"
-        orphan.mkdir(parents=True)
-        (orphan / "SKILL.md").write_text("# orphan", encoding="utf-8")
-
-        with patch("shutil.rmtree", side_effect=OSError("permission denied")):
-            stats = integrator._clean_orphaned_skills(
-                skills_dir=skills_dir,
-                installed_skill_names=set(),  # nothing installed => orphan should be removed
-                project_root=tmp_path,
-            )
-        assert stats["errors"] >= 1
-
-
-# ---------------------------------------------------------------------------
-# _clean_orphaned_skills -- lockfile ownership skip (line 1479)
-# ---------------------------------------------------------------------------
-
-
-class TestCleanOrphanedSkills:
-    """Skills in .agents/ dir not owned by lockfile are skipped."""
-
-    def test_unowned_agent_skill_is_skipped(self, tmp_path: Path) -> None:
-        skills_dir = tmp_path / ".agents" / "skills"
-        foreign = skills_dir / "foreign-skill"
-        foreign.mkdir(parents=True)
-        (foreign / "SKILL.md").write_text("# foreign", encoding="utf-8")
-
-        integrator = SkillIntegrator()
-
-        with patch.object(
-            SkillIntegrator,
-            "_get_lockfile_owned_agent_skills",
-            return_value=set(),  # lockfile owns nothing
-        ):
-            stats = integrator._clean_orphaned_skills(
-                skills_dir=skills_dir,
-                installed_skill_names=set(),  # not installed either
-                project_root=tmp_path,
-            )
-        # foreign-skill should NOT be removed (not lockfile-owned)
-        assert foreign.exists()
-        assert stats["files_removed"] == 0
-
-    def test_owned_agent_skill_is_removed(self, tmp_path: Path) -> None:
-        """Skills owned by lockfile AND not installed are removed."""
-        skills_dir = tmp_path / ".agents" / "skills"
-        owned = skills_dir / "owned-skill"
-        owned.mkdir(parents=True)
-        (owned / "SKILL.md").write_text("# owned", encoding="utf-8")
-
-        integrator = SkillIntegrator()
-
-        with patch.object(
-            SkillIntegrator,
-            "_get_lockfile_owned_agent_skills",
-            return_value={"owned-skill"},
-        ):
-            stats = integrator._clean_orphaned_skills(
-                skills_dir=skills_dir,
-                installed_skill_names=set(),
-                project_root=tmp_path,
-            )
-        assert stats["files_removed"] == 1
-
-    def test_remove_error_increments_errors(self, tmp_path: Path) -> None:
-        """OSError during cleanup increments error count."""
-        skills_dir = tmp_path / ".agents" / "skills"
-        owned = skills_dir / "owned-skill"
-        owned.mkdir(parents=True)
-        (owned / "SKILL.md").write_text("# owned", encoding="utf-8")
-
-        integrator = SkillIntegrator()
-
-        with (
-            patch.object(
-                SkillIntegrator,
-                "_get_lockfile_owned_agent_skills",
-                return_value={"owned-skill"},
-            ),
-            patch("shutil.rmtree", side_effect=OSError("perm denied")),
-        ):
-            stats = integrator._clean_orphaned_skills(
-                skills_dir=skills_dir,
-                installed_skill_names=set(),
-                project_root=tmp_path,
-            )
-        assert stats["errors"] == 1
-
-
-# ---------------------------------------------------------------------------
 # Executable gate denial path -- skip_bin blocks bin/ during promotion
 # ---------------------------------------------------------------------------
 
@@ -1243,3 +1142,48 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
             )
 
         mock_warn.assert_not_called()
+
+
+class TestPairedNameFilterPerSkillsRoot:
+    """#3763: each skills root receives only the skills paired with its targets."""
+
+    @staticmethod
+    def _pairing():
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        return merge_edge_pairings(
+            [(["alpha"], ["claude"]), (["gamma"], ["copilot"]), (["delta"], ["cursor"])]
+        )
+
+    def test_targets_sharing_a_root_receive_the_union_of_their_skills(self, tmp_path):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        targets = [KNOWN_TARGETS[name] for name in ("claude", "copilot", "cursor")]
+        roots = SkillIntegrator._skill_root_target_names(
+            targets, lambda target: tmp_path / target.skills_rel_root
+        )
+        shared = roots[(tmp_path / ".agents" / "skills").resolve()]
+        assert set(shared) == {"copilot", "cursor"}
+
+        tokens = SkillIntegrator._paired_name_filter(None, self._pairing(), shared)
+        assert {"gamma", "delta"} <= set(tokens)
+        assert "alpha" not in tokens
+
+    def test_unselected_root_gets_nothing_and_no_pairing_keeps_the_filter(self):
+        assert SkillIntegrator._paired_name_filter(None, self._pairing(), ("gemini",)) == (
+            frozenset()
+        )
+        base = {"alpha", "gamma"}
+        assert SkillIntegrator._paired_name_filter(base, None, ("claude",)) is base
+
+    def test_paired_filter_narrows_but_never_widens_the_source_plan(self):
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        pairing = merge_edge_pairings([(None, ["claude"]), (["alpha"], ["copilot"])])
+        assert SkillIntegrator._paired_name_filter({"alpha", "gamma"}, pairing, ("claude",)) == {
+            "alpha",
+            "gamma",
+        }
+        assert SkillIntegrator._paired_name_filter({"gamma"}, pairing, ("copilot",)) == (
+            frozenset()
+        )

@@ -668,7 +668,7 @@ def outdated(global_, verbose, parallel_checks):
         if is_enforce_only():
             logger.info(
                 "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
-                "newer versions because the registry proxy exposes no version listing. "
+                "newer versions because APM does not list versions through the registry proxy. "
                 "Exact pins still install through the proxy; unset PROXY_REGISTRY_ONLY "
                 "to check against the source host."
             )

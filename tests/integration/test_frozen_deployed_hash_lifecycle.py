@@ -36,7 +36,10 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
 ]
 
-_REMOTE = "https://github.com/test/c3-pkg.git"
+# A generic host keeps `apm install -g URL` validation on `git ls-remote`
+# through the insteadOf rewrite; a github.com URL is probed via the GitHub
+# API, which 404s for this fixture whenever CI provides a token.
+_REMOTE = "https://git.example.test/test/c3-pkg.git"
 # Byte-exact v0.35.1 renderings of the kit package (verified against the
 # released 0.35.1 CLI during the #3649 hunt).
 _OLD_RENDERINGS = {

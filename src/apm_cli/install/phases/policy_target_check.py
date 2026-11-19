@@ -35,8 +35,7 @@ def run(ctx: InstallContext) -> None:
       decided no enforcement -- no policy, fail-open, escape-hatched,
       enforcement=off, etc.)
     - no policy was fetched (``policy_fetch is None``)
-    - no effective target is resolved (neither ``--target`` CLI override
-      nor manifest ``target:`` field)
+    - the shared target decision is unrestricted (nothing selected)
     """
     # ------------------------------------------------------------------
     # 1. Skip if gate phase already determined no enforcement
@@ -51,24 +50,12 @@ def run(ctx: InstallContext) -> None:
         return
 
     # ------------------------------------------------------------------
-    # 3. Resolve effective target: CLI --target wins, then manifest target
-    #    (mirrors targets.py:38-39 logic exactly)
+    # 3. Judge the shared EffectiveTargetDecision (--target, apm.yml,
+    #    apm config target, or auto-detect) through its canonical projection.
     # ------------------------------------------------------------------
-    config_target = getattr(ctx.apm_package, "target", None) if ctx.apm_package else None
-    effective_target = ctx.target_override or config_target or None
-
-    if effective_target is None:
+    target_decision = ctx.target_decision
+    if target_decision is None or target_decision.canonical_targets is None:
         return  # no target to check -- trivially passes
-
-    # ------------------------------------------------------------------
-    # 3b. Normalize scalar or plural MCP-only pseudo-targets to their
-    #     canonical policy form (e.g. intellij -> copilot).
-    # ------------------------------------------------------------------
-    # Keep these lazy: target_detection and integration.targets reference each
-    # other at runtime, so module-level imports would create an import cycle.
-    from apm_cli.core.target_detection import normalize_policy_targets
-
-    effective_target = normalize_policy_targets(effective_target)
 
     # ------------------------------------------------------------------
     # 4. Run policy checks with effective_target populated
@@ -83,7 +70,8 @@ def run(ctx: InstallContext) -> None:
         ctx.deps_to_install,
         lockfile=ctx.existing_lockfile,
         policy=policy,
-        effective_target=effective_target,
+        effective_target=target_decision.canonical_targets,
+        effective_target_source=target_decision.source,
         fetch_outcome=ctx.policy_fetch.outcome,
         fail_fast=False,  # ensure target check runs even if dep checks re-pass
         registries=registries_map,
@@ -96,6 +84,7 @@ def run(ctx: InstallContext) -> None:
     #    dep-policy violations that already surfaced in the gate phase.
     # ------------------------------------------------------------------
     from apm_cli.install.phases.policy_gate import PolicyViolationError
+    from apm_cli.policy.install_preflight import emit_check_violations
 
     enforcement = policy.enforcement
     has_blocking = False
@@ -107,14 +96,11 @@ def run(ctx: InstallContext) -> None:
             continue
 
         severity = "block" if enforcement == "block" else "warn"
-        reason = check.message
-        if check.details:
-            reason = f"{check.message}: {', '.join(check.details[:5])}"
 
         if ctx.logger:
-            ctx.logger.policy_violation(
-                dep_ref=check.name,
-                reason=reason,
+            emit_check_violations(
+                ctx.logger,
+                check,
                 severity=severity,
                 source=getattr(getattr(ctx, "policy_fetch", None), "source", None),
             )

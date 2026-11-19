@@ -12,7 +12,6 @@ from scripts.architecture_linter.runner import run_selected_rules
 
 pytestmark = [
     pytest.mark.component,
-    pytest.mark.xdist_group(name="architecture_confirmed_bypass_mutations"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +30,13 @@ class BypassMutation:
 
 
 BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
+    BypassMutation(
+        name="local-bundle-copies-markdown-into-codex-toml",
+        rule_id="install-deployment-bundle-native-layout",
+        path="src/apm_cli/install/local_bundle_paths.py",
+        old='frozenset({"gemini_command", "codex_agent"})',
+        new='frozenset({"gemini_command"})',
+    ),
     BypassMutation(
         name="target-context-exemption",
         rule_id="registry_delegation.install_target_selection",
@@ -116,6 +122,13 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
             'else STATUS_SYMBOLS["error"]'
         ),
         new="        return check.symbol",
+    ),
+    BypassMutation(
+        name="policy-discovery-stdlib-warning",
+        rule_id="registry_delegation.output_diagnostics",
+        path="src/apm_cli/policy/discovery.py",
+        old="masked_private_hint = _masked_private_policy_hint(org, candidate_repo)",
+        new='logger.warning("%s", _masked_private_policy_hint(org, candidate_repo))',
     ),
     BypassMutation(
         name="agent-plugin-duplicate-exemption",

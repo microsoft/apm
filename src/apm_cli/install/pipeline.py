@@ -60,10 +60,16 @@ from .errors import (
     DirectDependencyError,
     FrozenInstallError,
     InstallFailureAlreadyRendered,
+    RequiredIntegrationError,
 )
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
+from .source_helpers import (
+    lockfile_refresh_command,
+    proxy_only_lock_entries,
+    ref_update_operation_label,
+)
 from .transaction import InstallTransaction, transactional_pipeline
 
 if TYPE_CHECKING:
@@ -144,9 +150,9 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     ``apm_modules/``.  A single ``git ls-remote`` per cluster catches
     stale tokens before any file is touched.
 
-    For ADO clusters, a stale ``ADO_APM_PAT`` automatically falls back
-    to an ``az cli`` AAD bearer via :meth:`AuthResolver.execute_with_bearer_fallback`
-    -- matching the protocol used by the actual clone path. Without this,
+    For ADO clusters the probe runs through
+    :meth:`AuthResolver.try_with_fallback` (``ADO_APM_PAT`` -> ``az`` bearer
+    -> path-scoped ``git credential fill``) -- the same chain as the clone path. Without this,
     ``apm install -g`` (which skipped preflight) would succeed but
     ``apm install -g --update`` would fail on the same machine with the
     same creds. See #1212.
@@ -156,17 +162,18 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     the dep carries an explicit ``ssh://`` scheme; otherwise HTTPS (token
     embedded when available, plain HTTPS for anonymous public deps).
     SSH failures are detected via :func:`is_ssh_auth_failure_signal`;
-    HTTPS failures via :func:`is_ado_auth_failure_signal`.
+    HTTPS failures via :func:`apm_cli.core.auth_outcome.classify_auth_outcome`.
 
     Raises :class:`AuthenticationError` (with ``build_error_context``
     payload) on the first auth failure that survives the fallback.
     """
     import subprocess as _sp
 
+    from ..core.auth_chain import AdoAuthChainExhaustedError, AuthAttemptLog
+    from ..core.auth_outcome import AuthAttemptFailed, classify_auth_outcome
     from ..models.dependency.host_virtual import dependency_repository_owner
     from ..utils.git_env import redact_git_diagnostic
     from ..utils.github_host import (
-        is_ado_auth_failure_signal,
         is_azure_devops_hostname,
         is_github_hostname,
         is_ssh_auth_failure_signal,
@@ -229,8 +236,8 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         host_display = endpoint if not org else f"{endpoint}/{org}"
 
         def _run_ls_remote(url, env):
-            # auth-delegated: invoked via _primary_op/_bearer_op below, both
-            # routed through auth_resolver.execute_with_bearer_fallback.
+            # auth-delegated: ADO probes run inside auth_resolver.try_with_fallback;
+            # other hosts use the AuthResolver-built probe_env.
             try:
                 from ..utils.git_env import git_remote_refs
 
@@ -243,70 +250,54 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             except _sp.TimeoutExpired:
                 return None  # network timeout sentinel; treated as non-auth
 
-        def _primary_op(url=probe_url, env=probe_env):
-            return _run_ls_remote(url, env)
+        chain_attempts = AuthAttemptLog()
+        if dep.is_azure_devops() and not _use_ssh:
 
-        def _bearer_op(
-            bearer, dep=dep, dep_ctx=dep_ctx, host=host, host_display=host_display, _dl=_dl
-        ):
-            # SECURITY: build a CLEAN env via _build_git_env(scheme="bearer")
-            # rather than {**probe_env, **build_ado_bearer_git_env(bearer)}.
-            # probe_env carries GIT_TOKEN=<stale-PAT> from dep_ctx.git_env;
-            # leaving it set during the bearer attempt would leak the
-            # rejected PAT into the child-process env table even though the
-            # GIT_CONFIG_VALUE_0 header carries the bearer. _build_git_env
-            # explicitly skips GIT_TOKEN for scheme="bearer".
-            bearer_env = auth_resolver._build_git_env(
-                bearer,
-                scheme="bearer",
-                host_kind="ado",
-                base_env=_dl.git_env,
-            )
-            bearer_url = _dl._build_repo_url(
-                dep.repo_url,
-                use_ssh=False,
-                dep_ref=dep,
-                token=None,
-                auth_scheme="bearer",
-            )
-            _trace(f"Preflight: {host_display} -- retrying with az cli bearer")
-            return _run_ls_remote(bearer_url, bearer_env)
+            def _ado_probe(_token, git_env, url=probe_url):
+                run = _run_ls_remote(url, git_env)
+                if run is None:
+                    # A timeout is an outcome, not a success: the chain must
+                    # not treat it as an accepted credential.
+                    raise _sp.TimeoutExpired("git ls-remote", 30)
+                if run.returncode != 0:
+                    raise AuthAttemptFailed(result=run)
+                return run
 
-        def _is_auth_failure(outcome):
-            if outcome is None:
-                return False  # timeout: not an auth failure
-            if outcome.returncode == 0:
-                return False
-            return is_ado_auth_failure_signal(outcome.stderr or "")
-
-        ado_eligible = (
-            dep.is_azure_devops()
-            and _auth_scheme == "basic"
-            and getattr(dep_ctx, "source", None) == "ADO_APM_PAT"
-        )
-
-        if ado_eligible:
-            fallback_result = auth_resolver.execute_with_bearer_fallback(
-                dep,
-                _primary_op,
-                _bearer_op,
-                _is_auth_failure,
-            )
-            result = fallback_result.outcome
-            # bearer_also_failed is True only when the bearer leg actually
-            # ran AND its outcome still matched the auth-failure signature.
-            # Early returns from execute_with_bearer_fallback (az
-            # unavailable, JWT acquisition failed) leave bearer_attempted
-            # False so the diagnostic does not falsely claim an attempt.
-            bearer_also_failed = (
-                fallback_result.bearer_attempted
-                and result is not None
-                and result.returncode != 0
-                and is_ado_auth_failure_signal(result.stderr or "")
-            )
+            try:
+                result = auth_resolver.try_with_fallback(
+                    host,
+                    _ado_probe,
+                    org=org,
+                    port=dep.port,
+                    path=dep.repo_url,
+                    host_type=dep.host_type,
+                    remote_url=probe_url,
+                    attempts=chain_attempts,
+                    verbose_callback=_trace if verbose else None,
+                )
+            except AuthAttemptFailed as failed:
+                result = failed.result
+            except _sp.TimeoutExpired:
+                result = None
+            except AdoAuthChainExhaustedError as exhausted:
+                _trace(f"Preflight: {host_display} -- auth rejected")
+                raise AuthenticationError(
+                    f"Authentication failed for {host}",
+                    diagnostic_context=(
+                        f"\n    {exhausted}\n"
+                        + auth_resolver.build_error_context(
+                            host,
+                            ref_update_operation_label(),
+                            org=org,
+                            dep_url=dep.repo_url,
+                            attempts=exhausted.attempts,
+                        )
+                        + "\n\n    No files were modified."
+                        + "\n    apm.yml, apm.lock.yaml, and apm_modules/ are unchanged."
+                    ),
+                ) from exhausted
         else:
-            result = _primary_op()
-            bearer_also_failed = False
+            result = _run_ls_remote(probe_url, probe_env)
 
         if result is None:
             continue  # timeout fallthrough -- handled by the real phase
@@ -331,15 +322,19 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                     ),
                 )
             else:
-                if not is_ado_auth_failure_signal(stderr_text):
+                if not classify_auth_outcome(
+                    host_info=dep_ctx.host_info,
+                    error=stderr_text,
+                    credential_presented=bool(dep_ctx.token),
+                ).is_auth_failure:
                     continue  # non-auth git failure (network, ref-not-found) -- defer
                 _trace(f"Preflight: {host_display} -- auth rejected")
                 _diag = auth_resolver.build_error_context(
                     host,
-                    "install --update",
+                    ref_update_operation_label(),
                     org=org,
                     dep_url=dep.repo_url,
-                    bearer_also_failed=bearer_also_failed,
+                    attempts=chain_attempts if dep.is_azure_devops() else None,
                 )
                 raise AuthenticationError(
                     f"Authentication failed for {host}",
@@ -383,6 +378,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     transaction: InstallTransaction | None = None,
     frozen: bool = False,
     trust_transitive_mcp: bool = False,
+    lsp_preflight=None,
 ):
     """Install APM package dependencies.
 
@@ -434,6 +430,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
     if scope is None:
         scope = InstallScope.PROJECT
+
+    from .phases.targets import reject_undeployable_manifest_targets
+
+    reject_undeployable_manifest_targets(apm_package, logger)  # before any write
 
     apm_deps = apm_package.get_apm_dependencies()
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
@@ -554,6 +554,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         lockfile_only=lockfile_only,
         trust_bin=trust_bin,
         transaction=transaction,
+        lsp_preflight=lsp_preflight,
     )
 
     # ------------------------------------------------------------------
@@ -730,10 +731,12 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             # Conflict: registry-only mode requires all locked deps to route
             # through the configured proxy. Deps locked to direct VCS sources
-            # (github.com, GHE Cloud, GHES) are incompatible.
+            # (github.com, GHE Cloud, GHES) are incompatible. A ref update
+            # re-resolves its selection through the registry; only the
+            # entries it keeps as-is are checked.
             if registry_config and registry_config.enforce_only:
                 conflicts = registry_config.validate_lockfile_deps(
-                    builtins.list(existing_lockfile.dependencies.values())
+                    proxy_only_lock_entries(existing_lockfile, update_refs=update_refs, ctx=ctx)
                 )
                 if conflicts:
                     _rich_error(
@@ -747,7 +750,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                             name = f"{name}/{dep.virtual_path}"
                         _rich_error(f"  - {name} (host: {host})")
                     _rich_error(
-                        "Re-run with 'apm install --update' to re-resolve "
+                        f"Run '{lockfile_refresh_command(scope)}' to re-resolve "
                         "through the registry, or unset PROXY_REGISTRY_ONLY."
                     )
                     raise InstallFailureAlreadyRendered(
@@ -756,15 +759,15 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             # Supply chain warning: registry-proxy entries without a
             # content_hash cannot be verified on re-install.
-            if registry_config and registry_config.enforce_only:
+            if registry_config and registry_config.enforce_only and not update_refs:
                 missing = registry_config.find_missing_hashes(
                     builtins.list(existing_lockfile.dependencies.values())
                 )
                 if missing:
                     diagnostics.warn(
                         "The following registry-proxy dependencies have no "
-                        "content_hash in the lockfile. Run 'apm install "
-                        "--update' to populate hashes for tamper detection.",
+                        f"content_hash in the lockfile. Run '{lockfile_refresh_command(scope)}' "
+                        "to populate hashes for tamper detection.",
                         package="lockfile",
                     )
                     for dep in missing[:10]:
@@ -824,9 +827,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
         # Update .gitignore only for project-scoped installs, not in lockfile_only mode.
         if scope == InstallScope.PROJECT and not lockfile_only:
-            from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
+            from apm_cli.install.helpers.gitignore import update_gitignore_for_apm_modules
 
-            _update_gitignore_for_apm_modules(logger=logger)
+            update_gitignore_for_apm_modules(logger=logger)
         elif verbose and logger is not None and not lockfile_only:
             logger.verbose_detail("Skipping .gitignore update (global scope install).")
 
@@ -980,7 +983,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # the typed exception lets the caller render the policy message
         # as-is.
         raise
-    except (DirectDependencyError, FrozenInstallError):
+    except (DirectDependencyError, FrozenInstallError, RequiredIntegrationError):
         # #946: same pattern -- surface the message as-is instead of
         # double-wrapping it through the generic RuntimeError below.
         raise

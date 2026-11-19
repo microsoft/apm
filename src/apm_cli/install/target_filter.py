@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from apm_cli.core.apm_yml import parse_targets_field
 from apm_cli.models.apm_package import canonical_package_targets
 
 if TYPE_CHECKING:
@@ -135,14 +134,6 @@ def resolve_effective_package_targets(
         consumer_targets = tuple(filtered)
 
     package = getattr(package_source, "package", package_source)
-    try:
-        package_fields = vars(package)
-    except TypeError:
-        package_fields = {}
-    raw_target = package_fields.get("target")
-    raw_targets = package_fields.get("targets")
-    if raw_target is not None and raw_targets is not None:
-        parse_targets_field({"target": raw_target, "targets": raw_targets})
     declared_targets = canonical_package_targets(package)
     package_restriction_active = bool(declared_targets) and "all" not in declared_targets
     package_allowed = frozenset(declared_targets) if package_restriction_active else frozenset()
@@ -200,6 +191,7 @@ def explicit_target_failure(
     """
     if not targets:
         return None
+    from apm_cli.install.package_resolution import effective_dependency_selection
 
     def _declared_and_effective(node: object) -> tuple[list[str], bool]:
         package = getattr(node, "package", None)
@@ -207,7 +199,7 @@ def explicit_target_failure(
             return [], True
         selection = resolve_effective_package_targets(
             targets,
-            getattr(node.dependency_ref, "target_subset", None),
+            effective_dependency_selection(node.dependency_ref).target_subset,
             package,
             None,
             "",

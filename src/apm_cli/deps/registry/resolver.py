@@ -45,12 +45,14 @@ class RegistryResolutionError(Exception):
     """
 
 
-def _split_owner_repo(repo_url: str) -> tuple[str, str]:
-    """Split ``owner/repo`` (or longer paths) into (owner, repo) for the API.
+def split_registry_identity(repo_url: str) -> tuple[str, str]:
+    """Split a registry package identity into ``(owner, repo)`` for the API.
 
-    For paths with more than two segments (e.g. ``group/subgroup/repo``), we
-    treat the last segment as the repo and the rest as the owner — the API
-    contract uses ``{owner}/{repo}`` as a flat two-segment identity.
+    Registry HTTP API section 1.2: the last ``/``-separated part is the repo
+    and everything before it, including any host, is the owner (e.g.
+    ``gitlab.com/acme/x`` -> ``("gitlab.com/acme", "x")``). The client
+    percent-encodes each part as one path segment. Both install (consumer)
+    and ``apm publish`` route through this function.
     """
     parts = [p for p in repo_url.split("/") if p]
     if len(parts) < 2:
@@ -303,7 +305,7 @@ class RegistryPackageResolver:
                 f"{dep_ref.repo_url!r} (source={dep_ref.source!r})"
             )
 
-        owner, repo = _split_owner_repo(dep_ref.repo_url)
+        owner, repo = split_registry_identity(dep_ref.repo_url)
         base_url = self._resolve_registry_url(dep_ref.registry_name)
         client = self._build_client(dep_ref.registry_name, base_url)
 
@@ -374,7 +376,7 @@ class RegistryPackageResolver:
         registry_name = dep_ref.registry_name
         base_url = self._resolve_registry_url(registry_name)
         client = self._build_client(registry_name, base_url)
-        owner, repo = _split_owner_repo(dep_ref.repo_url)
+        owner, repo = split_registry_identity(dep_ref.repo_url)
         expected_url = client.archive_url(owner, repo, version)
         if resolved_url != expected_url:
             raise RegistryResolutionError(

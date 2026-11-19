@@ -64,6 +64,7 @@ def _integrate_package_hooks(
     return integrate_package_primitives(
         package_info,
         project_root,
+        skill_subset=None,
         targets=[target],
         integrators=IntegratorBundle(
             prompt=None,

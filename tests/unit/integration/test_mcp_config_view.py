@@ -553,6 +553,40 @@ def test_root_declaration_wins_duplicate_name(tmp_path: Path) -> None:
     assert [dep.name for dep in view.dependencies] == ["shared", "unique"]
     assert view.configs["shared"]["command"] == "root-command"
     assert view.provenance == {"unique": "tools"}
+    assert view.brought_in_by == {"unique": "./packages/tools"}
+
+
+def test_brought_in_by_traces_transitive_servers_to_direct_apm_yml_entry(
+    tmp_path: Path,
+) -> None:
+    """#3835 review: removal hints need the direct dependency's key, never a display name."""
+    root = _write_manifest(tmp_path, name="consumer", mcp=["root-server"])
+    modules_root = tmp_path / "apm_modules"
+    parent = LockedDependency(repo_url="acme/parent-pkg", depth=1)
+    mid = LockedDependency(repo_url="acme/mid-pkg", depth=2, resolved_by="acme/parent-pkg")
+    leaf = LockedDependency(repo_url="acme/leaf-pkg", depth=3, resolved_by="acme/mid-pkg")
+    orphan = LockedDependency(repo_url="acme/orphan-pkg", depth=2, resolved_by="acme/gone")
+    other = LockedDependency(repo_url="acme/other-pkg", depth=1)
+    for locked, name, mcp in (
+        (parent, "parent-pkg", ["direct-child"]),
+        (mid, "mid", None),
+        (leaf, "leaf", ["deep-child", "shared"]),
+        (orphan, "orphan", ["unknown-chain"]),
+        (other, "other", ["shared", "root-server"]),
+    ):
+        _write_manifest(
+            locked.to_dependency_ref().get_install_path(modules_root), name=name, mcp=mcp
+        )
+
+    view = _derive(root, _lock(parent, mid, leaf, orphan, other), modules_root)
+
+    assert view.provenance["direct-child"] == "parent-pkg"
+    assert view.provenance["deep-child"] == "leaf"
+    # Unknown or ambiguous chains and root-declared servers name no entry.
+    assert view.brought_in_by == {
+        "direct-child": "acme/parent-pkg",
+        "deep-child": "acme/parent-pkg",
+    }
 
 
 def test_symmetric_diff_reports_changed_source_only_and_lock_only() -> None:
@@ -1112,13 +1146,11 @@ def test_transitive_self_defined_trust_matches_install_behavior(tmp_path: Path) 
     assert [dep.name for dep in trusted.dependencies] == ["direct-server", "deep-server"]
 
 
-def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
-    tmp_path: Path,
-) -> None:
-    """A no-op update preserves prior trust without trusting changed code."""
+def test_transitive_self_defined_server_needs_per_run_trust(tmp_path: Path) -> None:
+    """A transitive self-defined server is collected only with per-run trust."""
     root = _write_manifest(tmp_path, name="root")
     deep_dir = tmp_path / "packages" / "deep"
-    package = _write_manifest(
+    _write_manifest(
         deep_dir,
         name="deep",
         mcp=[_self_defined("deep-server", "trusted-command")],
@@ -1129,41 +1161,22 @@ def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
         local_path="./packages/deep",
         depth=2,
     )
-    stored_config = package.get_mcp_dependencies()[0].to_dict()
 
-    preserved = CurrentMcpConfigView.derive(
+    untrusted = CurrentMcpConfigView.derive(
         root,
         _lock(deep),
         tmp_path / "apm_modules",
         trust_transitive_self_defined=False,
-        trusted_transitive_configs={"deep-server": ("deep", stored_config)},
     )
-    changed = CurrentMcpConfigView.derive(
+    trusted = CurrentMcpConfigView.derive(
         root,
         _lock(deep),
         tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
-        trusted_transitive_configs={
-            "deep-server": (
-                "deep",
-                {
-                    **stored_config,
-                    "command": "different-command",
-                },
-            )
-        },
-    )
-    wrong_declarer = CurrentMcpConfigView.derive(
-        root,
-        _lock(deep),
-        tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
-        trusted_transitive_configs={"deep-server": ("other-package", stored_config)},
+        trust_transitive_self_defined=True,
     )
 
-    assert [dependency.name for dependency in preserved.dependencies] == ["deep-server"]
-    assert changed.dependencies == ()
-    assert wrong_declarer.dependencies == ()
+    assert untrusted.dependencies == ()
+    assert [dependency.name for dependency in trusted.dependencies] == ["deep-server"]
 
 
 def test_view_dependencies_are_mcp_dependency_objects(tmp_path: Path) -> None:

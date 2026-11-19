@@ -31,10 +31,9 @@ materialises them at install time into the harness-specific config
 file (see the per-harness map in
 [Install MCP servers](../../../consumer/install-mcp-servers/#what-apm-install-writes-to-disk)).
 
-You declare once. At project scope, APM writes `.github/mcp.json` for Copilot
-CLI, `.vscode/mcp.json` for VS Code, `.cursor/mcp.json`, `.mcp.json` for
-Claude, `.codex/config.toml`, and the rest -- whichever harnesses the consumer
-has.
+You declare once. At project scope, APM writes `.mcp.json` for Copilot (CLI
+and VS Code) and Claude, `.cursor/mcp.json`, `.codex/config.toml`, and the
+rest -- whichever harnesses the consumer has.
 
 ## The `mcp:` schema
 
@@ -88,8 +87,9 @@ The full mapping (file path, scope, JSON/TOML schema) is in
 You do not need to know it to author -- APM handles the per-target
 translation.
 
-The consumer can run `apm mcp list` to confirm the server landed in
-each runtime they care about.
+The consumer can open those config files to confirm the server landed in
+each runtime they care about (`apm mcp list` browses the registry, not
+installed servers).
 
 ## Secrets: never commit, always indirect
 
@@ -152,7 +152,11 @@ consumer. If your package is pulled in transitively, APM warns and
 Implications for producers:
 
 - Registry-resolved servers (form 1 above) flow through transitively
-  without a trust prompt -- they are vetted by the registry.
+  without a trust prompt only as plain references to the consumer's
+  registry. A transitive entry that sets its own `registry:` URL or any
+  `env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys is
+  skipped like a self-defined server unless the consumer passes
+  `--trust-transitive-mcp`.
 - Self-defined `stdio` and remote servers should be reserved for
   things the consumer would expect from a direct dependency.
 - Document any self-defined MCP server in your README so a transitive

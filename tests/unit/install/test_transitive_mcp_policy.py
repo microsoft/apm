@@ -41,6 +41,9 @@ from apm_cli.policy.schema import ApmPolicy
 # -- Fixtures / helpers -----------------------------------------------
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "policy"
+# Registry MCP servers resolve as stdio packages (mcp.transport.allow).
+pytestmark = pytest.mark.usefixtures("stdio_mcp_registry")
+
 MCP_POLICY_FIXTURE = FIXTURE_DIR / "apm-policy-mcp.yml"
 
 
@@ -165,6 +168,65 @@ class TestTransitiveMCPBlock:
             for c in mock_violation.call_args_list:
                 _, kwargs = c
                 assert kwargs.get("severity") == "block"
+
+    def test_transitive_block_hint_names_declaring_dependency(self):
+        """#3835: the violation names the server and the hint points at the
+        direct apm.yml dependency that brings it in, not at the declaring
+        package's display name (``resolved_by``), the server or the check."""
+        from dataclasses import replace
+
+        policy = _load_mcp_policy()
+        fetch = _make_fetch_result(policy=policy)
+        dep = replace(
+            _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio"),
+            resolved_by="parent-pkg",
+        )
+
+        logger = _make_logger()
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
+            with pytest.raises(PolicyBlockError):
+                run_policy_preflight(
+                    project_root=Path("/fake/project"),
+                    mcp_deps=[dep],
+                    mcp_brought_in_by={"io.github.untrusted/evil-transitive": "acme/parent-pkg"},
+                    no_policy=False,
+                    logger=logger,
+                    dry_run=False,
+                )
+        calls = [c.kwargs for c in mock_violation.call_args_list]
+        assert calls
+        for kwargs in calls:
+            assert kwargs["dep_ref"] == "io.github.untrusted/evil-transitive"
+            assert kwargs["declared_by"] == "acme/parent-pkg"
+
+    def test_transitive_block_without_direct_entry_suggests_no_apm_yml_edit(self):
+        """A transitive server whose direct apm.yml entry is unknown must not
+        be hinted with its declaring package's display name."""
+        from dataclasses import replace
+
+        policy = _load_mcp_policy()
+        fetch = _make_fetch_result(policy=policy)
+        dep = replace(
+            _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio"),
+            resolved_by="parent-pkg",
+        )
+
+        logger = _make_logger()
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
+            with pytest.raises(PolicyBlockError):
+                run_policy_preflight(
+                    project_root=Path("/fake/project"),
+                    mcp_deps=[dep],
+                    no_policy=False,
+                    logger=logger,
+                    dry_run=False,
+                )
+        calls = [c.kwargs for c in mock_violation.call_args_list]
+        assert calls
+        for kwargs in calls:
+            assert kwargs["dep_ref"] == "io.github.untrusted/evil-transitive"
+            assert kwargs["declared_by"] is None
+            assert kwargs["remedy"] is None
 
 
 # -- Test: transitive MCP denied under warn -> warning + proceed ------

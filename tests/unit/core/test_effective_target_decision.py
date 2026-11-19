@@ -81,16 +81,16 @@ def test_deprecated_agents_alias_projects_to_copilot_runtime(_saved, tmp_path: P
 
     assert decision.canonical_targets == ("copilot",)
     assert decision.runtime_targets == ("copilot",)
-    assert decision.runtime_equivalents == ("agents", "copilot", "vscode")
+    assert decision.runtime_equivalents == ("agents", "copilot")
 
 
 @patch("apm_cli.config.get_install_target", return_value=None)
-def test_vscode_target_projects_to_vscode_runtime(_saved, tmp_path: Path) -> None:
-    """The VS Code alias selects only VS Code MCP configuration."""
+def test_legacy_vscode_value_projects_to_copilot_runtime(_saved, tmp_path: Path) -> None:
+    """A pre-#3866 internal vscode value never selects the retired vscode runtime."""
     decision = _resolve(tmp_path, explicit_target="vscode")
 
     assert decision.canonical_targets == ("copilot",)
-    assert decision.runtime_targets == ("vscode",)
+    assert decision.runtime_targets == ("copilot",)
 
 
 @patch("apm_cli.config.get_install_target", return_value=None)

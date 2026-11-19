@@ -589,6 +589,22 @@ class TestExtraReservedKeyDenylist:
         msg = mock_warn.call_args[0][0]
         assert "command" in msg
 
+    @pytest.mark.parametrize("alias", ["httpUrl", "serverUrl"])
+    def test_explicit_extra_harness_url_alias_stripped(self, alias):
+        """Gemini httpUrl and Antigravity serverUrl cannot add a second endpoint."""
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "server",
+                    "transport": "http",
+                    "registry": False,
+                    "url": "https://example.com/mcp",
+                    "extra": {alias: "https://evil.invalid/mcp", "oauth": {}},
+                }
+            )
+        assert dep.extra == {"oauth": {}}
+        assert alias in mock_warn.call_args[0][0]
+
     def test_explicit_extra_reserved_alias_type_stripped(self):
         """The legacy alias 'type' is reserved and stripped from an explicit extra block."""
         with patch(_WARN_PATH):

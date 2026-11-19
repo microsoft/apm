@@ -63,7 +63,7 @@ def _run_probe(
 
     with (
         patch(
-            "apm_cli.install.validation.requests.get",
+            "apm_cli.install.validation._github_api_get",
             side_effect=request_results,
         ),
         patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=False),
@@ -210,3 +210,66 @@ def test_transient_detail_is_verbose_only(probe_path: str) -> None:
     logger.verbose_detail.assert_not_called()
     logger.warning.assert_not_called()
     logger.info.assert_not_called()
+
+
+def test_github_api_probe_keeps_its_credential_on_the_api_origin() -> None:
+    """A rename redirect on the API origin is followed; another origin is refused."""
+    _github_api_get = validation._github_api_get
+
+    def _resp(status, location=None):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {"Location": location} if location else {}
+        return resp
+
+    headers = {"Authorization": "token probe-token"}
+    session_request = "apm_cli.utils.http_credentials.CredentialScopedSession.request"
+    renamed = "https://api.github.com/repositories/42"
+    with patch(session_request, side_effect=[_resp(301, renamed), _resp(200)]) as request:
+        assert _github_api_get("https://api.github.com/repos/o/r", headers=headers, timeout=15).ok
+    assert [c.kwargs["url"] for c in request.call_args_list][-1] == renamed
+
+    elsewhere = "https://elsewhere.example.net/repos/o/r"
+    with (
+        patch(session_request, return_value=_resp(301, elsewhere)) as request,
+        pytest.raises(requests.RequestException),
+    ):
+        _github_api_get("https://api.github.com/repos/o/r", headers=headers, timeout=15)
+    assert request.call_count == 1
+
+
+@pytest.mark.parametrize("probe_path", PROBE_PATHS)
+def test_authenticated_probe_sends_the_github_rest_token_scheme(probe_path: str) -> None:
+    ok = SimpleNamespace(ok=True, status_code=200, reason="OK", headers={})
+    with patch(
+        "apm_cli.install.validation._github_api_get", side_effect=[_response(404), ok]
+    ) as get:
+        resolver = _resolver()
+        with patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=False):
+            if probe_path == "primary":
+                dep_ref = SimpleNamespace(
+                    host="github.com", port=None, repo_url="owner/repo", host_type=None
+                )
+                result = validation._validate_github_package(
+                    dep_ref, resolver, False, None, "owner/repo", MagicMock()
+                )
+            else:
+                result = validation._validate_parse_failure_fallback(
+                    "owner/repo", resolver, None, MagicMock()
+                )
+
+    assert result is True
+    anonymous, authenticated = (call.kwargs["headers"] for call in get.call_args_list)
+    assert "Authorization" not in anonymous
+    assert authenticated["Authorization"] == "token test-token"
+
+
+@pytest.mark.parametrize("probe_path", PROBE_PATHS)
+def test_refused_cross_origin_redirect_defers_to_download(probe_path: str) -> None:
+    from apm_cli.utils.http_credentials import REFUSED_OUTSIDE_ORIGIN, RedirectRefusedError
+
+    refused = RedirectRefusedError(reason=REFUSED_OUTSIDE_ORIGIN, origin="https://api.github.com")
+    result, _resolver_mock, logger = _run_probe(probe_path, refused, verbose=True)
+
+    assert result is True
+    assert "redirect not followed" in str(logger.verbose_detail.call_args_list)

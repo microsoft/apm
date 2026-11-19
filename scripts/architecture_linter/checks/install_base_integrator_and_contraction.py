@@ -1396,7 +1396,6 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "materialization_session.flush()",
             "self._materialization_session = None",
             "removed_paths.append(target)",
-            "removed_paths=removed_paths",
         ),
         _BASE_INTEGRATOR_OWNER: (
             "baseline_hash(target_file)",
@@ -1422,7 +1421,6 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "DeploymentMaterializationSession.retire_removed(",
             "receipt_retirements=receipt_retirements",
         ),
-        "src/apm_cli/integration/skill_support.py": ("removed_paths.append(skill_subdir)",),
         "src/apm_cli/commands/uninstall/engine.py": (
             "DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)",
             'with _integrators["skills"].ownership_snapshot(materialization_session=materialization_session):',

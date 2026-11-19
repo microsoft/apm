@@ -217,8 +217,8 @@ team-skills/
 ```
 
 `apm install` resolves which harness directories to populate using a strict
-priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
-[filesystem signals](../../reference/cli/targets/#detection-signals). That
+priority chain: `--target` flag > `apm.yml` `targets:` > `apm config set target` >
+auto-detect from [filesystem signals](../../reference/cli/targets/#detection-signals). That
 canonical list defines every auto-detection signal. With no signal, `apm
 install` exits with code 2 instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
@@ -337,5 +337,5 @@ For the full comparison and metadata precedence rules, see
   GitHub Agentic Workflows integration.
 - [Dependencies guide](/apm/consumer/manage-dependencies/) -- depend on other APM
   packages, file-level imports, version pinning.
-- [`apm audit`](/apm/reference/cli/install/) -- scan dependencies for
+- [`apm audit`](/apm/reference/cli/audit/) -- scan dependencies for
   policy violations before they ship.

@@ -37,8 +37,6 @@ from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
     build_copy_ignore,
     build_skill_ownership_maps,
-    clean_orphaned_skills,
-    get_lockfile_owned_agent_skills,
     skill_dir_has_content,
 )
 from apm_cli.integration.targets import TargetProfile
@@ -58,8 +56,11 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from collections.abc import Set
+
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.models.dependency.subsets import SkillTargetSelection
     from apm_cli.models.validation import PackageType
 
 
@@ -810,16 +811,29 @@ class SkillIntegrator(BaseIntegrator):
         parent_name: str,
         diagnostics=None,
         logger=None,
+        declared_by: str | None = None,
     ) -> None:
-        """Fail an unsatisfied persisted required selection through the output cascade."""
+        """Fail an unsatisfied persisted required selection through the output cascade.
+
+        *declared_by* names the dependency chain whose manifest declared the
+        selection when it is not the project's own apm.yml.
+        """
         available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
         requested_display = ", ".join(sorted(set(requested_names)))
-        details = (
-            "Skill selection matched no available skills. "
-            f"Requested: {requested_display}. Available: {available_display}. "
-            "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
-            "then run 'apm install'."
-        )
+        if declared_by:
+            details = (
+                f"Skill selection declared by '{declared_by}' matched no available skills. "
+                f"Requested: {requested_display}. Available: {available_display}. "
+                f"Update '{declared_by.split(' > ')[-1]}' to a version whose 'skills:' "
+                "names available skills, then run 'apm install'."
+            )
+        else:
+            details = (
+                "Skill selection matched no available skills. "
+                f"Requested: {requested_display}. Available: {available_display}. "
+                "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
+                "then run 'apm install'."
+            )
         if diagnostics is not None:
             diagnostics.error(details, package=parent_name)
         elif logger:
@@ -1025,6 +1039,42 @@ class SkillIntegrator(BaseIntegrator):
         _, native_owners = SkillIntegrator._build_ownership_maps(lockfile_root)
         return {path.rsplit("/", 1)[-1]: owner for path, owner in native_owners.items()}
 
+    @staticmethod
+    def _skill_root_target_names(targets, skills_root) -> dict[Path, tuple[str, ...]]:
+        """Group skill-capable target names by the resolved skills root they share."""
+        grouped: dict[Path, list[str]] = {}
+        for target in targets:
+            if target.supports("skills"):
+                grouped.setdefault(skills_root(target).resolve(), []).append(target.name)
+        return {root: tuple(names) for root, names in grouped.items()}
+
+    @staticmethod
+    def _paired_name_filter(
+        name_filter: "Set[str] | None",
+        skill_pairing: "SkillTargetSelection | None",
+        target_names: tuple[str, ...],
+    ) -> "Set[str] | None":
+        """Narrow *name_filter* to the skills paired with one skills root's targets.
+
+        Without a pairing every target receives the whole filter. A root shared
+        by several targets receives the union of their paired skills, so a
+        shared directory never loses a skill one of its targets selected.
+        """
+        if skill_pairing is None:
+            return name_filter
+        selected = [
+            skill_pairing.skills_for_target(name)
+            for name in target_names
+            if skill_pairing.selects_target(name)
+        ]
+        if not selected:
+            return frozenset()
+        if any(skills is None for skills in selected):
+            return name_filter
+        paired = skill_subset_filter_tokens({name for skills in selected for name in skills})
+        paired = frozenset(paired or ())
+        return paired if name_filter is None else frozenset(name_filter) & paired
+
     def _promote_sub_skills_standalone(
         self,
         package_info,
@@ -1037,6 +1087,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
@@ -1077,6 +1128,9 @@ class SkillIntegrator(BaseIntegrator):
             if source_paths is not None
             else self._skill_names_in_directory(sub_skills_dir)
         )
+        root_targets = self._skill_root_target_names(
+            targets, lambda target: self._target_skills_root(target, project_root)
+        )
 
         for target in targets:
             if not target.supports("skills"):
@@ -1110,7 +1164,9 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
-                name_filter=name_filter,
+                name_filter=self._paired_name_filter(
+                    name_filter, skill_pairing, root_targets[resolved_root]
+                ),
                 link_rewriter=self,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
@@ -1374,6 +1430,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
@@ -1412,6 +1469,9 @@ class SkillIntegrator(BaseIntegrator):
             if source_plan is not None
             else skill_subset_filter_tokens(skill_subset)
         )
+        root_targets = self._skill_root_target_names(
+            targets, lambda target: project_root / target.skills_rel_root
+        )
 
         for target in targets:
             if not target.supports("skills"):
@@ -1445,7 +1505,9 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
-                name_filter=_name_filter,
+                name_filter=self._paired_name_filter(
+                    _name_filter, skill_pairing, root_targets[resolved_root]
+                ),
                 link_rewriter=self,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
@@ -1496,6 +1558,7 @@ class SkillIntegrator(BaseIntegrator):
         bin_skip_reason_override: str | None = None,
         trust_bin: bool | None = None,
         source_plan=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
     ) -> SkillIntegrationResult:
         """Deploy admitted native skills, bundles and promoted sub-skills.
 
@@ -1550,6 +1613,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 targets=targets,
                 skill_subset=skill_subset,
+                skill_pairing=skill_pairing,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
                 source_paths=selection.children,
@@ -1670,6 +1734,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 targets=targets,
                 skill_subset=skill_subset,
+                skill_pairing=skill_pairing,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
             ),
@@ -1912,10 +1977,10 @@ class SkillIntegrator(BaseIntegrator):
         targets=None,
         removed_paths: list[Path] | None = None,
     ) -> dict[str, int]:
-        """Sync recorded skill paths, or use legacy package-name orphan detection.
+        """Remove recorded skill paths; without a managed set remove nothing.
 
         Scope-resolved ``targets`` supply skill prefixes; absent targets use the
-        catalog. An explicit managed set limits cleanup to those recorded paths.
+        catalog. Only paths in the managed set (lockfile ownership) are removed.
         Return removed-file and error counts.
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -1941,7 +2006,6 @@ class SkillIntegrator(BaseIntegrator):
 
         if managed_files is not None:
             # Manifest-based removal -- only remove tracked skill directories
-            project_root_resolved = project_root.resolve()
 
             # Lazy-resolve cowork root at most once per invocation
             # (mirrors the pattern in cleanup.py and sync_remove_files).
@@ -1977,15 +2041,17 @@ class SkillIntegrator(BaseIntegrator):
                         stats["errors"] += 1
                         continue
                 else:
-                    target = project_root / rel_path
-                    if not str(target.resolve()).startswith(str(project_root_resolved)):
+                    if not self.validate_deploy_path(
+                        rel_path, project_root, allowed_prefixes=skill_prefix_tuple
+                    ):
                         continue
+                    target = project_root / rel_path
 
-                if not target.exists():
+                if not target.exists() and not target.is_symlink():
                     continue
 
                 try:
-                    if target.is_dir():
+                    if target.is_dir() and not target.is_symlink():
                         shutil.rmtree(target)
                     else:
                         target.unlink()
@@ -2012,83 +2078,12 @@ class SkillIntegrator(BaseIntegrator):
 
             return stats
 
-        installed_skill_names = set()
-        for dep in apm_package.get_apm_dependencies():
-            raw_name = dep.repo_url.split("/")[-1]
-            if dep.is_virtual and dep.virtual_path:
-                raw_name = dep.virtual_path.split("/")[-1]
-            is_valid, _ = validate_skill_name(raw_name)
-            skill_name = raw_name if is_valid else normalize_skill_name(raw_name)
-            installed_skill_names.add(skill_name)
+        # Without lockfile ownership nothing proves which skill directories
+        # APM deployed, so legacy cleanup removes nothing.
+        from apm_cli.utils.console import _rich_info
 
-            # Also include promoted sub-skills from installed packages
-            install_path = dep.get_install_path(project_root / "apm_modules")
-            sub_skills_dir = install_path / ".apm" / "skills"
-            if sub_skills_dir.is_dir():
-                for sub_skill_path in sub_skills_dir.iterdir():
-                    if sub_skill_path.is_dir() and (sub_skill_path / "SKILL.md").exists():
-                        raw_sub = sub_skill_path.name
-                        is_valid, _ = validate_skill_name(raw_sub)
-                        installed_skill_names.add(
-                            raw_sub if is_valid else normalize_skill_name(raw_sub)
-                        )
-
-        # Clean all target skill directories dynamically
-        seen_cleanup_dirs: set[Path] = set()
-        for t in source:
-            if not t.supports("skills"):
-                continue
-            sm = t.primitives["skills"]
-
-            # Special guard for cross-tool deploy_root (.agents/)
-            # Only clean if the owning target dir exists
-            if sm.deploy_root:
-                if not (project_root / t.root_dir).is_dir():
-                    continue
-
-            skills_dir = project_root / t.skills_rel_root
-
-            # Dedup: skip if same resolved skills dir already cleaned.
-            resolved_skills = skills_dir.resolve()
-            if resolved_skills in seen_cleanup_dirs:
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "%s -- already processed, skipping cleanup for %s", skills_dir, t.name
-                )
-                continue
-            seen_cleanup_dirs.add(resolved_skills)
-
-            if skills_dir.exists():
-                result = self._clean_orphaned_skills(
-                    skills_dir,
-                    installed_skill_names,
-                    project_root=project_root,
-                    removed_paths=removed_paths,
-                )
-                stats["files_removed"] += result["files_removed"]
-                stats["errors"] += result["errors"]
-
-        return stats
-
-    def _clean_orphaned_skills(
-        self,
-        skills_dir: Path,
-        installed_skill_names: set,
-        *,
-        project_root: Path | None = None,
-        removed_paths: list[Path] | None = None,
-    ) -> dict[str, int]:
-        """Clean legacy-orphan skill directories without touching foreign agents."""
-        return clean_orphaned_skills(
-            skills_dir,
-            installed_skill_names,
-            project_root=project_root,
-            get_lockfile_owned_agent_skills=self._get_lockfile_owned_agent_skills,
-            removed_paths=removed_paths,
+        _rich_info(
+            "Skipped skill directory cleanup: no lockfile records which skills APM deployed.",
+            symbol="info",
         )
-
-    @staticmethod
-    def _get_lockfile_owned_agent_skills(project_root: Path) -> set[str]:
-        """Return the lockfile-owned ``.agents/skills`` names."""
-        return get_lockfile_owned_agent_skills(project_root)
+        return stats

@@ -18,7 +18,7 @@ from .auth import make_auth_context
 from .client import RegistryClient, RegistryError
 from .config_loader import resolve_effective_registries
 from .feature_gate import is_package_registry_enabled
-from .resolver import _split_owner_repo
+from .resolver import split_registry_identity
 from .semver import is_semver_range, match_version, pick_best
 
 if TYPE_CHECKING:
@@ -247,7 +247,7 @@ def check_registry_locked_dep(
         source_label = f"{source_label} (lockfile)"
 
     try:
-        owner, repo = _split_owner_repo(locked.repo_url)
+        owner, repo = split_registry_identity(locked.repo_url)
     except Exception:
         return OutdatedRow(
             package=package_name,

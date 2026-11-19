@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Normative reference:** This page describes the CLI's v0.2 working draft. [OpenAPM v0.1, Section 5](../../specs/openapm-v01/#5-lockfile-format-apmlockyaml) defines the normative contract; its unratified 0.1.46 amendment selects [`lockfile-v0.1.46.schema.json`](/apm/specs/schemas/lockfile-v0.1.46.schema.json), adding manifest extensions without changing earlier schema bytes. See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
+> **Normative reference:** This page describes the CLI's v0.2 working draft. [OpenAPM v0.1, Section 5](../../specs/openapm-v01/#5-lockfile-format-apmlockyaml) defines the normative contract; its unratified 0.1.46 and 0.1.60 amendments select [`lockfile-v0.1.60.schema.json`](/apm/specs/schemas/lockfile-v0.1.60.schema.json), adding manifest extensions and per-edge subset pairings without changing earlier schema bytes. See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
 
 `apm.lock.yaml` is the pinned record of every resolved dependency and every
 file APM deployed into the workspace. It is the source of truth for
@@ -41,8 +41,8 @@ The lockfile gives APM four things:
    with deployed files.
 3. **Cleanup.** The list of deployed files lets `apm prune` remove orphans
    when a dependency is dropped from `apm.yml`.
-4. **Inspection.** `apm view --lock` and `apm audit` read the lockfile to
-   answer "what is actually installed".
+4. **Inspection.** `apm deps why`, `apm view --file` and `apm audit` read the
+   lockfile to answer "what is actually installed".
 
 ## Location
 
@@ -182,7 +182,7 @@ deployments:
 | `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
 | `mcp_omissions` | map | no | Install-time dependency MCP exclusions: each server maps to a `declaration` fingerprint and `reason` (`only-apm` or `untrusted-transitive`). The fingerprint binds canonical dependency identity, source pin, dependency depth and authored declaration before plugin-root expansion, using the same manifest snapshot as the expanded config. It does not use self-asserted inventory name or version. An admitted baseline supersedes old omission evidence, but remains subject to normal drift checks. Audit never treats this as native ownership or as an exemption for root or previously admitted MCP. Missing or stale evidence cannot establish deliberate omission; see [config-consistency](../baseline-checks/#config-consistency) for reconciliation. |
-| `mcp_target_servers` | map of string lists | no | `target -> server names` for MCP entries APM successfully wrote. An empty map authorizes no cleanup. Older lockfiles lacking this field can recover ownership only for self-defined native entries matching their stored `mcp_configs` baseline; registry-resolved and user-edited entries remain unowned. A missing lockfile grants no ownership of existing native entries. |
+| `mcp_target_servers` | map of string lists | no | `target -> server names` for MCP entries APM successfully wrote. `copilot` and `claude` each record a server they share in the project `.mcp.json`. An older lockfile's project `vscode` entries and unsettled `copilot` entries, and a `copilot` entry whose fingerprint matches an entry in `.github/mcp.json` or `.vscode/mcp.json`, name APM's entries in those retired files: `apm install` removes them by proof, and no command treats them as `.mcp.json` ownership. An empty map authorizes no cleanup. Older lockfiles lacking this field can recover ownership only for self-defined native entries matching their stored `mcp_configs` baseline; registry-resolved and user-edited entries remain unowned. A missing lockfile grants no ownership of existing native entries. |
 | `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used to identify the former owner in `config-consistency` diagnostics; it never exempts a lock-only entry. |
 | `lsp_servers` | list of strings | no | Names of all LSP servers in current APM-managed state, including package- and bundle-contributed servers. |
 | `lsp_configs` | map | no | `server_name -> resolved config dict` retained for owner-aware lifecycle reconciliation. It is not an `apm audit` drift baseline. |
@@ -190,6 +190,7 @@ deployments:
 | `lsp_config_provenance` | map of strings | no | `server_name -> declaration owner` using `project:.`, `package:<identity>`, or `bundle:<identity>`. Reconciliation uses this field to preserve bundle and surviving-package entries while removing departed owners. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256:<hex>` for `local_deployed_files`. |
+| `local_staged_files` | list | no | Local bundle instructions staged under `apm_modules/<bundle>/.apm/` as `apm compile` input for targets without native instructions (Codex, Gemini, OpenCode). Not deployment claims: audit does not verify them. `apm prune` removes the staging and these rows. |
 | `deployments` | list | no | Canonical deployment ownership rows, additive alongside the legacy `deployed_files`/`local_deployed_files` views. See [Canonical deployment rows](#canonical-deployment-rows). |
 
 ## Canonical deployment rows
@@ -285,9 +286,10 @@ with one locked coordinate, not a durable catalog trust identity.
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
 | `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. Rewritten by `apm uninstall` when a rescued transitive dependency's original parent is removed, so the entry stays keyed on a genuine surviving parent -- this never changes the entry's identity or lock key, only which parent it points to. |
-| `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
-| `skill_subset` | list of strings | no | For dependencies that expose selectable skills: the sorted subset of skill names the manifest selected. Empty means "all". |
-| `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
+| `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `agent_plugin`, `marketplace_plugin`. Drives target placement. |
+| `skill_subset` | list of strings | no | For dependencies that expose selectable skills: the sorted union of the skill names every declaring edge selected (the project's `apm.yml` and any parent package). Empty means "all"; one declaration without `skills:` makes it "all". |
+| `target_subset` | list of strings | no | Sorted union of the canonical target names every declaring edge selected with `targets:` (`vscode` is recorded as `copilot`; older lockfiles that recorded `vscode` read as `copilot`). Empty means "all active install targets"; one declaration without `targets:` makes it "all". |
+| `subset_pairings` | list of mappings | no | Present only when declarations pair different skills with different targets, so `skill_subset` x `target_subset` would over-deploy. Each mapping has optional sorted `skills` and `targets` lists (omitted = all); a skill deploys to a target only when one mapping pairs them. Older lockfiles without it replay as the plain product. See [OpenAPM req-rs-018](../../specs/openapm-v01/#req-rs-018). |
 | `deployed_files` | list of strings | no | Sorted project-relative paths APM wrote for this dependency; powers `prune` and `audit`'s file-presence check. Shared paths have one canonical owner; uninstall transfers ownership to a surviving provider. Reinstall preserves other declared, gated, or dynamic targets' entries. On explicit manifest contraction, install/prune removes dropped targets' files only if recorded hashes match; edited files remain tracked on disk. `apm lock` preserves files and their `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows until normal install can verify and perform cleanup. Without `targets:` or `target:` in the consumer's `apm.yml`, reinstall preserves inactive targets' deployed files, merge-hook configuration, and ownership sidecars, even with `--target`. A `--target` override does not declare dropped targets; only explicit manifest contraction permits pruning them. |
 | `deployed_file_hashes` | map | no | `path -> sha256:<hex>` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
 | `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
@@ -305,7 +307,7 @@ with one locked coordinate, not a durable catalog trust identity.
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
 | `constraint` | string | git-source semver only | The original semver selector from Git `ref:` or marketplace object-form `version` in `apm.yml` (`^1.2.0`, `~1.4`, `1.2.3`). Together with `resolved_tag` and selected `version`, distinguishes a resolved selection from package inventory metadata. Replay pins the selected tag and commit rather than re-resolving the selector. |
 | `resolved_tag` | string | git-source semver or SHA-pin updates | The concrete annotated git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint` or justified the latest full-SHA revision-pin update. |
-| `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution. Surfaces "how stale is this pin?" in `apm why`. |
+| `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution: how old the pin is. |
 | `declared_license` | string | no | The license the package *manifest declares* (`license:` in `apm.yml`, or `license` in a `plugin.json`), recorded verbatim at resolve time and syntax-validated offline against the bundled SPDX id set. An author **claim**, not a conclusion from `LICENSE` text -- APM never interprets a license file. Omitted when undeclared (absence means unknown; no sentinel is stored). Surfaced by `apm lock export`. |
 | `carried_licenses` | list | no | Licence files APM copied, byte-for-byte, into the materialized package: the nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` from the package path up to the repository root, plus a copy next to each skill directory that has none. Each item has `path` (copy, relative to the package root), `source` (original file, relative to the repository root at `resolved_commit`) and `hash` (`sha256:<hex>`, line-ending normalized like deployed-file hashes). The copies are excluded from `content_hash` and verified against `hash` instead, so lockfiles written before this field keep verifying. Omitted when nothing was carried. |
 | `extensions` | map | no | Vendor keys matching `x-[a-z][a-z0-9-]*` from the dependency's own `apm.yml`, in declaration order. Values are recorded as declared and are not interpreted. Omitted when the dependency declares none. See [req-ext-003](../../specs/openapm-v01/#req-ext-003). |
@@ -416,7 +418,7 @@ with a top-level `pack:` block:
 
 ```yaml
 pack:
-  format: apm           # or "plugin"
+  format: apm           # or "claude-plugin", "agent-plugin"
   target: copilot       # or comma-joined list, or "all"
   packed_at: "2026-05-10T20:14:00+00:00"
   mapped_from:          # only when cross-target path remapping happened
@@ -442,7 +444,7 @@ shipped.
 | `apm compile` | yes (resolution + integrity) | no |
 | `apm audit` | yes | no |
 | `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |
-| `apm view --lock` | yes | no |
+| `apm deps why`, `apm view --file` | yes | no |
 | `apm unpack` | bundle's pack-enriched lockfile | merges into project lockfile |
 
 `apm install` only rewrites the file when its semantic content changes
@@ -475,7 +477,7 @@ check maps to specific lockfile fields:
 | `ref-consistency` | `resolved_ref` per entry vs. `apm.yml` |
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
-| `skill-subset-consistency` | `skill_subset` per entry, matched against `apm.yml` and the resolved package tree |
+| `skill-subset-consistency` | `skill_subset`, `target_subset` and `subset_pairings` per entry, matched against the merge declared by `apm.yml` and the installed packages' manifests, and against the resolved package tree |
 | `config-consistency` | `mcp_configs`, `mcp_config_provenance` and exact `mcp_omissions` evidence |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 
@@ -568,6 +570,6 @@ local_deployed_file_hashes:
 - [`apm install`](../cli/install/) - resolves and writes the lockfile
 - [`apm audit`](../cli/audit/) - validates the workspace against the lockfile
 - [`apm prune`](../cli/prune/) - removes orphan packages and files
-- [`apm view`](../cli/view/) - inspect resolved state (`--lock`)
+- [`apm view`](../cli/view/) - show which package deployed a file (`--file`)
 - [Baseline checks](../baseline-checks/) - the drift checks the lockfile feeds
 - [Manifest schema](../manifest-schema/) - the `apm.yml` it pins

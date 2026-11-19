@@ -727,40 +727,48 @@ class _RecordingLogger:
 
 
 class TestFilterMcpFailClosed:
-    """filter_mcp_by_allow_executables stays fail-closed under v1 deny-wins.
+    """Self-defined MCP servers from dependencies follow their package's decision."""
 
-    The v1 resolver drives the effective map from the project-level
-    ``executables`` block (personal consent merges in elsewhere); these
-    tests confirm the gate filters unapproved and unnamed deps regardless.
-    """
+    @staticmethod
+    def _dep(name, *, owner=None, keys=(), self_defined=True):
+        dep = _FakeMcpDep(name, resolved_by=owner, approval_keys=keys)
+        dep.is_self_defined = self_defined
+        return dep
 
     def test_none_gate_passes_all(self) -> None:
-        deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
+        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
         logger = _RecordingLogger()
         assert filter_mcp_by_allow_executables(deps, None, logger) == deps
         assert logger.warnings == []
 
-    def test_unapproved_filtered_out(self) -> None:
-        deps = [_FakeMcpDep("a")]
+    def test_unapproved_package_server_filtered_out(self) -> None:
+        deps = [self._dep("a", owner="o/a", keys=("o/a",))]
         logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {}, logger)
-        assert result == []
-        assert logger.warnings  # surfaced a remediation warning
-
-    def test_project_allowed_slug_passes(self) -> None:
-        deps = [_FakeMcpDep("a")]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
-        assert result == deps
-        assert logger.warnings == []
-
-    def test_unnamed_dep_is_fail_closed(self) -> None:
-        # A falsy/missing name must never bypass the gate.
-        deps = [_FakeMcpDep(None), _FakeMcpDep("")]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
-        assert result == []
+        assert filter_mcp_by_allow_executables(deps, {}, logger) == []
         assert logger.warnings
+
+    def test_approved_package_passes_regardless_of_server_name(self) -> None:
+        deps = [self._dep("srv", owner="o/a", keys=("o/a",))]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger)
+        assert result == deps
+
+    def test_server_name_matching_an_approved_key_is_not_enough(self) -> None:
+        deps = [self._dep("o/a", owner="o/b", keys=("o/b",))]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
+
+    def test_package_server_without_lock_identity_is_fail_closed(self) -> None:
+        deps = [self._dep("a", owner="o/a", keys=())]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, {"o/a": {"mcp": True}}, logger) == []
+        assert logger.warnings
+
+    def test_root_and_registry_servers_pass(self) -> None:
+        root = self._dep("root-srv")
+        registry = self._dep("io.github.x/y", owner="o/a", keys=("o/a",), self_defined=False)
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables([root, registry], {}, logger) == [root, registry]
 
 
 class TestFilterLspFailClosed:
@@ -891,3 +899,134 @@ def test_registrable_exec_statuses_excludes_every_untrusted_value() -> None:
     assert TRUST_GATED not in REGISTRABLE_EXEC_STATUSES
     assert "some-future-status" not in REGISTRABLE_EXEC_STATUSES
     assert frozenset({None, TRUST_ABSENT, TRUST_DEPLOYED}) == REGISTRABLE_EXEC_STATUSES
+
+
+class TestDenyIdentitySpellings:
+    """Deny rules match every spelling of one package identity."""
+
+    @staticmethod
+    def _ctx(*, org_deny=(), project_allow=None, project_deny=None, user_deny=None):
+        from types import SimpleNamespace
+
+        from apm_cli.security.executables import ExecTrustContext, build_exec_trust_context
+
+        policy = SimpleNamespace(
+            executables=SimpleNamespace(
+                deny_all=False, deny=list(org_deny), require=(), recommend=(), enforce=()
+            ),
+            bin_deploy=None,
+        )
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data={
+                "executables": {"allow": project_allow or {}, "deny": project_deny or {}}
+            },
+            migrate_user_legacy=False,
+        )
+        if user_deny:
+            from dataclasses import replace
+
+            ctx = replace(ctx, user_deny=user_deny)
+        assert isinstance(ctx, ExecTrustContext)
+        return ctx
+
+    @pytest.mark.parametrize(
+        "deny",
+        [
+            "contoso/pkg-hook",
+            "Contoso/Pkg-Hook",
+            "github.com/contoso/pkg-hook",
+            "https://github.com/Contoso/Pkg-Hook.git",
+            "contoso/*",
+            "Contoso/*",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "key", ["github.com/contoso/pkg-hook#v1.0.0", "contoso/pkg-hook", "Contoso/Pkg-Hook"]
+    )
+    def test_org_deny_matches_any_spelling(self, deny: str, key: str) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        ctx = self._ctx(org_deny=[deny], project_allow={key.split("#")[0]: {"hooks": True}})
+        decision = resolve_exec_decision(ctx, key, "hooks")
+        assert decision.allowed is False
+        assert decision.trust_state == "denied"
+
+    def test_org_deny_covers_sub_packages(self) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "github.com/contoso/pkg-hook/skills/review"
+        ctx = self._ctx(org_deny=["contoso/pkg-hook"], project_allow={key: {"hooks": True}})
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_denied_prefix_does_not_cover_sibling_names(self) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "contoso/pkg-hooks"
+        ctx = self._ctx(org_deny=["contoso/pkg-hook"], project_allow={key: {"hooks": True}})
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is True
+
+    @pytest.mark.parametrize("layer", ["project", "user"])
+    def test_project_and_user_deny_match_any_spelling(self, layer: str) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "github.com/contoso/pkg-hook#v1.0.0"
+        deny = {"contoso/pkg-hook#1.0.0": {"hooks": True}}
+        kwargs = {"project_deny": deny} if layer == "project" else {"user_deny": deny}
+        ctx = self._ctx(project_allow={"github.com/contoso/pkg-hook": {"hooks": True}}, **kwargs)
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_content_bound_keys_stay_exact(self) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        key = "bundle@sha256:abc"
+        assert canonical_exec_identity(key) == key
+
+
+class TestCanonicalExecIdentityHostCase:
+    """Identity case folding follows the host classification."""
+
+    @pytest.mark.parametrize(
+        ("key", "expected"),
+        [
+            ("contoso.ghe.com/Evil/Pkg", "contoso.ghe.com/evil/pkg"),
+            ("https://dev.azure.com/Org/Proj/_git/Repo", "dev.azure.com/org/proj/repo"),
+            ("dev.azure.com/org/proj/_git/repo#main", "dev.azure.com/org/proj/repo"),
+            ("gitlab.com/Evil/Pkg", "gitlab.com/Evil/Pkg"),
+        ],
+    )
+    def test_case_folding_by_host(self, key: str, expected: str) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        assert canonical_exec_identity(key) == expected
+
+    def test_ghes_host_from_environment_is_case_folded(self, monkeypatch) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        monkeypatch.setenv("GITHUB_HOST", "ghe.corp.example.com")
+        assert canonical_exec_identity("ghe.corp.example.com/Evil/Pkg") == (
+            "ghe.corp.example.com/evil/pkg"
+        )
+
+    def test_ado_deny_matches_case_variant(self) -> None:
+        from types import SimpleNamespace
+
+        from apm_cli.security.executables import build_exec_trust_context, resolve_exec_decision
+
+        key = "dev.azure.com/Org/Proj/Repo"
+        policy = SimpleNamespace(
+            executables=SimpleNamespace(
+                deny_all=False,
+                deny=["dev.azure.com/org/proj/repo"],
+                require=(),
+                recommend=(),
+                enforce=(),
+            ),
+            bin_deploy=None,
+        )
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data={"executables": {"allow": {key: {"hooks": True}}}},
+            migrate_user_legacy=False,
+        )
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False

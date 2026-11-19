@@ -34,7 +34,9 @@ Scaffold:
 
 ```bash
 apm plugin init my-plugin --yes
+cd my-plugin
 apm marketplace init --owner acme-org --name my-marketplace
+apm marketplace package remove example-package --yes
 apm marketplace package add ./ --name my-plugin --version 0.1.0 --no-verify
 ```
 
@@ -44,6 +46,8 @@ Resulting `apm.yml`:
 name: my-plugin
 version: 0.1.0
 description: Single plugin shipped through its own marketplace
+dependencies:
+  apm: []
 
 marketplace:
   owner:
@@ -57,7 +61,7 @@ marketplace:
       version: 0.1.0
 ```
 
-`apm pack` writes the plugin bundle to `./build/my-plugin/` and the
+`apm pack` writes the plugin bundle to `./build/my-plugin-0.1.0/` and the
 marketplace artifact to `.claude-plugin/marketplace.json`. Commit
 both. Consumers run `apm marketplace add acme-org/<repo>`.
 
@@ -70,6 +74,7 @@ Scaffold:
 
 ```bash
 apm marketplace init --owner acme-org --name acme-curated
+apm marketplace package remove example-package --yes
 apm marketplace package add acme-org/skill-pkg-a --version "^1.0.0"
 apm marketplace package add acme-org/skill-pkg-b --ref v0.4.2
 ```
@@ -293,7 +298,8 @@ Claude Code skills target. Authoring rules:
 - Consumers can pass `--trust-bin` on `apm install` to explicitly
   consent (suppresses the trust-posture warning) or `--no-trust-bin`
   to skip bin/ deployment for a single invocation. Without either
-  flag, bin/ deploys with a prominent warning.
+  flag, bin/ deploys with a prominent warning; non-interactive contexts
+  skip it.
 
 ## What to read next
 

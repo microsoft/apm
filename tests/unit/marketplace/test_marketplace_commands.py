@@ -360,7 +360,7 @@ class TestMarketplaceAdd:
         requests_seen: list[str] = []
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 requests_seen.append(url)
                 return Response()
@@ -417,7 +417,7 @@ class TestMarketplaceAdd:
                 return None
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 return Response()
 
@@ -872,6 +872,15 @@ class TestSearch:
         result = runner.invoke(search, ["security"])
         assert result.exit_code != 0
         assert "QUERY@MARKETPLACE" in result.output
+
+    @pytest.mark.parametrize("expression", ["security", "@skills"])
+    def test_search_format_hint_names_real_command(self, runner, expression):
+        from apm_cli.commands.marketplace import search
+
+        result = runner.invoke(search, [expression])
+        output = " ".join(result.output.split())
+        assert "apm search security@skills" in output
+        assert "apm marketplace search" not in output
 
     def test_search_empty_query(self, runner):
         from apm_cli.commands.marketplace import search
