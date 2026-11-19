@@ -648,6 +648,7 @@ install-deployment-lock-parent-placement
 install-deployment-locked-copy-validity
 install-deployment-skill-layout
 install-deployment-skill-preflight
+install-deployment-skill-adoption-baseline
 install-deployment-selection-merge
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate

@@ -113,6 +113,10 @@ from scripts.architecture_linter.checks.install_single_file import (
 from scripts.architecture_linter.checks.install_single_file import (
     check_single_file_materialization,
 )
+from scripts.architecture_linter.checks.install_skill_adoption_baseline import (
+    GUARD_SKILL_ADOPTION_BASELINE,
+    check_skill_adoption_baseline,
+)
 from scripts.architecture_linter.checks.install_skill_layout import (
     GUARD_SKILL_LAYOUT,
     check_skill_layout,
@@ -222,6 +226,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_SKILL_PREFLIGHT,
         "The complete selected skill plan is checked before native deployment.",
         check_skill_preflight,
+    ),
+    _rule(
+        GUARD_SKILL_ADOPTION_BASELINE,
+        "Receipt-less skill adoption compares with the locked render when the commit changes.",
+        check_skill_adoption_baseline,
     ),
     _rule(
         GUARD_SELECTION_MERGE,

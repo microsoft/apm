@@ -18,6 +18,7 @@ from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_adoption import (
     dircmp_equal,
+    installing_commit,
     is_skill_dir_identical_to_source,
     render_skill_markdown,
     skill_tree_baselines,
@@ -398,6 +399,7 @@ class SkillIntegrator(BaseIntegrator):
         self._skill_targets: list[TargetProfile] | None = None
         self._replay_owners: Mapping[str, str] | None = None
         self._skill_current_owner: str | None = None
+        self._skill_current_commit: str | None = None
         self._skill_source_plan: DeployableSourcePlan | None = None
         # Any skipped member or unverified rewrite invalidates this call's completion proof.
         self._skill_can_complete = False
@@ -1588,6 +1590,7 @@ class SkillIntegrator(BaseIntegrator):
             if package_info.dependency_ref is not None
             else "."
         )
+        self._skill_current_commit = installing_commit(package_info)
         snapshots = self._hash_snapshots if self._hash_snapshots is not None else {}
         if lockfile_root not in snapshots:
             lockfile = LockFile.read(get_lockfile_path(lockfile_root))
