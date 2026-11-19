@@ -1048,6 +1048,9 @@ class BaseIntegrator:
                     self.link_resolver.deployment_package_root = Path(
                         package_info.deployment_package_root or install_path
                     )
+                    self.link_resolver.deployment_frame = getattr(
+                        package_info, "deployment_frame", None
+                    )
         except Exception:
             self.link_resolver = None
 
@@ -1065,6 +1068,7 @@ class BaseIntegrator:
             replace(
                 package_info,
                 deployment_package_root=current.deployment_package_root or current.package_root,
+                deployment_frame=current.deployment_frame,
             ),
             current.base_dir,
         )

@@ -56,21 +56,33 @@ ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm
     [
         pytest.param(
             "src/apm_cli/install/drift.py",
-            "replay_modules_root(scratch_root, user_scope=config.user_scope)",
-            "private_modules_root(scratch_root, user_scope=config.user_scope)",
+            "deployment_modules_dir, deployment_frame = replay_deployment_frame(",
+            "deployment_modules_dir, deployment_frame = private_deployment_frame(",
             id="replay-call",
         ),
         pytest.param(
             "src/apm_cli/install/audit_target_roots.py",
-            "InstallScope.USER if user_scope else InstallScope.PROJECT",
-            "InstallScope.PROJECT",
-            id="user-scope",
+            "return get_modules_dir(scope), (scratch_root, get_deploy_root(scope))",
+            'return scratch_root / ".apm" / APM_MODULES_DIR, (scratch_root, scratch_root)',
+            id="user-scope-live-frame",
         ),
         pytest.param(
-            "src/apm_cli/install/audit_target_roots.py",
-            "get_modules_dir(scope).relative_to(get_deploy_root(scope))",
-            'Path("apm_modules")',
-            id="canonical-layout",
+            "src/apm_cli/install/drift.py",
+            "package_info.deployment_frame = deployment_frame",
+            "package_info.deployment_frame = None",
+            id="replay-live-link-frame",
+        ),
+        pytest.param(
+            "src/apm_cli/compilation/link_resolver.py",
+            "target_location = live_root / target_location.relative_to(replay_root)",
+            "target_location = target_location",
+            id="resolver-live-link-frame",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "replay_path=install_path,",
+            "replay_path=package_info.deployment_package_root,",
+            id="native-replay-image",
         ),
         pytest.param(
             "src/apm_cli/install/drift.py",
