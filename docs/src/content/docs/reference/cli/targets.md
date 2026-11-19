@@ -102,7 +102,7 @@ match per target is enough to activate it.
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
 | `kiro` | `.kiro/` directory | `.kiro/` |
-| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
+| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:
 

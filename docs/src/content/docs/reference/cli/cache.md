@@ -38,7 +38,7 @@ breaks correctness; the next dependency install or MCP registry
 lookup re-fetches whatever it needs.
 
 Plain and frozen installs can reuse locked SHAs when upstream is unavailable.
-Commands that require current state -- `apm install --update`, `apm install
+Commands that require current state -- `apm install --update` (deprecated), `apm install
 --refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm
 outdated` -- resolve upstream first. Update may reuse content for the resolved
 SHA; `--refresh` bypasses it.

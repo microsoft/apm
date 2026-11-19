@@ -119,7 +119,8 @@ What gets removed, in order:
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
 8. For global uninstalls, after lockfile processing, remove the removed packages'
-   `~/.agents/plugins/<plugin>/` roots and their `enabledPlugins` keys. A key you
+   `~/.agents/plugins/<plugin>/` roots and their `enabledPlugins` keys (and
+   APM's `extraKnownMarketplaces` entry once none remain). A key you
    set to `false`, your own entries and a root you edited are kept.
 
 When uninstall rebuilds a surviving package's loose skills, it deploys only the
@@ -187,8 +188,8 @@ ownership conflict. Run `apm install` to reconcile project state, or
 If updating Claude's settings fails, uninstall exits nonzero; package and
 manifest removals may already have happened. APM restores the previous
 `apm.lock.yaml`, so it still records the plugins to remove. Repair the reported
-issue, then run `apm install --global` to finish. Do not re-add removed package
-arguments. See
+issue, then run `apm install --global` with the original `--target` selection to
+finish. Do not re-add removed package arguments. See
 [native registration and runtime qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
 A package declared more than once -- in both `dependencies` and
