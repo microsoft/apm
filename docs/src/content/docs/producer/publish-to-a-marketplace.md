@@ -429,8 +429,10 @@ package in it. Use separate repositories when audiences need separate access.
   different repo than the marketplace project must host-qualify the
   `repo:` field. A bare `owner/repo` cannot be disambiguated from a
   dependency-confusion attempt where an attacker pre-stages the namespace
-  on public `github.com`, so the install command fail-closes before
-  validating.
+  on public `github.com`, so APM refuses the entry before fetching or
+  writing anything. The refusal applies wherever a consumer resolves the
+  entry: `apm install name@marketplace`, a marketplace entry in
+  `apm.yml`, a transitive marketplace dependency, and `apm update`.
 
   ```yaml
   # Refused -- ambiguous bare form on enterprise marketplace:

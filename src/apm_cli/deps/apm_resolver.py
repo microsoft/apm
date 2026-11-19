@@ -667,6 +667,7 @@ class APMDependencyResolver:
         """
         if self._read_only:
             raise ValueError("Marketplace lookup is not available in an offline dependency preview")
+        from apm_cli.marketplace.dependency_confusion import admit_marketplace_resolution
         from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 
         resolution = resolve_marketplace_plugin(
@@ -676,6 +677,7 @@ class APMDependencyResolver:
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
         )
+        admit_marketplace_resolution(resolution)
         resolved = (
             resolution.dependency_reference
             if resolution.dependency_reference is not None

@@ -375,7 +375,10 @@ ref; CLI marketplace suffixes do not accept ranges. Raw refs bypass tag resoluti
 placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
-
+On a `*.ghe.com` marketplace, a plugin whose source has a bare cross-repo
+`repo: owner/repo` is refused as a dependency-confusion risk (#1326) before
+any fetch or write. This applies to `apm install name@marketplace`, `apm.yml`
+entries, transitive declarations, and `apm update`.
 The `marketplace` value names a marketplace registered with
 `apm marketplace add` or declared in the user manifest's `marketplaces:`
 list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by

@@ -206,6 +206,11 @@ A catalog on port `8443` does not change a package's default HTTPS
 port, even when both URLs share the same hostname and repository path.
 An explicit SSH source stays SSH. Lookup and installation use the same package
 identity; bare cross-repository entries retain their normal dependency defaults.
+On an enterprise (`*.ghe.com`) marketplace, a bare cross-repository `repo:`
+would fall back to public `github.com`, so APM refuses that entry as a
+dependency-confusion risk (#1326) before fetching or writing anything, whether
+it comes from the command line, `apm.yml`, a transitive dependency, or
+`apm update`. Ask the publisher to host-qualify the `repo:` field.
 Invalid URLs, unsafe subdirectory paths, and malformed `sha` values fail
 before manifest, lockfile, or deployment writes.
 
