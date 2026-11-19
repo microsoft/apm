@@ -4441,8 +4441,8 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
         ),
         pytest.param(
             "src/apm_cli/install/mcp/integration.py",
-            "                mcp_deps, owned_target, named_only=True\n",
-            "                [], owned_target, named_only=True\n",
+            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned",
+            "mcp_servers_for_runtime([], owned_target, named_only=True) | bundle_owned",
             id="target-scoped-install-retires-other-targets",
         ),
         pytest.param(
