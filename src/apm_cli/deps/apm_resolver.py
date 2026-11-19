@@ -403,6 +403,7 @@ class APMDependencyResolver:
 
         for error in dependency_tree.resolution_errors:
             graph.add_error(error)
+        graph.declaration_errors.extend(dependency_tree.declaration_errors)
 
         return graph
 
@@ -1171,7 +1172,7 @@ class APMDependencyResolver:
         """Record root declarations whose package directories nest (#3699)."""
         nested = nested_materialization_pairs(root_refs, modules_dir)
         for outer, inner in nested:
-            tree.resolution_errors.append(
+            tree.add_declaration_error(
                 f"{outer.get_identity()} and its subdirectory package {inner.get_identity()} "
                 "cannot both be declared in apm.yml: the subdirectory package would be "
                 "installed inside the repository package. Keep only one of them."
@@ -1189,7 +1190,7 @@ class APMDependencyResolver:
             parent = parent_node.dependency_ref if parent_node is not None else None
             collision = slots.claim(dep_ref, parent)
             if collision is not None:
-                tree.resolution_errors.append(collision)
+                tree.add_declaration_error(collision)
                 return True
         return False
 

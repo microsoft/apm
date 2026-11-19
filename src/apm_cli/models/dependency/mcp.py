@@ -11,6 +11,8 @@ from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.github_host import has_parser_dependent_url_chars
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
 
+from .subsets import parse_target_subset
+
 # Keys recognised by from_dict (including legacy alias 'type' -> 'transport').
 _KNOWN_DICT_KEYS = frozenset(
     {
@@ -37,6 +39,8 @@ _KNOWN_DICT_KEYS = frozenset(
         # Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
         "resolved_by",
         "approval_keys",
+        # Selects which install targets receive the server; never rendered (#2606).
+        "targets",
     }
 )
 
@@ -151,6 +155,8 @@ class MCPDependency:
     # OpenCode-only value forwarded unchanged; other target adapters ignore it.
     enabled: Any = _ENABLED_UNSET
     extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
+    # Canonical install targets that receive this server; None = every active target.
+    targets: list[str] | None = None
     # Install-time provenance: the declaring package identity when this server
     # was contributed transitively (via a sub-package's apm.yml), else None for
     # servers declared directly in the root manifest. Set by
@@ -225,6 +231,8 @@ class MCPDependency:
             )
 
         transport = d.get("transport") or d.get("type")  # legacy 'type' -> 'transport'
+        targets_raw = d.get("targets")  # architecture-authority-exempt: dependency-target-subset
+        targets = parse_target_subset(targets_raw) if targets_raw is not None else None
 
         instance = cls(
             name=d["name"],
@@ -241,6 +249,7 @@ class MCPDependency:
             cwd=d.get("cwd"),
             enabled=d.get("enabled", _ENABLED_UNSET),
             extra=extra,
+            targets=targets,
         )
 
         if instance.registry is False:
@@ -311,6 +320,8 @@ class MCPDependency:
                 result[field_name] = value
         if self.has_enabled:
             result["enabled"] = self.enabled
+        if self.targets is not None:
+            result["targets"] = list(self.targets)
         if self.extra:
             for k, v in self.extra.items():
                 if k not in result and k not in _EXTRA_DENYLIST:

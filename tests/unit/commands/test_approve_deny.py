@@ -281,6 +281,21 @@ class TestFindMatchingKey:
         assert _find_matching_key({}, "anything") is None
 
 
+def test_port_less_name_points_at_the_ported_package() -> None:
+    """A port-less name never grants a ported package but names its key (#3967)."""
+    from apm_cli.commands.approve import _not_found_message
+    from apm_cli.security.executables import ExecutableDeclaration
+
+    ported = ExecutableDeclaration(package_key="github.com:8443/acme/hooky", package_name="hooky")
+    other = ExecutableDeclaration(package_key="acme/other", package_name="other")
+    message = _not_found_message([ported, other], "acme/hooky")
+    assert "not found in installed packages" in message
+    assert "'apm approve github.com:8443/acme/hooky'" in message
+    assert _not_found_message([other], "acme/hooky") == (
+        "acme/hooky: not found in installed packages"
+    )
+
+
 # ---------------------------------------------------------------------------
 # approve_cmd
 # ---------------------------------------------------------------------------
@@ -906,3 +921,36 @@ def test_approve_clears_a_deny_stored_under_another_spelling() -> None:
         "Acme/Hooky",
         "https://github.com/acme/hooky.git",
     ]
+
+
+def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm approve --all`` writes no allow for a package another layer denies (#3957)."""
+    project = tmp_path / "project"
+    apm_home = tmp_path / "home" / ".apm"
+    apm_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(apm_home.parent))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(apm_home / "config.json"))
+    for name in ("org-denied", "fine"):
+        hooks = project / "apm_modules" / name / ".apm" / "hooks"
+        hooks.mkdir(parents=True)
+        (hooks / "guard.json").write_text("{}", encoding="utf-8")
+        (project / "apm_modules" / name / "apm.yml").write_text(
+            f"name: {name}\nversion: '1.0'\n", encoding="utf-8"
+        )
+    manifest = project / "apm.yml"
+    manifest.write_text("name: consumer\nversion: '1.0'\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+    policy = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
+
+    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+        result = CliRunner().invoke(approve_cmd, ["--all"])
+
+    allow = (yaml.safe_load(manifest.read_text(encoding="utf-8")).get("executables") or {}).get(
+        "allow"
+    ) or {}
+    assert not any("org-denied" in key for key in allow), result.output
+    assert any("fine" in key for key in allow), result.output
+    assert "Skipped org-denied" in " ".join(result.output.split())

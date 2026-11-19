@@ -138,16 +138,19 @@ def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
 
 
 def native_plugin_fingerprint(plugin_root: Path) -> str:
-    """Fingerprint a natively loaded plugin: path, exec bit and bytes per file.
+    """Approval pin of a natively loaded plugin: path and bytes per file.
 
     Covers the native plugin file set (APM's root ``apm.yml`` and ``.apm/``
     normalization output excluded), so the approved source and the deployed
-    copy compare equal. Raises ``OSError`` or ``PathTraversalError`` for
-    unreadable data or a symlink; callers treat that as "cannot verify".
+    copy compare equal. The exec bit stays out so an approval committed on
+    one operating system holds on another; the per-machine integrity hash
+    (``compute_native_plugin_hash``) still checks modes. Raises ``OSError`` or
+    ``PathTraversalError`` for unreadable data or a symlink; callers treat
+    that as "cannot verify".
     """
-    from apm_cli.utils.content_hash import compute_native_plugin_hash
+    from apm_cli.utils.content_hash import compute_native_plugin_pin
 
-    return compute_native_plugin_hash(plugin_root)
+    return compute_native_plugin_pin(plugin_root)
 
 
 def evidence_fingerprint(payload: dict[str, Any]) -> str:

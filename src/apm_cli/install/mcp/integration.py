@@ -139,6 +139,7 @@ def run_owned_mcp_integration(
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.errors import MCPNativeConflictError
     from apm_cli.install.mcp.ownership import (
+        deselected_mcp_claims,
         names_owned_by_active_peers,
         retain_deferred_mcp_claims,
     )
@@ -148,12 +149,14 @@ def run_owned_mcp_integration(
         restore_pending_retired_claims,
         split_mcp_claims,
     )
+    from apm_cli.integration.mcp_config_view import bundle_mcp_owner_token
     from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
     lockfile = LockFile.read(lock_path) or LockFile()
     native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
     old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
-    owner_token = f"bundle:{owner}"
+    owner_token = bundle_mcp_owner_token(owner)
     old_owned = {
         name
         for name, provenance in lockfile.mcp_config_provenance.items()
@@ -213,6 +216,13 @@ def run_owned_mcp_integration(
     }
     for target, names in list(managed_targets.items()):
         stale_for_target = (stale if target in selected_targets else old_owned) & names
+        if target in selected_targets:
+            # Declared servers whose `targets:` no longer select this runtime.
+            stale_for_target |= deselected_mcp_claims(
+                previous_targets.get(target, set()) & old_owned,
+                new_names,
+                mcp_servers_for_runtime(dependencies, target),
+            )
         if stale_for_target and conflict is None:
             # An entry in a shared file (.mcp.json) stays while an active peer
             # owns it; only this runtime's claim retires.
@@ -518,7 +528,9 @@ def run_mcp_integration(  # noqa: PLR0913
             stored_configs=old_mcp_configs,
         )
 
-    if should_install and mcp_deps:
+    # Recorded local-bundle servers stay owned by their bundle install (#3955).
+    bundle_owned = current_view.bundle_owned if current_view is not None else frozenset()
+    if should_install and (mcp_deps or bundle_owned):
         from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
 
         old_mcp_target_servers = resolve_mcp_target_servers(
@@ -555,28 +567,32 @@ def run_mcp_integration(  # noqa: PLR0913
         adoptable = retired_owned.moved_unrecorded & MCPIntegrator.get_server_names(mcp_deps)
         try:
             with adoptable_root_mcp_entries(frozenset(adoptable)):
-                mcp_count = MCPIntegrator.install(
-                    mcp_deps,
-                    runtime,
-                    exclude,
-                    verbose,
-                    stored_mcp_configs=old_mcp_configs,
-                    apm_config=mcp_apm_config,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                    explicit_target=explicit_target,
-                    target_decision=target_decision,
-                    fail_on_write_error=True,
-                    diagnostics=diagnostics,
-                    scope=scope,
-                    managed_target_servers=managed_target_servers,
-                    native_hashes=native_hashes,
+                mcp_count = (
+                    MCPIntegrator.install(
+                        mcp_deps,
+                        runtime,
+                        exclude,
+                        verbose,
+                        stored_mcp_configs=old_mcp_configs,
+                        apm_config=mcp_apm_config,
+                        project_root=project_root,
+                        user_scope=user_scope,
+                        explicit_target=explicit_target,
+                        target_decision=target_decision,
+                        fail_on_write_error=True,
+                        diagnostics=diagnostics,
+                        scope=scope,
+                        managed_target_servers=managed_target_servers,
+                        native_hashes=native_hashes,
+                    )
+                    if mcp_deps
+                    else 0
                 )
         except MCPNativeConflictError as exc:
             if not exc.wrote_connections:
                 raise
             conflict = exc
-        new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
+        new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps) | bundle_owned
         new_mcp_configs = dict(current_view.configs) if current_view is not None else {}
         new_mcp_provenance = dict(current_view.provenance) if current_view is not None else {}
 
@@ -612,12 +628,49 @@ def run_mcp_integration(  # noqa: PLR0913
             builtins.set(new_mcp_servers),
             managed_target_servers.get("copilot") if "copilot" in managed_target_servers else None,
         )
-        from apm_cli.install.mcp.ownership import names_owned_by_active_peers
+        from apm_cli.install.mcp.ownership import (
+            deselected_mcp_claims,
+            names_owned_by_active_peers,
+        )
+        from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
-        for removed_target in sorted(
-            builtins.set(old_mcp_target_servers) - builtins.set(managed_target_servers)
+        # Targets the manifest itself stopped selecting leave every entry's reach;
+        # a target only excluded from this run (--exclude) is still listed there.
+        manifest_runtimes = (
+            builtins.set(target_decision.runtime_targets_for_scope(user_scope=user_scope) or ())
+            if runtime is None and target_decision is not None and target_decision.from_manifest
+            else None
+        )
+        retired_by_target: builtins.dict[str, builtins.set] = {}
+        retained_names: builtins.set = builtins.set()
+        for owned_target, owned in sorted(old_mcp_target_servers.items()):
+            if owned_target in managed_target_servers:
+                # Declared servers whose `targets:` no longer select this runtime.
+                # Bundle-owned servers declare no targets:, so only dependency
+                # declarations can be deselected (#3955 with #2606).
+                admitted = mcp_servers_for_runtime(mcp_deps, owned_target)
+                retired_by_target[owned_target] = deselected_mcp_claims(
+                    owned, new_mcp_servers - bundle_owned, admitted
+                )
+                continue
+            # A runtime this run does not select keeps the servers that name it.
+            kept = builtins.set(owned) & mcp_servers_for_runtime(
+                mcp_deps, owned_target, named_only=True
+            )
+            if manifest_runtimes is not None and owned_target not in manifest_runtimes:
+                kept = builtins.set()
+            if kept:
+                managed_target_servers[owned_target] = kept
+                retained_names |= kept
+            retired_by_target[owned_target] = builtins.set(owned) - kept
+        # A skipped target still holds the old declaration: keep that baseline
+        # so its next install sees the drift and applies the new one.
+        for name in MCPIntegrator._detect_mcp_config_drift(
+            [dep for dep in mcp_deps if getattr(dep, "name", None) in retained_names],
+            old_mcp_configs,
         ):
-            retired_names = builtins.set(old_mcp_target_servers[removed_target])
+            new_mcp_configs[name] = old_mcp_configs[name]
+        for removed_target, retired_names in retired_by_target.items():
             # An entry in a file the removed runtime shares (.mcp.json) stays
             # while an active runtime still owns it.
             retired_names -= names_owned_by_active_peers(

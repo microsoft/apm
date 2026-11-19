@@ -7,10 +7,6 @@ sidebar:
 
 For the full enterprise rollout playbook and bypass contract, see the [Governance Guide](../governance-guide/).
 
-:::caution[Experimental Feature]
-The `apm-policy.yml` schema, inheritance, and discovery ship today and are usable for testing and feedback. Policy enforcement at install time and via `apm audit --ci --policy` is an early preview. Fields, defaults, and check behaviour may change based on community input. Pin your policy to a specific APM version and watch the [CHANGELOG](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for breaking changes.
-:::
-
 `apm-policy.yml` is a single YAML file that defines what AI agent dependencies, MCP servers, and compilation targets are allowed across an organization. It is the governance pillar of APM — the file your security team owns and your repos inherit.
 
 This page is the mental model. For the full schema, see the [Policy Reference](../policy-reference/). For wiring it into CI, see the [Enforce in CI guide](../enforce-in-ci/).

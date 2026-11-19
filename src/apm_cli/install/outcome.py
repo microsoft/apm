@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from apm_cli.models.results import InstallDisposition, InstallResult
 
@@ -169,3 +169,34 @@ def finalize_install_result(
         result.disposition = InstallDisposition.FAILED
     apply_install_command_outcome(result)
     return result
+
+
+def direct_dependency_failed(ctx: InstallContext) -> bool:
+    """Whether a direct dependency failed to resolve or download (#3874)."""
+    direct_keys = {dep.get_unique_key() for dep in ctx.all_apm_deps}
+    return bool(set(ctx.callback_failures) & direct_keys)
+
+
+def stop_before_integration(ctx: InstallContext, diagnostics: object) -> InstallResult:
+    """End an install whose direct dependency failed, before anything integrates.
+
+    The apply barrier (#3874): a failure with error diagnostics returns the
+    failed result; one reported only to the console (a local path that is not
+    a package) raises, as a failure found during integration would.
+    """
+    ctx.diagnostics = diagnostics
+    result = result_from_install_context(ctx)
+    if result.disposition is InstallDisposition.FAILED:
+        return result
+    raise_direct_dependency_failure(ctx)
+
+
+def raise_direct_dependency_failure(ctx: InstallContext) -> NoReturn:
+    """Render the diagnostic summary and fail the install on a direct dependency."""
+    from .errors import DirectDependencyError
+
+    if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
+        ctx.diagnostics.render_summary()
+    raise DirectDependencyError(
+        "One or more direct dependencies failed validation. Run with --verbose for details."
+    )

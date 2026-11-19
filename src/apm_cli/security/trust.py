@@ -975,15 +975,36 @@ def package_exec_status(
     native: bool = False,
 ) -> str | None:
     """Worst-case lockfile ``exec_status`` for a package's declared executables."""
+    return package_exec_decision(ctx, package_keys, install_path, exec_types, native=native)[0]
+
+
+def package_exec_decision(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> tuple[str | None, tuple[str, ...]]:
+    """Return the worst-case ``exec_status`` and the declared types still allowed.
+
+    The allowed types are what a gated or denied row records as
+    ``exec_allowed_types`` (#3991): the worst case alone cannot show a partial
+    approval. They are empty when the gate is off or every type agrees.
+    """
     from .executables import more_severe_exec_status
 
     if ctx is None or not exec_types or not ctx.gate_enabled:
-        return None
+        return None, ()
     status: str | None = None
+    allowed: set[str] = set()
     verdicts = package_type_verdicts(ctx, package_keys, install_path, exec_types, native=native)
-    for verdict in verdicts.values():
+    for exec_type, verdict in verdicts.items():
         status = more_severe_exec_status(status, "deployed" if verdict.allowed else verdict.state)
-    return status
+        if verdict.allowed:
+            allowed.add(exec_type)
+    partial = allowed and len(allowed) < len(verdicts)
+    return status, tuple(sorted(allowed)) if partial else ()
 
 
 # -------------------------------------------------------------------

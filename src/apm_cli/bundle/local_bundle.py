@@ -176,11 +176,11 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
         return None
     if not isinstance(data, dict):
         return None
-    from ..deps.lockfile import require_supported_lockfile_version
+    from ..deps.lockfile import recorded_generator, require_supported_lockfile_version
     from ..deps.lockfile_generator import warn_if_newer
 
     data["lockfile_version"] = require_supported_lockfile_version(data)
-    warn_if_newer(lf_path, data.get("apm_version"), bundle=True)
+    warn_if_newer(lf_path, recorded_generator(data), bundle=True)
     return data
 
 

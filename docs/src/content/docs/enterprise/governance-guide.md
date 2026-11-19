@@ -513,7 +513,7 @@ These are the sharp edges. Plan around them; do not assume they are solved.
 - **Gate + transitive-MCP preflight may double-emit the same MCP violation.** A single bad transitive MCP can produce two SARIF alerts with the same rule and different code paths. Operational mitigation: dedupe by `(rule_id, server_name)` when aggregating alerts in your SIEM or dashboard.
 - **No signed attestation that the gate ran.** APM does not currently produce a signed (e.g. SLSA / sigstore) attestation for the install gate or the audit run. Non-repudiation depends on the GitHub Actions audit log plus branch-protection enforcement of the required check. Operational mitigation: pair APM with branch protection requiring `apm audit --ci` as a status check; rely on GitHub's audit log for auditor evidence.
 
-For features that would close these gaps, watch the [CHANGELOG](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) and the policy-engine experimental status.
+For features that would close these gaps, watch the [CHANGELOG](https://github.com/microsoft/apm/blob/main/CHANGELOG.md).
 
 ---
 

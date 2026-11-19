@@ -327,7 +327,7 @@ root-context targets:
 - `~/.copilot/AGENTS.md`
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
-- `~/.gemini/antigravity-cli/AGENTS.md`, `~/.grok/AGENTS.md`, `~/.hermes/AGENTS.md`,
+- `~/.gemini/config/AGENTS.md`, `~/.grok/AGENTS.md`, `~/.hermes/AGENTS.md`,
   `~/.kiro/AGENTS.md`, and `~/.codeium/windsurf/AGENTS.md`
 
 OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`

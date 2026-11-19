@@ -522,6 +522,11 @@ def locked_copy_proof(
     return None
 
 
+def locked_copy_holds_commit(locked_dep: Any, package_path: Path) -> bool:
+    """Whether a cached copy proves the locked commit for replay (marker admitted)."""
+    return locked_copy_proof(locked_dep, package_path, trust_marker=True) is not None
+
+
 def locked_copy_is_stale(locked_dep: Any, package_path: Path) -> bool:
     """Return whether an existing copy contradicts what *locked_dep* records.
 

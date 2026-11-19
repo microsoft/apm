@@ -548,16 +548,9 @@ class LSPIntegrator:
                 candidates.append("opencode")
 
         if exclude:
-            exclusions = {exclude}
-            try:
-                from apm_cli.core.target_detection import EffectiveTargetDecision
+            from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
-                exclusions.update(
-                    EffectiveTargetDecision(exclude, "--exclude").canonical_targets or ()
-                )
-            except KeyError:
-                pass
-            candidates = [target for target in candidates if target not in exclusions]
+            candidates = filter_excluded_mcp_runtimes(candidates, exclude)
 
         if not candidates:
             return []

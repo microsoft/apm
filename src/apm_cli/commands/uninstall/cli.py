@@ -982,6 +982,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     user_scope=scope is InstallScope.USER,
                     scope=scope,
                     persist=False,
+                    logger=logger,
                 )
         except (
             IntelliJConfigError,

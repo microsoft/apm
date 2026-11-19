@@ -58,7 +58,8 @@ _LOCKED_DEPENDENCY_VALUES = {
     "resolved_at": "2026-01-01T00:00:00+00:00",
     "declared_license": "MIT",
     "carried_licenses": (CarriedLicense("LICENSE", "LICENSE", f"sha256:{'f' * 64}"),),
-    "exec_status": "deployed",
+    "exec_status": "gated_pending_approval",
+    "exec_allowed_types": ("hooks",),
     "name": "consume-contract",
     "extensions": {"x-vendor": {"k": "v"}},
     "native_plugin": NativePluginRecord(

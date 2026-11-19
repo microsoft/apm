@@ -7,7 +7,7 @@ original PR lacked: a wrong path or a fabricated primitive must fail here.
 
 Authoritative surface (antigravity.google/docs):
   - instructions -> AGENTS.md (compile) + .agents/rules/ (installed rules)
-  - skills       -> .agents/skills/ (workspace) / ~/.gemini/antigravity-cli/skills/ (user)
+  - skills       -> .agents/skills/ (workspace) / ~/.gemini/config/skills/ (user)
   - MCP          -> .agents/mcp_config.json (workspace) / ~/.gemini/config/mcp_config.json (user)
   - hooks        -> .agents/hooks.json in Antigravity's OWN native schema
   - commands     -> NONE (legacy Gemini commands convert to skills upstream)
@@ -84,7 +84,7 @@ def test_antigravity_profile_matches_official_surface() -> None:
     assert target.auto_create is True
     assert target.detect_by_dir is False  # shared root -> no auto-detect signal
     assert target.user_supported == "partial"
-    assert target.user_root_dir == ".gemini/antigravity-cli"
+    assert target.user_root_dir == ".gemini/config"
     assert target.hooks_config_display == ".agents/hooks.json"
 
     # Commands MUST NOT exist -- agy has no TOML command surface.

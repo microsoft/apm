@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
 - `apm approve` lists what each package runs and pins MCP servers, hook files and whole native plugins to their content; changed content is parked until re-approved. (#3918)
 - Native Claude plugins can ship MCP and LSP servers; Claude loads them, whole-plugin approval covers them, and org MCP policy applies (#3290)
+- `targets:` on `dependencies.mcp` entries limits which targets get each server, is never written into native config, and target-scoped installs keep servers declared elsewhere. (closes #2606, #3989)
 
 ### Changed
 
@@ -116,6 +117,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After `apm deny`, `--frozen` names the executables gate, `apm approve` clears the deny and says so, and `apm deny --user` works outside a project. (closes #3957, #3988)
 - `apm targets` lists the targets `apm.yml` declares as active, as install resolves them. (closes #3792, #3988)
 - Messages name `targets:`, `executables.allow` and "marketplace", and generated `apm.yml` headers and target errors no longer list the deprecated `vscode`. (#3988)
+- Local-bundle MCP servers pass `apm audit --ci` and `apm install --frozen`, and survive installing or uninstalling other packages. (closes #3955, #3989)
+- `apm approve --all` and `--recommended` skip a package that any layer denies, including org policy, and write no approval for it. (#3957, #3989)
+- Packed bundle lockfiles name the APM that packed them, and an unchanged `apm.lock.yaml` is no longer rewritten, so its comments and formatting survive. (#3962, #3989)
+- `apm install -g <bundle>` records the bundle's files and MCP servers in the user lockfile, so `apm install -g --frozen` replays them. (#3955, #3989)
+- `apm audit --ci` no longer fails on a correct lock when `apm_modules` holds stale copies; it replays the locked packages as install does. (closes #3964, #3989)
+- `apm pack` on a plugin-only package prints the `target:`, `vscode` and `compilation.target` deprecation warnings like every other command. (closes #3965, #3989)
+- A multi-package `apm install` where one package fails to resolve or download now integrates nothing, so no untracked files are left behind. (closes #3874, #3989)
+- `apm update` re-gates executables recorded while the gate was off once org policy turns it on, as `apm install` does. (closes #3990, #3989)
+- `apm update` retires an executable type whose approval was removed from a partially approved package; the lock records the approved types in `exec_allowed_types`. (closes #3991, #3989)
+- Native plugin approvals are portable: the `plugin:` pin covers file paths and bytes, not executable bits, so a pin made on macOS holds on Windows. (#3989)
+- `apm install -g --target antigravity` deploys skills to `~/.gemini/config/skills/`, read by the Antigravity App, CLI and IDE, and removes APM's old `~/.gemini/antigravity-cli/skills/` copies. (closes #3940, #3992)
+- `target: agents` warns once per run, and `apm update -g` names the user manifest it read. (#3967, #3992)
+- `apm uninstall` reports MCP entries it heals out of retired files; `.github/mcp.json` is emptied, never deleted. (#3967, #3992)
+- `--exclude` accepts runtime names in any case and aliases like `--target` does, for MCP and LSP servers in project and user installs, and warns on unknown names. (#3967, #3992)
+- `apm deps list` and `apm find` show a package on a non-default port under its own `host:port` identity. (#3967, #3992)
+- `apm install -g --help` lists the user-scope runtimes from the runtime adapters, so it cannot drift. (#3967, #3992)
+- `apm view plugin@marketplace` no longer suggests installing an entry `apm install` would refuse. (#3967, #3992)
+- Every command, `apm install` included, prints the newer-lockfile refusal on stderr with the same `[x]` prefix and names the user-scope lockfile by its path. (#3967, #3992)
+- `apm install --dry-run` shows apm.yml declaration errors install would refuse (such as two hosts sharing one `apm_modules` directory) without `--verbose`. (#3967, #3992)
+- `apm install --dry-run` previews which MCP servers move from `.github/mcp.json` or `.vscode/mcp.json` to `.mcp.json`, and which are only removed there because they are no longer declared or another target now receives them. (#3967, #3992)
+- `apm approve owner/repo` on a package installed with a port names the `host:port/owner/repo` key to approve. (#3967, #3992)
+- `apm runtime setup codex` writes `wire_api = "chat"` for Codex v0.116 and later, which GitHub Models needs. (#3967, #3992)
+- The policy docs no longer call `apm-policy.yml` an experimental feature. (#3948, #3992)
 
 ### Security
 

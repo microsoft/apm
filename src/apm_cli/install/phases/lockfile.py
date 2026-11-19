@@ -380,9 +380,11 @@ class LockfileBuilder:
         statuses = getattr(self.ctx, "package_exec_status", None)
         if not statuses:
             return
+        allowed = getattr(self.ctx, "package_exec_allowed_types", None) or {}
         for dep_key, status in statuses.items():
             if dep_key in lockfile.dependencies and status:
                 lockfile.dependencies[dep_key].exec_status = status
+                lockfile.dependencies[dep_key].exec_allowed_types = allowed.get(dep_key, ())
 
     def _attach_native_plugins(self, lockfile: LockFile) -> None:
         """Record each admitted native Claude plugin as its dependency's ownership.

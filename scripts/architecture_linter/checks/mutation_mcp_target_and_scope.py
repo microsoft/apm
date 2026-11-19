@@ -54,10 +54,15 @@ _MCP_INSTALL = "src/apm_cli/integration/mcp_integrator_install.py"
 _MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
 
 
+_LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
+
+
 _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 
 
 _MCP_SCOPE_OWNER = "src/apm_cli/integration/mcp_config_view.py"
+# LSP owns its own ``bundle:`` provenance namespace.
+_LSP_BUNDLE_OWNER = "src/apm_cli/install/lsp/integration.py"
 _EXECUTABLES_OWNER = "src/apm_cli/security/executables.py"
 # Uninstall only intersects with managed servers and never admits one.
 _MCP_RAW_VIEW_CONSUMER = "src/apm_cli/commands/uninstall/engine.py"
@@ -146,7 +151,7 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
     """
     rule_id = "mutation_writes.mcp_target_selection"
     facts_by_path, failures = _read_required(
-        provider, rule_id, (_MCP_INSTALL, _MCP_INTEGRATION, _APM_PACKAGE)
+        provider, rule_id, (_MCP_INSTALL, _MCP_INTEGRATION, _APM_PACKAGE, _LSP_INTEGRATOR)
     )
     if failures:
         return failures
@@ -227,6 +232,34 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
         findings.append(
             violation(rule_id, _MCP_INSTALL, "resolver must not parse manifest targets itself")
         )
+    # C4 (#3967): MCP and LSP, project and user scope, read --exclude through one owner.
+    lsp_facts = facts_by_path[_LSP_INTEGRATOR]
+    for facts, span, path, call in (
+        (
+            install_facts,
+            resolver_span,
+            _MCP_INSTALL,
+            "filter_excluded_mcp_runtimes(target_runtimes, exclude)",
+        ),
+        (
+            lsp_facts,
+            _function_span(lsp_facts, "resolve_target_runtimes", top_level=False),
+            _LSP_INTEGRATOR,
+            "filter_excluded_mcp_runtimes(candidates, exclude)",
+        ),
+    ):
+        if (
+            span is None
+            or not _span_has_fixed(facts, span, call)
+            or _span_has_regex(facts, span, r"= \{exclude\b|\(exclude, \"--exclude\"\)")
+        ):
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "resolver must apply --exclude through filter_excluded_mcp_runtimes",
+                )
+            )
     validation_line = _first_span_line(
         integration_facts,
         integration_span,
@@ -264,6 +297,78 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 "Selected MCP targets must delegate safe-config preflight before no-op detection",
             )
         )
+    findings.extend(_dependency_target_selection_findings(provider, rule_id, install_facts))
+    return findings
+
+
+# Per-dependency ``targets:`` narrowing (#2606): one owner decides which runtimes
+# receive a server; install writes, claim pruning and --frozen claims route
+# through it instead of re-reading ``dep.targets``.
+_MCP_DEPENDENCY_TARGET_CONSUMERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        _MCP_INSTALL,
+        "run_mcp_install",
+        (
+            "mcp_dependency_runtimes(dep, target_runtimes)",
+            "selected = {target: mcp_servers_for_runtime(mcp_deps, target) for target in",
+            "managed_target_servers[target] &= selected[target]",
+            "transfer_deselected_shared_claims(",
+        ),
+    ),
+    (
+        _MCP_INTEGRATION,
+        "run_mcp_integration",
+        (
+            "admitted = mcp_servers_for_runtime(mcp_deps, owned_target)",
+            "mcp_deps, owned_target, named_only=True",
+            "deselected_mcp_claims(",
+            "target_decision.from_manifest",
+        ),
+    ),
+    (
+        _MCP_INTEGRATION,
+        "run_owned_mcp_integration",
+        ("mcp_servers_for_runtime(dependencies, target)", "deselected_mcp_claims("),
+    ),
+    (
+        "src/apm_cli/install/service_integration.py",
+        "run_service_integrations",
+        ("mcp_servers_for_runtime(prepared_mcp.dependencies, target)",),
+    ),
+)
+
+
+def _dependency_target_selection_findings(
+    provider: FactsProvider, rule_id: str, install_facts: FileFacts
+) -> list[Violation]:
+    findings: list[Violation] = []
+    owner_spans = _function_spans(install_facts, "mcp_dependency_runtimes")
+    if len(owner_spans) != 1 or not _span_has_fixed(
+        install_facts, owner_spans[0], "declared = _declared_mcp_targets(dep)"
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_INSTALL,
+                "mcp_dependency_runtimes must be the one per-dependency MCP target owner",
+            )
+        )
+    for path, function, fragments in _MCP_DEPENDENCY_TARGET_CONSUMERS:
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        findings.extend(failures)
+        if failures:
+            continue
+        span = _function_span(facts, function)
+        for fragment in fragments:
+            if span is None or not _span_has_fixed(facts, span, fragment):
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{function} must route MCP dependency targets through "
+                        f"mcp_dependency_runtimes (missing {fragment!r})",
+                    )
+                )
     return findings
 
 
@@ -387,6 +492,26 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
             paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
             pattern=r"^\s*def pending_servers\(|_absent_apm_package_mcp_configs",
             message="Deferred MCP origin evidence belongs to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    if not _span_has_fixed(facts, derive_span, "_bundle_owned_baseline(lockfile"):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "derive must keep recorded local-bundle MCP servers as baseline",
+            )
+        )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER, _LSP_BUNDLE_OWNER)
+            ),
+            pattern=r"""f?["']bundle:(?:["']|\{)""",
+            message="Local-bundle MCP owner tokens belong to CurrentMcpConfigView",
             exempt=False,
         )
     )

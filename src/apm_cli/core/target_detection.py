@@ -632,7 +632,9 @@ def parse_target_field(
             )
 
     # ---- deprecation warning for legacy "agents" alias (once per call) ----
-    if "agents" in raw_parts:
+    # Only a CLI token is a flag; a manifest value (``source_path`` set) is
+    # warned once by the manifest owner with manifest wording (C5a, #3967).
+    if "agents" in raw_parts and source_path is None:
         _agents_alias_detected = True
         warnings.warn(
             "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
@@ -873,12 +875,21 @@ def canonical_policy_target_name(value: str | None) -> str | None:
     return names[0] if names else None
 
 
+# Provenance label of a decision taken from the manifest's ``targets:``.
+MANIFEST_TARGET_SOURCE = "apm.yml"
+
+
 @dataclass(frozen=True)
 class EffectiveTargetDecision:
     """One install-time target decision shared by package, MCP, and LSP phases."""
 
     value: str | list[str] | None
     source: str
+
+    @property
+    def from_manifest(self) -> bool:
+        """True when the manifest's own ``targets:`` made this decision."""
+        return self.source == MANIFEST_TARGET_SOURCE
 
     @cached_property
     def canonical_targets(self) -> tuple[str, ...] | None:
@@ -984,7 +995,7 @@ def resolve_effective_target_decision(
         return EffectiveTargetDecision(explicit_target, "--target flag")
 
     if manifest_target:
-        return EffectiveTargetDecision(manifest_target, "apm.yml")
+        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
 
     from apm_cli.config import get_install_target
 
@@ -1032,7 +1043,7 @@ def resolve_audit_target_decision(
     Without declared or recorded intent, preserve audit's discovery fallback.
     """
     if manifest_target:
-        return EffectiveTargetDecision(manifest_target, "apm.yml")
+        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
     if recorded_targets:
         return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
     return EffectiveTargetDecision(None, "auto-detect")
