@@ -4479,3 +4479,34 @@ def test_mcp_dependency_target_selection_guard_rejects_mutations(
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "                status, allowed_types = current_exec_decision(",
+            "                status, allowed_types = package_exec_decision(",
+            id="update-probe-reads-verdicts-outside-the-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    def for_dependency(\n",
+            "    def for_dependency_replay(\n",
+            id="unregistered-staleness-reader",
+        ),
+    ],
+)
+def test_exec_decision_guard_rejects_second_readers(path: str, old: str, new: str) -> None:
+    """#3990/#3991: one owner decides exec status and allowed types; one compares them."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

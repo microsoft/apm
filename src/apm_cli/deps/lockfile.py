@@ -437,6 +437,20 @@ def _normalize_exec_status(raw: Any) -> str | None:
     return value
 
 
+def _normalize_exec_allowed_types(raw: Any) -> tuple[str, ...]:
+    """Validate the executable types a partially gated row deployed (#3991)."""
+    if raw is None:
+        return ()
+    from apm_cli.security.executables import ALL_EXEC_TYPES
+
+    if not isinstance(raw, list) or any(item not in ALL_EXEC_TYPES for item in raw):
+        raise ValueError(
+            "lockfile exec_allowed_types must be a list of executable types: "
+            f"{', '.join(ALL_EXEC_TYPES)}"
+        )
+    return tuple(sorted(set(raw)))
+
+
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     """Return values without duplicates, preserving first-seen order."""
     return list(dict.fromkeys(values))
@@ -520,6 +534,10 @@ class LockedDependency:
     # no executable primitive; it is OMITTED from the serialized entry so a
     # never-gated package stays distinguishable from an explicitly-cleared one.
     exec_status: str | None = None
+    # Types a gated or denied package still deployed because they are approved
+    # (#3991). ``exec_status`` is the worst case, so this is the only record of
+    # a partial approval; omitted when no type was allowed.
+    exec_allowed_types: tuple[str, ...] = ()
     # Package-declared name from the dependency's own apm.yml (issue #1888).
     # SELF-ASSERTED display/inventory metadata only -- NOT an identity anchor.
     # See to_dict/from_dict and the supply-chain boundary note in the lockfile
@@ -693,6 +711,8 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
+        if self.exec_allowed_types:
+            result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
             result["replacement"] = self.replacement.to_dict()
         # Replay forward-compat unknown fields LAST so they never shadow a
@@ -778,6 +798,7 @@ class LockedDependency:
             "carried_licenses",
             "extensions",
             "exec_status",
+            "exec_allowed_types",
             "name",
             "replacement",
             # legacy migration key handled above
@@ -831,6 +852,7 @@ class LockedDependency:
             declared_license=data.get("declared_license"),
             carried_licenses=records_from_lock_data(data.get("carried_licenses")),
             exec_status=exec_status,
+            exec_allowed_types=_normalize_exec_allowed_types(data.get("exec_allowed_types")),
             name=data.get("name"),
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
