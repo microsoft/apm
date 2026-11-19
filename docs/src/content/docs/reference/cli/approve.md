@@ -115,7 +115,7 @@ re-approve commands.
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
 `apm approve <package>` to pin it. `mcp: true` never admits a transitive MCP
-server. A Copilot or Codex native plugin is loaded intact by the harness, so
+server. A Copilot native plugin is loaded intact by the harness, so
 `apm approve` records ONE item for it, `plugin: sha256:<64 hex>`, over every
 file and executable bit in the plugin root (as installed in `apm_modules/`).
 Any byte or mode change parks the whole plugin: it is not registered, and
