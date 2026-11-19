@@ -428,11 +428,11 @@ def _collect_hooks_from_root(
     return hooks
 
 
-def _collect_mcp(package_root: Path) -> dict:
+def _collect_mcp(package_root: Path, *, exclude_apm_managed: bool = False) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json``."""
     from ..core.plugin_manifest import collect_mcp_servers
 
-    return collect_mcp_servers(package_root)
+    return collect_mcp_servers(package_root, exclude_apm_managed=exclude_apm_managed)
 
 
 # ---------------------------------------------------------------------------
@@ -1099,7 +1099,7 @@ def export_plugin_bundle(
     _deep_merge(merged_hooks, root_hooks, overwrite=True)
 
     # MCP -- root package wins on server-name collision
-    root_mcp = _collect_mcp(project_root)
+    root_mcp = _collect_mcp(project_root, exclude_apm_managed=True)
     _deep_merge(merged_mcp, root_mcp, overwrite=True)
 
     # 7. Emit collision warnings
