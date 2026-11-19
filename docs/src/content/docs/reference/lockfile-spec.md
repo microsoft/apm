@@ -276,7 +276,8 @@ DevOps, generic Git). The alias in `discovered_via` is machine-local, so when
 APM re-resolves a locked object-form entry it fails closed if the alias's
 registered origin no longer matches `source_url`, naming both origins.
 Comparison ignores transport (HTTPS or SSH), userinfo, default ports, a
-trailing `.git` and host case. Local filesystem catalogs record no
+trailing `.git`, host case and alias case; a hosted URL's query is kept. The
+catalog path is not compared, because the lock does not record it. Local filesystem catalogs record no
 `source_url` or `source_digest`, because their paths are machine-specific.
 Rows written before 0.37 have no `source_url`; they keep working and gain it
 on the next lockfile write. No new fields are added for this.

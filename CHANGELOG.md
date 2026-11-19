@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm update` fails naming both, and duplicate registrations warn. (closes #3912, #3917)
+- A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records Git catalog origins, `apm install`/`update` fail naming both, and duplicate registrations warn. (closes #3912, #3917)
 - `apm install` works again when APM is installed without dev extras; it no longer fails with "No module named 'packaging'". (#3909)
 - Upgrading to root `.mcp.json` after `--only apm`, a failed install or `--frozen` no longer strands or disowns APM's MCP entries. (#3899, #3909)
 - Instructions `apm install <bundle>` stages for Codex, Gemini or OpenCode are hash-checked, so edits before `apm compile` report `hash-drift`. (#3898)

@@ -571,9 +571,10 @@ def _parse_plugin_entry(
 def catalog_digest(data: dict[str, Any]) -> str:
     """Return the ``sha256:`` digest of a parsed catalog's canonical JSON.
 
-    Used as ``source_digest`` when the fetch path has no raw response bytes
-    (Git-hosted catalogs). Keys are sorted and whitespace is removed, so the
-    same catalog content always yields the same digest.
+    ``client._parse_catalog`` records it as ``source_digest`` for Git-hosted
+    catalogs, whose fetch path has no raw response bytes. Keys are sorted and
+    whitespace is removed, so the same catalog content always yields the same
+    digest.
     """
     payload = json.dumps(
         data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
@@ -599,7 +600,6 @@ def parse_marketplace_json(
         source_name: Display name of the marketplace (for provenance).
         source_url: Canonical marketplace source URL for lockfile provenance.
         source_digest: SHA-256 digest of the fetched marketplace.json bytes.
-            When empty, :func:`catalog_digest` of *data* is used.
 
     Returns:
         MarketplaceManifest: Parsed manifest with valid plugin entries.
@@ -649,5 +649,5 @@ def parse_marketplace_json(
         description=description,
         plugin_root=plugin_root,
         source_url=source_url,
-        source_digest=source_digest or catalog_digest(data),
+        source_digest=source_digest,
     )

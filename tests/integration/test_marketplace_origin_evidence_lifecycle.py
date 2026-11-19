@@ -140,22 +140,25 @@ def test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update(
     assert f"'{_ALIAS}'" in duplicate_output
     assert "same catalog" in duplicate_output
 
-    # Rebinding the alias on this machine must not switch the project's catalog.
+    # Rebinding the alias on this machine must not switch the project's catalog,
+    # whether the next command is a plain install or an update.
     before_lock = lock_path.read_bytes()
-    (_rebind, update) = runner.run_sequence(
+    (_rebind, install, update) = runner.run_sequence(
         (
             ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main"),
+            ("install", *_INSTALL_FLAGS),
             ("update", "--yes", *_UPDATE_FLAGS),
         ),
-        expected_returncodes=(0, 1),
+        expected_returncodes=(0, 1, 1),
         scenario_id="git-catalog-rebound-alias-update",
         cwd=consumer.root,
         env=environment,
     )
-    update_output = _output(update)
-    assert _REMOTE_A in update_output
-    assert _REMOTE_B in update_output
-    assert f"'{_ALIAS}'" in update_output
+    for refused in (install, update):
+        refused_output = _output(refused)
+        assert _REMOTE_A in refused_output
+        assert _REMOTE_B in refused_output
+        assert f"'{_ALIAS}'" in refused_output
     assert lock_path.read_bytes() == before_lock
     assert deployed_skill.read_text(encoding="utf-8") == _skill_document("from catalog A")
 
@@ -172,6 +175,34 @@ def test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update(
     )
     assert _locked_row(lock_path)["source_url"] == _REMOTE_A
     assert deployed_skill.read_text(encoding="utf-8") == _skill_document("from catalog A")
+
+    # Switching catalogs on purpose follows the error's advice: drop the entry,
+    # install, add it back, install again.
+    manifest = load_yaml(consumer.manifest_path)
+    declared = manifest["dependencies"]["apm"]
+    manifest["dependencies"]["apm"] = []
+    dump_yaml(manifest, consumer.manifest_path)
+    runner.run_sequence(
+        (
+            ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main"),
+            ("install", *_INSTALL_FLAGS),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="git-catalog-switch-drop",
+        cwd=consumer.root,
+        env=environment,
+    )
+    manifest["dependencies"]["apm"] = declared
+    dump_yaml(manifest, consumer.manifest_path)
+    runner.run_sequence(
+        (("install", *_INSTALL_FLAGS),),
+        expected_returncodes=(0,),
+        scenario_id="git-catalog-switch-readd",
+        cwd=consumer.root,
+        env=environment,
+    )
+    assert _locked_row(lock_path)["source_url"] == _REMOTE_B
+    assert deployed_skill.read_text(encoding="utf-8") == _skill_document("from catalog B")
 
 
 def test_pre_037_lock_without_origin_evidence_still_updates(

@@ -121,6 +121,18 @@ def same_marketplace_origin(left: str | None, right: str | None) -> bool:
     return _origin_comparison_key(left) == _origin_comparison_key(right)
 
 
+def same_marketplace_catalog(left: MarketplaceSource, right: MarketplaceSource) -> bool:
+    """Return whether two registrations name the same catalog: origin and catalog path.
+
+    The lockfile records only the origin (``source_url``), so the fail-closed
+    lock check compares origins alone; a catalog moved to another path in the
+    same repository is not detectable from the lock until the path is locked.
+    """
+    return left.path == right.path and same_marketplace_origin(
+        marketplace_origin(left), marketplace_origin(right)
+    )
+
+
 def _origin_comparison_key(origin: str) -> str:
     _scheme, _, rest = normalize_repo_url(origin).partition("://")
     authority, slash, path = rest.partition("/")

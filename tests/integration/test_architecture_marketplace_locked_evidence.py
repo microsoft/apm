@@ -60,9 +60,14 @@ def test_marketplace_catalog_origin_routes_through_owners() -> None:
             "source_url = manifest.source_url",
         ),
         (
-            "marketplace/models.py",
-            "source_digest=source_digest or catalog_digest(data)",
-            "source_digest=source_digest",
+            "marketplace/client.py",
+            "        source_digest = catalog_digest(data)\n",
+            "        pass\n",
+        ),
+        (
+            "marketplace/catalog_origin.py",
+            "for dep in lockfile.marketplace_rows(marketplace_name, plugin_name)",
+            "for dep in lockfile.dependencies.values()",
         ),
         (
             "marketplace/catalog_origin.py",

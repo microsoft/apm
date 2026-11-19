@@ -1198,6 +1198,20 @@ class LockFile:
         """
         return self.marketplace_index().get((marketplace_name, plugin_name))
 
+    def marketplace_rows(self, marketplace_name: str, plugin_name: str) -> list[LockedDependency]:
+        """Return every row recorded for an alias/plugin pair, ambiguous ones included.
+
+        Matching is case-insensitive, like the registry and catalog lookups the
+        alias resolves through, so a recased alias cannot hide a locked row.
+        """
+        alias, plugin = marketplace_name.casefold(), plugin_name.casefold()
+        return [
+            dep
+            for dep in self.dependencies.values()
+            if (dep.discovered_via or "").casefold() == alias
+            and (dep.marketplace_plugin_name or "").casefold() == plugin
+        ]
+
     def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
         """Rename one locally deployed path and carry its content hash."""
         from ..core.deployment_ledger import DeploymentLedgerCodec

@@ -52,16 +52,32 @@ class MarketplaceOriginConflictError(MarketplaceError):
     """Raised when an alias now names a different catalog than the lock recorded."""
 
     def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        import shlex
+
+        from .source_identity import parse_marketplace_source
+
         self.marketplace_name = marketplace_name
         self.plugin_name = plugin_name
         self.locked_origin = locked
         self.current_origin = current
+        try:
+            parse_marketplace_source(locked)
+        except ValueError:
+            restore = (
+                "To keep the locked catalog, register its origin again with "
+                f"'apm marketplace add' under the name {marketplace_name!r}."
+            )
+        else:
+            restore = (
+                "To keep the locked catalog, run: apm marketplace add "
+                f"{shlex.quote(locked)} --name {shlex.quote(marketplace_name)} "
+                "(add --ref or --path if the original registration used them)."
+            )
         super().__init__(
-            f"marketplace '{marketplace_name}' now points at {current}, but apm.lock.yaml "
-            f"recorded '{plugin_name}' from {locked}. Nothing was changed. To keep the "
-            f"locked catalog, run: apm marketplace add {locked} --name {marketplace_name}. "
-            f"To switch catalogs on purpose, run 'apm uninstall {plugin_name}@{marketplace_name}' "
-            "and add the dependency again."
+            f"marketplace {marketplace_name!r} now points at {current}, but apm.lock.yaml "
+            f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
+            f"To switch catalogs on purpose, remove {plugin_name!r} from apm.yml, run "
+            "'apm install', then add it back and run 'apm install' again."
         )
 
 

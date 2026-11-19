@@ -22,7 +22,7 @@ _ROUTES = (
 
 _ORIGIN_ROUTES = (
     ("src/apm_cli/marketplace/resolver.py", "resolve_marketplace_plugin", "marketplace_origin"),
-    ("src/apm_cli/marketplace/models.py", "parse_marketplace_json", "catalog_digest"),
+    ("src/apm_cli/marketplace/client.py", "_parse_catalog", "catalog_digest"),
     (
         "src/apm_cli/deps/apm_resolver.py",
         "_resolve_marketplace_dep",
@@ -35,8 +35,13 @@ _ORIGIN_ROUTES = (
     ),
     (
         "src/apm_cli/marketplace/catalog_origin.py",
+        "require_locked_catalog_origin",
+        "lockfile.marketplace_rows",
+    ),
+    (
+        "src/apm_cli/marketplace/catalog_origin.py",
         "registrations_sharing_origin",
-        "same_marketplace_origin",
+        "same_marketplace_catalog",
     ),
     ("src/apm_cli/commands/marketplace/__init__.py", "add", "_warn_if_duplicate_origin"),
     (

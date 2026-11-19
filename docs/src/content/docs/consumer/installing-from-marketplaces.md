@@ -281,13 +281,15 @@ catalogs record neither. See
 
 **Aliases are machine-local.** A name like `company` only means something on
 the machine that registered it. If `company` later points at a different
-catalog, `apm update` (or any re-resolution of an object-form
-`marketplace: company` entry) fails instead of switching, and names the locked
-and current origins. Re-register the locked origin with
-`apm marketplace add <locked-origin> --name company`, or run
-`apm uninstall <plugin>@company` and add the dependency again to switch on
-purpose. Registering a second name for an already registered catalog (same
-origin and `--path`) succeeds with a `[!]` warning.
+catalog, `apm install` or `apm update` of an object-form `marketplace: company`
+entry fails instead of switching, and names the locked and current origins.
+Alias names match case-insensitively. Re-register the locked origin with
+`apm marketplace add <locked-origin> --name company` to keep it. To switch on
+purpose, remove the entry from `apm.yml`, run `apm install`, add it back and
+run `apm install` again. The check compares origins only, so moving the catalog
+to another `--path` in the same repository is not detected. Registering a
+second name for an already registered catalog (same origin and `--path`)
+succeeds with a `[!]` warning.
 
 ## Declare marketplaces in your user manifest
 
