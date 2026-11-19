@@ -1707,42 +1707,42 @@ class TestComputeCrossRepoMisconfigRisk:
     def _source(self, host="corp.ghe.com"):
         return MarketplaceSource(name="mkt", owner="acme", repo="marketplace", host=host)
 
-    def test_dep_ref_returns_none(self):
-        plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
-        src = self._source()
-        dep_ref = DependencyReference.parse("some/thing")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", dep_ref)
-        assert result is None
+    def test_bare_url_source_returns_risk(self):
+        # A structured ref parsed from a bare locator still defaults to github.com (#3937).
+        plugin = MarketplacePlugin(name="p", source={"type": "url", "url": "other/repo"})
+        result = _compute_cross_repo_misconfig_risk(plugin, self._source(), "other/repo")
+        assert result is not None
+        assert result.suggested_qualified_repo == "corp.ghe.com/other/repo"
 
     def test_non_dict_source_returns_none(self):
         plugin = MarketplacePlugin(name="p", source="./local")
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace/local", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace/local")
         assert result is None
 
     def test_non_github_type_returns_none(self):
         plugin = MarketplacePlugin(name="p", source={"type": "npm", "package": "@scope/pkg"})
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "scope/pkg", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "scope/pkg")
         assert result is None
 
     def test_in_marketplace_returns_none(self):
         # Repo field points to the marketplace itself -> in-marketplace
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "acme/marketplace"})
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace")
         assert result is None
 
     def test_github_com_no_prefix_needed_returns_none(self):
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
         src = MarketplaceSource(name="mkt", owner="acme", repo="marketplace", host="github.com")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo")
         assert result is None
 
     def test_ghe_cross_repo_returns_risk(self):
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
         src = self._source("corp.ghe.com")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo")
         assert result is not None
         assert result.marketplace_host == "corp.ghe.com"
         assert result.bare_repo_field == "other/repo"
