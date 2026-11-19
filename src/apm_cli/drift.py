@@ -154,17 +154,22 @@ def marketplace_ref_mismatch(
 
 
 def locked_marketplace_row(
-    dep_ref: DependencyReference, lockfile: LockFile | None
+    dep_ref: DependencyReference,
+    lockfile: LockFile | None,
+    marketplace_index: dict | None = None,
 ) -> LockedDependency | None:
     """Return the lock row an unchanged marketplace declaration still matches.
 
     The row must be the lock's single association for the declaration's
     ``{name, marketplace}``, carry no replacement binding, and satisfy
-    :func:`marketplace_ref_mismatch`. Never performs catalog I/O.
+    :func:`marketplace_ref_mismatch`. Never performs catalog I/O. Callers
+    looking up many declarations pass one ``lockfile.marketplace_index()``.
     """
     if lockfile is None or getattr(dep_ref, "is_marketplace", False) is not True:
         return None
-    locked_dep = lockfile.get_dependency(dep_ref.get_unique_key())
+    locked_dep = lockfile.get_dependency(
+        dep_ref.get_unique_key(), marketplace_index=marketplace_index
+    )
     if (
         locked_dep is None
         or locked_dep.replacement is not None

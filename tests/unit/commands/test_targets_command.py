@@ -459,3 +459,22 @@ class TestTargetsHonourManifest:
         rows = {row["target"]: row["status"] for row in json.loads(result.stdout)}
         assert rows["copilot"] == "active"
         assert rows["claude"] == "active"
+
+    def test_singular_target_all_is_active_like_install(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Singular ``target: all`` names the install set, not auto-detect."""
+        from apm_cli.core.target_catalog import expand_all
+
+        (tmp_path / "apm.yml").write_text(
+            "name: demo\nversion: 1.0.0\ntarget: all\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(targets, ["--json"])
+
+        assert result.exit_code == 0, result.output
+        rows = {row["target"]: row["status"] for row in json.loads(result.stdout)}
+        assert {name for name, status in rows.items() if status == "active"} == set(
+            expand_all("install")
+        )

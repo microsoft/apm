@@ -624,9 +624,11 @@ def run_mcp_integration(  # noqa: PLR0913
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
             if owned_target in managed_target_servers:
                 # Declared servers whose `targets:` no longer select this runtime.
+                # Bundle-owned servers declare no targets:, so only dependency
+                # declarations can be deselected (#3955 with #2606).
                 admitted = mcp_servers_for_runtime(mcp_deps, owned_target)
                 retired_by_target[owned_target] = deselected_mcp_claims(
-                    owned, new_mcp_servers, admitted
+                    owned, new_mcp_servers - bundle_owned, admitted
                 )
                 continue
             # A runtime this run does not select keeps the servers that name it.

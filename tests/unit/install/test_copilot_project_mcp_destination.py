@@ -467,7 +467,9 @@ def test_heal_eligibility_reads_the_pre_install_lock(tmp_path: Path, snapshot: b
     stamped.mcp_configs = {"echo": _ECHO}
     DeploymentLedgerCodec.replace_mcp_target_servers(stamped, {"copilot": ["echo"]})
     lock_path = tmp_path / "apm.lock.yaml"
-    stamped.write(lock_path)
+    # A real write stamps the running CLI (#3962); pin it to the 0.37 package phase.
+    with patch("apm_cli.deps.lockfile.installed_apm_version", return_value="0.37.0"):
+        stamped.write(lock_path)
     package = MagicMock(scripts=None, targets=None, target=None, allow_executables=None)
     package.package_path = tmp_path
     dep = MCPDependency.from_dict(_ECHO)

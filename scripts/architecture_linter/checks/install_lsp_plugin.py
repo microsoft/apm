@@ -59,11 +59,25 @@ _TRUST_OWNER_CALLERS = frozenset(
         ("src/apm_cli/security/trust.py", "resolve"),
         ("src/apm_cli/security/trust.py", "pins"),
         (_EXEC_GATE, "_trust_ctx"),
-        (_EXEC_GATE, "lock_exec_decisions_stale"),
         (_EXEC_GATE, "_resolve"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
     }
 )
+# One owner decides a package's exec status and the types a partial approval
+# still deploys (#3991); one comparer reads them back. A second reader would let
+# update and install disagree on whether a recorded decision still holds.
+_EXEC_DECISION_CALLERS = {
+    "package_exec_decision": frozenset(
+        {
+            ("src/apm_cli/security/trust.py", "package_exec_status"),
+            (_EXEC_GATE, "check_executable_approval"),
+            (_EXEC_GATE, "current_exec_decision"),
+        }
+    ),
+    "recorded_exec_status_is_stale": frozenset(
+        {(_EXEC_GATE, "lock_exec_decisions_stale"), (_EXEC_GATE, "for_dependency")}
+    ),
+}
 _MANIFEST_DERIVATION_TOKENS = ('"apm.yml"', "APM_YML_FILENAME")
 # approve/deny select a package by exact name: a partial name could grant or deny
 # execution for another package, so prefix matching on names is refused.
@@ -231,6 +245,18 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
             for call in path_facts.calls
             if call.qualname.rsplit(".", 1)[-1] == _TRUST_OWNER
             and (path, call.scope) not in _TRUST_OWNER_CALLERS
+        )
+        findings.extend(
+            violation(
+                GUARD_EXECUTABLE_TRUST,
+                path,
+                f"{call.scope} calls {name} outside its registered callers; the exec "
+                "decision and its staleness check have one owner each (#3990, #3991)",
+                line=call.line,
+            )
+            for call in path_facts.calls
+            if (name := call.qualname.rsplit(".", 1)[-1]) in _EXEC_DECISION_CALLERS
+            and (path, call.scope) not in _EXEC_DECISION_CALLERS[name]
         )
     return findings
 

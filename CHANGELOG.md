@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pinned approvals in `apm.yml` need APM 0.37 or later on every machine; older clients reject them and fail closed. (#3918)
 - `hooks: true` and `mcp: true` approvals still deploy but now warn; run `apm approve <pkg>` to pin them to content. (#3918)
 - `apm lifecycle test --execute` now fires only what an install would: run `apm lifecycle trust` for project scripts; `APM_NO_SCRIPTS` and org `deny_all` apply. (#3988)
+- `apm pack` no longer ships MCP servers `apm install` writes to root `.mcp.json` (they can carry credentials); to ship one, write it in `.mcp.json`, not `apm.yml`. (closes #3966, #3988)
 
 ### Added
 
@@ -80,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Versions and tags with leading zeros or non-ASCII digits (`v01.2.3`, `v1.2.3-01`) are no longer SemVer: resolution skips them and `require_pinned_constraint` reports them as bare branches. (#3894)
 - Starting with this release, APM refuses to change, replay, audit or pack a lockfile written by a newer APM, naming both versions and how to upgrade. (#3916)
 - `apm install --refresh`, `apm update` and `apm marketplace update` revalidate marketplace catalogs and fail rather than use stale cached data; plain installs keep the cache. (#3910)
+- `apm self-update` on Windows no longer fails in `Expand-Archive` when run from PowerShell 7; the installer also falls back to .NET zip extraction. (#3931)
 - `apm install x@alias` (also `-g`) and `apm outdated` fail closed on a rebound marketplace alias like `apm update`; `apm deps update` and `apm lock --update` revalidate marketplaces. (closes #3959, #3961, #3988)
 - Uninstall, prune, `install --mcp`, bundle and LSP installs record the running APM in `apm.lock.yaml`; a bundle locked by a newer APM warns. (closes #3962, #3963, #3988)
 - `apm install --dry-run` and `apm prune` handle object-form `{name, marketplace}` dependencies instead of failing. (closes #3960, #3988)
@@ -90,6 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` no longer fails on a correct lock when `apm_modules` holds stale copies; it replays the locked packages as install does. (closes #3964, #3989)
 - `apm pack` on a plugin-only package prints the `target:`, `vscode` and `compilation.target` deprecation warnings like every other command. (closes #3965, #3989)
 - A multi-package `apm install` where one package fails to resolve or download now integrates nothing, so no untracked files are left behind. (closes #3874, #3989)
+- `apm update` re-gates executables recorded while the gate was off once org policy turns it on, as `apm install` does. (closes #3990, #3989)
+- `apm update` retires an executable type whose approval was removed from a partially approved package; the lock records the approved types in `exec_allowed_types`. (closes #3991, #3989)
 - Native plugin approvals are portable: the `plugin:` pin covers file paths and bytes, not executable bits, so a pin made on macOS holds on Windows. (#3989)
 - `apm install -g --target antigravity` deploys skills to `~/.gemini/config/skills/`, read by the Antigravity App, CLI and IDE, and removes APM's old `~/.gemini/antigravity-cli/skills/` copies. (closes #3940, #3992)
 - `target: agents` warns once per run, and `apm update -g` names the user manifest it read. (#3967, #3992)
@@ -110,7 +114,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve` and `apm deny` match package names exactly and refuse names matching several packages; a partial name could approve another package's executables. (#3988)
 - `apm update` with no ref change and `apm audit --ci` honour the current executables decision, so hooks left after `apm deny` are retired or reported. (closes #3958, #3988)
 - Reinstalling a local bundle whose MCP server was revoked, denied or repacked away now removes that server. (closes #3956, #3988)
-- `apm pack` never ships MCP servers `apm install` rendered into root `.mcp.json`, which could carry credentials; authored servers still ship. (closes #3966, #3988)
 
 ## [0.36.1] - 2026-11-18
 

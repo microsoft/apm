@@ -329,6 +329,17 @@ def collect_mcp_servers(
         if managed is None:
             _warn_unknown_mcp_ownership(logger)
             return {}
+        dropped = sorted(name for name in servers if name in managed)
+        if dropped:
+            _emit(
+                "warning",
+                "Left out of the plugin: MCP servers 'apm install' manages in .mcp.json ("
+                + ", ".join(dropped)
+                + "). To ship one, write it in .mcp.json yourself and do not declare it "
+                "in apm.yml.",
+                logger,
+                "warning",
+            )
         servers = {name: server for name, server in servers.items() if name not in managed}
     return _sanitize_mcp_servers(servers, logger=logger)
 

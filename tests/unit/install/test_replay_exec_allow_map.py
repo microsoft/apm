@@ -118,36 +118,67 @@ def test_project_self_entry_replays_ungated_under_deny(
     assert gate.for_dependency(package.lock_dep, package.package_info) is None
 
 
+_HOOKS = ("hooks",)
+
+
 @pytest.mark.parametrize(
-    ("recorded", "current", "mixed", "stale"),
+    ("recorded", "current", "recorded_allowed", "current_allowed", "stale"),
     [
-        (None, None, False, False),
-        (None, "deployed", False, False),
-        ("deployed", None, False, False),
-        (None, "gated_pending_approval", False, True),
-        ("deployed", "denied", False, True),
-        ("gated_pending_approval", "deployed", False, True),
-        ("denied", "denied", False, False),
-        # One aggregate status cannot show which of a mixed package's types changed.
-        ("denied", "denied", True, True),
-        ("deployed", "deployed", True, False),
+        (None, None, (), (), False),
+        (None, "deployed", (), (), False),
+        ("deployed", None, (), (), False),
+        (None, "gated_pending_approval", (), (), True),
+        ("deployed", "denied", (), (), True),
+        ("gated_pending_approval", "deployed", (), (), True),
+        ("denied", "denied", (), (), False),
+        # The worst case hides which types a partial package deployed (#3991).
+        ("denied", "denied", (), _HOOKS, True),
+        ("gated_pending_approval", "gated_pending_approval", _HOOKS, (), True),
+        ("gated_pending_approval", "gated_pending_approval", _HOOKS, _HOOKS, False),
+        ("deployed", "deployed", (), _HOOKS, False),
     ],
 )
 def test_recorded_exec_status_staleness(
-    recorded: str | None, current: str | None, mixed: bool, stale: bool
+    recorded: str | None,
+    current: str | None,
+    recorded_allowed: tuple[str, ...],
+    current_allowed: tuple[str, ...],
+    stale: bool,
 ) -> None:
     from apm_cli.install.exec_gate import recorded_exec_status_is_stale
 
-    assert recorded_exec_status_is_stale(recorded, current, mixed=mixed) is stale
+    assert (
+        recorded_exec_status_is_stale(
+            recorded,
+            current,
+            recorded_allowed=recorded_allowed,
+            current_allowed=current_allowed,
+        )
+        is stale
+    )
 
 
-def _locked_hook_package(modules: Path, *, codex_native: bool = False) -> SimpleNamespace:
+def _locked_hook_package(
+    modules: Path,
+    *,
+    codex_native: bool = False,
+    status: str | None = "deployed",
+    bin_dir: bool = False,
+    allowed: tuple[str, ...] = (),
+) -> SimpleNamespace:
     from apm_cli.deps.lockfile import LockedDependency
 
     lock_dep = LockedDependency(
-        repo_url="_local/hooky", source="local", local_path="../hooky", exec_status="deployed"
+        repo_url="_local/hooky",
+        source="local",
+        local_path="../hooky",
+        exec_status=status,
+        exec_allowed_types=allowed,
     )
     root = lock_dep.to_dependency_ref().get_install_path(modules)
+    if bin_dir:
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "hooky").write_text("#!/bin/sh\n", encoding="utf-8")
     if codex_native:
         (root / ".codex-plugin").mkdir(parents=True)
         (root / ".codex-plugin" / "plugin.json").write_text(
@@ -205,3 +236,209 @@ def test_update_probe_runs_the_gate_when_policy_is_unavailable(
     assert lock_exec_decisions_stale(
         lock, modules, project / "apm.yml", policy_provider=unavailable
     )
+
+
+def _write_trust(project: Path, block: str) -> None:
+    (project / "apm.yml").write_text(
+        f"name: p\nversion: 1.0.0\nexecutables:\n{block}", encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "trust", "fetched"),
+    [
+        # Org policy may have turned the gate on since (#3990).
+        (None, None, True),
+        (None, "  allow:\n    ../hooky:\n      hooks: true\n", True),
+        ("deployed", None, True),
+    ],
+    ids=["never-gated", "local-gate-on", "recorded"],
+)
+def test_update_probe_fetches_policy_for_packages_with_executables(
+    project: Path, tmp_path: Path, status: str | None, trust: str | None, fetched: bool
+) -> None:
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+
+    if trust is None:
+        (project / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    else:
+        _write_trust(project, trust)
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(modules, status=status)
+    calls: list[int] = []
+    lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: calls.append(1)
+    )
+    assert bool(calls) is fetched
+
+
+def test_update_probe_reconciles_a_denied_row_whose_types_are_mixed(
+    project: Path, tmp_path: Path
+) -> None:
+    from apm_cli.install.exec_gate import current_exec_decision, lock_exec_decisions_stale
+
+    _write_trust(
+        project,
+        "  allow:\n    ../hooky:\n      hooks: true\n  deny:\n    ../hooky:\n      bin: true\n",
+    )
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(modules, status="denied", bin_dir=True)
+    (dep,) = lock.dependencies.values()
+    from apm_cli.security.executables import exec_trust_context_for_project
+
+    ctx = exec_trust_context_for_project(
+        project / "apm.yml", policy=None, migrate_user_legacy=False
+    )
+    package_info = SimpleNamespace(
+        dependency_ref=dep.to_dependency_ref(),
+        install_path=dep.to_dependency_ref().get_install_path(modules),
+        package=None,
+    )
+    assert current_exec_decision(lambda: ctx, package_info, dep.get_unique_key()) == (
+        "denied",
+        ("hooks",),
+    )
+    assert lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: None
+    )
+
+    _write_trust(project, "  deny:\n    ../hooky:\n      hooks: true\n      bin: true\n")
+    assert not lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: None
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "stale"),
+    [
+        ("cache_miss_fetch_fail", True),
+        ("garbage_response", True),
+        ("malformed", True),
+        ("hash_mismatch", True),
+        ("incomplete_chain", True),
+        ("raise", True),
+        ("found", False),
+    ],
+)
+def test_update_probe_fails_toward_the_gate_on_unavailable_policy(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, stale: bool
+) -> None:
+    from apm_cli.commands.update import _executables_need_reconcile
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockFile
+
+    _write_trust(project, "  allow:\n    ../hooky:\n      hooks: true\n")
+    modules = tmp_path / "apm_modules"
+    lock = LockFile()
+    lock.dependencies.update(_locked_hook_package(modules).dependencies)
+
+    def _discover(_root, **_kwargs):
+        if outcome == "raise":
+            raise RuntimeError("network down")
+        return SimpleNamespace(outcome=outcome, policy=None)
+
+    monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", _discover)
+    monkeypatch.chdir(project)
+    assert (
+        _executables_need_reconcile(lock, modules, InstallScope.PROJECT, SimpleNamespace()) is stale
+    )
+
+
+def test_update_probe_skips_the_policy_fetch_without_executables(tmp_path: Path) -> None:
+    """A lock whose packages declare no executables never fetches org policy."""
+    from apm_cli.deps.lockfile import LockedDependency
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+
+    (tmp_path / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    modules = tmp_path / "apm_modules"
+    dep = LockedDependency(repo_url="_local/plain", source="local", local_path="../plain")
+    root = dep.to_dependency_ref().get_install_path(modules)
+    (root / ".apm" / "instructions").mkdir(parents=True)
+    calls: list[int] = []
+    lock = SimpleNamespace(dependencies={dep.get_unique_key(): dep})
+    assert not lock_exec_decisions_stale(
+        lock, modules, tmp_path / "apm.yml", policy_provider=lambda: calls.append(1)
+    )
+    assert calls == []
+
+
+def test_update_regates_rows_recorded_before_org_policy_enabled_the_gate(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row recorded gate-off is stale once org policy gates executables (#3990)."""
+    from apm_cli.commands.update import _executables_need_reconcile
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockFile
+
+    (project / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    modules = tmp_path / "apm_modules"
+    lock = LockFile()
+    lock.dependencies.update(_locked_hook_package(modules, status=None).dependencies)
+    executables = SimpleNamespace(
+        deny_all=False, deny=(), require=(), recommend=("other/pkg",), enforce=()
+    )
+    org = SimpleNamespace(executables=executables, bin_deploy=None)
+    monkeypatch.setattr(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        lambda _root, **_kwargs: SimpleNamespace(outcome="found", policy=org),
+    )
+    monkeypatch.chdir(project)
+    assert _executables_need_reconcile(lock, modules, InstallScope.PROJECT, SimpleNamespace())
+
+    monkeypatch.setattr(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        lambda _root, **_kwargs: SimpleNamespace(outcome="found", policy=None),
+    )
+    assert not _executables_need_reconcile(lock, modules, InstallScope.PROJECT, SimpleNamespace())
+
+
+def test_update_retires_a_type_whose_approval_was_removed(project: Path, tmp_path: Path) -> None:
+    """A partial package whose one approval is removed is stale (#3991)."""
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+
+    modules = tmp_path / "apm_modules"
+    lock = _locked_hook_package(
+        modules, status="gated_pending_approval", bin_dir=True, allowed=("hooks",)
+    )
+    _write_trust(project, "  allow:\n    ../hooky:\n      hooks: true\n")
+    assert not lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: None
+    )
+
+    _write_trust(project, "  allow: {}\n")
+    assert lock_exec_decisions_stale(
+        lock, modules, project / "apm.yml", policy_provider=lambda: None
+    )
+
+
+def test_lock_round_trips_the_types_a_partial_package_deployed() -> None:
+    from apm_cli.deps.lockfile import LockedDependency
+
+    dep = LockedDependency(
+        repo_url="o/r", exec_status="gated_pending_approval", exec_allowed_types=("hooks",)
+    )
+    data = dep.to_dict()
+    assert data["exec_allowed_types"] == ["hooks"]
+    assert LockedDependency.from_dict(data).exec_allowed_types == ("hooks",)
+    assert "exec_allowed_types" not in LockedDependency(repo_url="o/r").to_dict()
+    with pytest.raises(ValueError, match="exec_allowed_types"):
+        LockedDependency.from_dict({**data, "exec_allowed_types": ["root"]})
+
+
+def test_install_records_the_types_a_partial_package_deployed() -> None:
+    """The lock keeps a partial approval so update can see one type change (#3991)."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.phases.lockfile import LockfileBuilder
+
+    lock = LockFile()
+    for key in ("o/partial", "o/whole"):
+        lock.add_dependency(LockedDependency(repo_url=key))
+    ctx = SimpleNamespace(
+        package_exec_status={"o/partial": "gated_pending_approval", "o/whole": "denied"},
+        package_exec_allowed_types={"o/partial": ("hooks",)},
+    )
+    builder = LockfileBuilder.__new__(LockfileBuilder)
+    builder.ctx = ctx
+    builder._attach_exec_status(lock)
+    assert lock.dependencies["o/partial"].exec_allowed_types == ("hooks",)
+    assert lock.dependencies["o/whole"].exec_allowed_types == ()

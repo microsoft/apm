@@ -3300,3 +3300,28 @@ class TestInstallMcpFlag:
             mcp = yaml.safe_load((tmp / "apm.yml").read_text())["dependencies"]["mcp"][0]
             assert mcp["version"] == "1.2.3"
             assert mcp["registry"] == "https://mcp.example.com"
+
+
+def test_marketplace_origin_check_reads_a_legacy_lockfile(tmp_path, monkeypatch):
+    """#3959: before migration, a legacy apm.lock still feeds the origin check."""
+    from apm_cli.commands.install import _scoped_lockfile
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="acme/alpha",
+            discovered_via="official",
+            marketplace_plugin_name="alpha",
+            source_url="https://github.com/acme/catalog",
+        )
+    )
+    (tmp_path / "apm.lock").write_text(lock.to_yaml(), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    legacy = _scoped_lockfile(None)
+
+    assert legacy is not None
+    assert [dep.source_url for dep in legacy.marketplace_rows("official", "alpha")] == [
+        "https://github.com/acme/catalog"
+    ]

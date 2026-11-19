@@ -216,8 +216,11 @@ except ImportError as e:
 def _scoped_lockfile(scope):
     """Read the lockfile the scope's marketplace entries were locked in (#3959)."""
     from ..core.scope import InstallScope, get_apm_dir
+    from ..deps.lockfile import resolve_lockfile_path_for_read
 
-    return LockFile.read(get_lockfile_path(get_apm_dir(scope or InstallScope.PROJECT)))
+    # Read-only: a legacy apm.lock not yet migrated still carries the origin.
+    apm_dir = get_apm_dir(scope or InstallScope.PROJECT)
+    return LockFile.read(resolve_lockfile_path_for_read(apm_dir, read_only=True))
 
 
 def _resolve_package_references(

@@ -903,3 +903,21 @@ class TestExplainCmd:
             assert result.exit_code == 0
             assert "allowed" in result.output
             assert "project-allow" in result.output
+
+
+def test_approve_clears_a_deny_stored_under_another_spelling() -> None:
+    """A URL-form deny blocks ``acme/hooky``, so approving it must clear that deny."""
+    from apm_cli.commands.approve import _same_store_denies
+    from apm_cli.security.executables import ExecutableDeclaration
+
+    decl = ExecutableDeclaration(package_key="acme/hooky#1.0.0", package_name="hooky")
+    deny = {
+        "https://github.com/acme/hooky.git": {"hooks": True},
+        "Acme/Hooky": {"bin": True},
+        "acme/other": {"hooks": True},
+    }
+
+    assert sorted(_same_store_denies(deny, decl)) == [
+        "Acme/Hooky",
+        "https://github.com/acme/hooky.git",
+    ]

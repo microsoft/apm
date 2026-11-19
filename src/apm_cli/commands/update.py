@@ -143,11 +143,6 @@ def _module_cache_needs_rehydration(
     return has_locked_dependency
 
 
-_POLICY_UNAVAILABLE_OUTCOMES = frozenset(
-    {"cache_miss_fetch_fail", "garbage_response", "malformed", "hash_mismatch"}
-)
-
-
 def _executables_need_reconcile(
     lockfile: LockFile | None,
     modules_dir: Path,
@@ -169,6 +164,7 @@ def _executables_need_reconcile(
     def _policy() -> Any:
         from apm_cli.install.exec_gate import ExecPolicyUnavailable
         from apm_cli.policy.discovery import discover_policy_with_chain
+        from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
 
         try:
             fetch = discover_policy_with_chain(get_deploy_root(scope))
@@ -176,7 +172,7 @@ def _executables_need_reconcile(
             raise ExecPolicyUnavailable(str(exc)) from exc
         # Unknown policy fails toward running the install gate, which then
         # applies the configured fetch-failure posture.
-        if getattr(fetch, "outcome", "") in _POLICY_UNAVAILABLE_OUTCOMES:
+        if getattr(fetch, "outcome", "") in POLICY_RESOLUTION_FAILURE_OUTCOMES:
             raise ExecPolicyUnavailable(fetch.outcome)
         return getattr(fetch, "policy", None)
 
