@@ -264,6 +264,74 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 "Selected MCP targets must delegate safe-config preflight before no-op detection",
             )
         )
+    findings.extend(_dependency_target_selection_findings(provider, rule_id, install_facts))
+    return findings
+
+
+# Per-dependency ``targets:`` narrowing (#2606): one owner decides which runtimes
+# receive a server; install writes, claim pruning and --frozen claims route
+# through it instead of re-reading ``dep.targets``.
+_MCP_DEPENDENCY_TARGET_CONSUMERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        _MCP_INSTALL,
+        "run_mcp_install",
+        (
+            "mcp_dependency_runtimes(dep, target_runtimes)",
+            "managed_target_servers[target] &= mcp_servers_for_runtime(mcp_deps, target)",
+        ),
+    ),
+    (
+        _MCP_INTEGRATION,
+        "run_mcp_integration",
+        (
+            "admitted = mcp_servers_for_runtime(mcp_deps, owned_target)",
+            "mcp_deps, owned_target, named_only=True",
+        ),
+    ),
+    (
+        _MCP_INTEGRATION,
+        "run_owned_mcp_integration",
+        ("mcp_servers_for_runtime(dependencies, target)",),
+    ),
+    (
+        "src/apm_cli/install/service_integration.py",
+        "run_service_integrations",
+        ("mcp_servers_for_runtime(prepared_mcp.dependencies, target)",),
+    ),
+)
+
+
+def _dependency_target_selection_findings(
+    provider: FactsProvider, rule_id: str, install_facts: FileFacts
+) -> list[Violation]:
+    findings: list[Violation] = []
+    owner_spans = _function_spans(install_facts, "mcp_dependency_runtimes")
+    if len(owner_spans) != 1 or not _span_has_fixed(
+        install_facts, owner_spans[0], "declared = _declared_mcp_targets(dep)"
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_INSTALL,
+                "mcp_dependency_runtimes must be the one per-dependency MCP target owner",
+            )
+        )
+    for path, function, fragments in _MCP_DEPENDENCY_TARGET_CONSUMERS:
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        findings.extend(failures)
+        if failures:
+            continue
+        span = _function_span(facts, function)
+        for fragment in fragments:
+            if span is None or not _span_has_fixed(facts, span, fragment):
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{function} must route MCP dependency targets through "
+                        f"mcp_dependency_runtimes (missing {fragment!r})",
+                    )
+                )
     return findings
 
 

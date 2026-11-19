@@ -116,7 +116,10 @@ def run_service_integrations(
         from apm_cli.install.service import InstallService
         from apm_cli.integration.lsp_integrator import LSPIntegrator
         from apm_cli.integration.mcp_integrator import MCPIntegrator
-        from apm_cli.integration.mcp_integrator_install import _resolve_target_runtimes
+        from apm_cli.integration.mcp_integrator_install import (
+            _resolve_target_runtimes,
+            mcp_servers_for_runtime,
+        )
 
         prepared_mcp = prepare_mcp_integration(
             apm_package=apm_package,
@@ -168,6 +171,10 @@ def run_service_integrations(
                 dep.name: getattr(dep, "transport", None)
                 for dep in prepared_mcp.dependencies
                 if hasattr(dep, "name")
+            },
+            mcp_target_servers={
+                target: mcp_servers_for_runtime(prepared_mcp.dependencies, target)
+                for target in mcp_targets or []
             },
         )
     from apm_cli.install.mcp.ownership import frozen_unrecorded_mcp_pairs

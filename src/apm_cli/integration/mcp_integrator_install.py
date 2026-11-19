@@ -1415,6 +1415,34 @@ def _resolve_target_runtimes(
     return target_runtimes
 
 
+def _declared_mcp_targets(dep: Any) -> list[str] | None:
+    declared = getattr(dep, "targets", None)
+    return list(declared) if isinstance(declared, (list, tuple)) and declared else None
+
+
+def mcp_dependency_runtimes(dep: Any, target_runtimes: list[str]) -> list[str]:
+    """Narrow the run's runtimes to a dependency's ``targets:``; never widen them."""
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.models.dependency.subsets import canonical_target_name
+
+    declared = _declared_mcp_targets(dep)
+    if declared is None:
+        return list(target_runtimes)
+    admitted = set(EffectiveTargetDecision(declared, "dependencies.mcp").runtime_equivalents)
+    return [rt for rt in target_runtimes if rt in admitted or canonical_target_name(rt) in declared]
+
+
+def mcp_servers_for_runtime(mcp_deps: list, runtime: str, *, named_only: bool = False) -> set[str]:
+    """Declared servers *runtime* receives; ``named_only`` keeps those whose targets name it."""
+    return {
+        dep.name if hasattr(dep, "name") else dep
+        for dep in mcp_deps
+        if (isinstance(dep, str) or hasattr(dep, "name"))
+        and (_declared_mcp_targets(dep) is not None or not named_only)
+        and mcp_dependency_runtimes(dep, [runtime])
+    }
+
+
 def _install_self_defined_deps(
     self_defined_deps: list,
     target_runtimes: list[str],
@@ -1899,16 +1927,11 @@ def run_mcp_install(  # noqa: PLR0913
             active_runtimes=active_targets,
             user_scope=user_scope,
         )
-        current_names = {
-            dep.name if hasattr(dep, "name") else dep
-            for dep in mcp_deps
-            if isinstance(dep, str) or hasattr(dep, "name")
-        }
         for target in list(managed_target_servers):
             if target not in active_targets:
                 del managed_target_servers[target]
             else:
-                managed_target_servers[target].intersection_update(current_names)
+                managed_target_servers[target] &= mcp_servers_for_runtime(mcp_deps, target)
         for target in target_runtimes:
             managed_target_servers.setdefault(target, set())
 
@@ -1944,6 +1967,14 @@ def run_mcp_install(  # noqa: PLR0913
                 symbol="check",
             )
 
+    dep_runtimes = {id(dep): mcp_dependency_runtimes(dep, target_runtimes) for dep in mcp_deps}
+    for dep in mcp_deps:
+        if not dep_runtimes[id(dep)]:
+            logger.warning(
+                f"MCP server '{dep.name}' targets [{', '.join(dep.targets)}] do not overlap "
+                f"active MCP targets [{', '.join(target_runtimes)}]; skipping"
+            )
+
     # Use the new registry operations module for better server detection
     configured_count = 0
     written_connections: set[tuple[str, str]] = set()
@@ -1958,14 +1989,13 @@ def run_mcp_install(  # noqa: PLR0913
             # resolved against the correct registry endpoint.
             # Plain strings (backward-compat) and deps with registry=None go to
             # the default group (key=None).  Only str values trigger routing.
-            registry_groups: builtins.dict[str | None, list] = {}
+            registry_groups: builtins.dict[tuple, list] = {}
             for dep in registry_deps:
-                key = _registry_group_key(dep)
-                if key not in registry_groups:
-                    registry_groups[key] = []
-                registry_groups[key].append(dep)
+                key = (tuple(dep_runtimes[id(dep)]), _registry_group_key(dep))
+                if key[0]:
+                    registry_groups.setdefault(key, []).append(dep)
 
-            for group_registry_url, group_deps_list in registry_groups.items():
+            for (group_runtimes, group_registry_url), group_deps_list in registry_groups.items():
                 group_dep_names = [
                     dep.name if hasattr(dep, "name") else dep for dep in group_deps_list
                 ]
@@ -1993,7 +2023,7 @@ def run_mcp_install(  # noqa: PLR0913
                         group_dep_names=group_dep_names,
                         group_dep_map=group_dep_map,
                         group_deps=group_deps_list,
-                        target_runtimes=target_runtimes,
+                        target_runtimes=list(group_runtimes),
                         stored_mcp_configs=stored_mcp_configs,
                         servers_to_update=servers_to_update,
                         successful_updates=successful_updates,
@@ -2017,11 +2047,15 @@ def run_mcp_install(  # noqa: PLR0913
             raise RuntimeError("Registry operations module required for MCP installation")  # noqa: B904
 
     # --- Self-defined deps (registry: false) ---
-    if self_defined_deps:
+    self_defined_groups: builtins.dict[tuple, list] = {}
+    for dep in self_defined_deps:
+        if dep_runtimes[id(dep)]:
+            self_defined_groups.setdefault(tuple(dep_runtimes[id(dep)]), []).append(dep)
+    for group_runtimes, group_self_defined in self_defined_groups.items():
         try:
             configured_count += _install_self_defined_deps(
-                self_defined_deps=self_defined_deps,
-                target_runtimes=target_runtimes,
+                self_defined_deps=group_self_defined,
+                target_runtimes=list(group_runtimes),
                 stored_mcp_configs=stored_mcp_configs,
                 servers_to_update=servers_to_update,
                 successful_updates=successful_updates,
