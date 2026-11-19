@@ -219,10 +219,3 @@ Run tests with:
 ```bash
 python -m pytest tests/test_enhanced_discovery.py -v
 ```
-
-## Future Enhancements
-
-The enhanced discovery system is designed to support future features:
-
-- **Advanced Conflict Resolution**: User-configurable conflict resolution strategies
-- **Performance Optimization**: Caching and incremental discovery for large projects
