@@ -618,8 +618,10 @@ def _run_dep_update(
 ) -> None:
     """Serialize update with every other mutation of the same workspace."""
     from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile_generator import require_current_cli
 
     effective_scope = scope or InstallScope.PROJECT
+    require_current_cli(project_root or Path.cwd(), command="apm update")
     _run_dep_update_locked(
         assume_yes=assume_yes,
         dry_run=dry_run,

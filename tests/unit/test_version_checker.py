@@ -85,6 +85,15 @@ class TestVersionComparison(unittest.TestCase):
         self.assertTrue(is_newer_version("0.6.3a1", "0.6.3a2"))
         self.assertTrue(is_newer_version("0.6.3a2", "0.6.3b1"))
         self.assertTrue(is_newer_version("0.6.3b1", "0.6.3rc1"))
+        # Prerelease numbers compare numerically, not lexicographically.
+        self.assertTrue(is_newer_version("0.6.3a9", "0.6.3a10"))
+        self.assertFalse(is_newer_version("0.6.3rc10", "0.6.3rc9"))
+
+    def test_build_metadata_does_not_affect_precedence(self):
+        """``+build`` suffixes are accepted and ignored for ordering."""
+        self.assertFalse(is_newer_version("0.6.3", "0.6.3+abc.1"))
+        self.assertFalse(is_newer_version("0.6.3+abc.1", "0.6.3"))
+        self.assertTrue(is_newer_version("0.6.3+abc", "0.6.4"))
 
     def test_invalid_versions(self):
         """Test comparison with invalid versions."""

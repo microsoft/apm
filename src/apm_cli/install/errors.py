@@ -118,12 +118,13 @@ class FrozenInstallError(RuntimeError):
 
 
 def install_failure_message(error: Exception) -> str:
-    """Keep canonical conflict guidance intact and frame other install failures."""
+    """Keep canonical lockfile guidance intact and frame other install failures."""
     from apm_cli.deps.lockfile import LockfileConflictError
+    from apm_cli.deps.lockfile_generator import LockfileGeneratorError
 
     return (
         str(error)
-        if isinstance(error, LockfileConflictError)
+        if isinstance(error, (LockfileConflictError, LockfileGeneratorError))
         else f"Error installing dependencies: {error}"
     )
 

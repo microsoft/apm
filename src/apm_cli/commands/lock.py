@@ -213,6 +213,9 @@ def _run_lock(
                 symbol="info",
             )
 
+    from apm_cli.deps.lockfile_generator import require_current_cli
+
+    require_current_cli(project_root, command="apm lock")
     if project_root != Path.cwd().resolve():
         os.chdir(project_root)
 

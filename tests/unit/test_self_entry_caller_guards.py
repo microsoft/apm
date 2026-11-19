@@ -19,7 +19,7 @@ def _lockfile_with_self_and_remote() -> LockFile:
     lock = LockFile(
         lockfile_version="1",
         generated_at="2025-01-01T00:00:00+00:00",
-        apm_version="0.0.0-test",
+        apm_version="0.0.0",
     )
     lock.add_dependency(
         LockedDependency(

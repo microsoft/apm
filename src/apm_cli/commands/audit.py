@@ -1515,6 +1515,11 @@ def audit(  # noqa: PLR0913 -- Click handler
         apm audit --external sarif --external-sarif r.sarif  # Any SARIF
     """
     project_root = Path.cwd()
+    if not file_path:
+        # Lockfile-backed audits must not certify a newer generator's lockfile.
+        from ..deps.lockfile_generator import require_current_cli
+
+        require_current_cli(project_root, command="apm audit")
     logger = CommandLogger("audit", verbose=verbose)
 
     cfg = _AuditConfig(

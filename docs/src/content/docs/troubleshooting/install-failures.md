@@ -192,6 +192,27 @@ records. Changed or missing dependencies may resolve again on a later install,
 so review the resulting pins before committing. Preview, best-effort readers,
 and lockfiles invalid for other reasons keep their existing behavior.
 
+### Lockfile written by a newer APM
+
+`apm.lock.yaml` records the APM version that wrote it in `apm_version`. If your
+APM is older, `apm install` (including `--frozen` and `-g`), `apm update`,
+`apm uninstall`, `apm prune`, `apm lock`, `apm audit` and `apm pack` stop before
+changing anything and name both versions:
+
+```text
+Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.37.0,
+newer than this APM 0.36.1. ...
+```
+
+An older APM can drop or misread what a newer one recorded, so there is no
+override. Upgrade (`apm self-update`, `brew upgrade apm`, or
+`python3 -m pip install --upgrade apm-cli`) and retry. Read-only commands such
+as `apm deps list` and `apm outdated` still run with a warning. Pin the same APM
+version in CI as your team uses locally. Prereleases sort before their release
+(`0.37.0rc1` < `0.37.0`); `+build` suffixes are ignored. A lockfile whose
+`apm_version` appears twice or is not a valid APM version is refused too:
+restore it from version control.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:

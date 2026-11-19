@@ -219,14 +219,20 @@ class LockfileSymlinkError(OSError):
 
 
 def ensure_lockfile_writable(path: Path) -> None:
-    """Raise :class:`LockfileSymlinkError` when *path* cannot be written.
+    """Raise when this CLI must not write *path*.
 
-    Single owner of the "never write through a symlinked lockfile" rule:
+    Single owner of lockfile writability: never write through a symlinked
+    lockfile (:class:`LockfileSymlinkError`), and never let an older CLI
+    rewrite a lockfile a newer APM generated
+    (:class:`~apm_cli.deps.lockfile_generator.LockfileGeneratorError`, #2334).
     :meth:`LockFile.write` enforces it, and commands that will rewrite the
     lockfile call it before any other project write so a refusal is atomic.
     """
     if path.is_symlink():
         raise LockfileSymlinkError(path)
+    from .lockfile_generator import assert_writable
+
+    assert_writable(path, action="rewrite")
 
 
 def refuse_lockfile_before_mutation(
@@ -1626,11 +1632,15 @@ class LockFile:
             text = path.read_text(encoding="utf-8")
             if has_conflict_markers(text):
                 raise LockfileConflictError(path)
-            return cls.from_yaml(text)
+            lock = cls.from_yaml(text)
         except (LockfileFormatError, UnsupportedLockfileVersionError):
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
             raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
+        from .lockfile_generator import warn_if_newer
+
+        warn_if_newer(path, lock.apm_version, text)
+        return lock
 
     @classmethod
     def load_or_create(cls, path: Path) -> LockFile:

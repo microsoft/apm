@@ -1130,6 +1130,9 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = get_apm_dir(scope)
+    from ...deps.lockfile_generator import require_current_cli
+
+    require_current_cli(project_root, command="apm deps update")
     apm_yml_path = project_root / APM_YML_FILENAME
 
     if not apm_yml_path.exists():

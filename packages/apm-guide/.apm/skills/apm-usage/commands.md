@@ -169,6 +169,11 @@ Global dry-run bootstrap leaves an absent `~/.apm` uncreated.
 `apm install -g --mcp ... --dry-run` does not create a user manifest, lockfile,
 or runtime configuration.
 
+An APM older than the lockfile's `apm_version` refuses `install` (including
+`--frozen`, `--dry-run` and `-g`), `update`, `uninstall`, `prune`, `lock`,
+`audit` and `pack` before any change, naming both versions; read-only commands
+warn. Upgrade the CLI; there is no override.
+
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download
 or validation leaves the previous package active. Activation and its restore
