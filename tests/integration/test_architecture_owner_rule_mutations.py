@@ -1570,6 +1570,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective marketplace output path loses its single resolver.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-pack-plugin-manifests",
+        rule_id="marketplace-integrations-pack-plugin-manifests",
+        path="src/apm_cli/core/build_orchestrator.py",
+        old='path = PLUGIN_ECOSYSTEM_PATHS.get(target, "")',
+        new='path = {"codex": ".codex-plugin/plugin.json"}.get(target, "")',
+        intent="The pack producer re-declares a host manifest path outside the owner.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-package-construction",
         rule_id="marketplace-integrations-package-construction",
         path="src/apm_cli/models/apm_package.py",
