@@ -591,13 +591,14 @@ class TestClaudeLegacyEntries(unittest.TestCase):
     def test_conflict_guidance_restores_plugin_root_path_without_rotation(self):
         # #3927: the adapter's own ${CLAUDE_PROJECT_DIR:-.} render is a path.
         written = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p/scripts/server.js"
-        expected = {"type": "stdio", "command": "node", "args": [written]}
-        native = dict(expected, args=["/elsewhere/apm_modules/_local/p/scripts/server.js"])
+        flag = "--config=${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p/c.json"
+        expected = {"type": "stdio", "command": "node", "args": [written, flag]}
+        native = dict(expected, args=["/elsewhere/apm_modules/_local/p/scripts/server.js", "-v"])
         self.adapter.update_config({"synthdb": native})
         guidance = self.adapter.native_conflict_guidance("synthdb", expected)
 
-        self.assertIn("Field args[0] holds a value where APM writes a package path", guidance)
-        self.assertIn(f"(args[0]: {written})", guidance)
+        self.assertIn("Fields args[0], args[1] hold values where APM writes a package", guidance)
+        self.assertIn(f"(args[0]: {written}; args[1]: {flag})", guidance)
         self.assertNotIn("environment references", guidance)
         self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
         self.assertNotIn("rotate", guidance)
@@ -618,10 +619,11 @@ class TestClaudeLegacyEntries(unittest.TestCase):
         guidance = self.adapter.native_conflict_guidance("synthdb", expected)
 
         self.assertIn("Fields args[1], env.TOKEN hold values", guidance)
+        self.assertIn("(args[1]: ${DB_NAME}; env.TOKEN: ${TOKEN})", guidance)
         self.assertIn(
-            "(args[1]: ${CLAUDE_PROJECT_DIR:-.}, ${DB_NAME}; env.TOKEN: ${TOKEN})", guidance
+            f"(args[0]: {root}/server.js; args[1]: a package path under ${{CLAUDE_PROJECT_DIR:-.}})",
+            guidance,
         )
-        self.assertIn(f"(args[0]: {root}/server.js)", guidance)
         self.assertIn("rotate those credentials", guidance)
         self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
         self.assertNotIn("leaked-sentinel", guidance)

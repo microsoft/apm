@@ -39,9 +39,10 @@ _log = logging.getLogger(__name__)
 # Claude Code's reference syntax: ${VAR} or ${VAR:-default}.
 _CLAUDE_REFERENCE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}")
 
-# Path segments a conflict hint may print verbatim after the project-root
-# reference: ASCII only, so no query string, credential or JSON escape leaks.
-_PRINTABLE_PACKAGE_PATH_RE = re.compile(r"(?:/[A-Za-z0-9._-]+)*")
+# Literal text a conflict hint may print verbatim around the project-root
+# reference: plain ASCII path and flag characters, so no query string,
+# credential or JSON escape leaks.
+_PRINTABLE_PACKAGE_TEXT_RE = re.compile(r"[A-Za-z0-9._/=-]*")
 
 
 def _string_leaves(value: object) -> Iterator[str]:
@@ -378,20 +379,21 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         names = {
             path: list(
                 dict.fromkeys(
-                    m.group(0) if m.group(0) == root else "${" + m.group(1) + "}"
+                    "${" + m.group(1) + "}"
                     for m in _CLAUDE_REFERENCE_RE.finditer(text)
+                    if m.group(0) != root
                 )
             )
             for path, text in expanded
         }
-        paths = [(path, text) for path, text in expanded if names[path] == [root]]
+        paths = [(path, text) for path, text in expanded if root and root in text]
         restore = "; ".join(
             f"{path}: {text}"
-            if text.startswith(root) and _PRINTABLE_PACKAGE_PATH_RE.fullmatch(text[len(root) :])
+            if not names[path] and _PRINTABLE_PACKAGE_TEXT_RE.fullmatch(text.replace(root, ""))
             else f"{path}: a package path under {root}"
             for path, text in paths
         )
-        env_fields = [path for path, _text in expanded if names[path] != [root]]
+        env_fields = [path for path, _text in expanded if names[path]]
         if not env_fields:
             return (
                 f"{_holds([path for path, _text in paths])} where APM writes a package "
