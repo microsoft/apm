@@ -445,11 +445,11 @@ def _capability(
 
 def test_deprecated_aliases_are_accepted_but_never_advertised(tmp_path) -> None:
     """vscode still parses with a warning, but generated manifests and errors omit it."""
+    from apm_cli.core.errors import UnknownTargetError
     from apm_cli.core.target_catalog import (
         advertised_manifest_target_names,
         manifest_target_names,
     )
-    from apm_cli.core.errors import UnknownTargetError
     from apm_cli.core.target_detection import _validate_canonical_v2
 
     assert "vscode" in manifest_target_names()

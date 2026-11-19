@@ -17,7 +17,6 @@ import pytest
 from apm_cli.core.lifecycle_scripts import (
     LifecycleScriptRunner,
     build_runner_from_context,
-    discover_scripts,
 )
 from apm_cli.core.script_trust import trust_project_scripts
 
@@ -136,7 +135,9 @@ def test_lifecycle_test_execute_goes_through_the_gate(
     monkeypatch.setenv("APM_NO_SCRIPTS", "1")
     monkeypatch.chdir(project)
     fired: list[str] = []
-    monkeypatch.setattr(LifecycleScriptRunner, "fire", lambda self, *a, **k: fired.append("x") or [])
+    monkeypatch.setattr(
+        LifecycleScriptRunner, "fire", lambda self, *a, **k: fired.append("x") or []
+    )
 
     result = CliRunner().invoke(lifecycle_test, ["post-install", "--execute"])
 
