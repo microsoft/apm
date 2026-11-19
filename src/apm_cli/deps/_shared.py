@@ -119,7 +119,6 @@ def materialize_marketplace_manifest(dep_ref: DependencyReference, target_path: 
             output_path=stage_path,
             map_artifacts=False,
             merge_existing=False,
-            substitute_plugin_root=False,
             warn_on_invalid_servers=False,
         )
         staged_data = load_yaml(staged_apm_yml)

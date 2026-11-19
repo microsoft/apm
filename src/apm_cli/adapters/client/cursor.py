@@ -11,6 +11,7 @@ At project scope APM only writes to ``.cursor/mcp.json`` when the ``.cursor/`` d
 import json
 import os
 from pathlib import Path
+from typing import ClassVar
 
 from ...core.token_manager import GitHubTokenManager
 from ...mcp_transport import canonical_remote_transport
@@ -37,6 +38,10 @@ class CursorClientAdapter(CopilotClientAdapter):
     # those referenced values are not baked into the file. Explicit mcp.env
     # literals remain literal below; shared GitHub token injection is separate.
     _supports_runtime_env_substitution: bool = True
+
+    # cursor.com/docs/mcp "Config interpolation": ${workspaceFolder} is the
+    # folder that contains .cursor/mcp.json.
+    plugin_root_project_reference: ClassVar[str | None] = "${workspaceFolder}"
 
     def _format_runtime_env_placeholder(self, name: str) -> str:
         """Return Cursor's native env-var placeholder syntax."""
@@ -179,7 +184,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         config: dict = {}
 
         # --- raw stdio (self-defined deps) ---
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config["type"] = "stdio"
             config["command"] = raw["command"]

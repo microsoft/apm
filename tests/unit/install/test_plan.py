@@ -27,7 +27,7 @@ def _new_lockfile() -> LockFile:
     return LockFile(
         lockfile_version="1",
         generated_at="2025-01-01T00:00:00+00:00",
-        apm_version="0.0.0-test",
+        apm_version="0.0.0",
     )
 
 

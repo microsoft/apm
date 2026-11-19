@@ -117,7 +117,7 @@ class TestLegacyLockfileIsMigratedFirst(_ProjectCase):
         from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, migrate_lockfile_if_needed
 
         legacy = self.root / LEGACY_LOCKFILE_NAME
-        lock = LockFile(apm_version="0.0.1-test")
+        lock = LockFile(apm_version="0.0.1")
         lock.save(legacy)
         self.assertTrue(legacy.exists())
 
@@ -243,7 +243,7 @@ class TestExistingLockfileBehaviourUnchanged(_ProjectCase):
         self.assertEqual(self.lock_path.read_text(encoding="utf-8"), first)
 
     def test_existing_lockfile_is_updated_not_replaced(self):
-        lock = LockFile(apm_version="0.0.1-test")
+        lock = LockFile(apm_version="0.0.1")
         lock.lsp_servers = ["some-lsp"]
         lock.save(self.lock_path)
 

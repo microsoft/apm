@@ -1483,15 +1483,14 @@ class TestExtractMcpServers:
         result = _extract_mcp_servers(tmp_path, {})
         assert "bad" not in result
 
-    def test_substitutes_plugin_root_placeholder(self, tmp_path: Path) -> None:
+    def test_keeps_authored_plugin_root_placeholder(self, tmp_path: Path) -> None:
         from apm_cli.deps.plugin_parser import _extract_mcp_servers
 
         manifest: dict[str, Any] = {
             "mcpServers": {"srv": {"command": "${CLAUDE_PLUGIN_ROOT}/run.sh"}}
         }
         result = _extract_mcp_servers(tmp_path, manifest)
-        assert "${CLAUDE_PLUGIN_ROOT}" not in result["srv"]["command"]
-        assert str(tmp_path.resolve()) in result["srv"]["command"]
+        assert result["srv"]["command"] == "${CLAUDE_PLUGIN_ROOT}/run.sh"
 
     def test_unsupported_mcp_servers_type_returns_empty(self, tmp_path: Path) -> None:
         from apm_cli.deps.plugin_parser import _extract_mcp_servers
@@ -1923,34 +1922,3 @@ class TestReadMcpJson:
         path.write_text("[1, 2, 3]", encoding="utf-8")
         result = _read_mcp_json(path, logging.getLogger("test"))
         assert result == {}
-
-
-class TestSubstitutePluginRoot:
-    """_substitute_plugin_root replaces placeholder in nested structures."""
-
-    def test_substitutes_in_string_values(self) -> None:
-        import logging
-
-        from apm_cli.deps.plugin_parser import _substitute_plugin_root
-
-        servers: dict[str, Any] = {"s": {"command": "${CLAUDE_PLUGIN_ROOT}/run.sh"}}
-        result = _substitute_plugin_root(servers, "/abs/path", logging.getLogger("test"))
-        assert result["s"]["command"] == "/abs/path/run.sh"
-
-    def test_substitutes_in_nested_list(self) -> None:
-        import logging
-
-        from apm_cli.deps.plugin_parser import _substitute_plugin_root
-
-        servers: dict[str, Any] = {"s": {"args": ["${CLAUDE_PLUGIN_ROOT}/bin", "--port", "3000"]}}
-        result = _substitute_plugin_root(servers, "/root", logging.getLogger("test"))
-        assert result["s"]["args"][0] == "/root/bin"
-
-    def test_non_placeholder_strings_unchanged(self) -> None:
-        import logging
-
-        from apm_cli.deps.plugin_parser import _substitute_plugin_root
-
-        servers: dict[str, Any] = {"s": {"command": "npx"}}
-        result = _substitute_plugin_root(servers, "/root", logging.getLogger("test"))
-        assert result["s"]["command"] == "npx"

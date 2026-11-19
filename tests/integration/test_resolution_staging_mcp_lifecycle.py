@@ -78,12 +78,10 @@ def _publish_plugin(tmp_path: Path) -> tuple[Path, DependencyReference, APMPacka
 
 def _assert_published_server(package: APMPackage, live_path: Path) -> dict[str, object]:
     server = package.get_all_mcp_dependencies()[0]
-    assert server.args == [
-        f"{live_path}/start.mjs",
-        f"--root={live_path}/data",
-    ]
-    assert server.env == {"TOOL_HOME": str(live_path)}
-    assert Path(server.args[0]).is_file()
+    assert server.args == [f"{_PLUGIN_ROOT}/start.mjs", f"--root={_PLUGIN_ROOT}/data"]
+    assert server.env == {"TOOL_HOME": _PLUGIN_ROOT}
+    assert server.plugin_root == str(live_path)
+    assert (live_path / "start.mjs").is_file()
     return MCPIntegrator._build_self_defined_info(server)
 
 
@@ -164,8 +162,8 @@ def test_replayed_plugin_writes_lock_claude_and_codex_configs(tmp_path: Path) ->
     expected_home = str(live_path)
 
     lock_server = lock_data["mcp_configs"]["toolsrv"]["_raw_stdio"]
-    assert lock_server["args"][0] == expected_script
-    assert lock_server["env"]["TOOL_HOME"] == expected_home
+    assert lock_server["args"][0] == f"{_PLUGIN_ROOT}/start.mjs"
+    assert lock_server["env"]["TOOL_HOME"] == _PLUGIN_ROOT
     assert lock_data["dependencies"][0]["content_hash"] == compute_package_hash(live_path)
 
     claude_server = claude_config["mcpServers"]["toolsrv"]

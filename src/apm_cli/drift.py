@@ -407,7 +407,9 @@ def should_force_ref_recheck(
     callback. The resolver reads a package's ``apm.yml`` from whatever path this
     gate leaves in place, so returning False means "the materialized copy is
     current". A normal install rechecks local packages (their source can change
-    without any ref moving) and manifest/lock drift; *update_keys* scopes both
+    without any ref moving), manifest/lock drift, and a copy whose commit or
+    content contradicts its lock row (:func:`locked_copy_is_stale`);
+    *update_keys* scopes both
     the local recheck and the update rechecks to a targeted run's selected
     subtree. An explicit update also
     rechecks mutable Git refs, semver ranges and hook-only packages. Hook
@@ -454,7 +456,86 @@ def should_force_ref_recheck(
             # one.
             return not is_full_revision_pin(dep_ref.reference)
         return False
-    return detect_ref_change(dep_ref, locked_dep, update_refs=False)
+    if detect_ref_change(dep_ref, locked_dep, update_refs=False):
+        return True
+    # #3884: an unchanged manifest ref does not prove the copy on disk holds
+    # the locked commit; a stale copy would resolve children from an old apm.yml.
+    return package_path is not None and locked_copy_is_stale(locked_dep, package_path)
+
+
+LOCKED_COPY_GIT_HEAD = "git-head"
+LOCKED_COPY_PIN = "pin"
+LOCKED_COPY_CONTENT_HASH = "content-hash"
+
+
+def _locked_commit(locked_dep: Any) -> str | None:
+    commit = getattr(locked_dep, "resolved_commit", None)
+    if isinstance(commit, str) and commit and commit != "cached":
+        return commit
+    return None
+
+
+def locked_copy_proof(
+    locked_dep: Any, package_path: Path, *, trust_marker: bool = False
+) -> str | None:
+    """Return how the copy at *package_path* proves it holds *locked_dep*, else None.
+
+    This is the single owner of "is this apm_modules copy the locked
+    content". Strongest evidence first: a readable ``.git`` HEAD decides on
+    its own; otherwise the ``.apm-pin`` marker naming the locked
+    ``resolved_commit``, then the recorded ``content_hash`` (rows without a
+    commit, or copies without a marker). The marker only catches honest
+    staleness, so by default only the git HEAD or the verified content hash
+    prove a copy whose bytes may be deployed; *trust_marker* admits the
+    marker for resolution freshness (:func:`locked_copy_is_stale`).
+    """
+    if locked_dep is None or not package_path.is_dir():
+        return None
+    commit = _locked_commit(locked_dep)
+    if commit is not None:
+        if (package_path / ".git").exists():
+            try:
+                from git import Repo as GitRepo
+
+                head = GitRepo(package_path).head.commit.hexsha
+            except Exception:  # unreadable checkout: fall back to marker and hash
+                head = None
+            if head is not None:
+                return LOCKED_COPY_GIT_HEAD if head == commit else None
+        if trust_marker:
+            from apm_cli.install.cache_pin import CachePinError, verify_marker
+
+            try:
+                verify_marker(package_path, commit)
+                return LOCKED_COPY_PIN
+            except CachePinError:
+                pass
+    from apm_cli.install.phases._redownload import _should_skip_redownload
+
+    if _should_skip_redownload(locked_dep, package_path):
+        return LOCKED_COPY_CONTENT_HASH
+    return None
+
+
+def locked_copy_is_stale(locked_dep: Any, package_path: Path) -> bool:
+    """Return whether an existing copy contradicts what *locked_dep* records.
+
+    Only evidence can contradict a copy: a recorded content hash, an
+    ``.apm-pin`` marker or a ``.git`` checkout that does not prove the locked
+    content. A legacy copy with none of these (and a row without a content
+    hash) is kept, as before #3884; installs mark it from then on.
+    """
+    if locked_dep is None or not package_path.is_dir():
+        return False
+    if locked_copy_proof(locked_dep, package_path, trust_marker=True) is not None:
+        return False
+    from apm_cli.install.cache_pin import MARKER_FILENAME
+
+    return bool(
+        getattr(locked_dep, "content_hash", None)
+        or (_locked_commit(locked_dep) is not None and (package_path / MARKER_FILENAME).exists())
+        or (_locked_commit(locked_dep) is not None and (package_path / ".git").exists())
+    )
 
 
 def _refetches_mutable_ref_during_resolution(dep_ref: DependencyReference) -> bool:

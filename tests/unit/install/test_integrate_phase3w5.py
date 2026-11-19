@@ -875,3 +875,56 @@ class TestRunIntegrationLoop:
 
         assert ctx.installed_count == 1
         assert ctx.total_prompts_integrated == 2
+
+
+# ---------------------------------------------------------------------------
+# Deployment reuse (#3884): the .apm-pin marker never stands in for bytes
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("hashed", "tampered", "skip"),
+    [(True, False, True), (True, True, False), (False, False, False)],
+    ids=["intact", "tampered", "unhashed-row"],
+)
+def test_marker_proven_copy_still_needs_verified_bytes(
+    tmp_path: Path, hashed: bool, tampered: bool, skip: bool
+) -> None:
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.cache_pin import write_marker
+    from apm_cli.install.phases import integrate
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    commit = "a" * 40
+    ref = DependencyReference(repo_url="acme/pkg")
+    modules = tmp_path / "apm_modules"
+    installed = ref.get_install_path(modules)
+    installed.mkdir(parents=True)
+    (installed / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n", encoding="utf-8")
+    locked = LockedDependency(
+        repo_url=ref.repo_url,
+        resolved_commit=commit,
+        content_hash=compute_package_hash(installed) if hashed else None,
+    )
+    write_marker(installed, commit)
+    if tampered:
+        (installed / "apm.yml").write_text("name: pkg\nversion: 6.6.6\n", encoding="utf-8")
+    ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path)
+    ctx.apm_modules_dir = modules
+    ctx.existing_lockfile = LockFile()
+    ctx.existing_lockfile.add_dependency(locked)
+    ctx.logger = MagicMock()
+    ctx.diagnostics = MagicMock()
+    ctx.downloader = MagicMock()
+
+    heal = MagicMock(side_effect=lambda *a, **kw: (kw["lockfile_match"], kw["ref_changed"]))
+    with patch.object(integrate, "run_heal_chain", heal):
+        _, skip_download, _, _ = integrate._resolve_download_strategy(ctx, ref, installed)
+
+    assert skip_download is skip
+    assert heal.call_args.kwargs["lockfile_match"] is skip
+    # A hash-only proof keeps the v<=0.12.2 branch-drift heal eligible.
+    assert heal.call_args.kwargs["lockfile_match_via_content_hash_only"] is skip

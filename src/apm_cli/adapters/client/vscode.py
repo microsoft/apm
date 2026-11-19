@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from typing import ClassVar
 
 from ...core.docker_args import DockerArgsProcessor
 from ...mcp_transport import canonical_remote_transport
@@ -42,6 +43,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
     target_name: str = "vscode"
     mcp_servers_key: str = "servers"
+    # VS Code resolves ${workspaceFolder} in .vscode/mcp.json (predefined
+    # variables, code.visualstudio.com/docs/copilot/reference/mcp-configuration).
+    plugin_root_project_reference: ClassVar[str | None] = "${workspaceFolder}"
 
     def __init__(
         self,
@@ -318,7 +322,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
         input_vars = []
 
         # Self-defined stdio deps carry raw command/args  -- use directly
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             server_config = {
                 "type": "stdio",

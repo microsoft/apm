@@ -18,6 +18,7 @@ from apm_cli.deps.plugin_parser import (
     rebase_plugin_root_paths,
     resolve_plugin_root_placeholders,
 )
+from apm_cli.deps.plugin_root_render import with_absolute_plugin_root
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
@@ -78,12 +79,19 @@ def test_staged_download_records_published_package_path(tmp_path: Path) -> None:
     assert STAGING_DIR_NAME not in str(package.package_path)
 
 
+def _expanded(server):
+    """The server as a target without a portable form renders it."""
+    return with_absolute_plugin_root(server, ("args", "env"))
+
+
 def test_staged_download_records_published_mcp_args(tmp_path: Path) -> None:
     live_path, package = _resolve_through_staging(tmp_path)
 
     servers = package.get_all_mcp_dependencies()
     assert [server.name for server in servers] == ["toolsrv"]
-    server = servers[0]
+    assert servers[0].args[0] == f"{_ROOT}/start.mjs"
+    assert servers[0].plugin_root == str(live_path)
+    server = _expanded(servers[0])
     assert server.args[0] == f"{live_path}/start.mjs"
     assert Path(server.args[0]).exists()
     assert server.env["TOOL_HOME"] == str(live_path)
@@ -92,7 +100,7 @@ def test_staged_download_records_published_mcp_args(tmp_path: Path) -> None:
 def test_staged_download_rebases_mid_token_and_repeated_roots(tmp_path: Path) -> None:
     live_path, package = _resolve_through_staging(tmp_path)
 
-    server = package.get_all_mcp_dependencies()[0]
+    server = _expanded(package.get_all_mcp_dependencies()[0])
     assert server.args[1] == f"--root={live_path}/data"
     assert server.args[2] == f"--search={live_path}/a:{live_path}/b"
     assert server.env["TOOL_PREFIX"] == f"PREFIX={live_path}"
@@ -101,7 +109,7 @@ def test_staged_download_rebases_mid_token_and_repeated_roots(tmp_path: Path) ->
 def test_staged_download_leaves_no_staging_reference(tmp_path: Path) -> None:
     _, package = _resolve_through_staging(tmp_path)
 
-    server = package.get_all_mcp_dependencies()[0]
+    server = _expanded(package.get_all_mcp_dependencies()[0])
     rendered = [*server.args, *server.env.values(), str(package.package_path)]
     assert not [value for value in rendered if STAGING_DIR_NAME in value]
 

@@ -281,6 +281,26 @@ wrap servers as `{"mcpServers": {...}}` or list them as a flat top-level map
 object. A file with no usable server is skipped with a warning naming the file
 and plugin. Servers then install like `apm.yml`-declared self-defined servers.
 
+`${CLAUDE_PLUGIN_ROOT}` stays as written in `apm.lock.yaml`, so `apm install
+--frozen` and `apm audit --ci` pass in a clone at any path. Each target config
+gets its own project-root form for a package under `apm_modules/`:
+
+| Target | Written form |
+| --- | --- |
+| Claude and Copilot (`.mcp.json`) | `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<package>/...` |
+| Cursor (`.cursor/mcp.json`), VS Code (`.vscode/mcp.json`) | `${workspaceFolder}/apm_modules/<package>/...` |
+| Other targets, and every target with `--global` | Absolute package path |
+
+In `.mcp.json`, the default `.` resolves from the directory you start Claude
+Code or Copilot CLI in, so start them from the project root. A lockfile from an
+earlier release that holds the absolute path still passes `--frozen`, which
+replays that recorded path and leaves the target configs unchanged; the next
+`apm install` rewrites the lockfile and the configs in the portable form.
+
+`apm pack --format agent-plugin` refuses an MCP server that uses
+`${CLAUDE_PLUGIN_ROOT}`: Agent Plugins do not resolve it and the bundle does not
+include that plugin's files.
+
 ## Resolve a connection name conflict
 
 For every JSON-config target (Copilot, Cursor, Gemini, Kiro,

@@ -258,3 +258,24 @@ def test_locked_links_render_into_the_current_deployment_frame(tmp_path: Path) -
     assert count == 1
     anchor.write_bytes(rendered.encode("utf-8"))
     assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}
+
+
+def test_locked_sources_skip_the_download_when_installing_the_locked_commit(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+
+    update = _locked_update(tmp_path)
+    fetched: list[str] = []
+    locked = "a" * 40
+
+    def fetch(owner: str, _scratch: Path):
+        fetched.append(owner)
+
+    sources = LockedSkillSources(fetch, lambda _owner: locked)
+    assert sources.plan("org/pkg", update.plan, update.targets, locked) is None
+    assert fetched == []
+    sources = LockedSkillSources(fetch, lambda _owner: locked)
+    sources.plan("org/pkg", update.plan, update.targets, "b" * 40)
+    assert fetched == ["org/pkg"]
+    sources.close()

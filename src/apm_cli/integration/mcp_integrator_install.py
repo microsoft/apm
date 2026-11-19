@@ -1561,6 +1561,7 @@ def _install_self_defined_deps(
             )
             if rt in protected_clients:
                 client = protected_clients[rt]
+                stale_receipts: set[str] = set()
                 state = compare_native_mcp_connection(
                     client,
                     dep.name,
@@ -1571,6 +1572,7 @@ def _install_self_defined_deps(
                     managed_fields=managed_fields,
                     native_hash=(native_hashes or {}).get(rt, {}).get(dep.name),
                     declaration_changed=is_update,
+                    stale_receipts=stale_receipts,
                 )
                 if (
                     state
@@ -1612,7 +1614,12 @@ def _install_self_defined_deps(
                         if managed_target_servers is not None:
                             managed_target_servers.setdefault(rt, set()).add(dep.name)
                         retain_native_receipt(
-                            native_hashes, rt, client, dep.name, requested_info=synthetic_info
+                            native_hashes,
+                            rt,
+                            client,
+                            dep.name,
+                            requested_info=synthetic_info,
+                            replace=dep.name in stale_receipts,
                         )
                     if peer_wrote_shared_entry(
                         rt, dep.name, written_connections, user_scope=user_scope

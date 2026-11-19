@@ -20,6 +20,9 @@ from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
 # (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
 # working without modification.
+from apm_cli.core.scope import InstallScope as _InstallScope
+from apm_cli.core.scope import get_apm_dir as _get_apm_dir
+from apm_cli.deps.lockfile_generator import check_current_cli
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -1168,10 +1171,9 @@ def install(  # noqa: PLR0913
     # even if logger init itself raised.
     install_started_at = time.perf_counter()
     summary_rendered = False
-    logger = None
+    logger = dry_run_manifest_tmp = None
     command_result: InstallResult | None = None
     transaction: InstallTransaction | None = None
-    dry_run_manifest_tmp = None
     from ..install.service import InstallService
 
     ctx.with_resource(InstallService.frozen_writes(frozen))
@@ -1212,6 +1214,10 @@ def install(  # noqa: PLR0913
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _root_redirect.__enter__()
     try:
+        check_current_cli(
+            _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
+            command="apm install",
+        )
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
         # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
