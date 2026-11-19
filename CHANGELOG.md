@@ -37,10 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Diamond dependencies pair each skill with its own targets, recorded in the optional `subset_pairings` lockfile field. (#3769)
 - Azure DevOps installs tell your Git credential helper about success or HTTP 401, so Git Credential Manager can replace an expired credential; `ADO_APM_PAT` and `az` tokens are never reported. (#3765, #3818)
 - `mcp.transport.allow` checks registry MCP servers on what install writes, consistently in install, update and `apm audit --ci`, which now also checks dev MCP servers. (#3788)
-- OpenAPM v0.1 proposals: `vscode` as a `copilot` alias, `hermes` and `grok-bot` targets, stricter-wins `fetch_failure` merge, and per-file ownership of shared `.mcp.json` entries. (#3851, #3865, #3875, #3888)
+- OpenAPM v0.1 amendments: `vscode` as a `copilot` alias, `hermes` and `grok-bot` targets, stricter-wins `fetch_failure` merge, and per-file ownership of shared `.mcp.json` entries. (#3851, #3865, #3875, #3888)
+- OpenAPM v0.1 adopts amendments 0.1.61, 0.1.62 and 0.1.63; the `vscode` alias and singular `target:` deprecation windows start 2026-11-19. (#3905)
 
 ### Fixed
 
+- Instructions `apm install <bundle>` stages for Codex, Gemini or OpenCode are hash-checked, so edits before `apm compile` report `hash-drift`. (#3898)
 - `apm install <bundle>` registers a plugin bundle's hooks like a source install once its exact key is approved, and installing another package no longer removes local-bundle files. (#3897)
 - `apm approve <pkg>` on a dependency redirected by `replace:` now grants its selected source, so the next `apm install` deploys its hooks. -- by @MohammedAlkindi (#3742)
 - The same `owner/repo` from two hosts (such as `acme/tool` and `gitlab.example.com/acme/tool`) now fails before download, naming both declarations; set `alias:` on one or remove one. (#3895)
