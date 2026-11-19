@@ -54,7 +54,7 @@ def test_deactivating_one_target_keeps_entries_another_active_target_selects(
     """`claude` and `copilot` share `.mcp.json`; retiring one never strips the other's entry."""
     assert_spec_contains(
         "**[req-mf-027]** When two or more targets write project-scoped MCP",
-        "MUST attribute each entry it wrote in that",
+        "implementation attributes each entry it wrote in that",
         "NOT remove that entry while another active target that writes the same",
         "file still selects the server, and it MUST treat the entry as owned",
     )
@@ -76,6 +76,14 @@ def test_deactivating_one_target_keeps_entries_another_active_target_selects(
         project.install()
         assert project.servers() == {"mine": USER_ENTRY, "echo": WRITTEN}
         assert project.owners() == {remaining: ["echo"]}
+
+    # The inherited claim alone lets the remaining target remove the entry.
+    project.manifest(["claude"], servers=False)
+    project.install()
+    assert project.servers() == {"mine": USER_ENTRY}
+
+    project.manifest(["claude", "copilot"])
+    project.install()
 
     # Once no active target sharing the file selects the server, it may go.
     project.manifest(["claude", "copilot"], servers=False)
