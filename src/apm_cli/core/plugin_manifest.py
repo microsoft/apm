@@ -395,9 +395,10 @@ def build_plugin_manifest(
             manifest["mcpServers"] = mcp_servers
     elif ecosystem == "codex":
         _apply_codex_components(project_root, manifest, logger=logger)
-    else:
-        # copilot -- omit mcpServers
+    elif ecosystem == "copilot":
         manifest.pop("mcpServers", None)
+    else:
+        raise ValueError(f"Unknown plugin manifest ecosystem {ecosystem!r}")
 
     return manifest
 
@@ -410,6 +411,8 @@ def _is_regular(path: Path, *, directory: bool) -> bool:
 
 def _apply_codex_components(project_root: Path, manifest: dict, *, logger: Any = None) -> None:
     """Shape *manifest* as the documented ``.codex-plugin/plugin.json``."""
+    from ..codex_plugins.manifest import is_safe_codex_plugin_name
+
     manifest.pop("mcpServers", None)
     if _is_regular(project_root / "skills", directory=True):
         manifest["skills"] = "./skills/"
@@ -424,6 +427,13 @@ def _apply_codex_components(project_root: Path, manifest: dict, *, logger: Any =
         _warn = (
             "Codex expects " + ", ".join(missing) + " in .codex-plugin/plugin.json; "
             "add them to apm.yml so Codex lists this plugin with its real identity."
+        )
+        _emit("warning", _warn, logger, "warning")
+    if not is_safe_codex_plugin_name(manifest.get("name")):
+        _warn = (
+            f"Codex plugin name {manifest.get('name')!r} must start with a letter or "
+            "digit and use only letters, digits, '.', '_' or '-'; rename it in apm.yml "
+            "so 'apm install -g --target codex' accepts this plugin."
         )
         _emit("warning", _warn, logger, "warning")
 

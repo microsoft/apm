@@ -1,9 +1,9 @@
 """Keep pack-time ecosystem plugin.json generation in ``core/plugin_manifest.py``.
 
 ``apm pack`` maps each ``targets:`` ecosystem (claude, copilot, codex) to one
-generated ``plugin.json`` path and shape. Producers and bundle exporters route
-through ``PLUGIN_ECOSYSTEM_PATHS`` and ``build_plugin_manifest`` instead of
-re-declaring host manifest paths (#3077).
+generated ``plugin.json`` path and shape. Producers, bundle exporters and the
+Codex compatibility reader route through ``PLUGIN_ECOSYSTEM_PATHS`` and
+``build_plugin_manifest`` instead of re-declaring host manifest paths (#3077).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from scripts.architecture_linter.models import Rule, Violation
 
 RULE_ID = "marketplace-integrations-pack-plugin-manifests"
 _OWNER = "src/apm_cli/core/plugin_manifest.py"
-_PACK_SURFACE_PREFIXES = ("src/apm_cli/core/", "src/apm_cli/bundle/")
+_PACK_SURFACE_PREFIXES = ("src/apm_cli/core/", "src/apm_cli/bundle/", "src/apm_cli/codex_plugins/")
 _PACK_COMMAND = "src/apm_cli/commands/pack.py"
 _OWNER_DEFINITIONS = (
     (re.compile(r"^PLUGIN_ECOSYSTEM_PATHS\b"), "PLUGIN_ECOSYSTEM_PATHS"),

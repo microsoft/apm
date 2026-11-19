@@ -160,6 +160,34 @@ class TestBuildPluginManifest:
             "mcpServers": "./.mcp.json",
         }
 
+    def test_codex_manifest_round_trips_through_apm_codex_reader(self, tmp_path: Path) -> None:
+        from apm_cli.codex_plugins.manifest import load_codex_compatibility_manifest
+
+        apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
+        _write(tmp_path / "skills" / "hello" / "SKILL.md", "---\nname: hello\n---\n")
+        _write(tmp_path / ".mcp.json", json.dumps({"mcpServers": {"srv": {"command": "node"}}}))
+        write_plugin_manifest(tmp_path, build_plugin_manifest(tmp_path, apm, "codex"), "codex")
+
+        loaded = load_codex_compatibility_manifest(tmp_path)
+
+        assert (loaded.name, loaded.version) == ("my-plugin", "1.0.0")
+        assert loaded.mcp_server_names == ("srv",)
+
+    def test_codex_warns_on_name_the_codex_reader_rejects(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
+        apm.write_text(apm.read_text().replace("name: my-plugin", "name: '@acme/my plugin'"))
+        logger = MagicMock()
+        build_plugin_manifest(tmp_path, apm, "codex", logger=logger)
+        messages = [call.args[0] for call in logger.warning.call_args_list]
+        assert any("Codex plugin name '@acme/my plugin'" in message for message in messages)
+
+    def test_every_ecosystem_has_a_shape_and_unknown_raises(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
+        for ecosystem in sorted(PLUGIN_MANIFEST_ECOSYSTEMS):
+            assert build_plugin_manifest(tmp_path, apm, ecosystem)["name"] == "my-plugin"
+        with pytest.raises(ValueError, match="Unknown plugin manifest ecosystem"):
+            build_plugin_manifest(tmp_path, apm, "cursor")
+
     def test_codex_omits_absent_or_symlinked_components(self, tmp_path: Path) -> None:
         apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
         real_skills = tmp_path / "elsewhere"

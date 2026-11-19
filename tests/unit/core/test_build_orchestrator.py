@@ -21,6 +21,7 @@ from apm_cli.core.build_orchestrator import (
     ProducerResult,
     detect_outputs,
 )
+from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
 from apm_cli.marketplace.builder import BuildReport, MarketplaceOutputReport
 
 
@@ -477,6 +478,25 @@ class TestPluginManifestProducer:
         expected = tmp_path / ".codex-plugin" / "plugin.json"
         assert result.outputs == [expected]
         assert json.loads(expected.read_text(encoding="utf-8"))["version"] == "1.0.0"
+
+    @pytest.mark.parametrize(
+        ("bundle_format", "skipped"),
+        [("claude-plugin", set()), ("agent-plugin", {"claude"})],
+    )
+    def test_all_targets_skip_only_claude_under_agent_plugin(
+        self, tmp_path: Path, bundle_format: str, skipped: set[str]
+    ) -> None:
+        apm = self._apm_yml(tmp_path, "[claude, copilot, codex]")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, bundle_format=bundle_format)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        expected = {
+            tmp_path / path for name, path in PLUGIN_ECOSYSTEM_PATHS.items() if name not in skipped
+        }
+        assert set(result.outputs) == expected
+        for name in skipped:
+            assert not (tmp_path / PLUGIN_ECOSYSTEM_PATHS[name]).exists()
 
     def test_default_legacy_mode_produces_both_sidecars(self, tmp_path: Path) -> None:
         apm = tmp_path / "apm.yml"

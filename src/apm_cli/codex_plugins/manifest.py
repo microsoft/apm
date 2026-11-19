@@ -7,10 +7,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.codex_plugins.client import CodexNativeError
+from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
 from apm_cli.deps.plugin_parser import _bounded_read_json
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 
-CODEX_COMPAT_MANIFEST = Path(".codex-plugin/plugin.json")
+CODEX_COMPAT_MANIFEST = Path(PLUGIN_ECOSYSTEM_PATHS["codex"])
+_NATIVE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def is_safe_codex_plugin_name(name: object) -> bool:
+    """Return True when *name* is a plugin name APM's Codex route accepts."""
+    return isinstance(name, str) and _NATIVE_NAME_RE.fullmatch(name) is not None
 
 
 @dataclass(frozen=True)
@@ -69,7 +76,7 @@ def load_codex_compatibility_manifest(root: Path) -> CodexCompatibilityPlugin:
     if not isinstance(data, dict):
         raise CodexNativeError("Codex compatibility manifest must contain a JSON object.")
     name = data.get("name")
-    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None:
+    if not is_safe_codex_plugin_name(name):
         raise CodexNativeError("Codex compatibility plugin requires a safe native plugin name.")
     version = data.get("version", "0.0.0")
     if not isinstance(version, str) or not version.strip():

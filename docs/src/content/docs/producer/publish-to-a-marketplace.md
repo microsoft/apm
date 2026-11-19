@@ -247,7 +247,8 @@ Each Codex entry points at a plugin directory, and Codex reads that
 directory's own manifest. Add `codex` to the package's `targets:` so
 `apm pack` writes `.codex-plugin/plugin.json` with the package's name,
 version, description and author, plus `skills/` and `.mcp.json`
-references when those exist at the package root. See
+references when those exist at the package root. Codex does not see
+skills under `.apm/skills/` or MCP servers declared in `apm.yml`. See
 [Plugin manifests](../../reference/cli/pack/#plugin-manifests).
 Portable bundles from `apm pack --format agent-plugin` already work:
 Codex reads their schema-declared root `plugin.json`. Codex also reads
@@ -265,9 +266,17 @@ targets: [claude, copilot, codex]
 ```
 
 ```bash
-codex plugin marketplace add ./my-marketplace
-codex plugin add hello@my-marketplace   # installs hello 1.2.3
+(cd packages/hello && apm pack)   # writes packages/hello/.codex-plugin/plugin.json
+apm pack                          # writes .agents/plugins/marketplace.json
+git add packages/hello/.codex-plugin/plugin.json .agents/plugins/marketplace.json
+codex plugin marketplace add .
+codex plugin add hello@my-project        # marketplace name from apm.yml; installs 1.2.3
 ```
+
+`apm pack` keeps an existing `.codex-plugin/plugin.json`. After a
+version bump, re-run it in the package with `--force` so Codex installs
+the new version (see
+[Overwrite and dry-run](../../reference/cli/pack/#overwrite-and-dry-run)).
 
 Tested with Codex CLI 0.170.0 (CLI surface): installation, skills, and
 MCP server configuration. Desktop and hosted Codex, hooks, and agents
