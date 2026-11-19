@@ -1113,16 +1113,36 @@ def filter_excluded_mcp_runtimes(
     target_runtimes: list[str],
     exclude: str | None,
 ) -> list[str]:
-    """Apply one canonical runtime exclusion, including target aliases."""
+    """Apply one canonical runtime exclusion, including target aliases.
+
+    ``--exclude`` reads its value like ``--target`` (C4, #3967): case-folded,
+    a deprecated alias warns once and selects its replacement, and a value
+    that names no target or runtime warns instead of being ignored silently.
+    """
     if not exclude:
         return list(target_runtimes)
-    exclusions = {exclude}
-    try:
-        from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.core.target_catalog import canonical_target_token
+    from apm_cli.core.target_detection import (
+        EffectiveTargetDecision,
+        warn_deprecated_target_alias_flag,
+    )
 
-        exclusions.update(EffectiveTargetDecision(exclude, "--exclude").runtime_equivalents or ())
+    token = exclude.strip().lower()
+    warn_deprecated_target_alias_flag(token, flag="--exclude")
+    canonical = canonical_target_token(token)
+    exclusions = {token, canonical}
+    try:
+        exclusions.update(EffectiveTargetDecision(canonical, "--exclude").runtime_equivalents or ())
     except KeyError:
-        pass
+        from apm_cli.integration.targets import KNOWN_TARGETS, RUNTIME_TO_CANONICAL_TARGET
+
+        if canonical not in KNOWN_TARGETS and canonical not in RUNTIME_TO_CANONICAL_TARGET:
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(
+                f"--exclude {exclude!r} names no target or MCP runtime; nothing was excluded.",
+                symbol="warning",
+            )
     return [runtime for runtime in target_runtimes if runtime not in exclusions]
 
 
