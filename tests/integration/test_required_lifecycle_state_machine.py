@@ -217,10 +217,11 @@ def _publish_revision(scenario: _Scenario, source: _PublishedPackage, revision: 
     return scenario.repositories.commit(source.repository, message=f"publish revision {revision}")
 
 
-def _instruction(name: str) -> str:
+def _instruction(name: str, apply_to: str = "**") -> str:
+    """Fixture instruction; Claude loads ``**`` ones from AGENTS.md (#3939)."""
     return (
         "---\n"
-        "applyTo: '**'\n"
+        f"applyTo: '{apply_to}'\n"
         f"description: Required lifecycle fixture instruction {name}\n"
         "---\n"
         f"# {name}\n"
@@ -1710,6 +1711,8 @@ def test_required_lock_preserves_bytes_and_provenance_until_install_prunes(
         scenario,
         "lock-provenance-kit",
         instruction="guard",
+        # Path-scoped so Claude keeps a .claude/rules/ deployment to track.
+        instruction_content=_instruction("guard", "**/*.md"),
         skill="reviewer",
     )
     consumer = scenario.consumers.create(
@@ -4039,6 +4042,8 @@ def test_required_mixed_primitives_survive_reinstall_without_state_loss(
         "mixed-kit",
         skill="mixed",
         instruction="mixed",
+        # Path-scoped so Claude keeps a .claude/rules/ deployment to track.
+        instruction_content=_instruction("mixed", "**/*.md"),
         hook_command="echo mixed",
         mcp=True,
         mcp_env=mcp_env,

@@ -122,13 +122,14 @@ def test_claude_native_rules_compile_reports_once(
     )
     instruction = tmp_path / ".apm" / "instructions" / "base.instructions.md"
     instruction.parent.mkdir(parents=True)
+    # Path-scoped: always-on instructions load from AGENTS.md since #3939.
     instruction.write_text(
-        '---\ndescription: Base\napplyTo: "**"\n---\nKeep responses concise.\n',
+        '---\ndescription: Base\napplyTo: "**/*.py"\n---\nKeep responses concise.\n',
         encoding="utf-8",
     )
     runner = CliRunner()
     assert runner.invoke(cli, ["install"]).exit_code == 0
-    assert (tmp_path / ".claude" / "rules").is_dir()
+    assert (tmp_path / ".claude" / "rules" / "base.md").is_file()
 
     result = runner.invoke(cli, ["compile"])
 

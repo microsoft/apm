@@ -240,8 +240,9 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
     AGENTS.md is generated for vscode, cursor, opencode, codex, gemini,
-    windsurf, kiro, antigravity, grok-build, hermes, all, and minimal targets.
-    Gemini needs it because GEMINI.md imports AGENTS.md.
+    claude, windsurf, kiro, antigravity, grok-build, hermes, all, and minimal
+    targets. Gemini and Claude need it because GEMINI.md and CLAUDE.md import
+    AGENTS.md.
 
     Args:
         target: The detected or configured target. May be a string or a
@@ -251,9 +252,10 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         bool: True if AGENTS.md should be generated
     """
     if isinstance(target, frozenset):
-        return "agents" in target or "gemini" in target
+        return bool(target & {"agents", "gemini", "claude"})
     return target in (
         "vscode",
+        "claude",
         "cursor",
         "opencode",
         "codex",
@@ -409,7 +411,7 @@ def get_target_description(target: UserTargetType) -> str:
     descriptions = {
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
-        "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
+        "claude": "AGENTS.md + CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "cursor": ".cursor/agents/ + .agents/skills/ + .cursor/rules/",
         "gemini": "GEMINI.md + .gemini/commands/ + .agents/skills/ + .gemini/settings.json (MCP/hooks)",
