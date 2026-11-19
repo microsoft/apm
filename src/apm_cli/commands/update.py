@@ -619,22 +619,24 @@ def _run_dep_update(
     """Serialize update with every other mutation of the same workspace."""
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile_generator import require_current_cli
+    from apm_cli.install.service import InstallService
 
     effective_scope = scope or InstallScope.PROJECT
     require_current_cli(project_root or Path.cwd(), command="apm update")
-    _run_dep_update_locked(
-        assume_yes=assume_yes,
-        dry_run=dry_run,
-        verbose=verbose,
-        project_root=project_root,
-        target=target,
-        scope=effective_scope,
-        packages=packages,
-        force=force,
-        parallel_downloads=parallel_downloads,
-        legacy_skill_paths=legacy_skill_paths,
-        trust_transitive_mcp=trust_transitive_mcp,
-    )
+    with InstallService.catalog_freshness(update_refs=True, refresh=False):
+        _run_dep_update_locked(
+            assume_yes=assume_yes,
+            dry_run=dry_run,
+            verbose=verbose,
+            project_root=project_root,
+            target=target,
+            scope=effective_scope,
+            packages=packages,
+            force=force,
+            parallel_downloads=parallel_downloads,
+            legacy_skill_paths=legacy_skill_paths,
+            trust_transitive_mcp=trust_transitive_mcp,
+        )
 
 
 def _run_dep_update_locked(

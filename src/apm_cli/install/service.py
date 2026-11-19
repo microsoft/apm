@@ -82,6 +82,24 @@ class InstallService:
         return suppress_lockfile_writes() if frozen else nullcontext()
 
     @staticmethod
+    def catalog_freshness(
+        *, update_refs: bool, refresh: bool, frozen: bool = False
+    ) -> AbstractContextManager[None]:
+        """Bind marketplace catalog freshness to the whole command invocation.
+
+        Explicit update or refresh intent -- the same intent that makes Git
+        refs resolve from upstream -- revalidates each needed catalog once and
+        fails rather than using stale data (#3279). Ordinary installs keep
+        cached catalogs, and frozen replay never acquires a live-catalog
+        requirement.
+        """
+        from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
+        from apm_cli.marketplace.client import catalog_freshness_scope
+
+        policy = RefFreshnessPolicy.for_install_intent(update_refs=update_refs, refresh=refresh)
+        return catalog_freshness_scope(require_fresh=policy.requires_remote and not frozen)
+
+    @staticmethod
     def enforce_frozen_services(
         lockfile: LockFile,
         *,

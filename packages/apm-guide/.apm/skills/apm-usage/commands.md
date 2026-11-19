@@ -108,9 +108,11 @@ the manifest or lockfile.
 Without local receipts (a fresh clone or CI runner), a committed skill whose
 whole directory matches what the install would write, and whose files are
 recorded in `apm.lock.yaml`, is kept and receipts are recorded; lockfile hashes
-are never the proof. `apm update` also replaces such a skill when it matches
-what the currently locked version renders (fetched from its locked commit); if
-any of those files was edited, update fails before writing files or the lock.
+are never the proof. When the installed commit differs from the lock (`apm
+update`, or `apm install` after an `apm.yml` ref change), such a skill is also
+replaced when it matches what the currently locked version renders (fetched
+from its locked commit); if any of those files was edited, the command fails
+before writing files or the lock.
 When a missing local receipt prevents an existing skill from being overwritten,
 install exits nonzero before stale cleanup and lock replacement. The refused
 files and prior lock contents are preserved, including cold `--frozen` replay
@@ -173,6 +175,9 @@ An APM older than the lockfile's `apm_version` refuses `install` (including
 `--frozen`, `--dry-run` and `-g`), `update`, `uninstall`, `prune`, `lock`,
 `audit` and `pack` before any change, naming both versions; read-only commands
 warn. Upgrade the CLI; there is no override.
+`apm update`, `apm install --update`, and `apm install --refresh` revalidate
+each marketplace catalog they resolve once per run and fail without changes if
+it cannot be verified; plain `apm install` keeps the cached catalog.
 
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download
@@ -731,7 +736,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path (including a local `apm.yml` read as a live catalog), or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. Without `--path`, the catalog is discovered at `marketplace.json`, `.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json` (first wins). `--path` selects a repository-relative catalog JSON (for example one per audience, `catalogs/frontend/marketplace.json`), is saved in the registration, and must stay inside the repository; not for hosted `marketplace.json` URLs or a direct file. Separate catalogs are not access control. | `-n NAME`, `-r REF`, `--host HOST`, `--path PATH`, `--offline` (local `apm.yml` only) |
 | `apm marketplace list` | List registered marketplaces | -- |
 | `apm marketplace browse NAME` | Browse marketplace plugins; reread live local `apm.yml` catalogs | `--offline` (local YAML only) |
-| `apm marketplace update [NAME]` | Update marketplace index; reread live local `apm.yml` catalogs | -- |
+| `apm marketplace update [NAME]` | Revalidate marketplace index; reread live local `apm.yml` catalogs. A failed catalog keeps its last valid cache and the command exits non-zero naming it | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
 | `apm marketplace validate NAME` | Validate raw structure, plugin schema, and duplicate plugin names. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |

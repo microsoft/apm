@@ -71,6 +71,39 @@ class MarketplaceFetchError(MarketplaceError):
         super().__init__(f"Failed to fetch marketplace '{name}'{detail}. {retry}")
 
 
+class MarketplaceFreshnessError(MarketplaceFetchError):
+    """Raised when an explicit refresh cannot revalidate a marketplace catalog.
+
+    Explicit freshness (``apm install --refresh``, ``apm update``,
+    ``apm marketplace update``) never falls back to cached catalog data, so
+    a failure here means no catalog answer was used, not that a plugin is
+    missing.
+    """
+
+    RETRY_HINT = (
+        "The cached catalog was kept and nothing was changed. Retry when the "
+        "catalog is reachable; a plain 'apm install' still uses the cached catalog."
+    )
+
+    def __init__(self, name: str, reason: str = ""):
+        super().__init__(name, reason, retry_hint=self.RETRY_HINT)
+        detail = f": {reason}" if reason else ""
+        self.args = (
+            f"Could not verify that marketplace '{name}' is current{detail}. {self.RETRY_HINT}",
+        )
+
+
+class MarketplaceNotCachedError(MarketplaceFetchError):
+    """An advisory read during an explicit refresh found no cached catalog."""
+
+    def __init__(self, name: str):
+        super().__init__(
+            name,
+            "no cached catalog for an advisory read during an explicit refresh",
+            retry_hint="",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Builder errors (used by builder.py and ref_resolver.py)
 # ---------------------------------------------------------------------------

@@ -1247,11 +1247,20 @@ def resolve_marketplace_plugin(
     try:
         from .shadow_detector import detect_shadows
 
-        shadows = detect_shadows(plugin_name, marketplace_name, auth_resolver=auth_resolver)
+        skipped: list[str] = []
+        shadows = detect_shadows(
+            plugin_name, marketplace_name, auth_resolver=auth_resolver, skipped=skipped
+        )
         for shadow in shadows:
             _emit_warning(
                 f"Plugin '{plugin_name}' also found in marketplace '{shadow.marketplace_name}'. "
                 "Verify you are installing from the intended source."
+            )
+        if skipped:
+            _emit_warning(
+                f"Did not check {', '.join(repr(name) for name in skipped)} for another "
+                f"'{plugin_name}': not cached, and an explicit refresh fetches only the "
+                "catalogs it needs."
             )
     except Exception:
         # Shadow detection must never break installation

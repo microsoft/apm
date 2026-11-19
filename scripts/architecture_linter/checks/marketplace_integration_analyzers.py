@@ -19,6 +19,9 @@ from scripts.architecture_linter.checks.marketplace_catalog_and_contract import 
 from scripts.architecture_linter.checks.marketplace_catalog_and_contract import (
     RULES as _CATALOG_CONTRACT_RULES,
 )
+from scripts.architecture_linter.checks.marketplace_catalog_freshness import (
+    RULES as _CATALOG_FRESHNESS_RULES,
+)
 from scripts.architecture_linter.checks.marketplace_component_and_admission import (
     COLLECTORS as _COMPONENT_ADMISSION_COLLECTORS,
 )
@@ -51,6 +54,7 @@ RULES = (
     + _PACKAGE_REGISTRATION_RULES
     + _BUNDLE_AUDIT_RULES
     + _LOCKED_EVIDENCE_RULES
+    + _CATALOG_FRESHNESS_RULES
     + _PACK_PLUGIN_MANIFEST_RULES
 )
 COLLECTORS = (

@@ -260,6 +260,7 @@ class APMDependencyResolver:
         self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
         self._marketplace_provenance: dict[str, dict[str, str]] = {}
+        self._selected_marketplace_keys: list[str] = []
         # Every declaring edge per node identity (``get_unique_key``), recorded
         # before any dedup so the selection merge sees all of them (#3735).
         self._edge_selections: dict[str, list[EdgeSelection]] = {}
@@ -269,6 +270,11 @@ class APMDependencyResolver:
     def marketplace_provenance(self) -> dict[str, dict[str, str]]:
         """Return marketplace provenance captured while resolving the graph."""
         return dict(self._marketplace_provenance)
+
+    @property
+    def selected_marketplace_keys(self) -> tuple[str, ...]:
+        """Return resolved keys of selected catalog declarations (scoped updates)."""
+        return tuple(self._selected_marketplace_keys)
 
     @staticmethod
     def _resolve_max_parallel(explicit: int | None) -> int:
@@ -680,6 +686,13 @@ class APMDependencyResolver:
             resolved.marketplace_manifest = dict(manifest)
             resolved.marketplace_name = dep_ref.marketplace_name
             resolved.marketplace_plugin_name = dep_ref.marketplace_plugin_name
+        # A selected catalog declaration selects the Git coordinate it
+        # resolves to, so scoped updates re-check that package (#3279).
+        if self._update_keys is not None and dep_ref.get_unique_key() in self._update_keys:
+            resolved_key = resolved.get_unique_key()
+            if resolved_key not in self._update_keys:
+                self._update_keys.add(resolved_key)
+                self._selected_marketplace_keys.append(resolved_key)
         self._marketplace_provenance[resolved.get_unique_key()] = resolution.provenance(
             dep_ref.marketplace_name,
             dep_ref.marketplace_plugin_name,

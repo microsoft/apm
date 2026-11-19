@@ -342,11 +342,11 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
-def _attach_resolver_marketplace_provenance(
-    ctx: InstallContext,
-    resolver,
-) -> None:
-    """Carry manifest-resolved marketplace identity into lockfile assembly."""
+def _attach_resolver_marketplace_provenance(ctx: InstallContext, resolver) -> None:
+    """Carry manifest-resolved marketplace identity into selection and lockfile assembly."""
+    if ctx.only_packages and resolver.selected_marketplace_keys:
+        # Selecting ``plugin@marketplace`` selects the package it resolved to.
+        ctx.only_packages = [*ctx.only_packages, *resolver.selected_marketplace_keys]
     if not resolver.marketplace_provenance:
         return
     if ctx.marketplace_provenance is None:

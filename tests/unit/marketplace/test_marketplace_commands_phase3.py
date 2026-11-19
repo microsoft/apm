@@ -582,15 +582,16 @@ class TestUpdateCmd:
         with patch(
             "apm_cli.marketplace.registry.get_registered_marketplaces", return_value=sources
         ):
-            with patch("apm_cli.marketplace.client.clear_marketplace_cache"):
-                with patch(
-                    "apm_cli.marketplace.client.fetch_marketplace",
-                    side_effect=fetch_side_effect,
-                ):
-                    result = runner.invoke(marketplace, ["update"])
-        assert result.exit_code == 0
-        # bad marketplace warning should appear in output
-        assert "bad" in result.output
+            with patch(
+                "apm_cli.marketplace.client.fetch_marketplace",
+                side_effect=fetch_side_effect,
+            ):
+                result = runner.invoke(marketplace, ["update"])
+        # A partial refresh names the failed catalog and exits nonzero (#3279).
+        assert result.exit_code == 1
+        assert "good (1 plugins)" in result.output
+        assert "failed: bad" in result.output
+        assert "Marketplace cache refreshed" not in result.output
 
 
 # ---------------------------------------------------------------------------
