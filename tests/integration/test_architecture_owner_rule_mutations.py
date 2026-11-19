@@ -269,8 +269,8 @@ def test_frozen_and_audit_share_deployed_hash_verifier(
         ),
         pytest.param(
             "src/apm_cli/install/services.py",
-            "staged_fallback_hashes[record] = (",
-            "_unused_fallback = (",
+            'staged_fallback_hashes[record] = f"sha256:{desired_hash}"',
+            'skipped_hash = f"sha256:{desired_hash}"',
             id="collision-skipped-staging-left-unhashed",
         ),
         pytest.param(

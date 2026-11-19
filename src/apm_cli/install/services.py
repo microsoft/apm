@@ -838,11 +838,10 @@ def integrate_local_bundle(
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
-        ``deployed_file_hashes`` (dict[str, str]), ``staged_files``
-        (compile input under ``apm_modules/``, never a deployment claim),
-        ``staged_file_hashes`` (dict[str, str]), ``staged_file_fallback_hashes``
-        (bundle digests for staged files skipped on collision), ``skipped`` (int), and per-primitive counters
-        (``skills``, ``agents``, ``commands``, ...).
+        ``deployed_file_hashes``, ``staged_files`` / ``staged_file_hashes`` (compile
+        input under ``apm_modules/``, never deployment claims), ``staged_file_fallback_hashes``
+        (bundle digests of collision-skipped staging), ``skipped`` (int), and per-primitive
+        counters (``skills``, ``agents``, ``commands``, ...).
     """
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
@@ -1025,13 +1024,9 @@ def integrate_local_bundle(
                 skipped += 1
                 continue
 
-            # Issue #1207 D2.b: for compile-only targets (opencode, codex,
-            # gemini -- no ``instructions`` primitive in their profile),
-            # bundle ``instructions/*.md`` files must be staged under
-            # ``apm_modules/<slug>/.apm/instructions/`` so ``apm compile``
-            # can merge them into the target's AGENTS.md / GEMINI.md /
-            # equivalent.  Deploying them verbatim to ``<root>/instructions/``
-            # is a no-op for these clients.
+            # Issue #1207 D2.b: targets without an ``instructions`` primitive
+            # (opencode, codex, gemini) get bundle instructions staged under
+            # ``apm_modules/<slug>/.apm/instructions/`` for ``apm compile``.
             _rel_norm = rel.replace("\\", "/")
             _deploy_rel = _bundle_rel(
                 _rel_norm,
@@ -1124,8 +1119,7 @@ def integrate_local_bundle(
             else:
                 desired_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
 
-            # Collision handling: skip if file exists and content differs
-            # and not force.  Idempotent (same content) writes are silent.
+            # Skip an existing file with different content unless --force.
             if not dry_run and dest.exists() and not force:
                 try:
                     existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
@@ -1133,12 +1127,8 @@ def integrate_local_bundle(
                     existing_hash = None
                 if existing_hash and existing_hash != desired_hash:
                     skipped += 1
-                    if _staged:
-                        # Bind an edited, unrestaged file to the bundle bytes so
-                        # it is drift even without a prior hash (#3718).
-                        staged_fallback_hashes[record] = (
-                            f"sha256:{desired_hash.removeprefix('sha256:')}"
-                        )
+                    if _staged:  # an edited, unrestaged file stays drift (#3718)
+                        staged_fallback_hashes[record] = f"sha256:{desired_hash}"
                     msg = (
                         f"Skipped {record}: file exists with different "
                         "content. Re-run with --force to overwrite."
@@ -1157,11 +1147,8 @@ def integrate_local_bundle(
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
-            # Claims carry the canonical ``sha256:<hex>`` form that
-            # ``compute_deployed_hashes`` writes, so stale-cleanup provenance
-            # checks compare equal. IM4: a real deploy hashes the on-disk bytes
-            # after LF normalization; a dry run previews the same digest.
-            # Staged compile input is hash-bound the same way (#3718).
+            # Canonical ``sha256:<hex>`` claims, staged ones included (#3718); IM4: a
+            # real deploy hashes LF-normalized disk bytes, a dry run previews them.
             (staged_hashes if _staged else deployed_hashes)[record] = (
                 f"sha256:{desired_hash}" if dry_run else compute_file_hash(dest)
             )

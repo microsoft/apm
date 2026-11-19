@@ -75,7 +75,10 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             "(staged_hashes if _staged else deployed_hashes)[record] = (",
             "hash staged output with the deployed-file hash owner",
         ),
-        ("staged_fallback_hashes[record] = (", "bind collision-skipped staging"),
+        (
+            'staged_fallback_hashes[record] = f"sha256:{desired_hash}"',
+            "bind collision-skipped staging",
+        ),
     ),
     HANDLER: (
         ('staged_instructions = result.get("staged_files", [])', "read staging from the service"),
