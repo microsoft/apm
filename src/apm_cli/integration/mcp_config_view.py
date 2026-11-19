@@ -941,7 +941,13 @@ def _collect_locked_dependencies(
                     mcp_dependency.name, {"declaration": fingerprint, "reason": "only-apm"}
                 )
                 continue
-            subject = admission.subject(dependency, mcp_dependency, approval_keys)
+            # Fingerprint the authored declaration, as `apm approve` pins it,
+            # not the copy with ${CLAUDE_PLUGIN_ROOT} already expanded.
+            subject = admission.subject(
+                dependency,
+                authored_declarations.get(mcp_dependency.name, mcp_dependency),
+                approval_keys,
+            )
             verdict = admission.admit(subject)
             if not verdict.allowed:
                 omissions.setdefault(

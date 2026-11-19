@@ -163,7 +163,8 @@ def admit(
     3. item pin (project layer decides alone, then user):
        fingerprint matches                             -> admit
        mismatch                                        -> park ``definition-changed``
-                                                          (a one-off run overrides)
+                                                          (even a pin on a server that
+                                                          no longer needs approval)
     4. transitive trust needed, no pin match:
        ``--trust-transitive-mcp`` this run             -> continue as one-off
        otherwise                                       -> park ``untrusted-transitive``
@@ -176,7 +177,11 @@ def admit(
     """
     gate_on = ctx is not None and ctx.gate_enabled
     needs_trust = subject.needs_transitive_trust
-    if not needs_trust and not (subject.exec_gated and gate_on):
+    if (
+        not needs_trust
+        and not (subject.exec_gated and gate_on)
+        and pinned_layer(ctx, subject) is None
+    ):
         layer = LAYER_GATE_DISABLED if subject.exec_gated else LAYER_NOT_GATED
         return Admission(True, None, layer)
 
@@ -249,10 +254,16 @@ class McpAdmission:
         one_off: bool = False,
         registry_resolver: Callable[[Any], dict[str, Any] | None] | None = None,
         permissive: bool = False,
+        pins: Callable[[], ExecTrustContext | None] | None = None,
     ) -> None:
         self._trust = trust
         self._resolved = not callable(trust)
         self._ctx = None if callable(trust) else trust
+        # Policy-free source of item pins, so checking for an existing pin
+        # never forces org policy discovery.
+        self._pins = pins
+        self._pins_ctx: ExecTrustContext | None = None
+        self._pins_resolved = False
         self.one_off = one_off
         self.permissive = permissive
         self._registry_resolver = registry_resolver or resolve_registry_entry
@@ -303,7 +314,14 @@ class McpAdmission:
                 project_root, policy=policy, logger=logger, include_user=include_user
             )
 
-        admission = cls(resolve, one_off=one_off)
+        def pins() -> ExecTrustContext:
+            from .executables import exec_trust_context_for_project
+
+            return exec_trust_context_for_project(
+                project_root, policy=None, logger=None, include_user=include_user
+            )
+
+        admission = cls(resolve, one_off=one_off, pins=pins)
         return admission
 
     @property
@@ -313,12 +331,27 @@ class McpAdmission:
             self._ctx = self._trust()  # type: ignore[operator]
         return self._ctx
 
+    def _has_pin(self, subject: TrustSubject) -> bool:
+        if self._resolved or self._pins is None:
+            return pinned_layer(self.context, subject) is not None
+        if not self._pins_resolved:
+            self._pins_resolved = True
+            try:
+                self._pins_ctx = self._pins()
+            except ValueError:
+                # A malformed grant is reported by the full context; fail closed.
+                return True
+        return pinned_layer(self._pins_ctx, subject) is not None
+
     def subject(self, locked_dependency: Any, declaration: Any, package_keys: tuple[str, ...]):
         """Build the subject for one dependency-declared MCP server."""
         needs_trust = bool(declaration.requires_transitive_trust) and locked_dependency.depth > 1
         exec_gated = bool(declaration.is_self_defined)
         fingerprint: str | None = None
-        if needs_trust or exec_gated:
+        probe = TrustSubject(package_keys, EXEC_TYPE_MCP, declaration.name, None)
+        # An existing pin is always checked, even when the new declaration
+        # would not need an approval (for example self-defined -> registry).
+        if needs_trust or exec_gated or self._has_pin(probe):
             fingerprint = self._fingerprint(declaration, package_keys, needs_trust)
         return TrustSubject(
             package_keys=package_keys,
@@ -347,7 +380,11 @@ class McpAdmission:
     def admit(self, subject: TrustSubject) -> Admission:
         if self.permissive:
             return Admission(True, None, LAYER_ONE_OFF)
-        if not subject.needs_transitive_trust and not subject.exec_gated:
+        if (
+            not subject.needs_transitive_trust
+            and not subject.exec_gated
+            and not self._has_pin(subject)
+        ):
             return Admission(True, None, LAYER_NOT_GATED)
         return admit(self.context, subject, one_off=self.one_off)
 
@@ -688,6 +725,29 @@ class _Depth:
     depth: int
 
 
+def _parked_mcp_state(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path,
+    transitive: bool,
+    registry_resolver: Callable[[Any], dict[str, Any] | None] | None,
+) -> str | None:
+    """``gated``/``denied`` when install would park one of the package's MCP servers."""
+    from .executables import TRUST_GATED
+
+    if not transitive:
+        return None
+    subjects = _package_mcp_subjects(
+        ctx, package_keys, install_path, transitive=True, registry_resolver=registry_resolver
+    )
+    verdicts = [admit(ctx, subject) for subject in subjects]
+    if any(verdict.reason == REASON_DENIED for verdict in verdicts):
+        return TRUST_DENIED
+    if any(not verdict.allowed for verdict in verdicts):
+        return TRUST_GATED
+    return None
+
+
 def pinned_exec_status(
     ctx: ExecTrustContext | None,
     package_keys: tuple[str, ...],
@@ -818,6 +878,20 @@ def package_type_verdicts(
             result[exec_type] = TypeVerdict(
                 state == "deployed", state, LAYER_PROJECT_ALLOW, pinned=True
             )
+        elif (
+            exec_type == EXEC_TYPE_MCP
+            and decision.allowed
+            and install_path is not None
+            and not native
+            and (
+                parked := _parked_mcp_state(
+                    ctx, package_keys, install_path, transitive, registry_resolver
+                )
+            )
+        ):
+            # A type-level grant never satisfies transitive trust (D2):
+            # report what install will park.
+            result[exec_type] = TypeVerdict(False, parked, LAYER_DEFAULT_DENY)
         else:
             result[exec_type] = TypeVerdict(
                 decision.allowed,

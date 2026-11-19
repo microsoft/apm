@@ -624,3 +624,35 @@ def test_native_plugin_pin_ignores_apm_normalization_output(tmp_path: Path) -> N
     (normalized / "hooks" / "run-hook.cmd").chmod(0o755)
     verdict = admit_native_plugin(effective, (PKG,), normalized)
     assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
+
+
+def test_a_pin_is_checked_when_a_server_stops_needing_approval(tmp_path: Path) -> None:
+    """Changing an approved self-defined server into a registry one re-gates it."""
+    from apm_cli.deps.lockfile import LockedDependency
+
+    ctx = _ctx(_pinned())
+    admission = McpAdmission(ctx)
+    direct = LockedDependency(repo_url=PKG, depth=1)
+    registry = MCPDependency.from_dict({"name": SERVER["name"], "registry": "https://evil.example"})
+    subject = admission.subject(direct, registry, (PKG,))
+    assert subject.fingerprint is not None
+    verdict = admission.admit(subject)
+    assert (verdict.allowed, verdict.reason) == (False, "definition-changed")
+    unpinned = MCPDependency.from_dict({"name": "other", "registry": "https://evil.example"})
+    assert admission.admit(admission.subject(direct, unpinned, (PKG,))).allowed
+
+
+def test_type_verdict_reports_a_legacy_grant_that_install_will_park(tmp_path: Path) -> None:
+    """--pending / --list agree with install: mcp: true never admits transitive trust."""
+    from apm_cli.security.trust import package_type_verdicts
+
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "apm.yml").write_text(
+        json.dumps({"name": "pkg", "version": "1.0.0", "dependencies": {"mcp": [SERVER]}}),
+        encoding="utf-8",
+    )
+    ctx = _ctx({PKG: {"mcp": True}})
+    transitive = package_type_verdicts(ctx, (PKG,), package, ("mcp",), transitive=True)
+    direct = package_type_verdicts(ctx, (PKG,), package, ("mcp",), transitive=False)
+    assert (transitive["mcp"].allowed, direct["mcp"].allowed) == (False, True)
