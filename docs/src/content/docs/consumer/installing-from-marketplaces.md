@@ -307,7 +307,7 @@ catalogs record neither. See
 
 **Aliases are machine-local.** A name like `company` only means something on
 the machine that registered it. If `company` later points at a different
-catalog, `apm install` keeps replaying the locked catalog. `apm update`,
+catalog, `apm install` keeps replaying the locked marketplace. `apm update`,
 `apm install <plugin>@company` (with or without `-g`), `apm outdated` and any
 other re-resolution of a locked `company` entry fail instead of switching,
 naming the locked and current origins.

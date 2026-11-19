@@ -513,7 +513,7 @@ def log_bin_status(
         )
     elif skill_result.bin_skipped_reason == "not_approved":
         log_fn(
-            f"  |-- bin/ executables skipped (not approved in allowExecutables). "
+            f"  |-- bin/ executables skipped (not approved in executables.allow). "
             f"Run 'apm approve {package_label}' to approve."
         )
     elif skill_result.bin_skipped_reason == "not_trusted":
@@ -557,7 +557,7 @@ def log_hooks_skip(
         )
     else:
         message = (
-            f"{label}: hooks skipped (not approved in allowExecutables). "
+            f"{label}: hooks skipped (not approved in executables.allow). "
             f"Run 'apm approve {label}' to approve."
         )
     logger.warning(message, symbol="warning")

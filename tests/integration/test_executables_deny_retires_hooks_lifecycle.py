@@ -153,7 +153,7 @@ def test_gating_a_package_retires_its_deployed_hooks(
         assert "apm approve" not in gated, gated
         assert _exec_status(project) == "denied"
     else:
-        assert "not approved in allowExecutables" in gated, gated
+        assert "not approved in executables.allow" in gated, gated
         assert _exec_status(project) == "gated_pending_approval"
 
     assert _hook_residue(project) == []

@@ -321,6 +321,16 @@ def manifest_target_names() -> frozenset[str]:
     return frozenset(names)
 
 
+def advertised_manifest_target_names() -> frozenset[str]:
+    """Return the ``apm.yml`` target names to show users: accepted minus deprecated aliases.
+
+    ``manifest_target_names`` still accepts a deprecated alias (``vscode``) so
+    old manifests keep working with a warning; help text, errors and generated
+    manifests must not advertise it.
+    """
+    return manifest_target_names() - frozenset(DEPRECATED_TARGET_ALIASES)
+
+
 def normalize_target_name(name_or_alias: str) -> str:
     """Normalize a target spelling to its native capability name."""
     if name_or_alias == "all":

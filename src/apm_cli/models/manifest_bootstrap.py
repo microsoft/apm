@@ -115,10 +115,10 @@ def write_minimal_manifest(config, plugin=False, target_path=None):
 
     # architecture-authority-exempt: bootstrap-writer
     if "targets" in apm_yml_data:
-        from apm_cli.core.target_catalog import manifest_target_names
+        from apm_cli.core.target_catalog import advertised_manifest_target_names
 
         # Insert comment before the targets: line
-        accepted_targets = ", ".join(sorted(manifest_target_names()))
+        accepted_targets = ", ".join(sorted(advertised_manifest_target_names()))
         targets_comment = (
             "# Which agent platforms to deploy to.\n"
             "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"

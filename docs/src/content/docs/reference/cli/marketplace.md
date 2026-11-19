@@ -206,7 +206,7 @@ naming the existing alias. Re-adding an existing name with a different URL
 rebinds it on this machine only; a project whose lockfile recorded the old
 origin then fails `apm update`, `apm install <plugin>@<alias>` and
 `apm outdated` rather than switching catalogs; `apm install` keeps replaying
-the locked catalog. See
+the locked marketplace. See
 [lockfile `source_url`](../../lockfile-spec/#per-entry-fields).
 
 **Azure DevOps.** Services (`dev.azure.com`, `*.visualstudio.com`) use

@@ -1056,5 +1056,5 @@ def _log_bundle_meta(result, output_dir, logger):
         )
         logger.verbose_detail(
             f"    To get a {display_project}-targeted bundle, "
-            f"ask the publisher to run: apm pack --target {display_project}"
+            f"ask the publisher to declare targets: [{display_project}] in apm.yml and run apm pack"
         )
