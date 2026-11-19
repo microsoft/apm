@@ -1389,6 +1389,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Live authoring catalog parses apm.yml outside the canonical parser.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-catalog-freshness",
+        rule_id="marketplace-integrations-catalog-freshness",
+        path="src/apm_cli/commands/marketplace/__init__.py",
+        old="manifest = fetch_marketplace(source, require_fresh=True)",
+        new="manifest = fetch_marketplace(source, force_refresh=True)",
+        intent="Named marketplace update falls back to stale cache instead of revalidating.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-catalog-manifest",
         rule_id="marketplace-integrations-catalog-manifest",
         path="src/apm_cli/deps/_shared.py",

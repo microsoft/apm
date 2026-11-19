@@ -809,10 +809,14 @@ def browse(name, verbose, offline=False):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @serialized_lifecycle
 def update(name, verbose):
-    """Refresh cached marketplace data (one or all)."""
+    """Refresh cached marketplace data (one or all).
+
+    Each catalog must revalidate; a failed refresh keeps the last valid
+    cached copy and makes the command exit nonzero (#3279).
+    """
     logger = CommandLogger("marketplace-update", verbose=verbose)
     try:
-        from ...marketplace.client import clear_marketplace_cache, fetch_marketplace
+        from ...marketplace.client import fetch_marketplace
         from ...marketplace.registry import (
             get_marketplace_by_name,
             get_registered_marketplaces,
@@ -821,28 +825,36 @@ def update(name, verbose):
         if name:
             source = get_marketplace_by_name(name)
             logger.start(f"Refreshing marketplace '{name}'...", symbol="gear")
-            clear_marketplace_cache(source=source)
-            manifest = fetch_marketplace(source, force_refresh=True)
+            manifest = fetch_marketplace(source, require_fresh=True)
             logger.success(
                 f"Marketplace '{name}' updated ({len(manifest.plugins)} plugins)",
                 symbol="check",
             )
-        else:
-            sources = get_registered_marketplaces()
-            if not sources:
-                logger.progress("No marketplaces registered.", symbol="info")
-                return
-            logger.start(f"Refreshing {len(sources)} marketplace(s)...", symbol="gear")
-            for s in sources:
-                try:
-                    clear_marketplace_cache(source=s)
-                    manifest = fetch_marketplace(s, force_refresh=True)
-                    logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
-                except Exception as exc:
-                    logger.warning(f"  {s.name}: {exc}")
-                    if verbose:
-                        logger.progress(traceback.format_exc(), symbol="info")
-            logger.success("Marketplace cache refreshed", symbol="check")
+            return
+
+        sources = get_registered_marketplaces()
+        if not sources:
+            logger.progress("No marketplaces registered.", symbol="info")
+            return
+        logger.start(f"Refreshing {len(sources)} marketplace(s)...", symbol="gear")
+        failed = []
+        for s in sources:
+            try:
+                manifest = fetch_marketplace(s, require_fresh=True)
+                logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
+            except Exception as exc:
+                failed.append(s.name)
+                logger.error(f"  {s.name}: {exc}", symbol="error")
+                if verbose:
+                    logger.progress(traceback.format_exc(), symbol="info")
+        if failed:
+            logger.error(
+                f"Refreshed {len(sources) - len(failed)} of {len(sources)} marketplace(s); "
+                f"failed: {', '.join(failed)}",
+                symbol="error",
+            )
+            sys.exit(1)
+        logger.success("Marketplace cache refreshed", symbol="check")
 
     except Exception as e:
         logger.error(f"Failed to update marketplace: {e}")

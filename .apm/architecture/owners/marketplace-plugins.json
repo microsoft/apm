@@ -81,6 +81,16 @@
       "guards": ["marketplace-integrations-raw-diagnostics"]
     },
     {
+      "id": "marketplace-catalog-freshness",
+      "decision": "Explicit marketplace refresh revalidates each needed catalog once per invocation or fails, never serving stale data",
+      "owner": "marketplace/client.py (fetch_marketplace require_fresh, catalog_freshness_scope, fetch_or_cache); install/service.py (InstallService.catalog_freshness) maps command intent",
+      "selectors": [
+        "src/apm_cli/marketplace/shadow_detector.py",
+        "src/apm_cli/commands/marketplace/__init__.py"
+      ],
+      "guards": ["marketplace-integrations-catalog-freshness"]
+    },
+    {
       "id": "catalog-only-marketplace-manifest",
       "decision": "Catalog-only marketplace manifest materialization",
       "owner": "deps/_shared.py (materialize_marketplace_manifest)",

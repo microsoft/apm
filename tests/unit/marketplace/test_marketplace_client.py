@@ -13,7 +13,11 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.marketplace import client as client_mod
-from apm_cli.marketplace.errors import MarketplaceError, MarketplaceFetchError
+from apm_cli.marketplace.errors import (
+    MarketplaceError,
+    MarketplaceFetchError,
+    MarketplaceFreshnessError,
+)
 from apm_cli.marketplace.models import MarketplaceSource
 
 
@@ -169,6 +173,76 @@ class TestFetchMarketplace:
         with pytest.raises(MarketplaceFetchError):
             client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=mock_resolver)
 
+
+def _api_resolver(*, data=None, error=None):
+    resolver = MagicMock()
+    if error is not None:
+        resolver.try_with_fallback.side_effect = error
+    else:
+        resolver.try_with_fallback.return_value = data
+    resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
+    return resolver
+
+
+def _cached_bytes(source) -> bytes:
+    with open(client_mod._cache_data_path(source.name), "rb") as handle:
+        return handle.read()
+
+
+class TestExplicitFreshness:
+    """require_fresh and catalog_freshness_scope (#3279) on a sidecar-cached kind."""
+
+    @pytest.mark.parametrize(
+        "resolver",
+        [_api_resolver(error=Exception("Network error")), _api_resolver(data=["not", "a", "catalog"])],
+        ids=["unavailable", "invalid"],
+    )
+    def test_required_refresh_never_serves_or_replaces_cache(self, resolver):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        before = _cached_bytes(source)
+
+        with pytest.raises(MarketplaceFreshnessError, match="Could not verify"):
+            client_mod.fetch_marketplace(source, require_fresh=True, auth_resolver=resolver)
+        assert _cached_bytes(source) == before
+        # Ordinary reads keep their cached availability.
+        assert client_mod.fetch_marketplace(source, auth_resolver=resolver).name == "Cached"
+
+    def test_scope_shares_one_answer_per_source(self):
+        source = _make_source()
+        other = _make_source("other")
+        client_mod._write_cache(source.name, {"name": "Old", "plugins": []})
+        client_mod._write_cache(other.name, {"name": "Other", "plugins": []})
+        resolver = _api_resolver(data={"name": "Fresh", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            first = client_mod.fetch_or_cache(source, auth_resolver=resolver)
+            second = client_mod.fetch_or_cache(source, auth_resolver=resolver)
+            advisory = client_mod.fetch_or_cache(other, auth_resolver=resolver, advisory=True)
+        assert (first.name, second.name, advisory.name) == ("Fresh", "Fresh", "Other")
+        assert resolver.try_with_fallback.call_count == 1
+        assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Fresh"
+
+    def test_scope_shares_one_failure_per_source(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Old", "plugins": []})
+        resolver = _api_resolver(error=Exception("Network error"))
+
+        with client_mod.catalog_freshness_scope(require_fresh=True):
+            for _ in range(2):
+                with pytest.raises(MarketplaceFreshnessError):
+                    client_mod.fetch_or_cache(source, auth_resolver=resolver)
+        assert resolver.try_with_fallback.call_count == 1
+
+    def test_unscoped_and_ordinary_scope_keep_cached_reads(self):
+        source = _make_source()
+        client_mod._write_cache(source.name, {"name": "Cached", "plugins": []})
+        resolver = _api_resolver(data={"name": "Fresh", "plugins": []})
+
+        with client_mod.catalog_freshness_scope(require_fresh=False):
+            assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Cached"
+        assert client_mod.fetch_or_cache(source, auth_resolver=resolver).name == "Cached"
+        resolver.try_with_fallback.assert_not_called()
     def test_fetch_remote_marketplace_url_records_digest_and_etag(self, monkeypatch):
         source = MarketplaceSource(
             name="catalog",

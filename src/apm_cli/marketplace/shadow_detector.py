@@ -38,8 +38,8 @@ def detect_shadows(
     ``primary_marketplace`` and returns a :class:`ShadowMatch` for each
     one that contains a plugin with the same name (case-insensitive).
 
-    Uses :func:`fetch_or_cache` so cached manifests are reused and no
-    extra network round-trips are needed in the common case.
+    Uses an advisory :func:`fetch_or_cache` read so cached manifests are
+    reused, and an explicit refresh never revalidates unrelated catalogs.
 
     Args:
         plugin_name: The plugin name to search for.
@@ -56,7 +56,7 @@ def detect_shadows(
         if source.name.lower() == primary_marketplace.lower():
             continue
         try:
-            manifest = fetch_or_cache(source, auth_resolver=auth_resolver)
+            manifest = fetch_or_cache(source, auth_resolver=auth_resolver, advisory=True)
             match = manifest.find_plugin(plugin_name)
             if match is not None:
                 shadows.append(

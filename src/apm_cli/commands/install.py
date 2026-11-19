@@ -1170,6 +1170,7 @@ def install(  # noqa: PLR0913
     from ..install.service import InstallService
 
     ctx.with_resource(InstallService.frozen_writes(frozen))
+    ctx.with_resource(InstallService.catalog_freshness(update_refs=update, refresh=refresh, frozen=frozen))
     try:
         if mcp_name is not None:
             InstallService.reject_frozen_mutation(frozen, "--mcp")

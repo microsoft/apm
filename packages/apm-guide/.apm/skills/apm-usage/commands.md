@@ -169,6 +169,10 @@ Global dry-run bootstrap leaves an absent `~/.apm` uncreated.
 `apm install -g --mcp ... --dry-run` does not create a user manifest, lockfile,
 or runtime configuration.
 
+`apm update`, `apm install --update`, and `apm install --refresh` revalidate
+each marketplace catalog they resolve once per run and fail without changes if
+it cannot be verified; plain `apm install` keeps the cached catalog.
+
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download
 or validation leaves the previous package active. Activation and its restore
@@ -725,7 +729,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path (including a local `apm.yml` read as a live catalog), or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. Without `--path`, the catalog is discovered at `marketplace.json`, `.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json` (first wins). `--path` selects a repository-relative catalog JSON (for example one per audience, `catalogs/frontend/marketplace.json`), is saved in the registration, and must stay inside the repository; not for hosted `marketplace.json` URLs or a direct file. Separate catalogs are not access control. | `-n NAME`, `-r REF`, `--host HOST`, `--path PATH`, `--offline` (local `apm.yml` only) |
 | `apm marketplace list` | List registered marketplaces | -- |
 | `apm marketplace browse NAME` | Browse marketplace plugins; reread live local `apm.yml` catalogs | `--offline` (local YAML only) |
-| `apm marketplace update [NAME]` | Update marketplace index; reread live local `apm.yml` catalogs | -- |
+| `apm marketplace update [NAME]` | Revalidate marketplace index; reread live local `apm.yml` catalogs. A failed catalog keeps its last valid cache and the command exits non-zero naming it | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
 | `apm marketplace validate NAME` | Validate raw structure, plugin schema, and duplicate plugin names. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
