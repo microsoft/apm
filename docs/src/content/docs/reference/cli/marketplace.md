@@ -18,7 +18,7 @@ apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--pa
 apm marketplace list
 apm marketplace browse NAME [--offline]
 apm marketplace update [NAME]
-apm marketplace remove NAME
+apm marketplace remove NAME [--yes]
 apm marketplace validate NAME
 
 # Author

@@ -50,7 +50,7 @@ either a bare string or a mapping. Fields, from
 | `url` | self-defined `http`/`sse`/`streamable-http` | `http://` or `https://` only. |
 | `env` | optional, stdio | Map of env vars passed to the child process. |
 | `headers` | optional, remote | Map of HTTP headers. CR/LF rejected. |
-| `tools` | optional | Allowlist of tool names. Default `["*"]`. |
+| `tools` | optional | Allowlist of tool names. Default `["*"]`. Claude Code ignores it in the project `.mcp.json` it shares with Copilot. |
 | `version` | optional | Pin a registry server version. |
 | `registry` | optional | `false` = self-defined; URL = custom registry. |
 | `package` | optional | `npm`, `pypi`, or `oci` for registry-resolved servers. |
@@ -115,8 +115,8 @@ shipped. Do not embed tokens. Two patterns work:
 ```
 
 Headers and env values are never shell-expanded by APM. For harnesses
-that support runtime env placeholders (for example VS Code, Kiro, and
-Claude Code's project `.mcp.json`), APM preserves the placeholder so the
+that support runtime env placeholders (for example Copilot, Kiro, and the
+project `.mcp.json` shared by Copilot and Claude Code), APM preserves the placeholder so the
 harness resolves it when the server starts or the request is made. For
 harnesses that require literal values (for example Codex user scope, or a
 Codex project `env` value not written as `KEY: ${KEY}`) and for Claude

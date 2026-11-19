@@ -265,7 +265,7 @@ See [External scanners](../../../integrations/external-scanners/).
 
 - **Location:** `$APM_HOME/config.json` (default `~/.apm/config.json`)
 - **Format:** JSON object, one entry per stored key.
-- **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
+- **Created on first read** with `{"default_client": "copilot"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
 Internal JSON keys use snake_case (`install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `github_auth_first`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
 

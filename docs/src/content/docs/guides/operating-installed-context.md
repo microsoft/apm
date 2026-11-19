@@ -43,8 +43,7 @@ the locked content matches what was actually fetched.
 ## Local refresh loop
 
 ```bash
-apm update            # refresh refs + rewrite the lockfile
-apm install           # materialize the new lockfile
+apm update            # refresh refs, rewrite the lockfile, redeploy
 apm audit             # confirm integrity
 ```
 

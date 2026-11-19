@@ -419,12 +419,14 @@ class InstallService:
         manifest_deps = project_manifest_dependencies(request.apm_package, modules_dir=modules_dir)
         satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
 
-        from apm_cli.security.trust import McpAdmission
-
         # Same admission inputs as install, so a gate-parked or approved server
         # reaches the same verdict frozen or not (#3893, #3902).
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.security.trust import McpAdmission
+
         admission = McpAdmission.for_project(
             request.apm_package.package_path or lockfile_path.parent,
+            user_scope=is_user_scope(request.scope),
             one_off=request.trust_transitive_mcp,
             no_policy=request.no_policy,
         )

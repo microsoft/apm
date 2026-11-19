@@ -14,7 +14,7 @@ one. Only the host and the token change. For token setup, see
 ```yaml
 dependencies:
   apm:
-    # 1. Shorthand, github.com is implicit
+    # 1. Shorthand, github.com is implicit (unless apm.yml sets default_host:)
     - acme/standards#v1.2.0
 
     # 2. Shorthand with explicit host (GHE Cloud, GHES, GitLab)

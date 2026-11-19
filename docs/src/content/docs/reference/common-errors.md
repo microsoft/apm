@@ -6,7 +6,9 @@ sidebar:
 ---
 
 This page lists error messages and silent failures that users report most
-frequently, along with their cause and the shortest path to a fix.
+frequently, along with their cause and the shortest path to a fix. For install,
+compile, audit and auth error messages, see
+[Troubleshooting: common errors](../../troubleshooting/common-errors/).
 
 ---
 

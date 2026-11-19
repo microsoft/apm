@@ -1472,10 +1472,8 @@ def _sync_integrations_after_uninstall(
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
     _allow_executables = None
     if target_survivor_plan:
-        from ...core.scope import manifest_root
-
         _allow_executables = resolve_project_exec_allow_map(
-            manifest_root(project_root, user_scope=user_scope), apm_package, logger=logger
+            project_root, apm_package, user_scope=user_scope, logger=logger
         )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 

@@ -72,6 +72,14 @@ def test_user_manifest_grants_gate_global_install_and_uninstall(
     run("approve", str(beta), cwd=isolated.config_root)
     grants = load_yaml(isolated.config_root / "apm.yml")["executables"]["allow"]
     assert "sha256:" in json.dumps(grants)
+    # A deploy-root manifest is not the user manifest: its grant must not admit alpha.
+    alpha_key = next(iter(grants)).replace("beta", "alpha")
+    decoy = {
+        "name": "decoy",
+        "version": "1.0.0",
+        "executables": {"allow": {alpha_key: {"hooks": True}}},
+    }
+    (isolated.home / "apm.yml").write_text(json.dumps(decoy), encoding="utf-8")
     run("install", "--global", "--target", "claude", "--only", "apm")
     assert "BETA_HOOK" in deployed()
     assert "ALPHA_HOOK" not in deployed()

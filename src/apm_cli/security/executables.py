@@ -1148,6 +1148,7 @@ def resolve_project_exec_allow_map(
     project_root: Path,
     apm_package: Any,
     *,
+    user_scope: bool,
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
     logger: Any | None = None,
@@ -1157,6 +1158,8 @@ def resolve_project_exec_allow_map(
     Reuses a map the caller already resolved (``executable_context`` is
     ``(map, resolved)``); otherwise resolves org policy (unless disabled),
     project, and user layers through :func:`effective_exec_map_for_project`.
+    Org policy is discovered from *project_root*; the grants are read from
+    the scope's manifest (``$APM_HOME/apm.yml`` at user scope).
     """
     allow_map, resolved = executable_context
     if resolved:
@@ -1166,8 +1169,10 @@ def resolve_project_exec_allow_map(
         from apm_cli.policy.discovery import discover_policy_with_chain
 
         policy = getattr(discover_policy_with_chain(project_root), "policy", None)
+    from apm_cli.core.scope import manifest_root
+
     return effective_exec_map_for_project(
-        project_root,
+        manifest_root(project_root, user_scope=user_scope),
         policy=policy,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         logger=logger,

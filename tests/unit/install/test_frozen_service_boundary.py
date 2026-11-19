@@ -60,6 +60,7 @@ def test_skills_only_preparation_retains_omissions_without_selected_comparison(
         lock_path=lock_path,
         should_install=False,
         trust_transitive_mcp=False,
+        user_scope=False,
         logger=Mock(),
         allow_pending=False,
     )
@@ -138,6 +139,7 @@ def test_prepared_frozen_view_preserves_membership_and_actual_source_requirement
         lock_path=lock_path,
         should_install=selected,
         trust_transitive_mcp=False,
+        user_scope=False,
         logger=Mock(),
         allow_pending=False,
         active_package_keys=active_keys,

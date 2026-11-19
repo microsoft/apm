@@ -142,15 +142,93 @@ def test_unparseable_hook_file_cannot_be_fingerprinted(tmp_path: Path) -> None:
         hook_file_fingerprint(tmp_path, hook)
 
 
-def test_normalization_receipt_is_not_an_unpinned_apm_copy(tmp_path: Path) -> None:
-    """Legacy-plugin normalization writes one receipt; any other non-copy still parks."""
+def _normalized_plugin(root: Path) -> Path:
+    """A legacy plugin as normalization leaves it: skill copy plus canonical receipt."""
+    import json
+
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text('{"name": "p"}')
+    for base in (root / "skills/review", root / ".apm/skills/review"):
+        base.mkdir(parents=True)
+        (base / "SKILL.md").write_text("---\nname: review\n---\nbody\n")
+    receipt = {"version": 1, "declared": False, "sources": {"review": "skills/review"}}
+    (root / ".apm/.plugin-skill-sources.json").write_text(json.dumps(receipt, sort_keys=True))
+    return root
+
+
+def _dot_dot_skill_name(root: Path) -> None:
+    """A '..' name whose '.apm/skills/../SKILL.md' is itself a pinned copy."""
+    (root / ".apm/SKILL.md").write_bytes((root / "skills/review/SKILL.md").read_bytes())
+    (root / ".apm/.plugin-skill-sources.json").write_text(
+        '{"declared": false, "sources": {"..": "skills/review"}, "version": 1}'
+    )
+
+
+def _copy_holds_another_pinned_skill(root: Path) -> None:
+    """Every byte is pinned, but the copy is not from the recorded source."""
+    other = "---\nname: lint\n---\nother skill\n"
+    (root / "skills/lint").mkdir()
+    (root / "skills/lint/SKILL.md").write_text(other)
+    (root / ".apm/skills/review/SKILL.md").write_text(other)
+
+
+def test_canonical_normalization_receipt_is_not_an_unpinned_apm_copy(tmp_path: Path) -> None:
     from apm_cli.utils.content_hash import unpinned_apm_copy
 
-    (tmp_path / "hooks").mkdir()
-    (tmp_path / "hooks/hooks.json").write_text("{}")
-    (tmp_path / ".apm/hooks").mkdir(parents=True)
-    (tmp_path / ".apm/hooks/hooks.json").write_text("{}")
-    (tmp_path / ".apm/.plugin-skill-sources.json").write_text('{"skills": []}')
-    assert unpinned_apm_copy(tmp_path) is None
-    (tmp_path / ".apm/hooks/extra.sh").write_text("echo unpinned")
-    assert "extra.sh" in unpinned_apm_copy(tmp_path)
+    root = _normalized_plugin(tmp_path / "plugin")
+    assert unpinned_apm_copy(root) is None
+    (root / ".apm/skills/review/extra.sh").write_text("echo unpinned")
+    assert unpinned_apm_copy(root) is not None
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda root: (root / ".apm/.plugin-skill-sources.json").write_text(
+            '{"declared": false, "payload": "x", "sources": {}, "version": 1}'
+        ),
+        lambda root: (root / ".apm/.plugin-skill-sources.json").write_text(
+            '{"declared":false,"sources":{"review":"skills/review"},"version":1}'
+        ),
+        lambda root: (root / ".apm/.plugin-skill-sources.json").write_text(
+            '{"declared": false, "sources": {"review": "../outside"}, "version": 1}'
+        ),
+        _dot_dot_skill_name,
+        _copy_holds_another_pinned_skill,
+        lambda root: (root / "plugin.json").write_text(
+            '{"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", '
+            '"name": "p", "version": "1.0.0"}'
+        ),
+    ],
+    ids=[
+        "extra-field",
+        "non-canonical-bytes",
+        "escaping-source",
+        "dot-dot-name",
+        "copy-not-from-recorded-source",
+        "agent-plugin-live-root",
+    ],
+)
+def test_publisher_controlled_receipt_bytes_still_park(tmp_path: Path, tamper) -> None:
+    """Only APM's canonical receipt for a normalized legacy plugin is exempt."""
+    from apm_cli.utils.content_hash import unpinned_apm_copy
+
+    root = _normalized_plugin(tmp_path / "plugin")
+    tamper(root)
+    assert unpinned_apm_copy(root) is not None
+
+
+def test_receipt_written_by_normalization_is_exempt(tmp_path: Path) -> None:
+    """The exemption accepts exactly what the real writer produces."""
+    from apm_cli.deps.plugin_parser import normalize_plugin_directory
+    from apm_cli.utils.content_hash import unpinned_apm_copy
+
+    root = tmp_path / "plugin"
+    (root / "skills/review").mkdir(parents=True)
+    (root / "skills/review/SKILL.md").write_text("---\nname: review\n---\nbody\n")
+    (root / "plugin.json").write_text('{"name": "p", "skills": ["skills/review"]}')
+    normalize_plugin_directory(root, root / "plugin.json")
+    (root / "apm.yml").unlink()
+
+    assert (root / ".apm/.plugin-skill-sources.json").is_file()
+    assert unpinned_apm_copy(root) is None

@@ -74,7 +74,7 @@ Checks across all three discovery sources (policy, user, project). Reports:
 - Missing `scripts` object (admin JSON only)
 - Unknown lifecycle event names
 - Unknown script types
-- Missing `bash`/`command` for command scripts
+- Missing `bash`/`command`/`run` for command scripts
 - Missing or non-HTTPS `url` for HTTP scripts
 - Embedded credentials in URLs
 
