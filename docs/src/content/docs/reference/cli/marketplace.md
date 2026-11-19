@@ -195,9 +195,18 @@ token-free and noninteractive. See the
 for the full policy. Hosted `marketplace.json`
 URLs are public HTTPS only: APM sends no auth headers. Use a
 git-backed marketplace for private catalogs. When packages are
-installed from a hosted JSON URL, the lockfile records the source URL
-and fetched content digest. See
+installed from a remote catalog (hosted JSON URL or Git), the lockfile
+records the catalog origin (`source_url`) and a content digest
+(`source_digest`); local catalogs record neither. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
+
+**One catalog, one name.** Registering a second name for a catalog that is
+already registered (same origin and `--path`) succeeds with a `[!]` warning
+naming the existing alias. Re-adding an existing name with a different URL
+rebinds it on this machine only; a project whose lockfile recorded the old
+origin then fails `apm update` rather than switching catalogs; `apm install`
+keeps replaying the locked catalog. See
+[lockfile `source_url`](../../lockfile-spec/#per-entry-fields).
 
 **Azure DevOps.** Services (`dev.azure.com`, `*.visualstudio.com`) use
 `ADO_APM_PAT`, then the Azure CLI bearer. Server hosts registered through

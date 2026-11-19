@@ -49,6 +49,7 @@ from .client import fetch_or_cache
 from .errors import PluginNotFoundError
 from .models import MarketplacePlugin, MarketplaceSource
 from .registry import get_marketplace_by_name
+from .source_identity import marketplace_origin
 
 logger = logging.getLogger(__name__)
 
@@ -975,6 +976,9 @@ def resolve_marketplace_plugin(
 
     source = get_marketplace_by_name(marketplace_name)
     manifest = fetch_or_cache(source, auth_resolver=auth_resolver)
+    # Lock evidence names the catalog, never the machine-local alias (#3912).
+    source_url = marketplace_origin(source)
+    source_digest = manifest.source_digest if source_url else ""
 
     plugin = manifest.find_plugin(plugin_name)
     if plugin is None:
@@ -1002,8 +1006,8 @@ def resolve_marketplace_plugin(
             plugin=plugin,
             dependency_reference=dep_ref,
             cross_repo_misconfig_risk=None,
-            source_url=manifest.source_url,
-            source_digest=manifest.source_digest,
+            source_url=source_url,
+            source_digest=source_digest,
         )
 
     source_kind = source.kind
@@ -1022,8 +1026,8 @@ def resolve_marketplace_plugin(
             plugin=plugin,
             dependency_reference=None,
             cross_repo_misconfig_risk=None,
-            source_url=manifest.source_url,
-            source_digest=manifest.source_digest,
+            source_url=source_url,
+            source_digest=source_digest,
         )
 
     dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(plugin)
@@ -1276,8 +1280,8 @@ def resolve_marketplace_plugin(
         plugin=plugin,
         dependency_reference=dep_ref,
         cross_repo_misconfig_risk=cross_repo_misconfig_risk,
-        source_url=manifest.source_url,
-        source_digest=manifest.source_digest,
+        source_url=source_url,
+        source_digest=source_digest,
         constraint=resolved_constraint,
         resolved_tag=resolved_tag_name,
         resolved_version=resolved_version,

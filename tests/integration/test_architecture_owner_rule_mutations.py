@@ -1516,6 +1516,19 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Catalog-only marketplace manifest materialization loses its owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-catalog-origin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old=(
+            "require_locked_catalog_origin(\n"
+            "            dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, "
+            "self._existing_lockfile\n"
+            "        )"
+        ),
+        new="None",
+        intent="A rebound marketplace alias resolves without comparing the locked catalog origin.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-codex-native-lifecycle",
         rule_id="marketplace-integrations-codex-native-lifecycle",
         path="src/apm_cli/codex_plugins/client.py",

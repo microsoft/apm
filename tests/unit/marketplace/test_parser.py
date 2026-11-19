@@ -267,3 +267,63 @@ def test_https_ado_url_preserves_encoded_path_presentation() -> None:
 def test_https_ado_url_rejects_unsafe_encoded_path(raw: str) -> None:
     with pytest.raises(ValueError):
         _parse_marketplace_source(raw, host_flag=None)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://Git.Example.com/team/catalog.git", "https://git.example.com/team/catalog"),
+        ("git@git.example.com:team/catalog.git", "ssh://git.example.com/team/catalog"),
+        ("ssh://git@git.example.com:22/team/catalog", "ssh://git.example.com/team/catalog"),
+    ],
+)
+def test_marketplace_origin_canonicalizes_git_catalogs(url: str, expected: str) -> None:
+    from apm_cli.marketplace.models import MarketplaceSource
+    from apm_cli.marketplace.source_identity import marketplace_origin
+
+    assert marketplace_origin(MarketplaceSource(name="company", url=url)) == expected
+
+
+def test_marketplace_origin_keeps_hosted_url_and_skips_local(tmp_path) -> None:
+    from apm_cli.marketplace.models import MarketplaceSource
+    from apm_cli.marketplace.source_identity import marketplace_origin
+
+    hosted = "https://catalog.example.com/v1/marketplace.json"
+    assert marketplace_origin(MarketplaceSource(name="hosted", url=hosted, path="")) == hosted
+    local = MarketplaceSource(name="local", url=str(tmp_path))
+    assert marketplace_origin(local) == ""
+
+
+def test_same_marketplace_origin_ignores_transport_and_rejects_other_repos() -> None:
+    from apm_cli.marketplace.source_identity import same_marketplace_origin
+
+    https = "https://git.example.com/team/catalog"
+    assert same_marketplace_origin(https, "git@GIT.example.com:team/catalog.git")
+    assert not same_marketplace_origin(https, "https://git.example.com/team/catalog-b")
+    assert not same_marketplace_origin(https, "https://other.example.com/team/catalog")
+    assert not same_marketplace_origin("", https)
+
+
+def test_catalog_digest_is_stable_across_key_order_and_whitespace() -> None:
+    from apm_cli.marketplace.models import catalog_digest
+
+    first = {"name": "c", "plugins": [{"name": "p", "source": "./p"}]}
+    second = {"plugins": [{"source": "./p", "name": "p"}], "name": "c"}
+    assert catalog_digest(first) == catalog_digest(second)
+    assert catalog_digest(first) != catalog_digest({**first, "name": "d"})
+
+
+def test_digest_scheme_depends_only_on_catalog_kind() -> None:
+    """Git catalogs get the canonical digest; hosted URLs never fall back to it."""
+    from apm_cli.marketplace.client import _parse_catalog
+    from apm_cli.marketplace.models import MarketplaceSource, catalog_digest
+
+    data = {"name": "c", "plugins": []}
+    git = MarketplaceSource(name="git", url="https://git.example.com/team/catalog")
+    hosted = MarketplaceSource(
+        name="hosted", url="https://catalog.example.com/marketplace.json", path=""
+    )
+    assert _parse_catalog(data, git).source_digest == catalog_digest(data)
+    assert _parse_catalog(data, hosted, source_url=hosted.url).source_digest == ""
+    raw = _parse_catalog(data, hosted, source_url=hosted.url, source_digest="sha256:raw")
+    assert raw.source_digest == "sha256:raw"
