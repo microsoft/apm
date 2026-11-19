@@ -140,25 +140,25 @@ def test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update(
     assert f"'{_ALIAS}'" in duplicate_output
     assert "same catalog" in duplicate_output
 
-    # Rebinding the alias on this machine must not switch the project's catalog,
-    # whether the next command is a plain install or an update.
+    # Rebinding the alias on this machine must not switch the project's catalog:
+    # a plain install replays the locked catalog, and an update (which
+    # re-resolves through the alias) fails closed naming both origins.
     before_lock = lock_path.read_bytes()
-    (_rebind, install, update) = runner.run_sequence(
+    (_rebind, _install, update) = runner.run_sequence(
         (
             ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main"),
             ("install", *_INSTALL_FLAGS),
             ("update", "--yes", *_UPDATE_FLAGS),
         ),
-        expected_returncodes=(0, 1, 1),
+        expected_returncodes=(0, 0, 1),
         scenario_id="git-catalog-rebound-alias-update",
         cwd=consumer.root,
         env=environment,
     )
-    for refused in (install, update):
-        refused_output = _output(refused)
-        assert _REMOTE_A in refused_output
-        assert _REMOTE_B in refused_output
-        assert f"'{_ALIAS}'" in refused_output
+    update_output = _output(update)
+    assert _REMOTE_A in update_output
+    assert _REMOTE_B in update_output
+    assert f"'{_ALIAS}'" in update_output
     assert lock_path.read_bytes() == before_lock
     assert deployed_skill.read_text(encoding="utf-8") == _skill_document("from catalog A")
 

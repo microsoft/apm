@@ -298,8 +298,9 @@ catalogs record neither. See
 
 **Aliases are machine-local.** A name like `company` only means something on
 the machine that registered it. If `company` later points at a different
-catalog, `apm install` or `apm update` of an object-form `marketplace: company`
-entry fails instead of switching, and names the locked and current origins.
+catalog, `apm install` keeps replaying the locked catalog, and `apm update` (or
+any other re-resolution of an object-form `marketplace: company` entry) fails
+instead of switching, naming the locked and current origins.
 Alias names match case-insensitively. Re-register the locked origin with
 `apm marketplace add <locked-origin> --name company` to keep it. To switch on
 purpose, remove the entry from `apm.yml`, run `apm install`, add it back and

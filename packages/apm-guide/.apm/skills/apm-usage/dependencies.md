@@ -406,8 +406,8 @@ and full locked-commit requirements.
 The lock also records the catalog origin as `source_url` (and a
 `source_digest`) for every remote catalog kind, including Git; local catalogs
 record neither. The alias is machine-local: if it now points at a different
-origin, re-resolving the entry (`apm install` or `apm update`) fails and names
-both origins. Restore the alias with `apm marketplace add <locked-origin>
+origin, re-resolving the entry (for example `apm update`) fails and names both
+origins; `apm install` keeps replaying the locked catalog. Restore the alias with `apm marketplace add <locked-origin>
 --name <alias>`; to switch, remove the entry from `apm.yml`, run `apm install`,
 add it back and run `apm install` again. Only the origin is compared, not the
 catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain

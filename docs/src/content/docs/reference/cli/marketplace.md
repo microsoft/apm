@@ -204,8 +204,8 @@ records the catalog origin (`source_url`) and a content digest
 already registered (same origin and `--path`) succeeds with a `[!]` warning
 naming the existing alias. Re-adding an existing name with a different URL
 rebinds it on this machine only; a project whose lockfile recorded the old
-origin then fails `apm install` and `apm update` rather than switching
-catalogs. See
+origin then fails `apm update` rather than switching catalogs; `apm install`
+keeps replaying the locked catalog. See
 [lockfile `source_url`](../../lockfile-spec/#per-entry-fields).
 
 **Azure DevOps.** Services (`dev.azure.com`, `*.visualstudio.com`) use
