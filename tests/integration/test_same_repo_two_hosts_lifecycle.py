@@ -148,3 +148,10 @@ def test_same_repo_on_another_port_is_a_different_package(
     lock_after = world.lock_bytes()
     world.apm("install", NO_POLICY)
     assert world.lock_bytes() == lock_after
+
+    # Removing the default-port package keeps the ported one (no over-deletion).
+    world.apm("uninstall", "test/tool")
+    assert world.modules() == {"tool-other"}
+    assert world.deployed() == {"tool-other.instructions.md"}
+    entries = {(dep.get("host"), dep.get("port")) for dep in world.lock()["dependencies"]}
+    assert entries == {("github.com", 8443)}
