@@ -247,7 +247,13 @@ def _is_in_marketplace_source(plugin: MarketplacePlugin, source: MarketplaceSour
     if source_type in ("github", "git-subdir", "gitlab", "url"):
         # Same locator synonyms the resolvers and the #1326 sentinel read (#3945).
         _field, locator = _dict_source_locator(s)
-        return _repo_field_matches_marketplace(locator, source.owner, source.repo, source.host)
+        if _repo_field_matches_marketplace(locator, source.owner, source.repo, source.host):
+            return True
+        if source_type == "url" and is_github_hostname(source.host):
+            # A ``url:`` locator embeds its path; GitHub-family repositories are
+            # always ``owner/repo``, so the catalog slug is an exact prefix.
+            path = _normalize_repo_field_for_match(locator.split("#", 1)[0], source.host)
+            return path.startswith(f"{_marketplace_project_slug(source.owner, source.repo)}/")
     return False
 
 
@@ -650,8 +656,7 @@ def _resolve_url_source(source: dict) -> str:
         raise ValueError(f"Cannot resolve URL source '{url}': {exc}") from exc
     if dep.is_local:
         raise ValueError(f"URL source '{url}' resolves to a local path, not a Git coordinate.")
-    # A declared ``ref:`` wins over a ref embedded in the URL, as in the packed parse.
-    pin = _source_pin({"sha": source.get("sha"), "ref": source.get("ref") or dep.reference or ""})
+    pin = _source_pin({"sha": source.get("sha"), "ref": dep.reference or ""})
     if pin:
         return f"{dep.repo_url}#{pin}"
     return dep.repo_url
@@ -687,19 +692,25 @@ def _resolve_git_subdir_source(source: dict) -> str:
 
 def _dependency_reference_from_packed_source(
     plugin: MarketplacePlugin,
+    *,
+    bare_host: str | None = None,
 ) -> DependencyReference | None:
-    """Parse packed or explicitly qualified sources before catalog-local routing."""
+    """Parse packed or explicitly qualified sources before catalog-local routing.
+
+    *bare_host* host-qualifies a bare ``url:`` locator before parsing, so a
+    locator known to name that host keeps its ref and path (#3945).
+    """
     source = plugin.source
     if not isinstance(source, dict):
         return None
 
     source_type = _coerce_dict_plugin_type(source)
-    if source_type == "url":
-        remote = source.get("url")
-    elif source_type == "git-subdir" and not source.get("repo"):
+    if source_type == "url" or (source_type == "git-subdir" and not source.get("repo")):
         # Pack emits git-subdir repository identity in ``url``. Hand-authored
         # ``repo`` forms retain the existing marketplace-relative routing.
         remote = source.get("url")
+        if bare_host and isinstance(remote, str) and remote.strip():
+            remote = f"{bare_host}/{remote.strip().lstrip('/')}"
     elif source_type in {"github", "git-subdir", "gitlab"}:
         remote = source.get("repo") or source.get("repository")
         if not isinstance(remote, str) or not (
@@ -1082,11 +1093,11 @@ def resolve_marketplace_plugin(
             source_digest=source_digest,
         )
 
-    # A bare locator that names the marketplace host must not keep the packed
-    # parse, which defaults the host to ``github.com`` (#3945).
+    # A bare locator that names the marketplace host is parsed with that host,
+    # not the ``github.com`` default (#3945).
     names_marketplace_host = _bare_locator_means_marketplace_host(plugin, source)
-    dep_ref: DependencyReference | None = (
-        None if names_marketplace_host else _dependency_reference_from_packed_source(plugin)
+    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(
+        plugin, bare_host=source.host if names_marketplace_host else None
     )
     if dep_ref is not None:
         canonical = dep_ref.to_canonical()

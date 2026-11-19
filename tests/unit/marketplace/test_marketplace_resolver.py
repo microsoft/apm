@@ -1979,8 +1979,12 @@ class TestCrossRepoMisconfigRisk:
                 {"type": "url", "url": "myorg/my-marketplace", "ref": "v1.2.0"},
                 "corp.ghe.com/myorg/my-marketplace#v1.2.0",
             ),
+            (
+                {"type": "url", "url": "myorg/my-marketplace/plugins/x", "ref": "v1.2.0"},
+                "corp.ghe.com/myorg/my-marketplace/plugins/x#v1.2.0",
+            ),
         ],
-        ids=["github-repository", "git-subdir-url", "url", "url-ref"],
+        ids=["github-repository", "git-subdir-url", "url", "url-ref", "url-path-ref"],
     )
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -1997,6 +2001,20 @@ class TestCrossRepoMisconfigRisk:
         assert result.canonical == expected
         assert DependencyReference.parse(result.canonical).host == "corp.ghe.com"
 
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_url_sharing_only_a_slug_prefix_is_not_in_marketplace(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        """The ``url:`` path-prefix match needs a ``/`` boundary after the catalog slug."""
+        plugin = MarketplacePlugin(
+            name="x", source={"type": "url", "url": "myorg/my-marketplace-evil/plugins/x"}
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        assert resolve_marketplace_plugin("x", "my-marketplace").cross_repo_misconfig_risk
+
     @pytest.mark.parametrize(
         "plugin_source",
         [
@@ -2004,8 +2022,9 @@ class TestCrossRepoMisconfigRisk:
             {"type": "git-subdir", "repo": "platform-team/shared-tool", "subdir": "plugins/x"},
             {"type": "url", "url": "platform-team/shared-tool"},
             {"type": "url", "url": "platform-team/shared-tool", "ref": "v1.2.0"},
+            {"type": "git-subdir", "url": "platform-team/shared-tool", "subdir": "x", "ref": "v1"},
         ],
-        ids=["github", "git-subdir", "url", "url-ref"],
+        ids=["github", "git-subdir", "url", "url-ref", "git-subdir-url-ref"],
     )
     @pytest.mark.parametrize(
         ("github_host", "admitted"),
@@ -2039,14 +2058,16 @@ class TestCrossRepoMisconfigRisk:
             assert result.cross_repo_misconfig_risk is not None
             return
         assert result.cross_repo_misconfig_risk is None
-        assert result.dependency_reference is None
-        assert result.canonical.startswith("corp.ghe.com/platform-team/shared-tool")
+        selected = result.dependency_reference
         monkeypatch.delenv("GITHUB_HOST")
-        # Host-qualified: later parsing routes to the marketplace host regardless of env.
-        parsed = DependencyReference.parse(result.canonical)
-        assert parsed.host == "corp.ghe.com"
-        # The declared pin survives (the packed parse is skipped for these entries).
-        assert parsed.reference == plugin_source.get("ref")
+        # Host-qualified: the structured ref, or later parsing of the canonical,
+        # routes to the marketplace host regardless of env.
+        if selected is None:
+            selected = DependencyReference.parse(result.canonical)
+        assert (selected.host, selected.repo_url) == ("corp.ghe.com", "platform-team/shared-tool")
+        # The declared pin and path survive.
+        assert selected.reference == plugin_source.get("ref")
+        assert selected.virtual_path == (plugin_source.get("subdir") or plugin_source.get("path"))
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
