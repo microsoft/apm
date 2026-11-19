@@ -19,14 +19,16 @@ empty repository you can push to, cloned locally. This page calls it
 1. **Make the repository a package.** From the root of your clone:
 
    ```bash frame="terminal"
-   apm init -y --target copilot,claude
+   apm init -y
    ```
 
    This writes `apm.yml`, the manifest. For an author it names the package
    (`name`, `version`, `description`, `author`) and lists its own dependencies.
-   `targets:` names the harnesses APM writes for when you install in this
-   repository. A harness is the agent tool that reads the files: `.github/` for
-   GitHub Copilot, `.claude/` for Claude Code. Consumers choose their own.
+   Leave `targets:` commented out in a package you publish: a package's
+   `targets:` limits which harnesses its consumers get it for, so a Codex-only
+   consumer would skip a package that declares Copilot and Claude Code. A harness
+   is the agent tool that reads the files: `.github/` for GitHub Copilot,
+   `.claude/` for Claude Code.
    `includes: auto` lets APM install and pack everything you author under
    `.apm/`.
 
@@ -52,11 +54,14 @@ empty repository you can push to, cloned locally. This page calls it
 3. **Install it into your own repository.**
 
    ```bash frame="terminal"
-   apm install
+   apm install --target copilot,claude
    ```
 
+   `--target` picks the harnesses for this run only, without writing them into
+   `apm.yml`.
+
    ```text frame="none"
-   [i] Targets: claude, copilot  (source: apm.yml)
+   [i] Targets: claude, copilot  (source: --target flag)
      [+] <project root> (local)
      |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
    [i] Added apm_modules/ to .gitignore

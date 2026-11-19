@@ -141,6 +141,23 @@ they [approve your package](../../consumer/approve-executables/). Every
 hook file reaches every harness the consumer targets; to limit a hook to Claude
 Code, publish it in a package whose `apm.yml` sets `targets: [claude]`.
 
+
+### Migrating from filename routing
+
+APM no longer routes hook files named `*-<target>-hooks.json` or `hooks-<target>.json` to
+one target only. If dropping that routing would give a target a hook file the old name kept
+from it, `apm install` fails for that package, names the target and files, and writes
+nothing from it; until then `apm uninstall` of another package stops with the same message.
+
+- **Authors:** split the package so each target set has its own package whose `apm.yml`
+  declares `targets:`, with an ordinary `hooks/hooks.json`. Keep shared hooks in a common
+  package.
+- **Consumers:** if the package ships hooks for one target only, narrow the dependency with
+  object-form `targets: [codex]`. If it also ships a generic `hooks.json`, ask its author
+  to split it.
+
+Then reinstall. A file whose old name already matched every target keeps installing.
+
 ## MCP servers
 
 An MCP server gives the agent tools, such as access to GitHub or a database. A
