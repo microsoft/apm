@@ -119,12 +119,12 @@ def enforce_policy_hashes(policy: Any, lockfile: LockFile | None, lockfile_path:
     from .phases.policy_gate import PolicyViolationError
 
     if lockfile is None:
-        from ..core.remediation import LOCKFILE_RESTORE
+        from ..core.remediation import CONTENT_HASH_LOCK_RESTORE
 
         raise PolicyViolationError(
             "security.integrity.require_hashes is enabled but the lockfile at "
             f"{lockfile_path} could not be read (missing or corrupt); failing closed. "
-            f"{LOCKFILE_RESTORE.bind(lockfile=lockfile_path).sentence()}"
+            f"{CONTENT_HASH_LOCK_RESTORE.bind(lockfile=lockfile_path).sentence()}"
         )
     try:
         enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)

@@ -15,9 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm audit --ci` reports a failed install replay once, under `drift`: in JSON the `drift` message now reads `drift replay failed; see details` and the error moves to `details`. (#TBD)
-- Remedies never edit `apm.lock.yaml` or suggest `apm install --force`: a content-hash mismatch offers `apm cache clean --yes` or restoring the lockfile from version control, and a kept edited file offers moving it aside or `apm export-patch`. (#TBD)
-- Policy refusals no longer suggest `--no-policy` or `APM_POLICY_DISABLE`; they say nothing was changed and point to `apm policy status`. `apm outdated` under `PROXY_REGISTRY_ONLY` states the policy without suggesting to unset it. (#TBD)
+- `apm audit --ci` reports a failed install replay once, under `drift`: in JSON the `drift` message now reads `drift replay failed; see details` and the error moves to `details`. (#4424)
+- Remedies never edit `apm.lock.yaml` or suggest `apm install --force`: a content-hash mismatch offers `apm cache clean --yes` or restoring the lockfile from version control, and a kept edited file offers moving it aside or `apm export-patch`. (#4424)
+- Policy refusals no longer suggest `--no-policy` or `APM_POLICY_DISABLE`; they say nothing was changed and point to `apm policy status`. `apm outdated` under `PROXY_REGISTRY_ONLY` states the policy without suggesting to unset it. (#4424)
 - `apm install` upgrades projects last installed by an APM before 0.37 automatically: unedited files re-render once, and edited files are kept and named. (#4398)
 - `apm install` names every kept edited file with one message and a runnable next step; an upgrade blocked by a kept edit exits 1. (#4504)
 - Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)

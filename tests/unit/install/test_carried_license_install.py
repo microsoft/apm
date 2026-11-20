@@ -98,7 +98,7 @@ def test_carried_mismatch_with_lock_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(DirectDependencyError, match="Licence file mismatch") as exc_info:
         ensure_carried_licenses_match(ctx, "k", package, SimpleNamespace(carried_licenses=forged))
-    assert "Run 'apm cache clean --yes' to discard the cached package copies" in " ".join(
+    assert "run 'apm cache clean --yes' to discard the cached package copies" in " ".join(
         str(exc_info.value).split()
     )
     assert not package.exists()
@@ -124,10 +124,12 @@ def test_carried_mismatch_hint_names_only_restore_remedies(tmp_path: Path, scope
         )
     message = " ".join(str(exc_info.value).split())
     lockfile = tmp_path / "apm-root" / "apm.lock.yaml"
-    assert (
-        f"If the lockfile itself changed, restore {lockfile} from version control "
-        f"(for example 'git checkout -- {lockfile}'), then run '{command}' to verify"
-    ) in message
+    restore = (
+        f"restore {lockfile} from your backup"
+        if scope is InstallScope.USER
+        else f"restore {lockfile} from version control (for example 'git checkout -- {lockfile}')"
+    )
+    assert f"If {lockfile} changed, {restore}, then run '{command}' to verify" in message
     assert "entry from" not in message and "aside" not in message
 
 

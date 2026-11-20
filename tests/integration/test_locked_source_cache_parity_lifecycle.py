@@ -146,7 +146,7 @@ def _mismatch_count(result: CommandResult) -> int:
 def _assert_restore_only(result: CommandResult) -> None:
     """RA-004 rule B: the refusal offers only restores, never a lock edit."""
     text = re.sub(r"\s+", " ", result.stdout + result.stderr)
-    assert "Run 'apm cache clean --yes' to discard the cached package copies" in text, text
+    assert "run 'apm cache clean --yes' to discard the cached package copies" in text, text
     assert "from version control (for example 'git checkout -- " in text, text
     for forbidden in ("entry from", "re-pin", "aside"):
         assert forbidden not in text, (forbidden, text)
