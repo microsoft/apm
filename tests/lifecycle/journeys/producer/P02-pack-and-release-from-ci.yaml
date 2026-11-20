@@ -59,7 +59,7 @@ steps:
     run: [apm install ../project/build/my-package-1.0.0.zip, apm audit --ci]
     exit: 0
     files: [apm.lock.yaml, .agents/skills/review/SKILL.md]
-    key_lines: ["[*] Installed 1 file(s) from local bundle", "[*] All 11 check(s) passed"]
+    key_lines: ["[*] Installed 1 file(s) from local bundle", "[*] All 12 check(s) passed"]
     forbidden_lines: ["[x]"]
 known_cells:
   - id: pack-json-drops-license-warning
