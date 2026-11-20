@@ -11,6 +11,7 @@ from apm_cli.commands.install import (
     _validate_and_add_packages_to_apm_yml,
 )
 from apm_cli.core.command_logger import _ValidationOutcome
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.registry_wiring import get_effective_default_registry
 from apm_cli.models.apm_package import APMPackage
 
@@ -177,3 +178,42 @@ def test_global_dry_run_validation_summary_names_user_manifest(
 
     assert validated == ["test/pkg"]
     logger.progress.assert_any_call(f"Dry run: Would add 1 package to {user_manifest}")
+
+
+def _object_form_lock() -> tuple[LockFile, LockedDependency]:
+    locked = LockedDependency(
+        repo_url="team/catalog",
+        host="git.example.com",
+        virtual_path="plugins/example-plugin",
+        is_virtual=True,
+        resolved_commit="a" * 40,
+        discovered_via="company",
+        marketplace_plugin_name="example-plugin",
+    )
+    return LockFile(dependencies={locked.get_unique_key(): locked}), locked
+
+
+def test_dry_run_previews_object_form_checkout_from_the_scoped_lockfile(
+    tmp_path, monkeypatch
+) -> None:
+    """The preview uses the caller's lockfile, not ./apm.lock.yaml (global scope)."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.engine import _dry_run_uninstall
+
+    lockfile, locked = _object_form_lock()
+    modules = tmp_path / "home" / "apm_modules"
+    checkout = locked.to_dependency_ref().get_install_path(modules)
+    checkout.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)  # no apm.lock.yaml here
+    logger = MagicMock()
+
+    _dry_run_uninstall(
+        [{"name": "example-plugin", "marketplace": "company"}],
+        modules,
+        logger,
+        lockfile=lockfile,
+    )
+    lines = [call.args[0] for call in logger.progress.call_args_list]
+    assert any("from apm_modules/" in line for line in lines)
+    assert checkout.is_dir()

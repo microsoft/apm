@@ -1,7 +1,7 @@
 """Behavioural mutation evidence for resolve_user_invocable.
 
-Direct cases fail if the resolver's branches are inverted, dropped, or
-replaced. Consumer cases drive the real parser and the Codex agent
+Direct cases (in test_primitives.py) fail if the resolver's branches are
+inverted, dropped, or replaced. Consumer cases drive the real parser and the Codex agent
 integrator, which look the resolver up by name. The mutant tests replace
 that name and show those same consumer expectations no longer hold.
 """
@@ -16,7 +16,7 @@ import apm_cli.integration.agent_integrator as agent_integrator_mod
 import apm_cli.primitives.models as models_mod
 import apm_cli.primitives.parser as parser_mod
 from apm_cli.integration.agent_integrator import AgentIntegrator
-from apm_cli.primitives.models import Chatmode, resolve_user_invocable
+from apm_cli.primitives.models import Chatmode
 from apm_cli.primitives.parser import parse_primitive_file
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
@@ -25,56 +25,6 @@ from apm_cli.utils.diagnostics import (
 )
 
 pytestmark = pytest.mark.component
-
-
-def test_absent_defaults_to_user_invocable() -> None:
-    """A missing field, including an explicit null, stays user-invocable."""
-    assert resolve_user_invocable({}) is True
-    assert resolve_user_invocable({"description": "Agent"}) is True
-    assert resolve_user_invocable({"user-invocable": None}) is True
-
-
-def test_boolean_user_invocable_passes_through() -> None:
-    """Boolean user-invocable values are returned unchanged."""
-    assert resolve_user_invocable({"user-invocable": False}) is False
-    assert resolve_user_invocable({"user-invocable": True}) is True
-
-
-def test_visibility_internal_is_programmatic_only_alias() -> None:
-    """Only the internal visibility token aliases to not user-invocable."""
-    assert resolve_user_invocable({"visibility": "internal"}) is False
-    assert resolve_user_invocable({"visibility": " Internal "}) is False
-    assert resolve_user_invocable({"visibility": "INTERNAL"}) is False
-    assert resolve_user_invocable({"visibility": "public"}) is True
-    # Non-string visibility is not the alias and must not be stringified.
-    assert resolve_user_invocable({"visibility": True}) is True
-    assert resolve_user_invocable({"visibility": ["internal"]}) is True
-    assert resolve_user_invocable({"visibility": 0}) is True
-
-
-def test_canonical_field_wins_when_both_are_set() -> None:
-    """user-invocable wins over visibility, including quoted tokens."""
-    assert resolve_user_invocable({"user-invocable": True, "visibility": "internal"}) is True
-    assert resolve_user_invocable({"user-invocable": False, "visibility": "public"}) is False
-    assert resolve_user_invocable({"user-invocable": "false", "visibility": "public"}) is False
-    assert resolve_user_invocable({"user-invocable": "true", "visibility": "internal"}) is True
-
-
-def test_string_and_non_bool_values_follow_coercion() -> None:
-    """Quoted falsy tokens and non-bool values use the documented coercion."""
-    falsy_tokens = ("false", "no", "0", "off", "False", " OFF ")
-    for token in falsy_tokens:
-        assert resolve_user_invocable({"user-invocable": token}) is False, token
-    truthy_tokens = ("true", "yes", "1", "on", "TRUE", "", "internal")
-    for token in truthy_tokens:
-        assert resolve_user_invocable({"user-invocable": token}) is True, token
-    assert resolve_user_invocable({"user-invocable": 0}) is False
-    assert resolve_user_invocable({"user-invocable": 1}) is True
-    assert resolve_user_invocable({"user-invocable": 0.0}) is False
-    assert resolve_user_invocable({"user-invocable": []}) is False
-    assert resolve_user_invocable({"user-invocable": ["x"]}) is True
-    # Explicit null is absent, so the visibility alias still applies.
-    assert resolve_user_invocable({"user-invocable": None, "visibility": "internal"}) is False
 
 
 def _assert_parser_user_invocable(directory: Path, frontmatter: str, expected: bool) -> None:

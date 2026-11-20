@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
+import apm_cli.security.executables as ex
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
@@ -31,11 +32,13 @@ from apm_cli.security.executables import (
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
+    build_exec_trust_context,
     filter_lsp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
     more_severe_exec_status,
     parse_allow_executables,
+    parse_project_executables,
     prompt_executable_approval,
 )
 
@@ -408,7 +411,6 @@ class TestAliasDeprecationWarning:
     """S1 (#1873): the allowExecutables alias warns once, not per-package."""
 
     def test_warns_once(self, capsys) -> None:
-        import apm_cli.security.executables as ex
 
         ex._ALIAS_DEPRECATION_WARNED = False
         ex.warn_allow_executables_alias_once()
@@ -419,7 +421,6 @@ class TestAliasDeprecationWarning:
         assert "executables.allow" in out
 
     def test_uses_logger_when_given(self) -> None:
-        import apm_cli.security.executables as ex
 
         ex._ALIAS_DEPRECATION_WARNED = False
         calls = []
@@ -604,7 +605,7 @@ class TestDenyIdentitySpellings:
     def _ctx(*, org_deny=(), project_allow=None, project_deny=None, user_deny=None):
         from types import SimpleNamespace
 
-        from apm_cli.security.executables import ExecTrustContext, build_exec_trust_context
+        from apm_cli.security.executables import ExecTrustContext
 
         policy = SimpleNamespace(
             executables=SimpleNamespace(
@@ -725,7 +726,7 @@ class TestCanonicalExecIdentityHostCase:
     def test_ado_deny_matches_case_variant(self) -> None:
         from types import SimpleNamespace
 
-        from apm_cli.security.executables import build_exec_trust_context, resolve_exec_decision
+        from apm_cli.security.executables import resolve_exec_decision
 
         key = "dev.azure.com/Org/Proj/Repo"
         policy = SimpleNamespace(
@@ -810,3 +811,38 @@ dependencies:
     (locked,) = lock.get_package_dependencies()
 
     assert locked_dependency_approval_keys(locked) == ("myfork/hooky#v1.2.0", "myfork/hooky")
+
+
+class TestParseProjectExecutables:
+    def test_absent_returns_empty_no_deprecation(self):
+        allow, deny, deprecated = parse_project_executables({})
+        assert allow == {}
+        assert deny == {}
+        assert deprecated is False
+
+    def test_new_block_allow_and_deny(self):
+        data = {
+            "executables": {
+                "allow": {"owner/repo": {"hooks": True}},
+                "deny": {"bad/pkg": {"bin": True}},
+            }
+        }
+        allow, deny, deprecated = parse_project_executables(data)
+        assert allow == {"owner/repo": {"hooks": True}}
+        assert deny == {"bad/pkg": {"bin": True}}
+        assert deprecated is False
+
+    def test_allow_executables_alias_sets_deprecation_flag(self):
+        data = {"allowExecutables": {"owner/repo": {"hooks": True}}}
+        allow, _deny, deprecated = parse_project_executables(data)
+        assert allow == {"owner/repo": {"hooks": True}}
+        assert deprecated is True
+
+    def test_new_block_wins_over_alias_on_conflict(self):
+        data = {
+            "allowExecutables": {"owner/repo": {"hooks": False}},
+            "executables": {"allow": {"owner/repo": {"hooks": True}}},
+        }
+        allow, _deny, deprecated = parse_project_executables(data)
+        assert allow["owner/repo"]["hooks"] is True
+        assert deprecated is True

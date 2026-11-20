@@ -33,48 +33,12 @@ from apm_cli.security.executables import (
     effective_exec_map_for_project,
     load_user_executables,
     local_bundle_approval_key,
-    parse_project_executables,
     save_user_executables,
     scan_package_executables,
     write_allow_executables,
 )
 
 pytestmark = pytest.mark.component
-
-
-class TestParseProjectExecutables:
-    def test_absent_returns_empty_no_deprecation(self):
-        allow, deny, deprecated = parse_project_executables({})
-        assert allow == {}
-        assert deny == {}
-        assert deprecated is False
-
-    def test_new_block_allow_and_deny(self):
-        data = {
-            "executables": {
-                "allow": {"owner/repo": {"hooks": True}},
-                "deny": {"bad/pkg": {"bin": True}},
-            }
-        }
-        allow, deny, deprecated = parse_project_executables(data)
-        assert allow == {"owner/repo": {"hooks": True}}
-        assert deny == {"bad/pkg": {"bin": True}}
-        assert deprecated is False
-
-    def test_allow_executables_alias_sets_deprecation_flag(self):
-        data = {"allowExecutables": {"owner/repo": {"hooks": True}}}
-        allow, _deny, deprecated = parse_project_executables(data)
-        assert allow == {"owner/repo": {"hooks": True}}
-        assert deprecated is True
-
-    def test_new_block_wins_over_alias_on_conflict(self):
-        data = {
-            "allowExecutables": {"owner/repo": {"hooks": False}},
-            "executables": {"allow": {"owner/repo": {"hooks": True}}},
-        }
-        allow, _deny, deprecated = parse_project_executables(data)
-        assert allow["owner/repo"]["hooks"] is True
-        assert deprecated is True
 
 
 class TestUserExecutablesStore:
