@@ -328,3 +328,132 @@ def test_dry_run_waits_for_a_running_install(tmp_path: Path, apm_binary_path: Pa
     output, _ = preview.communicate(timeout=240)
     assert preview.returncode == 0, output
     assert "Another APM operation is running" in output, output
+
+
+_NATIVE_PLUGIN = "commit-point-native"
+_COLLIDING_SERVER = "commit-point-srv"
+
+
+def _native_plugin_with_colliding_mcp(tmp_path: Path, apm_binary_path: Path) -> FaultWorld:
+    """A user-scope native Claude plugin plus an MCP server whose name collides."""
+    world = build_world(tmp_path, apm_binary_path, packages=(), installed=False)
+    home = world.isolated.home
+    for variable in ("CLAUDE_CONFIG_DIR", "COPILOT_HOME", "CODEX_HOME"):
+        world.env.pop(variable, None)
+    plugin = world.isolated.package_root / _NATIVE_PLUGIN
+    manifest = plugin / ".claude-plugin/plugin.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"name": _NATIVE_PLUGIN}), encoding="utf-8")
+    skill = plugin / "skills/commit-point-skill/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        "---\nname: commit-point-skill\ndescription: native\n---\nbody\n", encoding="ascii"
+    )
+    (world.isolated.config_root / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "user",
+                "version": "1.0.0",
+                "targets": ["claude"],
+                "dependencies": {
+                    "apm": [str(plugin)],
+                    "mcp": [
+                        {
+                            "name": _COLLIDING_SERVER,
+                            "registry": False,
+                            "transport": "stdio",
+                            "command": "commit-point-mcp",
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    (home / ".claude.json").write_text(
+        json.dumps({"mcpServers": {_COLLIDING_SERVER: {"command": "personal"}}}),
+        encoding="utf-8",
+    )
+    return world
+
+
+def _user(world: FaultWorld, *args: str):
+    return world.runner.run(args, cwd=world.isolated.work_root, env=world.env)
+
+
+def _user_audit(world: FaultWorld):
+    return world.runner.run(
+        ("audit", "--ci", "--no-policy"), cwd=world.isolated.config_root, env=world.env
+    )
+
+
+def _assert_user_lock_equals_disk(world: FaultWorld) -> LockFile:
+    """Every recorded native root, file and MCP server is on disk; nothing else is."""
+    home = world.isolated.home
+    lock = LockFile.read(world.isolated.config_root / "apm.lock.yaml")
+    assert lock is not None
+    deps = lock.get_package_dependencies()
+    records = {dep.native_plugin.name: dep.native_plugin for dep in deps if dep.native_plugin}
+    plugins = home / ".agents/plugins"
+    on_disk = {path.name for path in plugins.iterdir()} if plugins.exists() else set()
+    assert on_disk == set(records), (on_disk, records)
+    settings_path = home / ".claude/settings.json"
+    settings = json.loads(settings_path.read_text("utf-8")) if settings_path.exists() else {}
+    enabled = {
+        key
+        for key in settings.get("enabledPlugins", {})
+        if any(key == f"{name}@{rec.marketplace}" for name, rec in records.items())
+    }
+    assert enabled == {f"{name}@{rec.marketplace}" for name, rec in records.items()}, settings
+    for record in records.values():
+        assert (home / record.root / ".claude-plugin/plugin.json").is_file(), record
+    recorded = {path for dep in deps for path in dep.deployed_files}
+    assert all((home / path).exists() for path in recorded), recorded
+    loose = home / ".claude/skills"
+    unrecorded = sorted(
+        path.relative_to(home).as_posix()
+        for path in (loose.rglob("*") if loose.exists() else ())
+        if path.is_file() and path.relative_to(home).as_posix() not in recorded
+    )
+    assert not unrecorded, unrecorded
+    claude_json = json.loads((home / ".claude.json").read_text("utf-8"))
+    configured = claude_json.get("mcpServers", {})
+    for server in lock.mcp_target_servers.get("claude", []):
+        assert server in configured, (server, configured)
+    if configured.get(_COLLIDING_SERVER, {}).get("command") == "personal":
+        assert _COLLIDING_SERVER not in lock.mcp_target_servers.get("claude", []), lock
+    return lock
+
+
+def test_a_failed_mcp_reconcile_after_native_registration_keeps_the_lock_equal_to_disk(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4329: native registration commits the lock, then the MCP reconcile fails."""
+    world = _native_plugin_with_colliding_mcp(tmp_path, apm_binary_path)
+
+    failed = _user(world, "install", "-g", "--no-policy")
+
+    assert failed.returncode != 0, evidence(failed)
+    lock = _assert_user_lock_equals_disk(world)
+    assert any(dep.native_plugin for dep in lock.get_package_dependencies()), evidence(failed)
+    audit = _user_audit(world)
+    frozen = _user(world, "install", "-g", "--frozen", "--no-policy")
+    assert (audit.returncode == 0) == (frozen.returncode == 0), (
+        f"{evidence(audit)}\n{evidence(frozen)}"
+    )
+    _assert_user_lock_equals_disk(world)
+
+    (world.isolated.home / ".claude.json").write_text("{}", encoding="utf-8")
+    converged = _user(world, "install", "-g", "--no-policy")
+    assert converged.returncode == 0, evidence(converged)
+    lock = _assert_user_lock_equals_disk(world)
+    assert _COLLIDING_SERVER in lock.mcp_target_servers.get("claude", []), evidence(converged)
+    settled = (world.isolated.config_root / "apm.lock.yaml").read_bytes()
+    repeat = _user(world, "install", "-g", "--no-policy")
+    assert repeat.returncode == 0, evidence(repeat)
+    assert (world.isolated.config_root / "apm.lock.yaml").read_bytes() == settled
+    audit = _user_audit(world)
+    assert audit.returncode == 0, evidence(audit)
+    frozen = _user(world, "install", "-g", "--frozen", "--no-policy")
+    assert frozen.returncode == 0, evidence(frozen)
