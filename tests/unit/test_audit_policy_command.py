@@ -166,7 +166,7 @@ class TestCiWithPolicyFlag:
         )
 
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         hash_check = next(
             check for check in payload["checks"] if check["name"] == "dependency-content-hashes"
         )
