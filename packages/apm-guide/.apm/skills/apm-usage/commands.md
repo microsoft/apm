@@ -141,6 +141,19 @@ plugin (`enforcement: block`). An explicit `false` in
 `enabledPlugins` is kept. `apm.lock.yaml` records each as `native_plugin`. See
 [admission limits](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
+At project scope, a project that targets `claude` or `copilot` installs the
+same plugins intact to the committed `.agents/plugins/<plugin>/`, generates
+`.agents/plugins/.claude-plugin/marketplace.json`, and declares them with the
+relative path `./.agents/plugins` under `apm-p-<hash>` (from the `apm.yml`
+`name`) in `.claude/settings.json` and/or `.github/copilot/settings.json`,
+following each dependency's targets. Commit those files; a fresh clone loads
+the plugins after folder trust, without APM. The project lock fingerprint covers
+paths and bytes only. Copilot also reads `.claude/settings*.json`; for the same
+key, `.github/copilot/settings*.json` wins (Copilot CLI 1.0.112). Uninstall and
+prune remove only lock-owned entries. Agent Plugins take the same route,
+declared only to Copilot; the next install, uninstall or prune migrates a legacy
+`apm_modules/.github/plugin/apm-registration.json` registration.
+
 `apm audit --ci` checks both the source and the deployed copy against that
 fingerprint (every file's path, bytes and executable bit). Same-revision content
 changes are refused, not adopted. Run audit from the user manifest directory with

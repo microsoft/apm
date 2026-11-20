@@ -105,6 +105,12 @@ not declared, with a warning. Rejected capabilities fail without loose-file
 fallback. See
 [Claude admission and qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
+In a project that targets `claude` or `copilot`, the same plugins are copied to
+the committed `.agents/plugins/<plugin>/` and declared with the relative path
+`./.agents/plugins` in `.claude/settings.json` and `.github/copilot/settings.json`,
+following each dependency's targets. See
+[project plugins](../../../consumer/installing-from-marketplaces/#apm-managed-project-plugins-claude-and-copilot).
+
 ### Policy and trust
 
 | Flag | Default | Description |

@@ -118,9 +118,10 @@ What gets removed, in order:
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
-8. For global uninstalls, after lockfile processing, remove the removed packages'
-   `~/.agents/plugins/<plugin>/` roots and their `enabledPlugins` keys. A key you
-   set to `false`, your own entries and a root you edited are kept.
+8. After lockfile processing, remove the removed packages' native plugin roots
+   (`.agents/plugins/<plugin>/`, or `~/.agents/plugins/<plugin>/` with
+   `--global`) and their `enabledPlugins` keys. A key you set to `false`, your
+   own entries and a root you edited are kept.
 
 When uninstall rebuilds a surviving package's loose skills, it deploys only the
 skills that package selects with `skills:`, as `apm install` does. APM records

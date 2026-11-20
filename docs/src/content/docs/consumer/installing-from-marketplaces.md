@@ -183,8 +183,49 @@ then reinstall to switch it to the native route.
 A human witness on Claude Code 2.1.322 (macOS arm64) observed `SessionStart`
 and `UserPromptSubmit` hooks and a namespaced plugin command reading bundled
 resources through `CLAUDE_PLUGIN_ROOT`. `SubagentStart` was not observed.
-Project scope comes later (#3921).
 :::
+
+### APM-managed project plugins (Claude and Copilot)
+
+In a project that targets `claude` or `copilot`, `apm install` installs an
+eligible Claude plugin intact and commits it, so a fresh clone loads it in
+Claude Code and GitHub Copilot CLI without APM:
+
+1. `apm_modules/` keeps the fetched source and stays ignored by git.
+2. APM copies the approved plugin root to `.agents/plugins/<plugin>/` and
+   generates `.agents/plugins/.claude-plugin/marketplace.json`. Commit both.
+3. It declares the marketplace, with the relative path `./.agents/plugins`,
+   in `.claude/settings.json` when the dependency targets Claude and in
+   `.github/copilot/settings.json` when it targets Copilot. The name,
+   `apm-p-<hash>`, comes from the `name` in `apm.yml`, so every clone uses the
+   same one and other projects use a different one.
+
+```json title=".github/copilot/settings.json"
+{
+  "extraKnownMarketplaces": {
+    "apm-p-1a2b3c4d": { "source": { "source": "directory", "path": "./.agents/plugins" } }
+  },
+  "enabledPlugins": { "superpowers@apm-p-1a2b3c4d": true }
+}
+```
+
+Each harness loads the plugin after you trust the folder. Ownership, approval,
+the explicit `false`, refusals and uninstall work as for user plugins above.
+Differences at project scope:
+
+- The lock fingerprint covers each file's path and bytes, not the executable
+  bit, because checkouts on Windows or with `core.fileMode=false` drop it.
+- Copilot CLI also reads `.claude/settings.json` and
+  `.claude/settings.local.json`. When a key appears in several files, Copilot
+  applies them in this order, later winning: `.claude/settings.json`,
+  `.claude/settings.local.json`, `.github/copilot/settings.json`,
+  `.github/copilot/settings.local.json` (observed on Copilot CLI 1.0.112). To
+  turn a plugin off for yourself only, set it to `false` in
+  `.github/copilot/settings.local.json` or `.claude/settings.local.json`.
+- Claude resolves the relative path against the main checkout, also from a git
+  worktree, and loads a newly declared plugin from the next session.
+- A package whose loose hooks an earlier install wrote must be removed with
+  `apm uninstall <package>` and installed again to switch to this route.
 
 ### Direct native installs
 

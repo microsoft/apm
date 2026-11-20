@@ -1,10 +1,11 @@
 ---
 title: Install Agent Plugins for Copilot
-description: Install a portable Agent Plugins 1.0 package and let GitHub Copilot load it live from apm_modules.
+description: Install a portable Agent Plugins 1.0 package and let GitHub Copilot load it live from the committed .agents/plugins.
 ---
 
 APM installs an Agent Plugin whole and GitHub Copilot loads it **live** from
-`apm_modules` -- no copy, no `--plugin-dir`. An
+the committed `.agents/plugins/<plugin>/` -- no `--plugin-dir`, and a fresh
+clone needs no APM. An
 [Agent Plugin](../../reference/package-types/#agent-plugin-pluginjson-with-an-agent-plugins-schema)
 is a whole unit: one `plugin.json`, its `skills/`, and its root `mcp.json`,
 and APM installs it without taking it apart.
@@ -36,47 +37,38 @@ $ copilot
 
 ## What APM writes
 
-APM writes two generated files it fully owns, and merges two namespaced keys
-into your Copilot settings, which stays yours:
+Agent Plugins take the same native route as
+[Claude plugins at project scope](../installing-from-marketplaces/#apm-managed-project-plugins-claude-and-copilot):
 
 | Path | Owner | Purpose |
 | --- | --- | --- |
-| `apm_modules/.github/plugin/marketplace.json` | APM (generated) | One catalog listing every installed Agent Plugin, each pointing at its real directory |
-| `apm_modules/.github/plugin/apm-registration.json` | APM (generated) | Primary ownership ledger for the settings keys APM manages |
-| `.github/copilot/settings.local.json` | You (merge-only) | APM adds two namespaced keys: `extraKnownMarketplaces.apm` and `enabledPlugins["<plugin>@apm"]` |
+| `.agents/plugins/<plugin>/` | APM (committed) | The approved plugin root, copied from `apm_modules/` |
+| `.agents/plugins/.claude-plugin/marketplace.json` | APM (committed) | One catalog listing every deployed plugin |
+| `.github/copilot/settings.json` | You (merge-only, committed) | APM adds `extraKnownMarketplaces["apm-p-<hash>"]` and `enabledPlugins["<plugin>@apm-p-<hash>"]` |
 
-```json title=".github/copilot/settings.local.json"
+```json title=".github/copilot/settings.json"
 {
   "extraKnownMarketplaces": {
-    "apm": { "source": { "source": "directory", "path": "apm_modules" } }
+    "apm-p-1a2b3c4d": { "source": { "source": "directory", "path": "./.agents/plugins" } }
   },
-  "enabledPlugins": { "my-plugin@apm": true }
+  "enabledPlugins": { "my-plugin@apm-p-1a2b3c4d": true }
 }
 ```
 
-The marketplace path is repository-relative, so the registration survives
-clones, worktrees, and moved checkouts. Global installs (`apm install -g`)
-write the same two keys to `$COPILOT_HOME/settings.json` (unset or blank:
-`~/.copilot/settings.json`) with an absolute path under `~/.apm/apm_modules`.
+`apm.lock.yaml` records each plugin as `native_plugin`, and that record is
+APM's only ownership evidence: APM adds what the lock needs, removes only what
+the previous lock produced, writes `true` only when a key is absent, and keeps
+your entries and any explicit `false`. A marketplace with APM's name that
+points elsewhere fails the install without a write. Global installs
+(`apm install -g`) deploy to `~/.agents/plugins/` and write
+`$COPILOT_HOME/settings.json` (unset or blank: `~/.copilot/settings.json`) with
+an absolute path.
 
-APM preserves unrelated JSON keys and values semantically. Its stable
-serialization may reformat the settings document.
-The install fails closed only when a pre-existing `apm` marketplace entry
-points somewhere other than APM's materialization root and the ledger does not
-record APM as its owner. An entry that already matches what APM would write is
-re-adopted silently, ledger or not. The `<plugin>@apm` enabled keys sit in
-APM's namespace: once APM owns the `apm` marketplace it sets the ones it needs
-and retires any leftover `@apm` key, so a lost ledger (`rm -rf apm_modules`)
-still converges on re-install. Do not create manual `*@apm` activation keys;
-APM reconciliation may retire them. Keys using another marketplace suffix are
-preserved.
-
-Only plugins that pass target and security admission participate in
-registration and name-collision handling. If two admitted dependencies declare
-the same plugin name, a direct dependency wins over a transitive dependency.
-Two admitted claimants at the same precedence fail with an actionable collision
-instead of registering either one. An admitted transitive dependency cannot
-silently replace the owner recorded in APM's ledger.
+Earlier APM versions registered Agent Plugins from `apm_modules` through
+`apm_modules/.github/plugin/apm-registration.json` and an `apm` marketplace in
+`.github/copilot/settings.local.json`. The next `apm install`, `apm uninstall`
+or `apm prune` removes exactly the entries that ledger recorded, then the
+ledger and its catalog.
 
 ## What APM does not do
 
@@ -104,17 +96,17 @@ See the
 [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases).
 Non-Copilot targets remain outside this native registration path.
 APM may still acquire and lock the dependency, but it creates no Copilot
-catalog, ledger, settings entry, or loose primitive projection for it.
+deployed root, catalog, settings entry, or loose primitive projection for it.
 
 ## Lifecycle
 
 | Command | Effect |
 | --- | --- |
-| `apm install` | Materializes the plugin under `apm_modules/`, then rebuilds the catalog and settings entries |
+| `apm install` | Materializes the plugin under `apm_modules/`, deploys it to `.agents/plugins/`, then updates the catalog and settings entries |
 | `apm install --force` | Reapplies the current dependency selection while overriding supported collision and trust prompts; it does not select newer remote refs |
 | `apm update` | Downloads and validates replacement package content while the current plugin remains available, then publishes it; a failed refresh keeps the prior content |
 | `apm deps list` | Reports which Agent Plugins APM registers natively |
-| `apm uninstall` / `apm prune` | Removes only APM-owned catalog rows and settings keys, then deletes the generated catalog once it is empty |
+| `apm uninstall` / `apm prune` | Removes only the deployed roots and settings keys the lock recorded, then the catalog once it is empty |
 
 Your plugin sources are never deleted by the registration lifecycle -- APM
 only retires what it wrote.
@@ -126,13 +118,10 @@ the project registration path is repository-relative, and repository-scoped
 settings are folder-trust gated. Grant folder trust once; APM does not
 pre-seed trust on your behalf.
 
-**A settings collision.** APM refuses to overwrite an `apm` marketplace entry
-whose directory differs from what it would write when the ledger at
-`apm_modules/.github/plugin/apm-registration.json` does not record APM as its
-owner. Rename or remove that entry and re-run the install. Deleting the ledger
-is not a collision on its own: as long as the `apm` marketplace still matches,
-the next install re-adopts it and regenerates the ledger, so
-`rm -rf apm_modules && apm install` recovers with no hand-editing.
+**A settings collision.** APM refuses to overwrite a marketplace entry with
+its `apm-p-<hash>` name that points somewhere other than `./.agents/plugins`,
+in any settings file Copilot reads. Rename or remove that entry and re-run the
+install.
 
 **The merge fails on invalid JSON or comments.** APM writes stable 2-space JSON,
 so JSONC comments are not supported. Invalid JSON fails closed with an explicit
