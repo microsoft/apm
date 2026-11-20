@@ -36,11 +36,38 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     site (in ``_install_apm_dependencies``) share one implementation.
     Returns ``{rel_path: "sha256:<hex>"}`` for files that exist as regular
     files; symlinks and unreadable paths are silently omitted (they cannot
-    contribute meaningful provenance).
+    contribute meaningful provenance). ``cowork://`` rows hash the file
+    they decode to under the resolved Cowork root, so they carry the same
+    provenance as project rows (#3701); without a resolvable root they get
+    no hash.
     """
+    from apm_cli.integration.copilot_cowork_paths import (
+        COWORK_URI_SCHEME,
+        CoworkResolutionError,
+        from_lockfile_path,
+        resolve_copilot_cowork_skills_dir,
+    )
+    from apm_cli.utils.path_security import PathTraversalError
+
     out: dict = {}
+    cowork_root: Path | None = None
+    cowork_resolved = False
     for _rel in rel_paths or ():
-        _full = project_root / _rel
+        if _rel.startswith(COWORK_URI_SCHEME):
+            if not cowork_resolved:
+                cowork_resolved = True
+                try:
+                    cowork_root = resolve_copilot_cowork_skills_dir()
+                except CoworkResolutionError:
+                    cowork_root = None
+            if cowork_root is None:
+                continue
+            try:
+                _full = from_lockfile_path(_rel, cowork_root)
+            except (PathTraversalError, ValueError):
+                continue
+        else:
+            _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
             try:  # noqa: SIM105
                 out[_rel] = compute_file_hash(_full)
@@ -246,13 +273,32 @@ class LockfileBuilder:
         manifest. Skipped for partial (``only_packages``) installs, which
         intentionally preserve unlisted entries.
         """
-        existing = self.ctx.existing_lockfile
-        if existing is None or self.ctx.only_packages:
+        if self.ctx.existing_lockfile is None or self.ctx.only_packages:
             return False
-        from apm_cli.deps.lockfile import _SELF_KEY
+        return bool(self._orphan_decision().candidate_keys)
 
-        intended = self.ctx.intended_dep_keys or set()
-        return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
+    def _orphan_decision(self):
+        """Ask the orphan owner which previous rows a full install retires."""
+        from apm_cli.install.orphans import (
+            DeploymentClaims,
+            OrphanOperation,
+            decide_orphan_removal,
+        )
+
+        return decide_orphan_removal(
+            operation=OrphanOperation.INSTALL,
+            roots=(),
+            candidate_universe=self.ctx.existing_lockfile,
+            installed_paths=None,
+            resolved_keys=None,
+            intended=self.ctx.intended_dep_keys or set(),
+            materialized=None,
+            reachability=None,
+            deployment_claims=DeploymentClaims(
+                live_files=frozenset(),
+                retained=getattr(self.ctx, "orphan_cleanup_retained", {}),
+            ),
+        )
 
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
@@ -597,13 +643,15 @@ class LockfileBuilder:
             return
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
             retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
+            decision = self._orphan_decision()
             for dep_key, dep in self.ctx.existing_lockfile.dependencies.items():
                 if dep_key not in lockfile.dependencies:
-                    if self.ctx.only_packages or dep_key in self.ctx.intended_dep_keys:
-                        # Preserve: partial install (sequential install support)
-                        # OR package still in manifest but failed to download.
+                    if dep_key in decision.rescued_keys:
+                        # Preserve: package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
-                    elif retained := retained_orphans.get(dep_key):
+                    elif dep_key in decision.retained_keys and (
+                        retained := retained_orphans.get(dep_key)
+                    ):
                         self._keep_retained_orphan(
                             lockfile, dep_key, dep, retained, self.ctx.existing_lockfile
                         )

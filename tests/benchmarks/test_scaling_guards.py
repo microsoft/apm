@@ -109,7 +109,7 @@ class TestChildrenIndexScaling:
     """_build_children_index must stay O(n)."""
 
     def test_scaling_ratio(self):
-        from apm_cli.commands.uninstall.engine import _build_children_index
+        from apm_cli.install.orphans import _build_children_index
 
         small_lf = _make_lockfile(50)
         large_lf = _make_lockfile(500)

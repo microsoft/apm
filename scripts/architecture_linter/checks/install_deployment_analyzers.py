@@ -86,6 +86,10 @@ from scripts.architecture_linter.checks.install_manifest_snapshot import (
     GUARD_MANIFEST_SNAPSHOT,
     check_manifest_snapshot,
 )
+from scripts.architecture_linter.checks.install_orphan_removal import (
+    GUARD_ORPHAN_SELECTION,
+    check_orphan_selection,
+)
 from scripts.architecture_linter.checks.install_package_content_hash import (
     GUARD as _GUARD_PACKAGE_CONTENT_HASH,
 )
@@ -154,11 +158,9 @@ from scripts.architecture_linter.checks.install_trust_integrity import (
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
-    _GUARD_ORPHAN_SELECTION,
     _GUARD_RESOLUTION_REPLACEMENT,
     _GUARD_UNINSTALL_SELECTION,
     check_immutable_requirements,
-    check_orphan_selection,
     check_resolution_replacement,
     check_uninstall_selection,
 )
@@ -216,8 +218,8 @@ RULES: tuple[Rule, ...] = (
         check_single_file_materialization,
     ),
     _rule(
-        _GUARD_ORPHAN_SELECTION,
-        "Prune and orphan warnings share declaration-aware package selection.",
+        GUARD_ORPHAN_SELECTION,
+        "Every command's orphan removal decision routes through install/orphans.py.",
         check_orphan_selection,
     ),
     _rule(

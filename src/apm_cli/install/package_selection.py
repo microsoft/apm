@@ -96,28 +96,17 @@ def only_packages_from_validation(
     return selected
 
 
-def previous_selected_subtree_keys(
+def selected_removal_roots(
     packages: Sequence[str],
     declarations: Sequence[DependencyReference],
     lockfile: LockFile,
-    complete_dep_keys: Collection[str],
-) -> tuple[frozenset[str], frozenset[str]]:
-    """Split the selected packages' previously locked descendants for a partial install.
+) -> list[object]:
+    """Return the removal roots a targeted install's selectors name.
 
-    Returns ``(dropped, rescued)``: descendants the complete graph resolved
-    this run no longer contains, and those it still reaches through another
-    retained package. Unrelated lock entries are never candidates. Both
-    sets are empty when a candidate carries replacement evidence, whose
-    recorded parent requests only a complete install may rewrite. Nothing is
-    dropped when the graph omits a retained entry, which may still need a
-    candidate.
+    Children record their parent's spelling at lock time; scan from both the
+    interpreted declaration and the selected package's own lock entry so a
+    canonical selector still reaches entries recorded under declared casing.
     """
-    from apm_cli.deps.lockfile import _SELF_KEY
-    from apm_cli.install.orphans import collect_orphan_candidates as _collect_orphan_candidates
-
-    # Children record their parent's spelling at lock time; scan from both the
-    # interpreted declaration and the selected package's own lock entry so a
-    # canonical selector still reaches entries recorded under declared casing.
     roots: list[object] = []
     for package in packages:
         try:
@@ -129,21 +118,36 @@ def previous_selected_subtree_keys(
         locked = lockfile.dependencies.get(selected.get_unique_key())
         if locked is not None:
             roots.append(locked.to_dependency_ref())
-    candidates, _ = _collect_orphan_candidates(lockfile, roots)
-    candidates.discard(_SELF_KEY)
-    if any(
-        (entry := lockfile.dependencies.get(key)) is not None and entry.replacement is not None
-        for key in candidates
-    ):
-        return frozenset(), frozenset()
-    complete = frozenset(complete_dep_keys)
-    # A retained entry the graph no longer reaches (e.g. an unselected local
-    # package whose apm.yml changed since it was locked) may still need a
-    # candidate; the graph cannot prove otherwise, so drop nothing.
-    unproven = set(lockfile.dependencies) - candidates - complete - {_SELF_KEY}
-    if unproven:
-        return frozenset(), frozenset(candidates & complete)
-    return frozenset(candidates - complete), frozenset(candidates & complete)
+    return roots
+
+
+def previous_selected_subtree_keys(
+    packages: Sequence[str],
+    declarations: Sequence[DependencyReference],
+    lockfile: LockFile,
+    complete_dep_keys: Collection[str] | None,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Split the selected packages' previously locked descendants for a partial install.
+
+    Returns ``(dropped, rescued)`` as the orphan owner decides them:
+    descendants the complete graph resolved this run no longer contains, and
+    those it still reaches through another retained package.
+    ``complete_dep_keys`` is ``None`` when resolution was incomplete.
+    """
+    from apm_cli.install.orphans import OrphanOperation, decide_orphan_removal
+
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.TARGETED_INSTALL,
+        roots=selected_removal_roots(packages, declarations, lockfile),
+        candidate_universe=lockfile,
+        installed_paths=None,
+        resolved_keys=complete_dep_keys,
+        intended=None,
+        materialized=None,
+        reachability=None,
+        deployment_claims=None,
+    )
+    return decision.candidate_keys, decision.rescued_keys
 
 
 def selected_dependency_keys(

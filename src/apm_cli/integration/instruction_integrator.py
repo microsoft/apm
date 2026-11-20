@@ -476,6 +476,7 @@ class InstructionIntegrator(BaseIntegrator):
                 continue
 
             write_text_lf(target_path, new_content)
+            self.note_rendered_write(target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
