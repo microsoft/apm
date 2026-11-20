@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from apm_cli.core.scope import InstallScope
 from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.helpers.no_work import local_rows_need_reconciling, retained_local_work
@@ -73,7 +74,7 @@ def test_bundle_only_rows_are_not_install_work(tmp_path: Path) -> None:
     lockfile = LockFile()
     bundled = ".agents/skills/bundled/SKILL.md"
     DeploymentLedgerCodec.record_local_bundle_files(
-        lockfile, [bundled], {bundled: f"sha256:{'b' * 64}"}
+        lockfile, [bundled], {bundled: f"sha256:{'b' * 64}"}, scope=InstallScope.PROJECT
     )
 
     assert not local_rows_need_reconciling(
