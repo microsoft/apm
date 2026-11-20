@@ -182,9 +182,9 @@ evidence, uninstall exits 1 before changing anything: `apm.yml`,
 `apm.lock.yaml`, `apm_modules/` and every file stay as they were. It names each
 file and why, then offers two remedies:
 
-- Move aside any listed file that holds your edits, then run `apm install` once
-  with access to the package source, which re-establishes deployment evidence,
-  then rerun `apm uninstall`. Install rewrites a file it cannot prove it wrote.
+- Run `apm install` once with access to the package source, which
+  re-establishes deployment evidence, then rerun `apm uninstall`. Install keeps
+  an edited file, so uninstall still refuses it: move it aside, then rerun.
 - If the source is unreachable, move each listed file aside or delete it, then
   rerun `apm uninstall`.
 

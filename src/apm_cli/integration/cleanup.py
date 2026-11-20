@@ -719,8 +719,7 @@ def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
     """Return the two runnable remedies when uninstall lacks deletion evidence."""
     flag = " -g" if user_scope else ""
     return (
-        "Move aside any listed file that holds your edits, then run "
-        f"'apm install{flag}' once with access to the package source, which "
+        f"Run 'apm install{flag}' once with access to the package source, which "
         f"re-establishes deployment evidence, then rerun 'apm uninstall{flag}'.",
         "If the source is unreachable, move each listed file aside or delete it, "
         f"then rerun 'apm uninstall{flag}'.",
