@@ -107,6 +107,13 @@ def either_sentence(first: Remediation, *alternatives: Remediation) -> str:
     return _sentence(either(first, *alternatives))
 
 
+def kept_file_message(
+    path: str, reason: str, remedy: Remediation, *alternatives: Remediation
+) -> str:
+    """Render the one kept-file shape: ``Kept <path>: <reason>. <Remedy sentence>``."""
+    return f"Kept {path}: {reason}. {either_sentence(remedy, *alternatives)}"
+
+
 _CATALOG: dict[str, Remediation] = {}
 
 
@@ -173,6 +180,9 @@ RESTORE_EDITED_SKILL = _entry(
     before="delete {subject}",
     then="commit the result",
 )
+# A managed file install kept because it may hold local edits (#4360, #4504).
+KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+KEPT_FILE_OVERWRITE = _entry("kept-file-overwrite", "apm install --force", "overwrite it")
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
     "apm install --force",

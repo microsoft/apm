@@ -211,17 +211,19 @@ def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str
     *proven_edit* means the file differs from the bytes APM recorded deploying;
     otherwise no receipt or locked render proves APM wrote it (#4360).
     """
-    install = "apm install -g" if user_scope else "apm install"
+    from apm_cli.core import remediation
+
     reason = (
         "it was modified since APM deployed it"
         if proven_edit
         else "it differs from what APM renders and there is no local deployment "
         "receipt or locked render proving APM wrote it, so it may hold local edits"
     )
-    return (
-        f"Kept {entry}: {reason}. Move it aside, then run '{install}' to restore it; "
-        f"or run '{install} --force' to overwrite it."
-    )
+    restore, overwrite = remediation.KEPT_FILE_RESTORE, remediation.KEPT_FILE_OVERWRITE
+    if user_scope:
+        restore = restore.with_command("apm install -g")
+        overwrite = overwrite.with_command("apm install -g --force")
+    return remediation.kept_file_message(entry, reason, restore, overwrite)
 
 
 class BaseIntegrator:
@@ -388,7 +390,7 @@ class BaseIntegrator:
 
     @staticmethod
     def _member_edit(
-        target_file: Path, source_file: Path, expected: str | None, *, baseline_required: bool
+        target_file: Path, source_file: Path, expected: str | None, *, untrusted: bool
     ) -> str | None:
         """Classify an existing member against the bytes APM recorded deploying.
 
@@ -402,8 +404,10 @@ class BaseIntegrator:
 
         if not target_file.is_file():
             return None
+        if untrusted:
+            return "untrusted"
         if expected is None:
-            return "untrusted" if baseline_required else None
+            return None
         disk = compute_file_hash(target_file)
         if disk == expected:
             return None
@@ -491,7 +495,7 @@ class BaseIntegrator:
                         target_file,
                         source_file,
                         expected,
-                        baseline_required=baseline_hash is not None,
+                        untrusted=(baseline_hash is not None and expected is None),
                     )
                 )
                 if state is not None:
