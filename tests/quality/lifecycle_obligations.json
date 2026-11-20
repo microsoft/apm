@@ -23657,9 +23657,9 @@
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:497",
-    "src/apm_cli/install/exec_gate.py:498",
-    "src/apm_cli/install/exec_gate.py:501"
+    "src/apm_cli/install/exec_gate.py:592",
+    "src/apm_cli/install/exec_gate.py:593",
+    "src/apm_cli/install/exec_gate.py:596"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "1dbec0fa89c1a5b2bf57598f8cfa8828f40ccd0d96c325c8379c4af0a2e85793"
+ "sha256": "7ab6a6d2e7f2d55b98035b3630414abb3ec76f3a91ac4919a31d6f5786004a62"
 }
