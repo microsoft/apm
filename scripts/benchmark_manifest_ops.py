@@ -51,7 +51,6 @@ def build_managed_files(n_packages: int, files_per_pkg: int) -> set:
 # OLD: check_collision rebuilds a normalized set on every call
 # ---------------------------------------------------------------------------
 
-
 def check_collision_OLD(rel_path: str, managed_files: set) -> bool:
     """Original O(M) per call — rebuilds normalized set."""
     if rel_path.replace("\\", "/") in {p.replace("\\", "/") for p in managed_files}:
@@ -62,7 +61,6 @@ def check_collision_OLD(rel_path: str, managed_files: set) -> bool:
 # ---------------------------------------------------------------------------
 # NEW: managed_files is pre-normalized — O(1) amortized lookup
 # ---------------------------------------------------------------------------
-
 
 def normalize_managed_files(managed_files: set) -> set:
     return {p.replace("\\", "/") for p in managed_files}
@@ -79,7 +77,6 @@ def check_collision_NEW(rel_path: str, managed_files_normalized: set) -> bool:
 # OLD: sync_remove_files scans all paths with startswith for each integrator
 # ---------------------------------------------------------------------------
 
-
 def sync_remove_old(managed_files: set, prefix: str) -> int:
     """Original: iterate full set, filter by prefix."""
     count = 0
@@ -94,7 +91,6 @@ def sync_remove_old(managed_files: set, prefix: str) -> int:
 # ---------------------------------------------------------------------------
 # NEW: pre-partitioned — each integrator receives only its own paths
 # ---------------------------------------------------------------------------
-
 
 def partition_managed_files(managed_files: set) -> dict:
     """Single-pass partition by prefix."""
@@ -120,7 +116,6 @@ def sync_remove_new(bucket: set) -> int:
 # ---------------------------------------------------------------------------
 # Benchmarks
 # ---------------------------------------------------------------------------
-
 
 def timeit(fn, *args, iterations: int = 1000) -> float:
     """Return total time in ms for *iterations* calls."""
@@ -299,9 +294,7 @@ def run_benchmarks():
                 _ = [p for p in removed_files if p.startswith(prefix)]
         new_scope_ms = (time.perf_counter() - t0) * 1000
 
-        print(
-            f"\n  scoped uninstall set (removing {removed_count}/{n_pkgs} pkgs, {iters4} cycles):"
-        )
+        print(f"\n  scoped uninstall set (removing {removed_count}/{n_pkgs} pkgs, {iters4} cycles):")
         print(f"    OLD (union ALL {len(all_files)} paths):     {old_scope_ms:>8.2f} ms")
         print(f"    NEW (union removed {len(removed_files)} paths): {new_scope_ms:>8.2f} ms")
         speedup4 = old_scope_ms / new_scope_ms if new_scope_ms > 0 else float("inf")
