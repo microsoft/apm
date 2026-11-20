@@ -93,7 +93,9 @@ and `apm install --frozen` and survive other installs and uninstalls; `apm insta
 <bundle>` records them in `$APM_HOME/apm.lock.yaml`. A `bundle:` entry counts only
 when the lockfile also records its deployment, and org MCP policy still applies to
 it. Org policy resolves as for a package install; when it cannot be resolved,
-`policy.fetch_failure_default` decides. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
+`policy.fetch_failure_default` decides. Approved bundle hooks are re-checked on
+every install, update and prune, and retired once their approval is removed or
+org policy denies them. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
 current directory's `apm.yml`. To build one, see
 [Build a plugin](../../producer/build-a-plugin/).
 

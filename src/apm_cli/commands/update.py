@@ -747,6 +747,9 @@ def _run_dep_update_locked(
     logger = InstallLogger(
         verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
     )
+    from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+    reconcile_scope_bundle_hooks(scope, apm_package, logger=logger, dry_run=dry_run)
     if _handle_service_only_update(
         apm_package=apm_package,
         scope=scope,

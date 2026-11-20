@@ -114,6 +114,9 @@ def integrate_local_bundle_hooks(
     managed_files = _prior_bundle_claims(project_root, user_scope=user_scope)
     with tempfile.TemporaryDirectory(prefix="apm-bundle-hooks-") as tmp:
         package_info = _bundle_hook_package(bundle_info, verified_files, Path(tmp) / slug, slug)
+        package_info.local_bundle_approval = approval_key
+        # Entries recorded under an earlier key are replaced, never kept beside.
+        _retire_bundle_hooks(project_root, targets, slug)
         integrator = HookIntegrator()
         for target in hook_targets:
             outcome = integrator.integrate_hooks_for_target(
@@ -127,6 +130,9 @@ def integrate_local_bundle_hooks(
                 user_scope=user_scope,
             )
             result.hook_files += outcome.files_integrated
+            _record_per_file_approval(
+                target, project_root, slug, approval_key, outcome.target_paths, user_scope
+            )
             for target_path in outcome.target_paths:
                 dest = Path(target_path)
                 record = _record_path(dest, project_root, user_scope=user_scope)
@@ -210,6 +216,30 @@ def _prior_bundle_claims(project_root: Path, *, user_scope: bool = False) -> set
             continue
         claims.add(_record_path(path, project_root, user_scope=False))
     return claims
+
+
+def _record_per_file_approval(
+    target: Any,
+    project_root: Path,
+    slug: str,
+    approval_key: str | None,
+    target_paths: Any,
+    user_scope: bool,
+) -> None:
+    """Record the approval key for a per-file hook target's bundle hook files (#4027)."""
+    from ..integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
+    from ..integration.hook_ownership import write_per_file_bundle_record
+
+    if target.name in _MERGE_HOOK_TARGETS:
+        return
+    hooks_dir = project_root / target.root_dir / "hooks"
+    hook_files = [
+        _record_path(Path(path), project_root, user_scope=user_scope)
+        for path in target_paths
+        if Path(path).suffix == ".json" and Path(path).parent == hooks_dir
+    ]
+    sidecar = project_root / target.root_dir / _APM_HOOKS_SIDECAR
+    write_per_file_bundle_record(sidecar, slug, approval_key, hook_files)
 
 
 def _record_path(dest: Path, project_root: Path, *, user_scope: bool) -> str:

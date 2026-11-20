@@ -279,9 +279,49 @@ def apm_owned_hook_entries_remain(
 LOCAL_BUNDLE_HOOK_SOURCE_PREFIX = "local-bundle::"
 
 
-def local_bundle_hook_source_marker(bundle_id: str) -> str:
-    """Return the sidecar marker for hooks a local bundle install registered."""
-    return f"{LOCAL_BUNDLE_HOOK_SOURCE_PREFIX}{bundle_id}"
+# Separates a bundle's deployed slug from the approval key that admitted it.
+_LOCAL_BUNDLE_APPROVAL_SEPARATOR = "::"
+
+
+def local_bundle_hook_source_marker(bundle_id: str, approval_key: str | None = None) -> str:
+    """Return the sidecar marker for hooks a local bundle install registered.
+
+    The only writer of the bundle's approval record: the marker carries the
+    exact content-bound key that admitted the hooks, so every later install
+    and audit can re-check it (#4027). The slug is the deployed (``--as``)
+    name; the key is the bundle's real package key.
+    """
+    marker = f"{LOCAL_BUNDLE_HOOK_SOURCE_PREFIX}{bundle_id}"
+    if approval_key:
+        marker = f"{marker}{_LOCAL_BUNDLE_APPROVAL_SEPARATOR}{approval_key}"
+    return marker
+
+
+def parse_local_bundle_hook_source(marker: object) -> tuple[str, str | None] | None:
+    """Return ``(slug, approval_key)`` for a local-bundle marker, else ``None``.
+
+    The only reader of the bundle's approval record. A marker written before
+    the key was recorded yields ``approval_key=None``.
+    """
+    if not is_local_bundle_hook_source(marker):
+        return None
+    slug, _, key = str(marker)[len(LOCAL_BUNDLE_HOOK_SOURCE_PREFIX) :].partition(
+        _LOCAL_BUNDLE_APPROVAL_SEPARATOR
+    )
+    return slug, (key or None)
+
+
+class LocalBundleMarkers(frozenset):
+    """Every marker one local bundle slug wrote, whichever key it recorded."""
+
+    def __new__(cls, bundle_id: str):
+        instance = super().__new__(cls, {local_bundle_hook_source_marker(bundle_id)})
+        instance.bundle_id = bundle_id
+        return instance
+
+    def __contains__(self, marker: object) -> bool:
+        parsed = parse_local_bundle_hook_source(marker)
+        return parsed is not None and parsed[0] == self.bundle_id
 
 
 def is_local_bundle_hook_source(marker: object) -> bool:
@@ -508,3 +548,61 @@ def legacy_source_marker_is_unambiguous(
         if Path(relative_path).name == legacy_marker
     }
     return matching == {current}
+
+
+# Per-file hook targets (Copilot) keep no merged config, so a local bundle's
+# approval record lives in the same sidecar name at the target root, outside
+# the hooks directory the harness loads.
+PER_FILE_BUNDLE_RECORDS = "local-bundle-hooks"
+_RECORD_HOOK_FILES = "hook_files"
+
+
+def per_file_bundle_records(sidecar_path: Path) -> list[dict[str, Any]]:
+    """Return the local-bundle approval records a per-file hook sidecar holds."""
+    data = read_hook_object(sidecar_path)
+    records = data.get(PER_FILE_BUNDLE_RECORDS, [])
+    if not isinstance(records, list):
+        raise TypeError("local-bundle hook records must be a list")
+    return [record for record in records if isinstance(record, dict)]
+
+
+def per_file_bundle_hook_keys(sidecar_path: Path) -> dict[str, tuple[str | None, list[str]]]:
+    """Return ``slug -> (approval_key, hook_files)`` from a per-file hook sidecar."""
+    found: dict[str, tuple[str | None, list[str]]] = {}
+    for record in per_file_bundle_records(sidecar_path):
+        parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
+        files = record.get(_RECORD_HOOK_FILES)
+        if parsed is not None:
+            found[parsed[0]] = (
+                parsed[1],
+                [str(item) for item in files] if isinstance(files, list) else [],
+            )
+    return found
+
+
+def write_per_file_bundle_record(
+    sidecar_path: Path, bundle_id: str, approval_key: str | None, hook_files: list[str]
+) -> None:
+    """Record (or, with no *hook_files*, drop) one bundle's per-file hook approval."""
+    kept = [
+        record
+        for record in (per_file_bundle_records(sidecar_path) if sidecar_path.exists() else [])
+        if record.get("_apm_source") not in LocalBundleMarkers(bundle_id)
+    ]
+    if hook_files:
+        kept.append(
+            {
+                "_apm_source": local_bundle_hook_source_marker(bundle_id, approval_key),
+                _RECORD_HOOK_FILES: sorted(hook_files),
+            }
+        )
+    data = read_hook_object(sidecar_path) if sidecar_path.exists() else {}
+    if kept:
+        data[PER_FILE_BUNDLE_RECORDS] = kept
+    else:
+        data.pop(PER_FILE_BUNDLE_RECORDS, None)
+    if data:
+        sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+        sidecar_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    elif sidecar_path.exists():
+        sidecar_path.unlink()
