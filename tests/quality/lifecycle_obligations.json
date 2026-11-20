@@ -23650,8 +23650,8 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:844",
-    "src/apm_cli/install/services.py:1046"
+    "src/apm_cli/install/services.py:823",
+    "src/apm_cli/install/services.py:1025"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23669,8 +23669,8 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:684",
-    "src/apm_cli/commands/compile/cli.py:716"
+    "src/apm_cli/commands/compile/cli.py:686",
+    "src/apm_cli/commands/compile/cli.py:720"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },
@@ -23695,14 +23695,14 @@
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:162"
+    "src/apm_cli/commands/pack.py:169"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:32",
-    "src/apm_cli/commands/pack.py:33"
+    "src/apm_cli/commands/pack.py:35",
+    "src/apm_cli/commands/pack.py:36"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
@@ -23722,7 +23722,7 @@
     "src/apm_cli/commands/uninstall/engine.py:698",
     "src/apm_cli/commands/uninstall/engine.py:857",
     "src/apm_cli/commands/uninstall/engine.py:690",
-    "src/apm_cli/commands/update.py:448",
+    "src/apm_cli/commands/update.py:452",
     "src/apm_cli/commands/prune.py:199",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "440382e393c5468b601c1ca8065220e953b842fbb4f83dcad6d7624f9435ef44"
+ "sha256": "e20ded9ce5eef97a9efcc8be673b8e4e39cc64488e833442cef612ab57e2a9ee"
 }
