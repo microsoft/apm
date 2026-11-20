@@ -58,7 +58,11 @@
       "decision": "Compiled-output writes (atomic)",
       "owner": "CompiledOutputWriter",
       "selectors": ["src/apm_cli/compilation/output_writer.py"],
-      "guards": ["registry-delegation-compiled-output-writes"]
+      "guards": ["registry-delegation-compiled-output-writes"],
+      "families": ["tests/integration/test_compile*.py"],
+      "state": ["compiled-output"],
+      "promises": ["P-INV-I2", "P-INV-I5"],
+      "modules": ["src/apm_cli/compilation/*"]
     },
     {
       "id": "distributed-agents-output-preparation",

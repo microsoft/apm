@@ -6,7 +6,11 @@
       "decision": "Local bundle instructions staged under apm_modules/<slug>/.apm/ for compile-only targets are lockfile-proven, hash-bound compile input, never deployment claims",
       "owner": "deps/lockfile.py (local_staging_slug, LockFile.local_staged_files, local_staged_file_hashes, local_staging_slugs, absent_staging_slugs, retire_local_staging, carry_local_staging_from -- apm prune is the only retirement path; only lockfile.py and deployment_ledger.py write staged hashes; staged_hash_drift is the only staged-content verifier, used by apm audit content-integrity and apm compile) written by core/deployment_ledger.py (record_local_bundle_files staged=, staged_hashes=, staged_fallback_hashes=) from install/services.py (integrate_local_bundle staged_files, staged_file_hashes via compute_file_hash; staged_file_fallback_hashes bind collision-skipped files to the bundle bytes)",
       "selectors": ["src/apm_cli/install/local_bundle_handler.py"],
-      "guards": ["install-deployment-bundle-compile-staging"]
+      "guards": ["install-deployment-bundle-compile-staging"],
+      "families": ["tests/integration/test_*local_bundle*.py"],
+      "state": ["compiled-output", "deployed-files", "lockfile"],
+      "promises": ["P-INV-I1", "P-INV-I5"],
+      "modules": ["src/apm_cli/install/local_bundle*.py"]
     },
     {
       "id": "single-file-package-materialization",
@@ -24,7 +28,11 @@
       "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
       "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner)",
       "selectors": ["src/apm_cli/install/orphans.py"],
-      "guards": ["install-deployment-orphan-selection"]
+      "guards": ["install-deployment-orphan-selection"],
+      "families": ["tests/integration/test_*orphan*.py"],
+      "state": ["deployed-files", "lockfile"],
+      "promises": ["P-INV-I1", "P-INV-I4", "P-LAW-ownership.preserve_unowned"],
+      "modules": ["src/apm_cli/install/orphans.py", "src/apm_cli/deps/reachability.py"]
     },
     {
       "id": "immutable-dependency-requirements",
@@ -48,7 +56,11 @@
       "guards": [
         "install-deployment-mcp-ownership-migration",
         "install-deployment-mcp-native-comparison"
-      ]
+      ],
+      "families": ["tests/integration/test_*mcp*lifecycle*.py"],
+      "state": ["mcp-config"],
+      "promises": ["P-INV-I1", "P-INV-I5"],
+      "modules": ["src/apm_cli/install/mcp/*"]
     },
     {
       "id": "deployment-provenance-state",
@@ -59,7 +71,11 @@
         "src/apm_cli/integration/skill_support.py",
         "src/apm_cli/install/pipeline.py"
       ],
-      "guards": ["install-deployment-provenance-state"]
+      "guards": ["install-deployment-provenance-state"],
+      "families": ["tests/integration/test_*receipt*.py", "tests/integration/test_*deploy*.py"],
+      "state": ["deployed-files", "lockfile"],
+      "promises": ["P-INV-I1", "P-INV-I2", "P-LAW-idempotency.byte_stable"],
+      "modules": ["src/apm_cli/core/deployment_ledger.py", "src/apm_cli/install/phases/*", "src/apm_cli/install/pipeline.py", "src/apm_cli/integration/skill_support.py"]
     },
     {
       "id": "target-scoped-deployed-file-contraction",
@@ -143,7 +159,11 @@
       "selectors": [
         "src/apm_cli/models/dependency/subsets.py"
       ],
-      "guards": ["install-deployment-selection-merge"]
+      "guards": ["install-deployment-selection-merge"],
+      "families": ["tests/integration/test_*dependency*.py", "tests/integration/test_*replacement*.py"],
+      "state": ["lockfile", "manifest"],
+      "promises": ["P-INV-I1", "P-LAW-source.ref_cache_coherent"],
+      "modules": ["src/apm_cli/models/dependency/*"]
     },
     {
       "id": "primitive-kind-classification",
@@ -174,7 +194,11 @@
       "decision": "Install command scope selection",
       "owner": "commands/install.py (install computes scope once)",
       "selectors": ["src/apm_cli/commands/install.py"],
-      "guards": ["install-deployment-install-scope-selection"]
+      "guards": ["install-deployment-install-scope-selection"],
+      "families": ["tests/integration/test_install_*.py"],
+      "state": ["deployed-files", "lockfile", "manifest"],
+      "promises": ["P-INV-I1", "P-INV-I5", "P-INV-I8"],
+      "modules": ["src/apm_cli/commands/install.py", "src/apm_cli/commands/prune.py", "src/apm_cli/commands/update.py"]
     },
     {
       "id": "mcp-registry-url-resolution",
@@ -197,7 +221,11 @@
         "install-deployment-cleanup-ownership-release",
         "install-deployment-codex-agent-link-resolution",
         "install-deployment-agent-render-then-adopt"
-      ]
+      ],
+      "families": ["tests/integration/test_*receipt*.py", "tests/integration/test_deployed_files*.py"],
+      "state": ["deployed-files"],
+      "promises": ["P-INV-I1", "P-INV-I5", "P-LAW-ownership.preserve_unowned"],
+      "modules": ["src/apm_cli/install/services.py", "src/apm_cli/integration/*_integrator.py", "src/apm_cli/integration/cleanup.py"]
     },
     {
       "id": "executable-trust-context",
@@ -211,7 +239,11 @@
       "decision": "Admission of one dependency-declared executable item (MCP server or hook file): org/user/project deny ladder AND manifest approval AND definition fingerprint match, for install, update, install --frozen, apm audit --ci, apm approve and the install prompt; the lockfile is evidence, never consent (#3902)",
       "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it",
       "selectors": ["src/apm_cli/security/trust.py"],
-      "guards": ["install-deployment-executable-item-admission", "install-deployment-mcp-admission"]
+      "guards": ["install-deployment-executable-item-admission", "install-deployment-mcp-admission"],
+      "families": ["tests/integration/test_*trust*.py"],
+      "state": ["approvals"],
+      "promises": ["P-INV-I4", "P-INV-I7"],
+      "modules": ["src/apm_cli/security/*"]
     },
     {
       "id": "executable-trust-fingerprint",
@@ -225,21 +257,33 @@
       "decision": "LSP target path, shape, and reserved Claude namespace",
       "owner": "integration/lsp_integrator.py (LSPIntegrator)",
       "selectors": ["src/apm_cli/integration/lsp_integrator.py"],
-      "guards": ["install-deployment-lsp-target-contract"]
+      "guards": ["install-deployment-lsp-target-contract"],
+      "families": ["tests/integration/test_*lsp*.py"],
+      "state": ["mcp-config"],
+      "promises": ["P-INV-I5", "P-LAW-routing.authorized_targets_only"],
+      "modules": ["src/apm_cli/integration/lsp_integrator.py"]
     },
     {
       "id": "lsp-lifecycle",
       "decision": "LSP lifecycle orchestration and reconciliation, including the pre-write refusal of declared LSP with no LSP-capable target (#3727)",
       "owner": "install/lsp/integration.py (require_lsp_capable_target, preflight_lsp_targets)",
       "selectors": ["src/apm_cli/install/lsp/integration.py"],
-      "guards": ["install-deployment-lsp-lifecycle", "install-deployment-lsp-capability-gate"]
+      "guards": ["install-deployment-lsp-lifecycle", "install-deployment-lsp-capability-gate"],
+      "families": ["tests/integration/test_*lsp*.py"],
+      "state": ["lockfile", "mcp-config"],
+      "promises": ["P-INV-I1", "P-INV-I2"],
+      "modules": ["src/apm_cli/install/lsp/*"]
     },
     {
       "id": "post-uninstall-dependency-reachability",
       "decision": "Dependency reachability after uninstall and the lock entries prune and deps list retain",
       "owner": "deps/reachability.py (compute_forward_reachable_keys, retained_lock_keys)",
       "selectors": ["src/apm_cli/deps/reachability.py"],
-      "guards": ["install-deployment-uninstall-reachability"]
+      "guards": ["install-deployment-uninstall-reachability"],
+      "families": ["tests/integration/test_*uninstall*.py"],
+      "state": ["deployed-files", "lockfile"],
+      "promises": ["P-INV-I1", "P-INV-I5", "P-LAW-ownership.preserve_unowned"],
+      "modules": ["src/apm_cli/deps/reachability.py", "src/apm_cli/commands/uninstall/*"]
     },
     {
       "id": "legacy-lockfile-parent-placement",
@@ -348,14 +392,22 @@
       "decision": "Which org policy an executables-trust reader applies when discovery does not return a usable policy (#4027)",
       "owner": "policy/outcome_routing.py (resolve_trust_policy routes every discovery outcome through route_discovery_outcome with policy.fetch_failure_default); consumers: security/executables.py resolve_project_exec_allow_map, install/exec_gate.py ReplayExecAllowMap, install/local_bundle_handler.py effective_bundle_allow_map",
       "selectors": ["src/apm_cli/policy/outcome_routing.py"],
-      "guards": ["install-deployment-trust-policy-outcome"]
+      "guards": ["install-deployment-trust-policy-outcome"],
+      "families": ["tests/integration/test_*policy*.py"],
+      "state": ["approvals", "deployed-files"],
+      "promises": ["P-INV-I3", "P-INV-I4", "P-LAW-outcome.status_matches_state"],
+      "modules": ["src/apm_cli/policy/*"]
     },
     {
       "id": "unpack-executable-refusal",
       "decision": "apm unpack refuses executable bundle content and points to apm install <bundle> (#4027)",
       "owner": "bundle/unpacker.py (_refuse_executable_content before any preview or write)",
       "selectors": ["src/apm_cli/bundle/unpacker.py"],
-      "guards": ["install-deployment-unpack-executable-refusal"]
+      "guards": ["install-deployment-unpack-executable-refusal"],
+      "families": ["tests/integration/test_*bundle*.py"],
+      "state": ["deployed-files"],
+      "promises": ["P-INV-I4", "P-INV-I7"],
+      "modules": ["src/apm_cli/bundle/*"]
     },
     {
       "id": "local-bundle-hook-trust",

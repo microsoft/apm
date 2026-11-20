@@ -48,9 +48,13 @@ from scripts.architecture_linter.process_audit import (
     child_process_count,
 )
 from scripts.architecture_linter.registry import (
+    LIFECYCLE_LEDGER,
+    PROMISE_CATALOG,
     OwnerRegistry,
+    PromiseVocabulary,
     RegistryError,
     load_registry_documents,
+    promise_vocabulary,
     validate_shard_name,
 )
 
@@ -302,6 +306,15 @@ def _discover_shard_names(index_text: str) -> tuple[str, ...]:
     return names
 
 
+def _promise_vocabulary(provider: FactsProvider) -> PromiseVocabulary | None:
+    """Prefer the promise catalog; fall back to the lifecycle ledger when it is absent."""
+    documents: dict[str, bytes | None] = {}
+    for path in (PROMISE_CATALOG, LIFECYCLE_LEDGER):
+        text = provider.source_cache.read(path)[0] if path in provider.inventory else None
+        documents[path] = text.encode("utf-8") if text is not None else None
+    return promise_vocabulary(documents[PROMISE_CATALOG], documents[LIFECYCLE_LEDGER])
+
+
 def _load_registry(
     provider: FactsProvider,
     known_guard_ids: frozenset[str],
@@ -359,6 +372,7 @@ def _load_registry(
             provider.inventory,
             known_guard_ids=known_guard_ids,
             owner_specific_guard_ids=owner_specific_guard_ids,
+            promise_ids=_promise_vocabulary(provider),
         )
     except RegistryError as exc:
         return None, Failure("registry", str(exc))

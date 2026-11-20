@@ -6,7 +6,7 @@ import fnmatch
 import hashlib
 import json
 import re
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -16,6 +16,28 @@ INDEX_FILE = "index.json"
 _INDEX_FIELDS = frozenset({"version", "shards"})
 _SHARD_FIELDS = frozenset({"version", "owners"})
 _OWNER_FIELDS = frozenset({"id", "decision", "owner", "selectors", "guards"})
+# Blast-radius overlay (#4117): optional on an owner, but all four or none.
+BLAST_RADIUS_FIELDS = frozenset({"families", "state", "promises", "modules"})
+STATE_VALUES = frozenset(
+    {
+        "approvals",
+        "cache",
+        "compiled-output",
+        "credentials",
+        "deployed-files",
+        "egress",
+        "lockfile",
+        "manifest",
+        "mcp-config",
+        "user-scope",
+    }
+)
+MODULES_ROOT = "src/apm_cli/"
+FAMILIES_ROOT = "tests/integration/"
+PROMISE_CATALOG = "tests/quality/promise-catalog.json"
+LIFECYCLE_LEDGER = "tests/fixtures/lifecycle_bug_ledger.json"
+_INVARIANT_PROMISES = frozenset(f"P-INV-I{number}" for number in range(1, 10))
+_PROMISE_ID = re.compile(r"P-(?:INV-I[1-9]|LAW-[a-z0-9_]+(?:\.[a-z0-9_]+)+|OWN-[a-z0-9]+(?:-[a-z0-9]+)*)")
 _KEBAB_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _SHARD_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.json")
 
@@ -33,6 +55,10 @@ class OwnerRecord:
     owner: str
     selectors: tuple[str, ...]
     guards: tuple[str, ...]
+    families: tuple[str, ...] = ()
+    state: tuple[str, ...] = ()
+    promises: tuple[str, ...] = ()
+    modules: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,6 +155,122 @@ def _validate_selector(selector: str) -> None:
         raise RegistryError(f"unsafe POSIX owner selector: {selector!r}")
 
 
+@dataclass(frozen=True)
+class PromiseVocabulary:
+    """Closed promise-id set; ledger fallback admits P-OWN ids of registered owners."""
+
+    ids: frozenset[str]
+    owner_ids_from_registry: bool
+
+
+def promise_vocabulary(catalog: bytes | None, ledger: bytes | None) -> PromiseVocabulary | None:
+    """Read the promise catalog, or derive the vocabulary from the ledger when it is absent."""
+    if catalog is not None:
+        document = _mapping(_load_json(catalog, PROMISE_CATALOG), PROMISE_CATALOG)
+        promises = _mapping(document.get("promises"), f"{PROMISE_CATALOG}.promises")
+        ids = frozenset(key for key in promises if _PROMISE_ID.fullmatch(key))
+        return PromiseVocabulary(ids=ids, owner_ids_from_registry=False)
+    if ledger is None:
+        return None
+    document = _mapping(_load_json(ledger, LIFECYCLE_LEDGER), LIFECYCLE_LEDGER)
+    rows = document.get("property_catalog")
+    if not isinstance(rows, list):
+        raise RegistryError(f"{LIFECYCLE_LEDGER}.property_catalog must be an array")
+    laws = {
+        "P-LAW-" + _printable_string(_mapping(row, "property").get("id"), "property.id")
+        for row in rows
+    }
+    return PromiseVocabulary(ids=_INVARIANT_PROMISES | laws, owner_ids_from_registry=True)
+
+
+def _blast_radius_hash_fields(owner: OwnerRecord) -> dict[str, list[str]]:
+    if not owner.modules:
+        return {}
+    return {
+        "families": sorted(owner.families),
+        "state": sorted(owner.state),
+        "promises": sorted(owner.promises),
+        "modules": sorted(owner.modules),
+    }
+
+
+def _rooted_globs(value: Any, label: str, root: str) -> tuple[str, ...]:
+    items = _string_array(value, label)
+    for item in items:
+        _validate_selector(item)
+        if not item.startswith(root):
+            raise RegistryError(f"{label} entries must start with {root}: {item!r}")
+    return items
+
+
+def _sorted_vocabulary(value: Any, label: str, allowed: Callable[[str], bool]) -> tuple[str, ...]:
+    items = _string_array(value, label)
+    unknown = [item for item in items if not allowed(item)]
+    if unknown:
+        raise RegistryError(f"{label} has unknown values: {', '.join(unknown)}")
+    if list(items) != sorted(items):
+        raise RegistryError(f"{label} must be sorted")
+    return items
+
+
+def _blast_radius_block(item: Mapping[str, Any], label: str) -> dict[str, tuple[str, ...]]:
+    """Validate the optional all-or-none blast-radius overlay of one owner."""
+    present = BLAST_RADIUS_FIELDS & set(item)
+    if not present:
+        return {}
+    if present != BLAST_RADIUS_FIELDS:
+        missing = ", ".join(sorted(BLAST_RADIUS_FIELDS - present))
+        raise RegistryError(f"{label} blast-radius fields are all-or-none; missing: {missing}")
+    return {
+        "families": _rooted_globs(item["families"], f"{label}.families", FAMILIES_ROOT),
+        "state": _sorted_vocabulary(item["state"], f"{label}.state", STATE_VALUES.__contains__),
+        "promises": _sorted_vocabulary(
+            item["promises"], f"{label}.promises", lambda value: bool(_PROMISE_ID.fullmatch(value))
+        ),
+        "modules": _rooted_globs(item["modules"], f"{label}.modules", MODULES_ROOT),
+    }
+
+
+def _validate_promises(owners: Iterable[OwnerRecord], vocabulary: PromiseVocabulary | None) -> None:
+    owner_rows = tuple(owners)
+    owner_promises = {f"P-OWN-{owner.id}" for owner in owner_rows}
+    for owner in owner_rows:
+        for promise in owner.promises:
+            if promise.startswith("P-OWN-") and promise not in owner_promises:
+                raise RegistryError(f"{owner.id}.promises names an unknown owner: {promise}")
+            if vocabulary is None:
+                continue
+            known = promise in vocabulary.ids or (
+                vocabulary.owner_ids_from_registry and promise in owner_promises
+            )
+            if not known:
+                raise RegistryError(f"{owner.id}.promises names an uncatalogued promise: {promise}")
+
+
+def _validate_blast_radius_inventory(owners: Iterable[OwnerRecord], inventory: Sequence[str]) -> None:
+    """Every module and family glob resolves; modules cover the owner's own src selectors."""
+    for owner in owners:
+        if not owner.modules:
+            continue
+        for module in owner.modules:
+            if not any(fnmatch.fnmatchcase(path, module) for path in inventory):
+                raise RegistryError(f"{owner.id}.modules matches no supplied file: {module}")
+        for family in owner.families:
+            if not any(
+                fnmatch.fnmatchcase(path, family)
+                and PurePosixPath(path).name.startswith("test_")
+                and path.endswith(".py")
+                for path in inventory
+            ):
+                raise RegistryError(f"{owner.id}.families matches no test module: {family}")
+        for path in inventory:
+            if not path.startswith(MODULES_ROOT):
+                continue
+            owned = any(fnmatch.fnmatchcase(path, selector) for selector in owner.selectors)
+            if owned and not any(fnmatch.fnmatchcase(path, module) for module in owner.modules):
+                raise RegistryError(f"{owner.id}.modules must cover its own selector file: {path}")
+
+
 def _semantic_hash(owners: Iterable[OwnerRecord]) -> str:
     normalized = {
         "version": REGISTRY_VERSION,
@@ -139,6 +281,7 @@ def _semantic_hash(owners: Iterable[OwnerRecord]) -> str:
                 "owner": owner.owner,
                 "selectors": sorted(owner.selectors),
                 "guards": sorted(owner.guards),
+                **_blast_radius_hash_fields(owner),
             }
             for owner in sorted(owners, key=lambda item: item.id)
         ],
@@ -184,6 +327,7 @@ def load_registry_documents(
     *,
     known_guard_ids: Collection[str] | None = None,
     owner_specific_guard_ids: Collection[str] = (),
+    promise_ids: PromiseVocabulary | None = None,
 ) -> OwnerRegistry:
     """Load a complete registry from supplied exact-snapshot documents."""
     index = _mapping(_load_json(index_content, INDEX_FILE), INDEX_FILE)
@@ -217,7 +361,8 @@ def load_registry_documents(
         for index_number, raw_owner in enumerate(raw_owners):
             label = f"{shard}.owners[{index_number}]"
             item = _mapping(raw_owner, label)
-            _exact_fields(item, _OWNER_FIELDS, label)
+            blast_radius = _blast_radius_block(item, label)
+            _exact_fields(item, _OWNER_FIELDS | frozenset(blast_radius), label)
             owner_id = _printable_string(item.get("id"), f"{label}.id")
             _validate_id(owner_id, f"{label}.id")
             decision = _printable_string(item.get("decision"), f"{label}.decision")
@@ -251,10 +396,14 @@ def load_registry_documents(
                     owner=canonical_owner,
                     selectors=owner_selectors,
                     guards=guards,
+                    **blast_radius,
                 )
             )
 
-    _validate_selector_inventory(owners, file_inventory)
+    inventory = tuple(file_inventory)
+    _validate_selector_inventory(owners, inventory)
+    _validate_blast_radius_inventory(owners, inventory)
+    _validate_promises(owners, promise_ids)
 
     referenced_guards = {guard for owner in owners for guard in owner.guards}
     if known_guard_ids is not None:
@@ -282,6 +431,7 @@ def load_registry(
     *,
     known_guard_ids: Collection[str] | None = None,
     owner_specific_guard_ids: Collection[str] = (),
+    promise_ids: PromiseVocabulary | None = None,
 ) -> OwnerRegistry:
     """Load a registry directory and reject missing or unlisted JSON shards."""
     index_path = registry_dir / INDEX_FILE
@@ -321,4 +471,5 @@ def load_registry(
         file_inventory,
         known_guard_ids=known_guard_ids,
         owner_specific_guard_ids=owner_specific_guard_ids,
+        promise_ids=promise_ids,
     )

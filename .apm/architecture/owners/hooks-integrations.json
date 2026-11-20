@@ -50,7 +50,11 @@
         "src/apm_cli/integration/hook_ownership.py",
         "src/apm_cli/install/local_bundle_hooks.py"
       ],
-      "guards": ["hooks-integrations-neutral-hook-contract"]
+      "guards": ["hooks-integrations-neutral-hook-contract"],
+      "families": ["tests/integration/test_*hook*.py"],
+      "state": ["approvals", "deployed-files"],
+      "promises": ["P-INV-I4", "P-INV-I5"],
+      "modules": ["src/apm_cli/hook_contract.py", "src/apm_cli/install/local_bundle_hooks.py", "src/apm_cli/integration/hook_*.py"]
     },
     {
       "id": "plugin-root-hook-command-vocabulary",

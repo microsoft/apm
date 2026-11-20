@@ -27,6 +27,8 @@ REGISTRY_VERSION = 1
 _INDEX_FIELDS = frozenset({"version", "shards"})
 _SHARD_FIELDS = frozenset({"version", "owners"})
 _OWNER_FIELDS = frozenset({"id", "decision", "owner", "selectors", "guards"})
+# Optional blast-radius overlay fields (#4117); the architecture linter validates them.
+_OPTIONAL_OWNER_FIELDS = frozenset({"families", "state", "promises", "modules"})
 _KEBAB_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _SHARD_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.json")
 OWNER_CLASSIFICATIONS = {
@@ -353,7 +355,7 @@ def _parse_owner_registry(
         for index_number, raw_owner in enumerate(raw_owners):
             label = f"{shard}.owners[{index_number}]"
             item = _registry_mapping(raw_owner, label)
-            _registry_exact_fields(item, _OWNER_FIELDS, label)
+            _registry_exact_fields(item, _OWNER_FIELDS | (_OPTIONAL_OWNER_FIELDS & set(item)), label)
             owner_id = _registry_string(item.get("id"), f"{label}.id")
             if _KEBAB_ID.fullmatch(owner_id) is None:
                 raise GateError(f"{label}.id must be a stable kebab-case ID")

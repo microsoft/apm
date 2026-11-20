@@ -131,7 +131,11 @@
         "contracts-tooling-lockfile-timestamp-constructor",
         "contracts-tooling-lockfile-timestamp-fallback",
         "marketplace-integrations-locked-association"
-      ]
+      ],
+      "families": ["tests/integration/test_*lockfile*.py"],
+      "state": ["lockfile"],
+      "promises": ["P-INV-I1", "P-INV-I2", "P-LAW-lockfile.frozen_preserves_bytes"],
+      "modules": ["src/apm_cli/deps/lockfile.py"]
     },
     {
       "id": "generated-content-footer-wording",
