@@ -2424,7 +2424,8 @@
       "failure_modes": ["portability", "outcome"],
       "properties": ["portability.byte_deterministic", "outcome.status_matches_state"],
       "regression_tests": [
-        "tests/integration/test_claude_config_profile_lifecycle.py::test_user_lockfile_rows_record_user_scope"
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_user_lockfile_rows_record_user_scope",
+        "tests/lifecycle/machines/test_m_spine.py::test_global_install_records_user_scope_deployment_rows"
       ]
     },
     {

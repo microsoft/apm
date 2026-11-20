@@ -1721,6 +1721,7 @@ class LockFile:
         if "deployments" in data:
             deployment_rows = data["deployments"]
             lock.deployment_ledger = DeploymentLedgerCodec.from_rows(deployment_rows)
+            DeploymentLedgerCodec.adopt_user_lockfile_rows(lock)
             lock._deployments_present = isinstance(deployment_rows, list) and (
                 not deployment_rows or bool(lock.deployment_ledger.records)
             )
@@ -1836,9 +1837,7 @@ class LockFile:
 
         # An explicit ``apm_version: null`` is unverifiable, unlike an absent one.
         warn_if_newer(path, "null" if lock._apm_version_null else lock.apm_version)
-        from ..core.deployment_ledger import DeploymentLedgerCodec
-
-        return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
+        return lock
 
     @classmethod
     def load_or_create(cls, path: Path) -> LockFile:
