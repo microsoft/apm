@@ -237,5 +237,5 @@ def test_install_points_local_edits_at_export_patch(
 
     output = " ".join(result.output.split())
     assert output.count("apm export-patch") == 1, result.output
-    assert "1 local edit(s) to managed files may be overwritten by this install" in output
+    assert "This install overwrites 1 locally edited managed file(s)" in output
     assert (proj / _DEPLOYED).read_bytes() == _EDITED

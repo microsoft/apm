@@ -25,6 +25,7 @@ from ..core.deployment_ledger import (
     DeploymentLedgerCodec,
     DeploymentOwnerViolation,
 )
+from ..core.remediation import HIDDEN_CHARACTERS_FOUND, HIDDEN_CHARACTERS_PREVIEWED
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..install.locking import serialized_lifecycle_when
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
@@ -196,10 +197,11 @@ def _render_findings_table(
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 title=title,
                 show_header=True,
                 header_style="bold cyan",
@@ -332,7 +334,7 @@ def _render_summary(
     remedy = (
         "Review structured or external prompt fields manually; --strip does not rewrite native settings."
         if any(not entry.strippable and entry.file in findings_by_file for entry in coverage)
-        else "  Review file contents, then run 'apm audit --strip' to remove hidden characters"
+        else f"  {HIDDEN_CHARACTERS_FOUND.sentence()}"
     )
 
     _rich_echo("")
@@ -461,10 +463,11 @@ def _preview_strip(
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 show_header=True,
                 header_style="bold cyan",
             )
@@ -503,7 +506,7 @@ def _preview_strip(
 
     _rich_echo("")
     logger.progress(f"{affected} file(s) would be modified")
-    logger.progress("Run 'apm audit --strip' to apply")
+    logger.progress(HIDDEN_CHARACTERS_PREVIEWED.sentence())
     return affected
 
 
@@ -551,10 +554,11 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 title=f"{STATUS_SYMBOLS['search']} APM Policy Compliance",
                 show_header=True,
                 header_style="bold cyan",
@@ -586,8 +590,13 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
                         color="yellow" if check.warned else "red",
                         bold=True,
                     )
+                    # Details follow their header's stream (failed checks: stderr).
                     for detail in check.details:
-                        _rich_echo(f"    - {printable_ascii_text(detail)}", color="dim")
+                        _rich_echo(
+                            f"    - {printable_ascii_text(detail)}",
+                            color="dim",
+                            err=not check.warned,
+                        )
 
             console.print()
             summary = ci_result.to_json()["summary"]
@@ -834,11 +843,14 @@ def _audit_ci_gate(
     # -- Drift detection (default-on per ADR-02) --------------------
     drift_findings: list = []
     if not no_drift and manifest_file(cfg.project_root).exists():
-        from ..deps.lockfile import LockFile, get_lockfile_path
+        from ..deps.lockfile import LockFile, UnsupportedLockfileVersionError, get_lockfile_path
 
         lockfile_path = get_lockfile_path(cfg.project_root)
         if lockfile_path.exists():
-            lockfile = LockFile.read(lockfile_path)
+            try:
+                lockfile = LockFile.read(lockfile_path)
+            except UnsupportedLockfileVersionError:
+                lockfile = None  # the lockfile-exists check already failed with both remedies
             if lockfile is not None:
                 if prepared_replay_error is not None:
                     from ..policy.models import CheckResult

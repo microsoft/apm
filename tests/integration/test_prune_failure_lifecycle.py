@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import PRUNE_INCOMPLETE
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
@@ -101,7 +102,7 @@ def test_prune_failure_reports_partial_state_and_retry_converges(
         f"Prune incomplete: removed {removed_count} orphaned package(s); "
         "failed to remove 1 package(s)."
     ) in output
-    assert "rerun 'apm prune'" in output
+    assert PRUNE_INCOMPLETE.sentence() in output
     assert "No packages were removed" not in output
     assert "Pruned " not in output
     after_failure = ArtifactSnapshot.capture(consumer.root)

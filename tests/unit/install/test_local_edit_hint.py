@@ -197,10 +197,10 @@ def _run_pipeline(tmp_path: Path, edited: int, **kwargs) -> tuple[MagicMock, Mag
         elif name == "targets":
             ctx.integrators["skill"] = MagicMock()
 
-    counter = MagicMock(return_value=edited)
+    counter = MagicMock(return_value=[f".github/agents/a{i}.agent.md" for i in range(edited)])
     with (
         patch("apm_cli.install.pipeline._run_phase", side_effect=_phase),
-        patch("apm_cli.install.local_edits.count_local_edits", counter),
+        patch("apm_cli.install.local_edits.local_edit_paths", counter),
     ):
         stack = _pipeline_patches(tmp_path, lockfile)
         for cm in stack:
@@ -216,7 +216,7 @@ def _run_pipeline(tmp_path: Path, edited: int, **kwargs) -> tuple[MagicMock, Mag
 def _hint_calls(logger: MagicMock) -> list[str]:
     return [
         str(call.args[0])
-        for call in logger.info.call_args_list
+        for call in logger.warning.call_args_list
         if call.args and "apm export-patch" in str(call.args[0])
     ]
 
@@ -224,7 +224,13 @@ def _hint_calls(logger: MagicMock) -> list[str]:
 class TestInstallPipelineHint:
     def test_project_install_shows_hint_once(self, tmp_path: Path) -> None:
         logger, counter = _run_pipeline(tmp_path, 3, scope=InstallScope.PROJECT)
-        assert _hint_calls(logger) == [local_edit_hint(3, installing=True)]
+        # Install keeps every edit (#4360): no overwrite warning, one export hint.
+        assert _hint_calls(logger) == []
+        assert [
+            str(call.args[0])
+            for call in logger.info.call_args_list
+            if call.args and "apm export-patch" in str(call.args[0])
+        ] == [local_edit_hint(3, overwritten=0)]
         _, _, keys = counter.call_args.args
         assert set(keys) == {"org/pkg"}
 
@@ -266,7 +272,7 @@ class TestRenderingChangeIsNotALocalEdit:
     def test_drift_text_separates_edits_from_rendering_changes(self, tmp_path: Path) -> None:
         lock, findings = self._findings(tmp_path)
         out = render_drift_text(findings, lockfile=lock, project_root=tmp_path)
-        assert local_edit_hint(1) in out
+        assert local_edit_hint(1, overwritten=0) in out
         assert rendering_change_hint(1) in out
         assert rendering_change_hint(1).isascii()
 
@@ -281,5 +287,5 @@ class TestRenderingChangeIsNotALocalEdit:
     ) -> None:
         lock, findings = self._findings(tmp_path)
         out = render_drift_text(findings, lockfile=lock)
-        assert local_edit_hint(2) in out
+        assert local_edit_hint(2, overwritten=0) in out
         assert "renders them differently" not in out

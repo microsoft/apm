@@ -1217,7 +1217,7 @@ class TestWarnInputVariables(unittest.TestCase):
         self,
     ):
         mapping = {"Authorization": "Bearer ${input:my-token}"}
-        with patch("apm_cli.adapters.client.base._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             MCPClientAdapter._warn_input_variables(mapping, "my-server", "Copilot CLI")
         mock_warn.assert_called_once()
         msg = mock_warn.call_args[0][0]
@@ -1226,12 +1226,12 @@ class TestWarnInputVariables(unittest.TestCase):
 
     def test_no_warning_for_plain_values(self):
         mapping = {"Content-Type": "application/json"}
-        with patch("apm_cli.adapters.client.base._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             MCPClientAdapter._warn_input_variables(mapping, "s", "Codex CLI")
         mock_warn.assert_not_called()
 
     def test_no_warning_for_empty_mapping(self):
-        with patch("apm_cli.adapters.client.base._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             MCPClientAdapter._warn_input_variables({}, "s", "Codex CLI")
             MCPClientAdapter._warn_input_variables(None, "s", "Codex CLI")
         mock_warn.assert_not_called()
@@ -1293,7 +1293,7 @@ class TestWarnOnLegacyAngleVars(unittest.TestCase):
 
     def test_warning_emitted_for_legacy_var_in_headers(self):
         mapping = {"Authorization": "Bearer <MY_TOKEN>"}
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             VSCodeClientAdapter._warn_on_legacy_angle_vars(mapping, "my-server", "headers")
         mock_warn.assert_called_once()
         msg = mock_warn.call_args[0][0]
@@ -1307,7 +1307,7 @@ class TestWarnOnLegacyAngleVars(unittest.TestCase):
             "X-A": "<TOKEN_A>",
             "X-B": "<TOKEN_B> and <TOKEN_A>",  # duplicate of A should dedupe
         }
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             VSCodeClientAdapter._warn_on_legacy_angle_vars(mapping, "s", "headers")
         mock_warn.assert_called_once()
         msg = mock_warn.call_args[0][0]
@@ -1315,18 +1315,18 @@ class TestWarnOnLegacyAngleVars(unittest.TestCase):
 
     def test_no_warning_for_modern_syntax(self):
         for value in ("Bearer ${MY_TOKEN}", "Bearer ${env:MY_TOKEN}", "Bearer ${input:tok}"):
-            with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
                 VSCodeClientAdapter._warn_on_legacy_angle_vars({"H": value}, "s", "headers")
             mock_warn.assert_not_called()
 
     def test_no_warning_for_empty_or_none_mapping(self):
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             VSCodeClientAdapter._warn_on_legacy_angle_vars({}, "s", "headers")
             VSCodeClientAdapter._warn_on_legacy_angle_vars(None, "s", "headers")
         mock_warn.assert_not_called()
 
     def test_no_warning_for_non_string_values(self):
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             VSCodeClientAdapter._warn_on_legacy_angle_vars(
                 {"n": 42, "b": True, "x": None}, "s", "env"
             )

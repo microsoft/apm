@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
+
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
 
@@ -255,7 +257,7 @@ def retire_unadmitted_bundle_hooks(
         elif logger is not None:
             logger.warning(
                 f"Would retire hooks from local bundle '{item.slug}' ({item.reason}). "
-                "To keep them, approve the bundle and rerun 'apm install <bundle>'."
+                f"To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
             )
     return unadmitted
 
@@ -346,7 +348,7 @@ def retire_bundle_hooks(
     if reason is not None:
         message = (
             f"Retired hooks from local bundle '{slug}' ({reason}). "
-            "To keep them, approve the bundle and rerun 'apm install <bundle>'."
+            f"To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
         )
         if diagnostics is not None:
             diagnostics.warn(message=message, package=slug)

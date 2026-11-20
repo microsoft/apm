@@ -832,7 +832,7 @@ class TestCopilotInstallRunSummary(unittest.TestCase):
             adapter._collect_previously_baked_keys.__call__  # noqa: B018 - sanity
             CopilotClientAdapter._security_upgraded_keys.update({"GITHUB_TOKEN", "LINEAR_KEY"})
 
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
 
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
@@ -871,7 +871,7 @@ class TestCopilotInstallRunSummary(unittest.TestCase):
             self.assertEqual(upgraded, {"GH_TOKEN"})
             CopilotClientAdapter._security_upgraded_keys.update(upgraded)
 
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("Security improvement", joined)
@@ -885,7 +885,7 @@ class TestCopilotInstallRunSummary(unittest.TestCase):
         """
         CopilotClientAdapter._unset_env_keys_by_server["github-mcp"] = ["GH_TOKEN"]
         CopilotClientAdapter._unset_env_keys_by_server["linear"] = ["LINEAR_KEY"]
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("GH_TOKEN", joined)
@@ -896,7 +896,7 @@ class TestCopilotInstallRunSummary(unittest.TestCase):
         """Calling ``emit_install_run_summary`` twice in the same process
         emits the diagnostics exactly once (idempotent guard)."""
         CopilotClientAdapter._unset_env_keys_by_server["s"] = ["X"]
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
             CopilotClientAdapter.emit_install_run_summary()
         self.assertEqual(mock_warn.call_count, 1)

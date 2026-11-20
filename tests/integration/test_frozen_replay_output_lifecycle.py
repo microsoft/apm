@@ -1,9 +1,11 @@
 """APMLifecycle: ``install --frozen`` reports a replay in the same shape as install.
 
 PROMISE: I9 -- a frozen replay prints each package header and diagnostic line
-once, in the same shape a normal install prints (source: #4195).
+once, in the same shape a normal install prints (source: #4195, #4293).
 CELLS: OP=install FROZEN SRC=marketplace(git-subdir, ref main) PRIM=command
 SCOPE=project TGT=claude LOCK=present DEPLOYED=absent (cold cache);
+OP=install FROZEN SRC=git(tag v1.0.0) PRIM=instruction SCOPE=project TGT=claude
+LOCK=present DEPLOYED=absent (cold cache, #4293);
 OP=install FROZEN SRC=local GATE=registries-disabled (registry in $APM_HOME config)
 SCOPE=project LOCK=present (#4175).
 """
@@ -81,12 +83,18 @@ class _World:
         self.isolated.cache_root.mkdir()
 
 
-def _world(root: Path, binary: Path, *, targets: tuple[str, ...] = (_TARGET,)) -> _World:
+def _world(
+    root: Path,
+    binary: Path,
+    *,
+    targets: tuple[str, ...] = (_TARGET,),
+    dependencies: tuple[object, ...] = (),
+) -> _World:
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     env = isolated.subprocess_env()
     env["COLUMNS"] = "200"
     packages = LocalPackageFactory(isolated.work_root)
-    consumer = packages.create("consumer", targets=targets)
+    consumer = packages.create("consumer", targets=targets, dependencies=dependencies)
     runner = ApmLifecycleRunner((str(binary),), timeout_seconds=120)
     return _World(isolated, env, runner, consumer, packages, commit="")
 
@@ -153,6 +161,41 @@ def test_cold_frozen_replay_header_matches_install_shape(
     world.apm("audit", "--ci")
 
 
+def test_cold_frozen_replay_of_a_tag_names_the_tag_not_the_commit(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4293: a cold frozen replay of a tag pin shows the tag and short commit."""
+    remote = f"https://{_HOST}/acme/tagged"
+    world = _world(
+        tmp_path / "world",
+        apm_binary_path,
+        dependencies=({"git": f"{remote}.git", "ref": "v1.0.0"},),
+    )
+    repositories = LocalGitRepositoryFactory(world.isolated.repository_root, env=world.env)
+    repository = repositories.create("tagged")
+    (repository.worktree / "apm.yml").write_text("name: tagged\nversion: 1.0.0\n", encoding="utf-8")
+    rules = repository.worktree / ".apm" / "instructions"
+    rules.mkdir(parents=True)
+    (rules / "tagged.instructions.md").write_text(
+        "---\napplyTo: '**'\n---\nTagged rule.\n", encoding="utf-8"
+    )
+    commit = repositories.commit(repository, message="v1.0.0")
+    repositories.tag(repository, "v1.0.0", commit)
+    world = replace(world, env=repositories.url_rewrite_subprocess_env(repository, remote))
+    header = f"  [+] acme/tagged #v1.0.0 @{commit.sha[:8]}"
+
+    installed = world.apm("install")
+    assert _header_lines(installed) == [header], _evidence(installed)
+    lock_bytes = (world.consumer.root / "apm.lock.yaml").read_bytes()
+
+    world.cold()
+    frozen = world.apm("install", "--frozen")
+
+    assert _header_lines(frozen) == [header], _evidence(frozen)
+    assert commit.sha not in frozen.stdout, _evidence(frozen)
+    assert (world.consumer.root / "apm.lock.yaml").read_bytes() == lock_bytes
+
+
 def test_frozen_names_user_registry_config_when_registries_disabled(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -170,7 +213,9 @@ def test_frozen_names_user_registry_config_when_registries_disabled(
 
     refused = world.apm("install", "--frozen", expected=1)
 
-    output = " ".join(refused.stdout.split())
+    # Errors go to stderr; stdout carries no error line.
+    output = " ".join(refused.stderr.split())
+    assert "[x]" not in refused.stdout, _evidence(refused)
     assert (
         f"[x] Registry configuration in {config} requires the experimental registries "
         "feature. Run 'apm experimental enable registries' to enable it." in output

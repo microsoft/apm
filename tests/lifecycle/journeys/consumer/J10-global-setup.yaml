@@ -54,9 +54,3 @@ steps:
     key_lines:
       - "[+] p-skill@lifecycle-market - found in apm.yml (as lifecycle/p-skill)"
       - "[i] Cleaned 1 stale deployed path for lifecycle/p-skill"
-known_cells:
-  - id: J10-frozen-global-repeats-targeting-line
-    law: O4
-    tracking: "#4196"
-    step: 4
-    match: "repeats '\\[i\\] Targeting specific runtime: claude'"

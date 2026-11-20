@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core import remediation
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -40,8 +42,8 @@ def frozen_selection_changes(deps_to_install: Iterable[Any], committed: LockFile
         if recorded != dependency_pairing(dep_ref):
             reasons[key] = (
                 f"selection for {key} changed: the skills and targets its declaring "
-                "manifests request differ from apm.lock.yaml; run 'apm install' and "
-                "commit apm.lock.yaml"
+                "manifests request differ from apm.lock.yaml; "
+                f"{remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
             )
     return [reasons[key] for key in sorted(reasons)]
 
@@ -60,8 +62,8 @@ def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, s
             if before != after:
                 changed[key] = (
                     f"selection for {key} changed: locked {label} {before or 'all'}, "
-                    f"resolved {label} {after or 'all'}; run 'apm install' and commit "
-                    "apm.lock.yaml"
+                    f"resolved {label} {after or 'all'}; "
+                    f"{remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
                 )
                 break
         else:
@@ -73,7 +75,7 @@ def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, s
             if not same:
                 changed[key] = (
                     f"selection for {key} changed: the skills paired with each target "
-                    "differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml"
+                    f"differ from apm.lock.yaml; {remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
                 )
     return changed
 

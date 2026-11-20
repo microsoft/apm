@@ -58,15 +58,3 @@ steps:
       - "[i] APM_RELEASE_METADATA_URL override active -- using mirrored metadata"
       - "[+] You're already on the latest version"
 known_cells:
-  - id: e03-frozen-targets-line-twice
-    law: O4
-    tracking: "#4196"
-    step: 5
-    match: "repeats .*Targeting declared target from apm.yml"
-  # A lockfile written through PROXY_REGISTRY_URL records no resolved_commit,
-  # so every later --frozen install refuses it (network on or off).
-  - id: e03-frozen-refuses-proxy-lockfile
-    law: O5
-    tracking: "#4172"
-    step: 5
-    match: "'apm install --frozen' exited 1, step expects 0"

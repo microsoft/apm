@@ -27,6 +27,12 @@ from typing import Any
 
 from apm_cli.core.scope import manifest_file
 
+from ..core.remediation import (
+    EXECUTABLES_IDENTITY_UNLOCKED,
+    EXECUTABLES_PIN_MALFORMED,
+    MCP_EXECUTABLES_UNTRUSTED,
+)
+
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
 EXEC_TYPE_MCP = "mcp"
@@ -1489,14 +1495,13 @@ def _filter_declared_services(
         elif approval_keys:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
-                f"executables not trusted. Run 'apm policy explain {owner}'; "
-                f"if policy permits, run 'apm approve {owner}'."
+                f"executables not trusted. {MCP_EXECUTABLES_UNTRUSTED.bind(package=owner).sentence()}"
             )
         else:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': package "
-                "identity cannot be verified without lock state. Run 'apm install' "
-                "to regenerate apm.lock.yaml, then approve the package."
+                "identity cannot be verified without lock state. "
+                f"{EXECUTABLES_IDENTITY_UNLOCKED.bind(subject='the package').sentence()}"
             )
     if len(filtered) < len(dependencies):
         skipped_count = len(dependencies) - len(filtered)
@@ -1542,7 +1547,7 @@ def _filter_declared_services(
         if unlocked_owners:
             package_noun = "that package" if len(unlocked_owners) == 1 else "each package"
             remediation_parts.append(
-                f"Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
+                EXECUTABLES_IDENTITY_UNLOCKED.bind(subject=package_noun).sentence()
             )
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
@@ -1578,7 +1583,7 @@ PLUGIN_ITEM = "."
 def _item_error(where: str, pkg_key: str, exec_type: str, item: object) -> ValueError:
     return ValueError(
         f"apm.yml {where}.{pkg_key}.{exec_type}.{item}: expected 'sha256:<64 hex>'. "
-        f"Run 'apm approve {pkg_key}' to record it."
+        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
     )
 
 
@@ -1630,7 +1635,8 @@ def _parse_grant_block(
                 if not where.endswith(".allow") or not is_fingerprint(value):
                     raise ValueError(
                         f"apm.yml {where}.{pkg_key}.plugin: expected 'sha256:<64 hex>' under "
-                        f"executables.allow. Run 'apm approve {pkg_key}' to record it."
+                        "executables.allow. "
+                        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
                     )
                 parsed[exec_type_str] = value
                 continue

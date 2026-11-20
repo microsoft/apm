@@ -10,6 +10,7 @@ import builtins
 import copy
 import logging
 import re
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,7 @@ from apm_cli.core.apm_yml import (
     UnknownTargetError,
 )
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.remediation import MCP_REGISTRY_ALTERNATIVE
 from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_catalog import accepted_target_values
 from apm_cli.install.errors import (
@@ -32,7 +34,7 @@ from apm_cli.install.errors import (
 )
 from apm_cli.integration.mcp_user_scope_runtimes import user_scope_runtime_labels
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.console import STATUS_SYMBOLS
+from apm_cli.utils.console import STATUS_SYMBOLS, _rich_echo
 from apm_cli.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
@@ -106,8 +108,7 @@ def _emit_registry_choice_hint(
             search = f"{search} (with MCP_REGISTRY_URL set to {registry_url})"
         logger.info(f"Search this registry: {search}", soft_wrap=True)
         logger.info(
-            "Use another registry (replace <URL>): "
-            f'apm install --mcp "{server_name}" --registry <URL>{suffix}',
+            MCP_REGISTRY_ALTERNATIVE.bind(server=server_name, retry=suffix).sentence(),
             soft_wrap=True,
         )
     if registry_source == "env":
@@ -233,6 +234,26 @@ class _TargetSelectionSource(str, Enum):
 
     __str__ = str.__str__
     __format__ = str.__format__
+
+
+@dataclass(frozen=True)
+class ResolvedMcpTargets:
+    """MCP target runtimes resolved once per install run (``None``: none can accept)."""
+
+    runtimes: tuple[str, ...] | None
+
+    def runtime_list(self) -> list[str] | None:
+        """Return a mutable copy of the runtimes, or ``None``."""
+        return None if self.runtimes is None else list(self.runtimes)
+
+
+def resolve_mcp_targets(**kwargs: Any) -> ResolvedMcpTargets:
+    """Resolve and announce MCP targets once; ``run_mcp_install`` reuses them (#4089).
+
+    Takes the keyword arguments of :func:`_resolve_target_runtimes`.
+    """
+    runtimes = _resolve_target_runtimes(**kwargs)
+    return ResolvedMcpTargets(None if runtimes is None else tuple(runtimes))
 
 
 def _announce_registry_endpoint(registry_client: Any, logger: Any) -> None:
@@ -866,7 +887,7 @@ def _raise_strict_config_failures(
         "retaining --global and any --target selection."
     )
     if console:
-        console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
+        _rich_echo(f"{STATUS_SYMBOLS['cross']} {message}", color="red")
     else:
         logger.error(message)
     raise InstallFailureAlreadyRendered(message)
@@ -1755,6 +1776,7 @@ def run_mcp_install(  # noqa: PLR0913
     prevalidated_registry_servers: dict[str, dict] | None = None,
     fail_on_write_error: bool = False,
     native_hashes: dict[str, dict[str, str]] | None = None,
+    resolved_targets: ResolvedMcpTargets | None = None,
 ) -> int:
     """Install MCP dependencies.
 
@@ -1777,6 +1799,8 @@ def run_mcp_install(  # noqa: PLR0913
             runtimes whose adapter declares ``supports_user_scope``
             are targeted; workspace-only runtimes are skipped.
         managed_target_servers: Mutable per-target APM ownership state.
+        resolved_targets: Targets this run already resolved (``--frozen``
+            checks them first); the install reuses them as they are.
 
     Returns:
         Number of MCP servers newly configured or updated.
@@ -1838,20 +1862,23 @@ def run_mcp_install(  # noqa: PLR0913
     else:
         logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
 
-    # Runtime detection, gating, and scope filtering
-    target_runtimes = _resolve_target_runtimes(
-        runtime=runtime,
-        exclude=exclude,
-        verbose=verbose,
-        apm_config=apm_config,
-        project_root=project_root,
-        user_scope=user_scope,
-        explicit_target=explicit_target,
-        target_decision=target_decision,
-        scope=scope,
-        logger=logger,
-        console=console,
-    )
+    # Runtime detection, gating, and scope filtering (once per run, #4089)
+    target_runtimes = (
+        resolved_targets
+        or resolve_mcp_targets(
+            runtime=runtime,
+            exclude=exclude,
+            verbose=verbose,
+            apm_config=apm_config,
+            project_root=project_root,
+            user_scope=user_scope,
+            explicit_target=explicit_target,
+            target_decision=target_decision,
+            scope=scope,
+            logger=logger,
+            console=console,
+        )
+    ).runtime_list()
     if target_runtimes is None:
         if fail_on_write_error:
             raise RequiredIntegrationError(
