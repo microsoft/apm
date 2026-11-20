@@ -1,0 +1,134 @@
+lockfile_version: '1'
+apm_version: 0.36.1
+dependencies:
+- repo_url: _local/pkg
+  name: mcp-pkg
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/notes-skill
+  - .agents/skills/notes-skill/SKILL.md
+  - .github/agents/helper.agent.md
+  - .github/instructions/python.instructions.md
+  - .kiro/agents/helper.md
+  - .kiro/skills/notes-skill
+  - .kiro/skills/notes-skill/SKILL.md
+  - .kiro/steering/python.md
+  deployed_file_hashes:
+    .agents/skills/notes-skill/SKILL.md: sha256:1577383579cdd249f4cdb16642efe5294e61c85e6d438c87755f8d83062ac83d
+    .github/agents/helper.agent.md: sha256:f08a968f9d3fbee4f777fd0402f99b48beeb8dc365dcce18df52f65e0b443cfb
+    .github/instructions/python.instructions.md: sha256:eae2660ad91c1a2d4add7cd2356adb69a5ca2d3b114a7644567f1145b04a9ba7
+    .kiro/agents/helper.md: sha256:759fc67f389564ce26dad97ae8a8c34471756d54f7ea69265660a42b2fe0970e
+    .kiro/skills/notes-skill/SKILL.md: sha256:1577383579cdd249f4cdb16642efe5294e61c85e6d438c87755f8d83062ac83d
+    .kiro/steering/python.md: sha256:0ea599e9322742c6ea570e269ac1dfeea1d2f8d2322b3cd324a70b16445e7bd6
+  source: local
+  local_path: ../pkg
+  content_hash: sha256:0e66249faa2630970020d71351245d04c1529e92effa2238c92ac2d8eebd71cd
+deployments:
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/notes-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/notes-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:1577383579cdd249f4cdb16642efe5294e61c85e6d438c87755f8d83062ac83d
+- kind: project-relative
+  target: copilot
+  value: .github/agents/helper.agent.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:f08a968f9d3fbee4f777fd0402f99b48beeb8dc365dcce18df52f65e0b443cfb
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/python.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:eae2660ad91c1a2d4add7cd2356adb69a5ca2d3b114a7644567f1145b04a9ba7
+- kind: project-relative
+  target: kiro
+  value: .kiro/agents/helper.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:759fc67f389564ce26dad97ae8a8c34471756d54f7ea69265660a42b2fe0970e
+- kind: project-relative
+  target: kiro
+  value: .kiro/skills/notes-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: kiro
+  value: .kiro/skills/notes-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:1577383579cdd249f4cdb16642efe5294e61c85e6d438c87755f8d83062ac83d
+- kind: project-relative
+  target: kiro
+  value: .kiro/steering/python.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:0ea599e9322742c6ea570e269ac1dfeea1d2f8d2322b3cd324a70b16445e7bd6
+- kind: uri
+  target: mcp
+  value: notes
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b0fb3628b99206d0d0410dd59ec3ca11dc1130a30ddc35c8ef928a41790c89ad
+- kind: uri
+  target: mcp
+  value: notes
+  runtime: kiro
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:aae5909971f4c15bb28893e09f9ff19884c9578148b991864e9c45e95c6f9718
+mcp_servers:
+- notes
+mcp_configs:
+  notes:
+    name: notes
+    transport: stdio
+    args:
+    - server.js
+    registry: false
+    command: node
+mcp_target_servers:
+  copilot:
+  - notes
+  kiro:
+  - notes
+mcp_config_provenance:
+  notes: mcp-pkg
