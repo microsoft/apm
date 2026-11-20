@@ -15,6 +15,7 @@ APM-namespaced rows in BOTH user (``--global``) and project scope.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import textwrap
 from pathlib import Path
@@ -464,7 +465,7 @@ class TestCopilotAppDeployUninstall:
         # integrated line AND the enable-in-Copilot-App hint, so a
         # project-scope teammate isn't left wondering why their
         # workflow never fires (see devx-ux-expert finding on PR #1405).
-        assert "prompts integrated" in install_result.output, install_result.output
+        assert re.search(r"prompts? integrated", install_result.output), install_result.output
         assert "enable from the Copilot App" in install_result.output, install_result.output
 
         # Lockfile must live in the PROJECT (not user-home) and carry

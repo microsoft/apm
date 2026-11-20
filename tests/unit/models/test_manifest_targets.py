@@ -334,3 +334,23 @@ def test_option_target_names_refuses_an_ide(target):
 def test_bootstrap_target_names_refuses_an_ide_with_guidance():
     with pytest.raises(IdeTargetError, match="is an IDE, not a target"):
         bootstrap_target_names(["claude", "intellij"])
+
+
+def test_user_manifest_warning_names_the_resolved_path_from_a_relative_read(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """`apm update -g` reads ``apm.yml`` relatively; the label still names APM_HOME (C5b)."""
+    import apm_cli.models.manifest_targets as owner
+
+    apm_home = tmp_path / "apm-home"
+    apm_home.mkdir()
+    (apm_home / "apm.yml").write_text("name: u\nversion: 1.0.0\ntarget: claude\n")
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.chdir(apm_home)
+    monkeypatch.setattr(owner, "_deprecated_manifest_keys_warned", set())
+
+    owner._warn_deprecated_manifest_keys({"target": "claude"}, Path("apm.yml"))
+
+    captured = capsys.readouterr()
+    rendered = (captured.out + captured.err).replace("\n", "")
+    assert (apm_home / "apm.yml").resolve().as_posix() in rendered

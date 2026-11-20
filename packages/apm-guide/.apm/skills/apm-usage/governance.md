@@ -1,9 +1,5 @@
 # Governance and Policy
 
-**Note:** The policy engine is experimental (early preview). Schema fields and
-defaults may change between releases. Pin your APM version and monitor the
-CHANGELOG when using policy features.
-
 ## Policy file location
 
 - **Org-level:** hosted in a repo, fetched via `--policy org` or `--policy URL`
@@ -122,6 +118,21 @@ dependencies:
 - Enforced at install and by `apm audit` (direct deps incl. dev deps and
   `replace` sources, plus lockfile transitives).
 
+`dependencies.require` entries are exact and name ONE host: a hostless
+entry (`contoso/baseline`) names the default host only; write other hosts
+in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
+and `required-packages-deployed` (apm.lock.yaml) compare that same
+identity; an entry matching no declared package fails both, and the
+message names the other host and the entry that would match it (for a
+trusted host). An explicit proxy path (`host/artifactory/...`) is identified
+by the proxy host; prefer `PROXY_REGISTRY_URL` with plain shorthand.
+A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
+varies per machine, so org-wide policies should host-qualify every entry.
+Required-package matching follows source replacement: with a root
+`replace:` rule, an entry names the selected package (the fork), and the
+lock entry is read under the original's key. `apm install` and
+`apm audit --ci` agree, also on `registry_source`.
+
 ## Registry source governance (experimental)
 
 Gate dependency sources to REST-based APM registries declared via the
@@ -160,7 +171,7 @@ security:
 
 | Field | Default | Behavior |
 |-------|---------|----------|
-| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle with cached policy but no embedded `apm.lock.yaml` fails closed; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs never fetch policy from the network. Logical OR on inheritance. |
+| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle without an embedded `apm.lock.yaml` fails closed under this setting; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs resolve org policy as package installs do. Logical OR on inheritance. |
 | `audit.fail_on_drift` | `false` | When `true`, a bare `apm audit` exits non-zero when workspace content drifts from the lockfile (default-off keeps drift advisory at exit 0). Only changes the exit code; `apm audit --ci` already gates on drift. Logical OR on inheritance. |
 
 Canonical deployment ownership is an always-on integrity boundary, not a
@@ -255,8 +266,9 @@ The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` pins `hooks` and `mcp` grants per item to a `sha256:<64 hex>`
 fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`. A native
 Copilot/Codex plugin, loaded intact, gets one `plugin:` pin over its whole
-root (every file plus executable bits), next to item pins for a split
-install; any byte or mode change parks it, and `.apm/` content that is not a
+root (every file's path and bytes; executable bits are left out so the pin
+holds across operating systems), next to item pins for a split install; any
+byte change parks it, and `.apm/` content that is not a
 copy of a pinned file makes it unapprovable:
 
 ```yaml

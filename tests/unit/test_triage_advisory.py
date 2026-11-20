@@ -332,7 +332,9 @@ def test_local_package_snapshots_match_lockfile(tmp_path: Path) -> None:
     for key, source in sources.items():
         dependency = lock.get_dependency(key)
         assert dependency is not None
-        assert dependency.content_hash == compute_local_package_hash(source), key
+        assert dependency.content_hash == compute_local_package_hash(
+            source, framed=dependency.content_hash_framed
+        ), key
 
 
 def test_installed_triage_content_passes_canonical_integrity_audit() -> None:

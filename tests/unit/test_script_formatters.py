@@ -140,6 +140,19 @@ class TestFormatExecutionResultSuccess(unittest.TestCase):
         self.assertIn("exit code: 1", text)
         self.assertIn("bad input", text)
 
+    def test_shell_script_without_runtime_is_labelled_shell_script(self):
+        """A plain shell script is never labelled 'Unknown execution'."""
+        from apm_cli.core.script_runner import ScriptRunner
+        from apm_cli.output.script_formatters import ScriptExecutionFormatter
+
+        runtime = ScriptRunner()._detect_runtime("echo hello-team")
+        formatter = ScriptExecutionFormatter(use_color=False)
+        success = formatter.format_execution_success(runtime, execution_time=0.06)
+        failure = formatter.format_execution_error(runtime, error_code=3)
+
+        self.assertEqual(success, ["[+] Shell script execution completed successfully (0.06s)"])
+        self.assertEqual(failure[0], "x Shell script execution failed (exit code: 3)")
+
     def test_format_script_header(self):
         """format_script_header includes script name and parameters."""
         from apm_cli.output.script_formatters import ScriptExecutionFormatter

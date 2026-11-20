@@ -287,3 +287,27 @@ echo "download accepted"
             assert "Check your connection and retry." in output
         else:
             assert "Neither curl nor wget is available. Please install one of them." in output
+
+
+@pytest.mark.parametrize(
+    ("version", "wire_api"),
+    [("rust-v0.118.0", "chat"), ("latest", "chat"), ("rust-v0.115.0", "responses")],
+)
+def test_setup_codex_config_matches_the_installed_version(
+    tmp_path: Path, codex_platform: str, version: str, wire_api: str
+) -> None:
+    """GitHub Models has no Responses API, so Codex after v0.115 gets wire_api=chat."""
+    asset_name = f"codex-{codex_platform}.tar.gz"
+    tarball = tmp_path / asset_name
+    metadata = tmp_path / "release.json"
+    write_fake_archive(tarball)
+    write_release_metadata(metadata, asset_name=asset_name, digest=sha256(tarball))
+
+    result = run_setup(
+        tmp_path, release_json=metadata, tarball=tarball, vanilla=False, version=version
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    config = (tmp_path / "home" / ".codex" / "config.toml").read_text(encoding="utf-8")
+    assert f'wire_api = "{wire_api}"' in config
+    assert "returns 404" not in result.stdout + result.stderr

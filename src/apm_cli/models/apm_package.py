@@ -1084,6 +1084,7 @@ class PackageInfo:
     # (replay output root, live deploy root): audit replay renders links live (#3901)
     deployment_frame: tuple[Path, Path] | None = None
     local_bundle_id: str | None = None  # Set only for a local bundle's hook view (#3700)
+    local_bundle_approval: str | None = None  # The key that admitted those hooks (#4027)
     # Verbatim licence copies APM added after materialization (#3556); see
     # apm_cli.deps.carried_license. Empty when nothing was carried.
     carried_licenses: tuple[Any, ...] = ()

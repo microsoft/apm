@@ -157,7 +157,7 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     assert _hook_entries(consumer) == _hook_entries(source)
     assert _run_hook(world, consumer, "Bash") == _run_hook(world, source, "Bash") == "hookpkg\n"
     sidecar = json.loads((consumer / ".claude" / "apm-hooks.json").read_text())
-    assert [e["_apm_source"] for e in sidecar["PreToolUse"]] == ["local-bundle::hookpkg"]
+    assert [e["_apm_source"] for e in sidecar["PreToolUse"]] == [f"local-bundle::hookpkg::{key}"]
     assert list(consumer.rglob("*.sh.json")) == []
     lock = world.lock(consumer)
     scripts = [p for p in lock["local_deployed_files"] if p.endswith("/x.sh")]

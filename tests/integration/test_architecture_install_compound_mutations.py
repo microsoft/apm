@@ -756,14 +756,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
         _replace(
-            "        prepared_replay.modules_root\n"
-            "        if prepared_replay is not None\n"
-            "        else project_root / APM_MODULES_DIR,\n"
-            "        # Consent is re-evaluated from apm.yml and org policy, never from the\n",
-            "        prepared_replay.project_root\n"
-            "        if prepared_replay is not None\n"
-            "        else project_root / APM_MODULES_DIR,\n"
-            "        # Consent is re-evaluated from apm.yml and org policy, never from the\n",
+            "        modules_root=prepared_replay.modules_root if prepared_replay is not None else None,\n",
+            "        modules_root=prepared_replay.project_root if prepared_replay is not None else None,\n",
         ),
     ),
     CompoundMutation(
@@ -780,8 +774,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
         _replace(
-            "        else project_root / APM_MODULES_DIR,\n",
-            '        else project_root / "apm_modules",\n',
+            "modules_root if modules_root is not None else project_root / APM_MODULES_DIR,\n",
+            'modules_root if modules_root is not None else project_root / "apm_modules",\n',
         ),
     ),
     CompoundMutation(

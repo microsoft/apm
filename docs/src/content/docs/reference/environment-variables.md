@@ -11,7 +11,7 @@ For CLI flags that pair with these variables, see the [reference index](./). For
 
 ## Authentication
 
-PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../../consumer/authentication/) for the resolution chain and [Security model](../../enterprise/security/) for token scoping.
+PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../../getting-started/authentication/) for the resolution chain and [Security model](../../enterprise/security/) for token scoping.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
@@ -69,7 +69,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `PROXY_REGISTRY_URL` | Enterprise package proxy base URL. See [Registry proxy](../../enterprise/registry-proxy/). | unset | When set, APM resolves package downloads through the proxy. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token for `PROXY_REGISTRY_URL`. | unset | Required for authenticated proxies. |
 | `PROXY_REGISTRY_ALLOW_HTTP` | Set to `1` to silence the plaintext-token warning when `PROXY_REGISTRY_TOKEN` is sent to an `http://` `PROXY_REGISTRY_URL`. | unset | `http://` proxy URLs are accepted without it; use only for a trusted internal proxy. |
-| `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any download not served by the proxy. | unset | Air-gapped deployments. |
+| `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any dependency content not served by the proxy, including marketplace catalogs and lookups in the default MCP registry. Policy fetches stay direct. | unset | Air-gapped deployments. |
 | `APM_REGISTRY_TOKEN_<NAME>` | Bearer token for configured package registry `<NAME>`. | unset | `<NAME>` is the registry name uppercased, with `-` and `.` replaced by `_`. |
 | `APM_REGISTRY_USER_<NAME>` / `APM_REGISTRY_PASS_<NAME>` | Basic-auth credentials for configured package registry `<NAME>`. | unset | Used when a bearer token is not supplied. |
 | `ARTIFACTORY_BASE_URL` | Legacy alias for `PROXY_REGISTRY_URL`. | unset | Prefer `PROXY_REGISTRY_URL` in new setups. |

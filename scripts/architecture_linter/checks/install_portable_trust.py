@@ -107,7 +107,9 @@ _FINGERPRINT_ROUTES: dict[str, tuple[str, ...]] = {
         "def evidence_fingerprint(",
         "def local_bundle_digest(",
         "def native_plugin_fingerprint(",
-        "return compute_native_plugin_hash(plugin_root)",
+        # Approval pins leave the exec bit out so they hold across operating
+        # systems; the mode-aware hash is the per-machine integrity check.
+        "return compute_native_plugin_pin(plugin_root)",
     ),
     _MCP_VIEW: ("return evidence_fingerprint(payload)",),
     _EXECUTABLES: ("digest = local_bundle_digest(source_dir, lockfile)",),
@@ -200,6 +202,18 @@ def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
 def check_trust_fingerprint(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every trust fingerprint is computed by security/trust_fingerprint.py."""
     findings = _missing(provider, GUARD_TRUST_FINGERPRINT, _FINGERPRINT_ROUTES)
+    for path in _python_paths(provider, _SRC):
+        if path in (_FINGERPRINT, "src/apm_cli/utils/content_hash.py"):
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_TRUST_FINGERPRINT)
+        if not failures and any("compute_native_plugin_pin(" in line for line in _lines(facts)):
+            findings.append(
+                _summary(
+                    GUARD_TRUST_FINGERPRINT,
+                    path,
+                    "Native plugin approval pins come only from native_plugin_fingerprint",
+                )
+            )
     for path in _NO_HASHLIB:
         facts, failures = _facts_for(provider, path, GUARD_TRUST_FINGERPRINT)
         if failures:

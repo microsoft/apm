@@ -46,6 +46,24 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
+AUDIT_REPLAY = "src/apm_cli/install/audit_replay.py"
+REPLAY = "src/apm_cli/install/drift.py"
+_REQUIRED[AUDIT_REPLAY] = (
+    ("if locked_copy_is_stale(dep, path):", "decide warm audit copies through the owner"),
+    ("_live_copies_stale(project_root / APM_MODULES_DIR, lockfile_path)", "check warm copies"),
+)
+_REQUIRED[REPLAY] = (
+    ("if not locked_copy_holds_commit(lock_dep, candidate):", "prove replay copies"),
+)
+# Closed world (#3964): outside the owner modules, only these sites may touch
+# the copy evidence, each for a different decision.
+_OWNER_MODULES = frozenset({DRIFT, CACHE_PIN, "src/apm_cli/install/phases/_redownload.py"})
+_EXEMPT = {
+    "src/apm_cli/install/sources.py": "Codex source-pin identity reporting, not copy validity",
+    "src/apm_cli/deps/github_downloader.py": "fresh clone HEAD resolution, not copy validity",
+    "src/apm_cli/deps/bare_cache.py": "bare cache commit resolution, not copy validity",
+}
+
 _REDERIVATIONS = (
     "_should_skip_redownload(",
     "head.commit.hexsha",
@@ -65,9 +83,17 @@ def check_locked_copy_validity(provider: FactsProvider) -> tuple[Violation, ...]
         for needle, purpose in needles:
             if not _present(facts, needle):
                 findings.append(_summary(GUARD, path, f"Locked copy validity must {purpose}"))
-        if path in (DRIFT, CACHE_PIN):
+    for path in provider.inventory:
+        if not (path.startswith("src/apm_cli/") and path.endswith(".py")):
+            continue
+        if path in _OWNER_MODULES or path in _EXEMPT:
+            continue
+        facts, failures = _facts_for(provider, path, GUARD)
+        if failures:
             continue
         for number, line in enumerate(getattr(facts, "lines", ()), start=1):
+            if line.lstrip().startswith("#"):
+                continue
             if any(token in line for token in _REDERIVATIONS):
                 findings.append(
                     _summary(

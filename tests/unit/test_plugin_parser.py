@@ -2208,3 +2208,50 @@ class TestSyntheticManifestLineEndings:
         raw = (apm_dir / "hooks" / "hooks.json").read_bytes()
         assert b"\r" not in raw
         assert json.loads(raw.decode("utf-8")) == hooks
+
+
+def test_claude_native_mcp_servers_model_claude_loader(tmp_path: Path) -> None:
+    """The native route's MCP owner unions every source Claude merges."""
+    from apm_cli.deps.plugin_parser import claude_native_mcp_servers
+
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"a": {"command": "x"}}}))
+    (tmp_path / "more.json").write_text(json.dumps({"b": {"url": "https://b.example"}}))
+    manifest = {
+        "mcpServers": [
+            "./more.json",
+            {"c": {"type": "sse", "url": "https://c.example", "command": "y"}, "d": {}},
+            "../outside.json",
+            "https://evil.example/x.mcpb",
+        ]
+    }
+    servers, unmodeled = claude_native_mcp_servers(tmp_path, manifest)
+    assert [(s["name"], s["transport"]) for s in servers] == [
+        ("a", "stdio"),
+        ("b", "http"),
+        ("c", "sse"),
+    ]
+    assert len(unmodeled) == 3
+    assert any("'d'" in entry for entry in unmodeled)
+    assert any("outside" in entry for entry in unmodeled)
+    assert any(".mcpb" in entry for entry in unmodeled)
+
+
+def test_missing_declared_component_names_the_manifest_folder_cause(tmp_path):
+    """A staged marketplace plugin rooted at its manifest folder gets an upstream hint (#3994)."""
+    from apm_cli.deps.plugin_parser import (
+        DeclaredPluginComponentError,
+        _validate_declared_component_paths,
+    )
+
+    plugin_root = tmp_path / "apm_modules" / ".apm-resolution-staging" / "abc"
+    plugin_root.mkdir(parents=True)
+    with pytest.raises(DeclaredPluginComponentError) as excinfo:
+        _validate_declared_component_paths(
+            plugin_root, {"name": "ai-ready", "skills": ["./skills/ai-ready"]}
+        )
+    message = str(excinfo.value)
+    assert "Plugin 'ai-ready'" in message
+    assert "'./skills/ai-ready'" in message
+    assert "'.github/plugin'" in message
+    assert "Report it to the plugin publisher" in message
+    assert ".apm-resolution-staging" not in message

@@ -642,6 +642,11 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     assert _install(monkeypatch, project).exit_code == 0
 
     _forbid_copilot_discovery(monkeypatch)
+    # Update reads org policy for packages with executables (#3990); no org here.
+    monkeypatch.setattr(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        lambda *_args, **_kwargs: SimpleNamespace(outcome="no_policy", policy=None),
+    )
 
     updated = CliRunner().invoke(
         cli,
