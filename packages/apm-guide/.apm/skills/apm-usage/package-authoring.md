@@ -435,7 +435,8 @@ license value.
 `apm plugin init` scaffolds a commented `# license: MIT` line in `apm.yml`;
 APM never picks a license for you. If you omit `license:`, `apm pack` and `apm publish` print an actionable
 warning (`No 'license:' field in apm.yml; the SBOM will record NOASSERTION
-for this package. Add a 'license:' field ...`). The SBOM still exports
+for this package. Add a 'license:' field ...`); with `apm pack --json` it
+appears in the report's `warnings` array. The SBOM still exports
 correctly -- the component just records NOASSERTION (genuinely unknown).
 This warning fires only on the **authoring** path (your own `apm.yml`);
 installing or exporting other people's dependencies is silent.

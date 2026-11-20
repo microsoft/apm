@@ -68,6 +68,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     if ctx.invoked_subcommand is not None:
         return  # delegate to sub-command
 
+    from apm_cli.constants import APM_YML_FILENAME
     from apm_cli.core.errors import AmbiguousHarnessError, NoHarnessError
     from apm_cli.core.target_detection import (
         CANONICAL_DEPLOY_DIRS,
@@ -87,10 +88,13 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     # On ambiguous-harness, show all detected signals (the user ran
     # ``apm targets`` precisely to see what's there).
     # On no-harness error, report empty active list.
+    manifest_source: str | None = None
     try:
         # Same precedence as install: apm.yml targets win over detected signals (#3792).
         resolved = resolve_targets(project_root, yaml_targets=yaml_targets)
         active = resolved.targets
+        if resolved.source == APM_YML_FILENAME:
+            manifest_source = resolved.source
     except AmbiguousHarnessError:
         signals = detect_signals(project_root)
         active = sorted({s.target for s in signals})
@@ -103,9 +107,15 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     all_signals = detect_signals(project_root)
 
     # Build per-target row data from canonical tables.
+    def _active_source(name: str) -> str | None:
+        # Targets declared in apm.yml report the manifest, not a folder signal (#4210).
+        if manifest_source is not None:
+            return manifest_source
+        return next((s.source for s in all_signals if s.target == name), None)
+
     def _row(name: str) -> dict:
         is_active = name in active
-        active_source = next((s.source for s in all_signals if s.target == name), None)
+        active_source = _active_source(name)
         return {
             "target": name,
             "status": "active" if is_active else "inactive",
@@ -139,7 +149,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
                     {
                         "target": name,
                         "status": "active" if name in active else "inactive",
-                        "source": None,
+                        "source": _active_source(name) if name in active else None,
                         "deploy_dir": f"{profile.root_dir}/",
                         "needs": None,
                         "meta_target": capability.meta_target,
