@@ -624,6 +624,7 @@ contracts-tooling-python-artifact-membership
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
+install-deployment-approval-store-identity
 install-deployment-approve-command
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay

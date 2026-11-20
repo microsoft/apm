@@ -110,7 +110,79 @@ def check_approve_command(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+STORE_RULE = "install-deployment-approval-store-identity"
+_RAW_SPEC_NAMES = frozenset({"pkg", "package", "spec"})
+_SPEC_ENTRY_POINTS = ("approve_cmd", "deny_cmd", "explain_decision")
+
+
+def _calls(function: ast.AST, name: str) -> bool:
+    return any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+        for node in ast.walk(function)
+    )
+
+
+def _raw_spec_store_writes(function: ast.AST) -> bool:
+    """Whether *function* keys ``allow``/``deny`` by a CLI spec variable."""
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.value, ast.Name)
+                and target.value.id in {"allow", "deny"}
+                and isinstance(target.slice, ast.Name)
+                and target.slice.id in _RAW_SPEC_NAMES
+            ):
+                return True
+    return False
+
+
+def check_approval_store_identity(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Approval stores are keyed by the identity a CLI spec resolves to (#4189).
+
+    Closed world over ``commands/approve.py``: every spec entry point resolves
+    specs through ``_canonical_specs`` (which calls the owner
+    ``canonical_approval_spec``), and a store keyed by a spec variable is
+    written only inside such an entry point.
+    """
+    facts, failures = checked_facts(provider, APPROVE, STORE_RULE, require_python=True)
+    findings = list(failures)
+    if facts is None or facts.tree_index is None:
+        return tuple(findings)
+    helper = facts.tree_index.function("_canonical_specs")
+    if helper is None or not _calls(helper, "canonical_approval_spec"):
+        findings.append(
+            _summary(STORE_RULE, APPROVE, "_canonical_specs must call canonical_approval_spec")
+        )
+    for name in _SPEC_ENTRY_POINTS:
+        function = facts.tree_index.function(name)
+        if function is None or not _calls(function, "_canonical_specs"):
+            findings.append(
+                _summary(STORE_RULE, APPROVE, f"{name} must resolve specs via _canonical_specs")
+            )
+    root = facts.tree_index.root
+    for function in ast.walk(root) if root is not None else ():
+        if (
+            isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and _raw_spec_store_writes(function)
+            and not _calls(function, "_canonical_specs")
+        ):
+            findings.append(
+                _summary(STORE_RULE, APPROVE, f"{function.name} keys a store by a raw spec")
+            )
+    return tuple(findings)
+
+
 RULES = (
+    Rule(
+        id=STORE_RULE,
+        group="contracts_tests",
+        guard_ids=(STORE_RULE,),
+        description="Approval stores are keyed by the identity a CLI spec resolves to.",
+        check=check_approval_store_identity,
+    ),
     Rule(
         id=RULE,
         group="contracts_tests",

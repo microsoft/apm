@@ -533,7 +533,9 @@ def _find_declaration(
     return None
 
 
-def _not_found_message(declarations: Sequence[ExecutableDeclaration], pkg: str) -> str:
+def _not_found_message(
+    declarations: Sequence[ExecutableDeclaration], pkg: str, *, user_scope: bool = False
+) -> str:
     """Name the ported package a port-less name almost matched (#3967).
 
     Grants never fall back across ports, so the message points at the exact
@@ -557,7 +559,9 @@ def _not_found_message(declarations: Sequence[ExecutableDeclaration], pkg: str) 
             ported.append(decl.package_key)
     if not ported:
         return f"{pkg}: not found in installed packages"
-    keys = " or ".join(f"'apm approve {key}'" for key in sorted(ported))
+    from ..security.trust import approve_command
+
+    keys = " or ".join(f"'{approve_command(key, user_scope=user_scope)}'" for key in sorted(ported))
     return f"{pkg}: not found in installed packages; it is installed with a port, run {keys}"
 
 
@@ -685,7 +689,7 @@ def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
         _rich_error(f"{pkg}: approve the installed package by identity, not a ref: {command}")
         return
     review = approve_command("--pending", user_scope=user_scope)
-    _rich_error(f"{_not_found_message(declarations, pkg)}. Review: {review}")
+    _rich_error(f"{_not_found_message(declarations, pkg, user_scope=user_scope)}. Review: {review}")
 
 
 def _identity(decl: ExecutableDeclaration) -> str:
