@@ -996,6 +996,7 @@ def resolve_marketplace_plugin(
     auth_resolver: object | None = None,
     warning_handler: Callable[[str], None] | None = None,
     enforce_ref_pins: bool = True,
+    accept_ref_change: bool = False,
 ) -> MarketplacePluginResolution:
     """Resolve a marketplace plugin reference to a canonical string and plugin row.
 
@@ -1023,6 +1024,8 @@ def resolve_marketplace_plugin(
         enforce_ref_pins: When ``True`` (installs), a ref that contradicts the
             recorded version pin raises ``RefPinMismatchError`` and a new ref is
             staged for the install transaction. Read-only callers pass ``False``.
+        accept_ref_change: When ``True`` (an explicit ``apm update`` of this
+            plugin), a changed ref is staged in place of the recorded pin.
 
     Returns:
         :class:`MarketplacePluginResolution` (iterates as ``(canonical, plugin)``).
@@ -1300,7 +1303,8 @@ def resolve_marketplace_plugin(
     # Pins key on the version a range resolved to, else the plugin's declared
     # version, so a release never collides with an earlier pin. A raw ref
     # override is the consumer's own choice and neither checks nor moves the
-    # publisher's pin.
+    # publisher's pin. An explicit ``apm update`` of the plugin accepts a
+    # changed ref and records it on commit.
     current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
     raw_ref_override = bool(version_spec) and resolved_constraint is None
     if current_ref and enforce_ref_pins and not raw_ref_override:
@@ -1311,6 +1315,7 @@ def resolve_marketplace_plugin(
             plugin_name,
             current_ref,
             version=resolved_version or plugin.version or "",
+            accept_change=accept_ref_change,
         )
 
     logger.debug(

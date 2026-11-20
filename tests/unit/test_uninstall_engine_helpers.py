@@ -332,7 +332,9 @@ class TestResolveMarketplacePackages:
             result = _resolve_marketplace_packages(["resolved-plugin@official"], lockfile, logger)
 
         # Registry was called, but supply-chain guard refused the result
-        mock_resolve.assert_called_once_with("resolved-plugin", "official", auth_resolver=None)
+        mock_resolve.assert_called_once_with(
+            "resolved-plugin", "official", auth_resolver=None, enforce_ref_pins=False
+        )
         assert result["resolved-plugin@official"] is None
         logger.error.assert_called_once()
         assert "could not be resolved" in logger.error.call_args[0][0]
@@ -347,7 +349,9 @@ class TestResolveMarketplacePackages:
             mock_resolve.return_value = MagicMock(canonical="acme/my-plugin")
             result = _resolve_marketplace_packages(["my-plugin@official"], None, logger)
 
-        mock_resolve.assert_called_once_with("my-plugin", "official", auth_resolver=None)
+        mock_resolve.assert_called_once_with(
+            "my-plugin", "official", auth_resolver=None, enforce_ref_pins=False
+        )
         assert result["my-plugin@official"] == "acme/my-plugin"
 
     def test_network_error_logs_error_and_maps_to_none(self):
@@ -863,4 +867,6 @@ class TestValidateUninstallPackagesMarketplace:
             )
 
         assert "acme/my-plugin" in to_remove
-        mock_resolve.assert_called_once_with("my-plugin", "official", auth_resolver=None)
+        mock_resolve.assert_called_once_with(
+            "my-plugin", "official", auth_resolver=None, enforce_ref_pins=False
+        )
