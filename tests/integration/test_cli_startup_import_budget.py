@@ -29,7 +29,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
-    pytest.mark.promise("P-OWN-cli-version-rendering"),
+    pytest.mark.promise("P-OWN-cli-startup-import-budget"),
 ]
 
 # Recorded on Linux CPython 3.12 after #4118: --help 332, --version 334

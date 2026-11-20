@@ -33,7 +33,7 @@ from tests.integration.test_architecture_owner_rule_mutations import (
 
 pytestmark = [
     pytest.mark.component,
-    pytest.mark.promise("P-LAW-outcome.status_matches_state"),
+    pytest.mark.promise("P-OWN-architecture-linter-performance"),
 ]
 
 _CACHE_GUARD_IDS = (
