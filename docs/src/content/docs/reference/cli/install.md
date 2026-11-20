@@ -424,7 +424,10 @@ This imperative route deploys Claude plugin bundles (the default `apm pack`
 output). The bundle's `hooks.json` and `hooks/` scripts are registered through
 the same hook merge a source install uses, once the exact bundle key printed by
 `apm install` is approved in `executables.allow`; until then they are skipped
-with one warning. `apm uninstall` does not remove local-bundle content. A
+with one warning. Every later `apm install` (including `--frozen`), `apm update`
+and `apm prune` re-checks that exact key against current approvals and org
+policy and retires the hooks when it no longer holds; `apm audit --ci` reports
+them first. `apm uninstall` does not remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
 whole and registers it without locating or executing Copilot. Stable Copilot

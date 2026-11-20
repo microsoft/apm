@@ -59,6 +59,7 @@ from apm_cli.integration.hook_native_formats import (
     require_claude_native_events,
 )
 from apm_cli.integration.hook_ownership import (
+    LocalBundleMarkers,
     dependency_hook_source_marker,
     dependency_hook_sources,
     drop_dependency_owned_entries,
@@ -901,7 +902,7 @@ class HookIntegrator(BaseIntegrator):
                 return "_local"
             return f"_local/{package_name}"
         if isinstance(bundle_id := getattr(package_info, "local_bundle_id", None), str):
-            return local_bundle_hook_source_marker(bundle_id)
+            return local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)
         try:
             dependency_ref = vars(package_info).get("dependency_ref")
         except TypeError:
@@ -1739,8 +1740,7 @@ class HookIntegrator(BaseIntegrator):
 
     def retire_local_bundle_hooks(self, bundle_id: str, project_root: Path, targets):
         """Remove one local bundle's merged hooks; its next install ships none (#3700)."""
-        marker = frozenset({local_bundle_hook_source_marker(bundle_id)})
-        return self._retire_source_markers(project_root, targets, marker)
+        return self._retire_source_markers(project_root, targets, LocalBundleMarkers(bundle_id))
 
     def _retire_source_markers(
         self, project_root: Path, excluded_targets, source_markers: frozenset[str], dry_run=False

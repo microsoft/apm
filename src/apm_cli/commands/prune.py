@@ -117,6 +117,11 @@ def prune(ctx, dry_run):
 
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            from ..install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+            reconcile_scope_bundle_hooks(
+                InstallScope.PROJECT, apm_package, logger=logger, dry_run=dry_run
+            )
             declared_deps = apm_package.get_all_apm_dependencies()
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)

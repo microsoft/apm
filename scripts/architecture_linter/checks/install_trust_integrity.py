@@ -29,6 +29,7 @@ GUARD_TRUST_POLICY_OUTCOME = "install-deployment-trust-policy-outcome"
 GUARD_UPDATE_CONTENT_INTEGRITY = "install-deployment-update-content-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
 GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
+GUARD_LOCAL_BUNDLE_HOOK_TRUST = "install-deployment-local-bundle-hook-trust"
 
 _OWNER = "src/apm_cli/policy/outcome_routing.py"
 _EXECUTABLES = "src/apm_cli/security/executables.py"
@@ -39,6 +40,10 @@ _INTEGRATE = "src/apm_cli/install/phases/integrate.py"
 _HELPERS = "src/apm_cli/install/source_helpers.py"
 _UNPACKER = "src/apm_cli/bundle/unpacker.py"
 _INSTALL_COMMAND = "src/apm_cli/commands/install.py"
+_HOOK_OWNERSHIP = "src/apm_cli/integration/hook_ownership.py"
+_HOOK_INTEGRATOR = "src/apm_cli/integration/hook_integrator.py"
+_BUNDLE_HOOK_TRUST = "src/apm_cli/install/local_bundle_hook_trust.py"
+_CI_CHECKS = "src/apm_cli/policy/ci_checks.py"
 
 _DISCOVERY = "discover_policy_with_chain"
 # Every remaining direct discovery call consumes the outcome itself: the
@@ -262,5 +267,75 @@ def check_bundle_user_scope_root(provider: FactsProvider) -> tuple[Violation, ..
                 _INSTALL_COMMAND,
                 "apm install -g <bundle> must read grants from the user-scope manifest",
             )
+        )
+    return tuple(findings)
+
+
+_BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
+    _HOOK_OWNERSHIP: (
+        "def local_bundle_hook_source_marker(bundle_id: str, approval_key: str | None = None)",
+        "def parse_local_bundle_hook_source(",
+        "def write_per_file_bundle_record(",
+    ),
+    _HOOK_INTEGRATOR: (
+        "local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
+        "LocalBundleMarkers(bundle_id)",
+    ),
+    _BUNDLE_HOOK_TRUST: (
+        "parse_local_bundle_hook_source(",
+        "is_package_approved(allow_map, key, EXEC_TYPE_HOOKS)",
+        "if None in keys:",
+        "HookIntegrator().retire_local_bundle_hooks(item.slug, project_root, hook_targets)",
+        "_retire_per_file(project_root, targets, item)",
+        "_drop_lock_rows(lock_dir, retired_files)",
+    ),
+    _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
+    "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
+    "src/apm_cli/commands/prune.py": ("reconcile_scope_bundle_hooks(",),
+    _CI_CHECKS: (
+        "unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)",
+    ),
+    "src/apm_cli/install/local_bundle_hooks.py": (
+        "package_info.local_bundle_approval = approval_key",
+        "_record_per_file_approval(",
+    ),
+}
+# The approval record is read and written only in hook_ownership.py.
+_MARKER_TOKENS = ('"local-bundle::', "LOCAL_BUNDLE_HOOK_SOURCE_PREFIX")
+
+
+def check_local_bundle_hook_trust(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every command re-checks local-bundle hooks through one record and one owner."""
+    findings: list[Violation] = []
+    for path, needles in _BUNDLE_HOOK_TRUST_REQUIRED.items():
+        facts, failures = _facts_for(provider, path, GUARD_LOCAL_BUNDLE_HOOK_TRUST)
+        findings.extend(failures)
+        if failures:
+            continue
+        missing = [needle for needle in needles if not _present(facts, needle)]
+        if missing:
+            findings.append(
+                _summary(
+                    GUARD_LOCAL_BUNDLE_HOOK_TRUST,
+                    path,
+                    "Local-bundle hook trust routing is missing: " + ", ".join(missing),
+                )
+            )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path == _HOOK_OWNERSHIP:
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_LOCAL_BUNDLE_HOOK_TRUST)
+        if failures:
+            continue
+        findings.extend(
+            violation(
+                GUARD_LOCAL_BUNDLE_HOOK_TRUST,
+                path,
+                "Read or write a local-bundle hook approval record through "
+                "integration.hook_ownership, never by hand",
+                line=number,
+            )
+            for number, line in enumerate(_lines(facts), start=1)
+            if any(token in line for token in _MARKER_TOKENS)
         )
     return tuple(findings)

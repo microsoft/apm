@@ -1831,6 +1831,15 @@ def _install_apm_packages(ctx, outcome):
     from apm_cli.install.phases.targets import reject_undeployable_manifest_targets
 
     reject_undeployable_manifest_targets(apm_package, logger)  # before the lockfile rename
+    from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+    reconcile_scope_bundle_hooks(
+        ctx.scope,
+        apm_package,
+        no_policy=ctx.no_policy,
+        logger=logger,
+        dry_run=bool(getattr(ctx, "dry_run", False)),
+    )
     migrate_lockfile_if_needed(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
