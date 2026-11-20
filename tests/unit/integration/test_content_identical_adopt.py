@@ -40,6 +40,8 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _make_package_info(package_dir: Path, name: str = "test-pkg") -> PackageInfo:
     package = APMPackage(

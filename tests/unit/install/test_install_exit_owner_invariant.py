@@ -5,6 +5,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 SRC_ROOT = Path(__file__).resolve().parents[3] / "src" / "apm_cli"
 INSTALL_ROOT = SRC_ROOT / "install"
 ALLOWED_EXIT_MAPPERS = {"commands/install.py", "install/summary.py"}

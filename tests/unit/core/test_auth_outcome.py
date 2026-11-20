@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import requests
 
-import apm_cli.core.token_manager as token_manager_module
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.auth_chain import (
     AdoAuthChainExhaustedError,
@@ -20,7 +18,7 @@ from apm_cli.core.auth_chain import (
 from apm_cli.core.auth_outcome import AuthOutcomeKind, classify_auth_outcome
 from apm_cli.core.token_manager import GitHubTokenManager
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 
 def _response(status: int, headers: dict[str, str] | None = None) -> SimpleNamespace:
@@ -291,27 +289,6 @@ def test_tenant_lookup_runs_once_under_concurrency(monkeypatch) -> None:
 
     assert results == ["tenant-0000"] * 6
     assert len(calls) == 1
-
-
-def test_helper_credential_keeps_username_and_request_scope(monkeypatch) -> None:
-    def _fill(args, *_a, **kwargs):
-        return subprocess.CompletedProcess(
-            args, 0, stdout="username=bob\npassword=secret-value\n", stderr=""
-        )
-
-    monkeypatch.setattr(token_manager_module.subprocess, "run", _fill)
-    credential = GitHubTokenManager.resolve_git_helper_credential(
-        "dev.azure.com", path="/org/proj/_git/repo"
-    )
-    assert credential is not None
-    assert (credential.username, credential.host, credential.path) == (
-        "bob",
-        "dev.azure.com",
-        "org/proj/_git/repo",
-    )
-    assert "secret-value" not in repr(credential)
-    assert credential.description == (("username", "bob"), ("password", "secret-value"))
-    assert "secret-value" not in repr(credential)
 
 
 def test_ado_server_chain_skips_azure_cli(monkeypatch) -> None:

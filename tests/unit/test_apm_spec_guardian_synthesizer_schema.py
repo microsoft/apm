@@ -51,6 +51,8 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+pytestmark = pytest.mark.component
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_SCHEMA_PATH = (
     REPO_ROOT / ".apm/skills/apm-spec-guardian/assets/synthesizer-return-schema.json"

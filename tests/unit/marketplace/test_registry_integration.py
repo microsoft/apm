@@ -14,6 +14,8 @@ from apm_cli.marketplace.models import (
     parse_marketplace_json,
 )
 
+pytestmark = pytest.mark.unit
+
 # ───────────────────────────────────────────────────────────────────────────
 # Schema extension: ``registry`` field on plugin entries
 # ───────────────────────────────────────────────────────────────────────────

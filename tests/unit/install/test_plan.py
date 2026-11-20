@@ -22,6 +22,8 @@ from apm_cli.install.plan import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
+pytestmark = pytest.mark.unit
+
 
 def _new_lockfile() -> LockFile:
     return LockFile(

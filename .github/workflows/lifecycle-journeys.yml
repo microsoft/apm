@@ -1,0 +1,128 @@
+name: Lifecycle Journeys Nightly
+
+# All 25 docs journeys (#4110) through the real CLI in the hermetic lifecycle
+# world, on Linux, Windows and macOS. The PR lifecycle smoke job runs only the
+# golden journeys on Linux. A scheduled failure opens (or updates) one tracking
+# issue; the next green scheduled run closes it. Dispatch with `ref` set to a
+# release-candidate SHA to validate it before tagging.
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA, branch or tag to test (empty: the default branch)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-journeys-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  journeys:
+    name: Lifecycle Journeys (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run every lifecycle journey
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 2 --durations=10 -m "not live" tests/lifecycle/journeys/test_journeys.py
+
+  signal:
+    name: Lifecycle Journeys Nightly Signal
+    needs: [journeys]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RESULT: ${{ needs.journeys.result }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const MARKER = '<!-- apm-lifecycle-journeys-nightly -->';
+            const LABEL = 'ci/lifecycle-journeys-nightly';
+            const { owner, repo } = context.repo;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const failed = process.env.RESULT !== 'success';
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: LABEL });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner, repo, name: LABEL, color: 'D93F0B',
+                description: 'Nightly lifecycle journeys signal',
+              });
+            }
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: LABEL, per_page: 100,
+            });
+            const issue = open.find((item) => !item.pull_request && (item.body || '').includes(MARKER));
+            if (failed) {
+              const body = [
+                MARKER,
+                'The nightly lifecycle journeys run is failing on at least one OS.',
+                '',
+                `- Run: [${context.runNumber}](${runUrl})`,
+                `- Head SHA: \`${context.sha}\``,
+                `- Result: ${process.env.RESULT}`,
+                '',
+                'Each failing journey prints its step, the oracle that failed and the step transcript.',
+              ].join('\n');
+              if (issue) {
+                await github.rest.issues.update({ owner, repo, issue_number: issue.number, body });
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number, body: `Still failing: ${runUrl}`,
+                });
+              } else {
+                await github.rest.issues.create({
+                  owner, repo, title: '[ci] Nightly lifecycle journeys are failing', body, labels: [LABEL],
+                });
+              }
+            } else if (issue) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number, body: `Recovered: ${runUrl}`,
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'completed',
+              });
+            }

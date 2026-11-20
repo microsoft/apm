@@ -24,6 +24,8 @@ from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.primitives.discovery import find_primitive_files
 from apm_cli.utils.console import _get_console, _reset_console
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data
 # ---------------------------------------------------------------------------

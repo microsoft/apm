@@ -3,12 +3,14 @@
 import os
 from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils import github_host
+
+pytestmark = pytest.mark.component
 
 
 class TestGitHubDownloaderTokenPrecedence:

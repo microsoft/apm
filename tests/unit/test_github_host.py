@@ -6,6 +6,8 @@ import pytest
 from apm_cli.utils import github_host
 from apm_cli.utils.github_host import build_raw_content_url, is_valid_fqdn
 
+pytestmark = pytest.mark.unit
+
 
 def test_build_raw_content_url():
     """build_raw_content_url returns the correct raw.githubusercontent.com URL."""
