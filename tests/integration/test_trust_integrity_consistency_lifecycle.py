@@ -1541,10 +1541,11 @@ def test_frozen_and_audit_refuse_alike_a_git_row_without_content_hash_under_requ
         "security.integrity.require_hashes is enabled but these locked dependencies "
         f"have no content hash (fail-closed): {pkg.slug}."
     )
+    # Both readers refuse on stderr; stdout never carries the refusal.
     for result in (audit, frozen):
-        text = " ".join(output(result).split())
-        assert sentence in text, text
-        assert "redacted" not in text, text
+        assert sentence in " ".join(result.stderr.split()), result.stderr
+        assert sentence not in " ".join(result.stdout.split()), result.stdout
+        assert "redacted" not in output(result), output(result)
 
 
 def test_frozen_and_audit_agree_on_a_git_row_without_content_hash_by_default(
