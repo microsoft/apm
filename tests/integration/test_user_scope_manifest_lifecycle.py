@@ -127,7 +127,7 @@ def test_global_fetch_failure_default_comes_from_user_manifest(
             step="user-manifest-block",
             expected=1,
         )
-        assert "fetch_failure_default=block" in output(result), output(result)
+        assert "fetch_failure_default=block" in result.stdout + result.stderr, output(result)
         # I7: the blocked command preserves user-scope state.
         assert (tree_snapshot(apm_home), tree_snapshot(home / ".claude")) == before
 
