@@ -62,7 +62,8 @@ class TestDiagnosticsSecurityRendering:
                 )
         diag.render_summary()
         captured = capsys.readouterr()
-        assert "Diagnostics" in captured.out or "security" in captured.out.lower()
+        rendered = captured.out + captured.err
+        assert "Diagnostics" in rendered or "security" in rendered.lower()
 
     def test_critical_security_flag(self, tmp_path):
         p = tmp_path / "evil.md"

@@ -213,6 +213,7 @@ def _rich_echo(
     """Echo message with Rich formatting or colorama fallback.
 
     ``err=True`` writes to stderr regardless of the configured output stream.
+    Error lines (red, or the ``error`` symbol) always go to stderr.
     """
     # Handle backward compatibility - if style is provided, use it as color
     if style is not None:
@@ -222,10 +223,14 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
+    err = err or color == "red" or symbol == "error"
     # A hard-wrapped URL is split into lines that no longer open (#3994).
     soft_wrap = soft_wrap or "://" in message
     console = _get_stderr_console() if err else _get_console()
     if console:
+        # Piped or captured output is never hard-wrapped: a wrapped command or
+        # path no longer copies, greps or parses as one line.
+        soft_wrap = soft_wrap or not console.is_terminal
         try:
             style_str = color
             if bold:
@@ -268,8 +273,8 @@ def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
     _rich_echo(message, color="green", symbol=symbol, bold=True)
 
 
-def _rich_error(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013
-    """Display error message with red color (``err=True`` writes to stderr)."""
+def _rich_error(message: str, symbol: str = None, *, err: bool = True):  # noqa: RUF013
+    """Display an error message in red on stderr."""
     _rich_echo(message, color="red", symbol=symbol, err=err)
 
 

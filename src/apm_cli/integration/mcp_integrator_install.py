@@ -32,7 +32,7 @@ from apm_cli.install.errors import (
 )
 from apm_cli.integration.mcp_user_scope_runtimes import user_scope_runtime_labels
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.console import STATUS_SYMBOLS
+from apm_cli.utils.console import STATUS_SYMBOLS, _rich_echo
 from apm_cli.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
@@ -882,7 +882,7 @@ def _raise_strict_config_failures(
         "retaining --global and any --target selection."
     )
     if console:
-        console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
+        _rich_echo(f"{STATUS_SYMBOLS['cross']} {message}", color="red")
     else:
         logger.error(message)
     raise InstallFailureAlreadyRendered(message)

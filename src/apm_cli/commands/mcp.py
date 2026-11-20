@@ -104,10 +104,10 @@ def _handle_registry_network_error(exc, registry, console, logger, action):
 
     msg = f"Could not {action} MCP registry at {url}"
     if console:
-        from ..utils.console import STATUS_SYMBOLS
+        from ..utils.console import STATUS_SYMBOLS, _rich_echo
 
-        console.print(f"\n{STATUS_SYMBOLS['error']} {msg}", style="red")
-        console.print(f"  -> {hint}", style="dim")
+        _rich_echo(f"\n{STATUS_SYMBOLS['error']} {msg}", color="red")
+        _rich_echo(f"  -> {hint}", color="dim", err=True)
     else:
         logger.error(msg)
         logger.error(hint)

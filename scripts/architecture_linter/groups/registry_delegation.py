@@ -5,6 +5,9 @@ Composed from cohesive check modules -- owner-registry-guarded checks
 neither check module outgrows the module size budget.
 """
 
+from scripts.architecture_linter.checks.registry_console_streams import (
+    RULES as _CONSOLE_STREAM_RULES,
+)
 from scripts.architecture_linter.checks.registry_module_ownership import (
     RULES as _MODULE_OWNERSHIP_RULES,
 )
@@ -21,7 +24,9 @@ from scripts.architecture_linter.checks.registry_semantic_rules import (
 )
 from scripts.architecture_linter.checks.registry_semantic_rules import RULES as _SEMANTIC_RULES
 
-RULES = _OWNER_RULES + _OUTPUT_RULES + _SEMANTIC_RULES + _MODULE_OWNERSHIP_RULES
+RULES = (
+    _OWNER_RULES + _OUTPUT_RULES + _SEMANTIC_RULES + _MODULE_OWNERSHIP_RULES + _CONSOLE_STREAM_RULES
+)
 COLLECTORS = _OWNER_COLLECTORS + _OUTPUT_COLLECTORS + _SEMANTIC_COLLECTORS
 
 __all__ = ["COLLECTORS", "RULES"]

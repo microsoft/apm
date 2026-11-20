@@ -1313,7 +1313,7 @@ class TestGateProjectScopedRuntimes:
             explicit_target=None,
         )
         assert result == []
-        out = capsys.readouterr().out
+        out = capsys.readouterr().err
         # Canonical lead-with-outcome voice + structured error body.
         assert "Skipping all MCP config writes" in out
         assert "could not resolve active targets" in out
@@ -1358,7 +1358,7 @@ class TestGateProjectScopedRuntimes:
             explicit_target=None,
         )
         assert result == []
-        out = capsys.readouterr().out
+        out = capsys.readouterr().err
         assert "Skipping all MCP config writes" in out
         assert "apm.yml 'targets' field is invalid" in out
 

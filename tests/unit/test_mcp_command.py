@@ -968,7 +968,7 @@ class TestMcpRegistryEnvVar:
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 result = make_runner().invoke(mcp, ["list"])
         assert result.exit_code == 1
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        printed = result.stderr
         assert "mcp-registry-url is set in apm config" in printed
         assert "MCP_REGISTRY_URL is set" not in printed
 
@@ -1014,7 +1014,7 @@ class TestMcpRegistryEnvVar:
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 result = runner.invoke(mcp, ["search", "x"])
         assert result.exit_code == 1
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        printed = result.stderr
         assert "Could not reach MCP registry" in printed
         assert ("https", "busted.internal.example.com") in _printed_urls(printed)
         assert "MCP_REGISTRY_URL" in printed

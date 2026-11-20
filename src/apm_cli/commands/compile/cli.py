@@ -37,6 +37,7 @@ from ...install.locking import serialized_lifecycle_unless
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
+    _rich_echo,
     _rich_error,
     _rich_info,
     _rich_panel,
@@ -181,7 +182,7 @@ def _display_validation_errors(errors):
     # Fallback to simple text output
     _rich_error("Validation errors found:")
     for error in errors:
-        click.echo(f"  [x] {error}")
+        _rich_echo(f"  [x] {error}", color="red")
 
 
 def _get_validation_suggestion(error_msg):

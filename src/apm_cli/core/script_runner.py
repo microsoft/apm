@@ -853,7 +853,9 @@ class ScriptRunner:
             return True
 
         except Exception as e:
-            print(f"  [x] Auto-install failed: {e}")
+            from ..utils.console import _rich_echo
+
+            _rich_echo(f"  [x] Auto-install failed: {e}", color="red")
             return False
 
     def _add_dependency_to_config(self, package_ref: str) -> None:

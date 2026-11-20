@@ -149,7 +149,8 @@ class TestRichEcho:
             _rich_echo("colorama msg", color="red")
 
         captured = capsys.readouterr()
-        assert "colorama msg" in captured.out
+        assert "colorama msg" in captured.err
+        assert "colorama msg" not in captured.out
 
     def test_colorama_fallback_bold(self, capsys):
         from apm_cli.utils.console import _rich_echo
@@ -572,9 +573,9 @@ class TestRichErrorNarrowWidthWrapping:
             "Claude-import route, then reinstall."
         )
         buffer = io.StringIO()
-        narrow_console = Console(file=buffer, width=20, force_terminal=False)
+        narrow_console = Console(file=buffer, width=20, force_terminal=True, color_system=None)
         with patch(
-            "apm_cli.utils.console._get_console",
+            "apm_cli.utils.console._get_stderr_console",
             return_value=narrow_console,
         ):
             _rich_error(message, symbol="error")

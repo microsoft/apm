@@ -52,10 +52,13 @@
     },
     {
       "id": "console-construction",
-      "decision": "Rich Console and Table construction: every console and table comes from one ASCII-rendering factory",
-      "owner": "utils/console.py (new_console, new_table, _get_console)",
+      "decision": "Rich Console and Table construction: every console and table comes from one ASCII-rendering factory; the stream and wrap mode of every line (error lines on stderr, no hard wrap when not a terminal)",
+      "owner": "utils/console.py (new_console, new_table, _get_console, _rich_echo)",
       "selectors": ["src/apm_cli/utils/console.py"],
-      "guards": ["registry-delegation-console-construction"]
+      "guards": [
+        "registry-delegation-console-construction",
+        "registry-delegation-console-streams"
+      ]
     },
     {
       "id": "experimental-flag-registry",

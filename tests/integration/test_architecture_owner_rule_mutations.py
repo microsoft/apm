@@ -2360,6 +2360,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A command builds a Rich table outside the ASCII table factory.",
     ),
     MutationCase(
+        guard_id="registry-delegation-console-streams",
+        rule_id="registry_delegation.console_streams",
+        path="src/apm_cli/commands/compile/cli.py",
+        old='_rich_echo(f"  [x] {error}", color="red")',
+        new='click.echo(f"  [x] {error}")',
+        intent="A command prints an error line on stdout, bypassing the console stream owner.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-experimental-flags",
         rule_id="registry_delegation.experimental_flags",
         path="src/apm_cli/version_output.py",
