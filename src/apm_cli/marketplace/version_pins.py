@@ -33,6 +33,7 @@ import logging
 import os
 import threading
 
+from ..core.remediation import MARKETPLACE_REF_SWAP_ACCEPT
 from .errors import MarketplaceError
 
 logger = logging.getLogger(__name__)
@@ -49,8 +50,7 @@ class RefPinMismatchError(MarketplaceError):
         super().__init__(
             f"Plugin {plugin}@{marketplace} ref changed: was '{previous_ref}', now "
             f"'{current_ref}'. This may indicate a ref swap attack; refusing to install. "
-            "If the publisher moved this version on purpose, run 'apm update' to accept "
-            f"the new ref (pin '{key}')."
+            f"{MARKETPLACE_REF_SWAP_ACCEPT.bind(key=key).sentence()}"
         )
 
 

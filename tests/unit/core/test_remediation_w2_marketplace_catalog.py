@@ -60,6 +60,9 @@ COMPONENT_ONLY: dict[str, str] = {
     "marketplace-unregistered-shorthand": _NETWORK,
     "marketplace-unregistered-url": _NETWORK,
     "marketplace-yml-compile": _TEMPLATE,
+    "marketplace-origin-readd": "needs a lock that predates origin recording; covered by the catalog origin tests",
+    "marketplace-origin-reinstall": "needs a lock that predates origin recording; covered by the catalog origin tests",
+    "marketplace-ref-swap-accept": "covered by the marketplace ref-swap lifecycle test, which asserts the printed next step",
 }
 
 

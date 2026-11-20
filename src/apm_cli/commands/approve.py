@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.remediation import (
+    BUNDLE_EXECUTABLES_ALLOW,
     EXECUTABLES_APPROVED,
     EXECUTABLES_DENIED,
     EXECUTABLES_UNAPPROVED,
@@ -702,8 +703,7 @@ def _show_pending_bundles(manifest: Path, bundles: list) -> None:
         _rich_echo(f'    "{bundle.approval_key}"', soft_wrap=True)
     _rich_echo("")
     _rich_info(
-        f"Review the bundle, add its approval key under executables.allow in {manifest.name}, "
-        "then rerun 'apm install <bundle>'.",
+        BUNDLE_EXECUTABLES_ALLOW.bind(manifest=manifest.name).sentence(),
         symbol="info",
     )
 

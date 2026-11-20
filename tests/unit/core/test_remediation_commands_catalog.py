@@ -111,6 +111,9 @@ COMPONENT_ONLY: dict[str, str] = {
     "reported the bundle",
     "legacy-bundle-unpack": _OUTSIDE,
     "registry-package-install": _NETWORK,
+    "update-undeclared-package": "covered by the update undeclared-package refusal lifecycle test, which asserts the printed next step",
+    "bundle-executables-allow": "printed by 'apm approve' with no package for a parked local bundle; covered by the approve pending-bundle tests",
+    "lockfile-unmanaged-paths": "needs a lockfile that records paths APM does not manage; covered by the uninstall lockfile-path refusal tests",
 }
 
 

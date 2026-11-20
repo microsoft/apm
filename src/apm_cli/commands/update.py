@@ -55,6 +55,7 @@ swiss-army-knife escape hatch for the rest of the install surface.
 from __future__ import annotations
 
 import copy
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,7 @@ import click
 
 from apm_cli.core.remediation import (
     CLI_BINARY_OUTDATED,
+    UPDATE_UNDECLARED_PACKAGE,
     USER_MANIFEST_MISSING,
 )
 from apm_cli.core.scope import manifest_file
@@ -422,7 +424,8 @@ def _resolve_only_packages(packages: tuple[str, ...], declared: list) -> list[st
             _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
         else:
             _rich_info(
-                f"No APM dependencies are declared. Run 'apm install {e.token}' to add it.",
+                "No APM dependencies are declared. "
+                + UPDATE_UNDECLARED_PACKAGE.bind(package=shlex.quote(e.token)).sentence(),
                 symbol="info",
             )
         sys.exit(1)
