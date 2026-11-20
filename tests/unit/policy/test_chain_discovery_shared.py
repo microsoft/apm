@@ -428,8 +428,10 @@ class TestMultiLevelExtendsChain:
 
         mock_discover.side_effect = [leaf_fetch, b_fetch, a_fetch]
 
-        with pytest.raises(PolicyInheritanceError, match="Cycle"):
+        with pytest.raises(PolicyInheritanceError, match="Cycle") as exc_info:
             discover_policy_with_chain(Path("/fake"))
+        assert "org-a/.github" in str(exc_info.value)
+        assert "org-b/.github" in str(exc_info.value)
 
     @pytest.mark.req("req-pl-003")
     @patch(_PATCH_WRITE_CACHE)
@@ -462,6 +464,7 @@ class TestMultiLevelExtendsChain:
             discover_policy_with_chain(Path("/fake"))
         assert str(MAX_CHAIN_DEPTH) in str(exc_info.value)
 
+    @pytest.mark.req("req-pl-010")
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
     def test_partial_chain_fails_closed(self, mock_discover, mock_write_cache):

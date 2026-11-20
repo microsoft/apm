@@ -230,3 +230,19 @@ class TestParentExpansionToLockfilePipeline:
         locked, reloaded = self._round_trip(expanded, sha="b" * 40)
         assert locked.resolved_ref == "v1.2.3"
         assert reloaded.resolved_ref == "v1.2.3"
+
+
+@pytest.mark.req("req-mf-010")
+def test_resolver_expands_parent_to_parent_coordinates():
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+    parent = DependencyReference.parse("gitlab.example.com/org/monorepo#v1.2.0")
+    child = DependencyReference.parse_from_dict({"git": "parent", "path": "skills/shared"})
+
+    expanded = APMDependencyResolver().expand_parent_repo_decl(parent, child)
+
+    assert expanded.host == "gitlab.example.com"
+    assert expanded.repo_url == "org/monorepo"
+    assert expanded.reference == "v1.2.0"
+    assert expanded.virtual_path == "skills/shared"
+    assert expanded.is_parent_repo_inheritance is False
