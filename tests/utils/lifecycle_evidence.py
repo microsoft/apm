@@ -9,6 +9,7 @@ import hashlib
 import importlib
 import itertools
 import json
+import os
 import re
 import subprocess
 import sys
@@ -417,14 +418,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
-        "install-empty-org-policy-notice-per-phase",
-        "I9",
-        "#4241",
-        _runs("install"),
-        r"\[!\] Org policy at \S+ is present but empty",
-        output=r"\A(?=.*^\[!\] Org policy at \S+ is present but empty).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
         "install-org-policy-banner-when-mcp-blocked",
         "I9",
         "#4267",
@@ -579,14 +572,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
     ),
     KnownOutputCell(
-        "install-adapter-unreadable-config-warning-twice",
-        "I9",
-        "#4332",
-        _runs("install"),
-        r"stderr repeats a line: 'WARNING apm_cli\.adapters\.client\.\w+ Could not read",
-        output=r"as a JSON object -- skipping config write",
-    ),
-    KnownOutputCell(
         "update-deny-all-lifecycle-notice-repeats",
         "I9",
         "#4333",
@@ -601,28 +586,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-hook-summary-line-twice",
-        "I9",
-        "#4336",
-        _runs("install"),
-        r"repeats a line: '\|   \w+: runs ",
-        # Not the per-target shape #4243 owns.
-        output=(
-            r"\A(?!.*(?:^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, "
-            r"\.windsurf/hooks\.json$|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n"
-            r"  \|   Hook file integrated: ))"
-            r".*^\s*(\|   \w+: runs [^\n]*)$.*^\s*\1$"
-        ),
-    ),
-    KnownOutputCell(
-        "install-frozen-parked-mcp-notice-per-phase",
-        "I9",
-        "#4299",
-        _runs("install", "--frozen"),
-        r"Parked MCP server",
-        output=r"^\s*(\[!\] Parked MCP server [^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
@@ -804,8 +767,21 @@ def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]
             OutputViolation("I8", f"exit code {result.returncode} is outside {sorted(contract)}")
         )
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
+        if stream == "stderr" and _diagnostic_run(args):
+            # A verbose or debug run asked for Python logging records; they are
+            # diagnostics, not user output, so I9 does not judge their repeats.
+            text = "\n".join(line for line in text.splitlines() if not _LOG_RECORD.match(line))
         found.extend(_noise_violations(stream, text))
     return found
+
+
+# A Python logging record on stderr: "DEBUG apm_cli.core.token_manager ...".
+_LOG_RECORD = re.compile(r"^(?:DEBUG|INFO) [A-Za-z_][\w.]* ")
+
+
+def _diagnostic_run(args: Sequence[str]) -> bool:
+    """True when the run itself enabled verbose or debug output."""
+    return bool({"-v", "--verbose"} & set(args)) or bool(os.environ.get("APM_DEBUG"))
 
 
 def apm_args(command: Sequence[str]) -> tuple[str, ...]:

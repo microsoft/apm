@@ -21,6 +21,7 @@ import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
 
+from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle.machines._spine_kit import (
     _PHASE_ONE_PROPERTIES,
     _TRANSITION_PROPERTIES,
@@ -182,3 +183,24 @@ def test_generated_transition_catalog_covers_phase_one_properties() -> None:
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
         assert called_names & oracle_calls, f"{rule_name} does not invoke a filesystem oracle"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="tracking #4248: a --global install records its deployment rows as scope project",
+)
+def test_global_install_records_user_scope_deployment_rows(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """After ``apm install --global`` every user-lock deployment row records scope user."""
+    model = _LifecycleReferenceModel(
+        _ModelFixture.create(
+            tmp_path / "user-scope-rows", lifecycle_entry_point, "global-canonical"
+        )
+    )
+    model.install()
+    lock = LockFile.read(model.project.root / "apm.lock.yaml")
+    assert lock is not None
+    scopes = sorted({record.locator.scope for record in lock.deployment_ledger.records.values()})
+    assert scopes == ["user"], scopes
