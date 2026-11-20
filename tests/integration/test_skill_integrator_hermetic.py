@@ -670,12 +670,15 @@ class TestSyncIntegration:
         apm_pkg = self._make_apm_package()
         managed = {".github/skills/orphan-skill"}
 
-        # We need a target that maps to .github/skills prefix
+        # We need a target that maps to .github/skills prefix; cleanup path
+        # validation reads its string prefix and managed root (#3701).
         fake_target = MagicMock()
         fake_target.supports.return_value = True
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.prefix = ".github/"
+        fake_target.managed_deploy_root = None
         fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
