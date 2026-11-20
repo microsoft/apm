@@ -1,84 +1,89 @@
 """WS2b (#1116): parallel MCP registry batch lookup tests.
 
 Verifies that ``validate_servers_exist``, ``check_servers_needing_installation``,
-and ``batch_fetch_server_info`` run in parallel and complete within bounded wall time.
+and ``batch_fetch_server_info`` keep every lookup in flight at the same time.
+Parallelism is proven with a max-in-flight counter, not wall time, so the
+result does not depend on machine speed.
 
 No real network calls -- all registry HTTP is mocked.
 """
 
 from __future__ import annotations
 
-import time
+import threading
 from unittest.mock import MagicMock, patch
 
 from apm_cli.registry.operations import MCPServerOperations
 
+SERVERS = ["server-a", "server-b", "server-c"]
+
+
+class _InFlightProbe:
+    """Registry lookup stub that records how many calls overlap.
+
+    Each call holds until ``target`` calls are in flight together. Serialized
+    callers never reach the target: the first call gives up after ``timeout``
+    and releases the rest, so a serial regression fails fast instead of hanging.
+    """
+
+    def __init__(self, target: int, timeout: float = 10.0) -> None:
+        self._lock = threading.Lock()
+        self._all_in = threading.Event()
+        self._target = target
+        self._timeout = timeout
+        self._in_flight = 0
+        self.max_in_flight = 0
+        self.calls = 0
+
+    def __call__(self, ref: str) -> dict[str, str]:
+        with self._lock:
+            self.calls += 1
+            self._in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self._in_flight)
+            if self._in_flight >= self._target:
+                self._all_in.set()
+        try:
+            if not self._all_in.wait(self._timeout):
+                self._all_in.set()
+            return {"id": f"uuid-{ref}", "name": ref}
+        finally:
+            with self._lock:
+                self._in_flight -= 1
+
 
 class TestParallelRegistryLookups:
-    """Parallel batch lookups complete faster than serial."""
+    """Batch lookups run concurrently, not one after another."""
 
-    def test_validate_servers_exist_parallel_wall_time(self) -> None:
-        """3 servers each sleeping 500ms: wall time < 1.0s (vs 1.5s serial)."""
+    def test_validate_servers_exist_runs_lookups_concurrently(self) -> None:
         ops = MCPServerOperations.__new__(MCPServerOperations)
         ops.registry_client = MagicMock()
-
-        call_count = {"n": 0}
-
-        def slow_find(ref: str):
-            import time as _t
-
-            call_count["n"] += 1
-            _t.sleep(0.5)
-            return {"id": f"uuid-{ref}", "name": ref}
-
-        ops.registry_client.find_server_by_reference = slow_find
+        probe = _InFlightProbe(target=len(SERVERS))
+        ops.registry_client.find_server_by_reference = probe
         ops.registry_client._is_custom_url = False
 
-        servers = ["server-a", "server-b", "server-c"]
+        valid, invalid = ops.validate_servers_exist(SERVERS, max_workers=4)
 
-        start = time.monotonic()
-        valid, invalid = ops.validate_servers_exist(servers, max_workers=4)
-        elapsed = time.monotonic() - start
+        assert probe.calls == 3
+        assert valid == SERVERS
+        assert invalid == []
+        assert probe.max_in_flight == 3, f"max in flight {probe.max_in_flight} (not parallel)"
 
-        assert call_count["n"] == 3
-        assert len(valid) == 3
-        assert len(invalid) == 0
-        # Parallel: should complete in ~500ms, well under the 1500ms
-        # serial baseline. 1.0s budget absorbs scheduler jitter on
-        # slow CI runners (Windows can add hundreds of ms of
-        # thread-startup overhead on top of the nominal 500ms sleep).
-        assert elapsed < 1.0, f"Wall time {elapsed:.3f}s >= 1.0s (not parallel)"
-
-    def test_check_servers_needing_installation_parallel_wall_time(self) -> None:
-        """3 servers each sleeping 500ms: wall time < 1.0s (vs 1.5s serial)."""
+    def test_check_servers_needing_installation_runs_lookups_concurrently(self) -> None:
         ops = MCPServerOperations.__new__(MCPServerOperations)
         ops.registry_client = MagicMock()
-
-        def slow_find(ref: str):
-            import time as _t
-
-            _t.sleep(0.5)
-            return {"id": f"uuid-{ref}", "name": ref}
-
-        ops.registry_client.find_server_by_reference = slow_find
-
-        # Mock _get_installed_server_ids to return empty sets
+        probe = _InFlightProbe(target=len(SERVERS))
+        ops.registry_client.find_server_by_reference = probe
         ops._get_installed_server_ids = MagicMock(return_value=set())
 
-        servers = ["server-a", "server-b", "server-c"]
-
-        start = time.monotonic()
         result = ops.check_servers_needing_installation(
             target_runtimes=["copilot"],
-            server_references=servers,
+            server_references=SERVERS,
             max_workers=4,
         )
-        elapsed = time.monotonic() - start
 
         # All need installation (none installed)
-        assert set(result) == set(servers)
-        # Parallel: should complete in ~500ms, well under 1500ms serial.
-        assert elapsed < 1.0, f"Wall time {elapsed:.3f}s >= 1.0s (not parallel)"
+        assert set(result) == set(SERVERS)
+        assert probe.max_in_flight == 3, f"max in flight {probe.max_in_flight} (not parallel)"
 
     def test_validate_preserves_submission_order(self) -> None:
         """Results appear in the same order as the input list."""
@@ -117,32 +122,18 @@ class TestParallelRegistryLookups:
         assert valid == ["only-one"]
         assert invalid == []
 
-    def test_batch_fetch_server_info_parallel_wall_time(self) -> None:
-        """3 servers each sleeping 500ms: wall time < 1.0s (vs 1.5s serial)."""
+    def test_batch_fetch_server_info_runs_lookups_concurrently(self) -> None:
         ops = MCPServerOperations.__new__(MCPServerOperations)
         ops.registry_client = MagicMock()
+        probe = _InFlightProbe(target=len(SERVERS))
+        ops.registry_client.find_server_by_reference = probe
 
-        call_count = {"n": 0}
+        result = ops.batch_fetch_server_info(SERVERS, max_workers=4)
 
-        def slow_find(ref: str):
-            import time as _t
-
-            call_count["n"] += 1
-            _t.sleep(0.5)
-            return {"id": f"uuid-{ref}", "name": ref}
-
-        ops.registry_client.find_server_by_reference = slow_find
-
-        servers = ["server-a", "server-b", "server-c"]
-
-        start = time.monotonic()
-        result = ops.batch_fetch_server_info(servers, max_workers=4)
-        elapsed = time.monotonic() - start
-
-        assert call_count["n"] == 3
-        assert list(result.keys()) == servers
-        assert all(result[ref]["id"] == f"uuid-{ref}" for ref in servers)
-        assert elapsed < 1.0, f"Wall time {elapsed:.3f}s >= 1.0s (not parallel)"
+        assert probe.calls == 3
+        assert list(result.keys()) == SERVERS
+        assert all(result[ref]["id"] == f"uuid-{ref}" for ref in SERVERS)
+        assert probe.max_in_flight == 3, f"max in flight {probe.max_in_flight} (not parallel)"
 
     def test_batch_fetch_preserves_submission_order_and_exceptions(self) -> None:
         """Results keep input order; per-ref exceptions map to None."""
