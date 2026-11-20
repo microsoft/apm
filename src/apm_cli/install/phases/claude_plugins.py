@@ -21,7 +21,7 @@ def _refuse_retained_loose_claude_files(ctx: InstallContext) -> None:
     paths attributed to the Claude target block; other targets' projections
     and unmanaged user files are not package-owned Claude state.
     """
-    from apm_cli.install.manifest_reconcile import install_governance, is_governed_by_install
+    from apm_cli.install.target_governance import install_governance, is_governed_by_install
 
     plugins = getattr(ctx, "claude_native_plugins", None) or {}
     retained = getattr(ctx, "package_cleanup_retained", None) or {}
