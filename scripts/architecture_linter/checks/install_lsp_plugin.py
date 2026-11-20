@@ -541,6 +541,8 @@ def check_lsp_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
                     "transitive_lsp = filter_lsp_by_allow_executables(",
                     "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)",
                     "def reconcile_lsp_after_uninstall(",
+                    # Uninstall keeps survivors on the recorded targets (#4059).
+                    "recorded_targets=recorded_lsp_targets(lockfile),",
                     "lsp_target_servers=new_targets",
                     "managed_target_servers=old_lsp_targets",
                 ),
