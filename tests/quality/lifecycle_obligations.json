@@ -23650,8 +23650,8 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:850",
-    "src/apm_cli/install/services.py:1050"
+    "src/apm_cli/install/services.py:823",
+    "src/apm_cli/install/services.py:1025"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "b7921f20415eebf77629af7cf609202a0444c0e304962b4edb7bd90410a7ce9e"
+ "sha256": "90064bf269077bb812f633a3d430057092db454b4f423f75c9e2a5878b261919"
 }

@@ -37,6 +37,23 @@ class _Requirement:
     chain: str
 
 
+def _replays_locked_proxy_archive(dep: DependencyReference, locked) -> bool:
+    """Return True when a commit-less lock row is a proxy archive this run replays.
+
+    A registry proxy serves an archive, not a Git commit, so its lock row pins
+    the proxy route, the requested ref and the archive content hash. The row
+    stays verifiable when the current routing lands on that same proxy and the
+    ref is unchanged; materialization then checks the locked content hash (#4172).
+    """
+    from .artifactory_orchestrator import ArtifactoryRouter
+
+    return (
+        bool(locked.content_hash)
+        and locked.resolved_ref == dep.reference
+        and ArtifactoryRouter.routes_to_locked_proxy(dep, locked)
+    )
+
+
 class ImmutableRequirements:
     """Preserve immutable obligations independently of materialization winners.
 
@@ -121,6 +138,8 @@ class ImmutableRequirements:
             )
         locked_commit = locked.resolved_commit
         if not is_full_revision_pin(locked_commit):
+            if _replays_locked_proxy_archive(dep, locked):
+                return
             raise ImmutableRequirementError(
                 f"--frozen: apm.lock.yaml has no verifiable commit for {requirement.chain}. "
                 "Run 'apm install' without --frozen to regenerate the lockfile."
