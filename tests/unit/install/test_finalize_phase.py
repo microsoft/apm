@@ -7,9 +7,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.core.scope import InstallScope
 from apm_cli.install.phases.finalize import run
 from apm_cli.utils.diagnostics import DiagnosticCollector
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Minimal InstallContext stub

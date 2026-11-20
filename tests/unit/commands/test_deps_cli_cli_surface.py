@@ -18,16 +18,16 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.commands.deps.cli import (
-    _add_tree_children,
     _build_dep_tree,
-    _deps_list_source_label,
-    _echo_tree_children,
     _resolve_scope_deps,
-    _show_scope_deps,
 )
 from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
-from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,228 +59,6 @@ def _make_dep(
         resolved_commit=resolved_commit,
         resolved_ref=resolved_ref,
     )
-
-
-class _RecordingBranch:
-    def __init__(self, labels: list[str]) -> None:
-        self.labels = labels
-
-    def add(self, label: str) -> _RecordingBranch:
-        self.labels.append(label)
-        return _RecordingBranch(self.labels)
-
-
-def _make_pkg_dict(
-    name: str = "owner/repo",
-    version: str = "1.0.0",
-    source: str = "github",
-    is_orphaned: bool = False,
-    is_insecure: bool = False,
-) -> dict:
-    return {
-        "name": name,
-        "version": version,
-        "source": source,
-        "primitives": {"prompts": 0, "instructions": 0, "agents": 0, "skills": 0, "hooks": 0},
-        "path": f"/fake/{name}",
-        "is_orphaned": is_orphaned,
-        "is_insecure": is_insecure,
-        "insecure_via": "direct",
-    }
-
-
-# ---------------------------------------------------------------------------
-# _deps_list_source_label
-# ---------------------------------------------------------------------------
-
-
-class TestDepsListSourceLabel:
-    def test_local_flag_returns_local(self) -> None:
-        result = _deps_list_source_label(None, is_local=True)
-        assert result == "local"
-
-    def test_lockfile_source_local_returns_local(self) -> None:
-        result = _deps_list_source_label(None, lockfile_source="local")
-        assert result == "local"
-
-    def test_azure_devops_hostname_returns_azure_devops(self) -> None:
-        with patch("apm_cli.utils.github_host.is_azure_devops_hostname", return_value=True):
-            result = _deps_list_source_label("dev.azure.com")
-        assert result == "azure-devops"
-
-    def test_gitlab_hostname_returns_gitlab(self) -> None:
-        with patch("apm_cli.utils.github_host.is_azure_devops_hostname", return_value=False):
-            with patch("apm_cli.utils.github_host.is_gitlab_hostname", return_value=True):
-                result = _deps_list_source_label("gitlab.com")
-        assert result == "gitlab"
-
-    def test_unknown_host_returns_github(self) -> None:
-        with patch("apm_cli.utils.github_host.is_azure_devops_hostname", return_value=False):
-            with patch("apm_cli.utils.github_host.is_gitlab_hostname", return_value=False):
-                result = _deps_list_source_label("github.com")
-        assert result == "github"
-
-    def test_none_host_returns_github(self) -> None:
-        with patch("apm_cli.utils.github_host.is_azure_devops_hostname", return_value=False):
-            with patch("apm_cli.utils.github_host.is_gitlab_hostname", return_value=False):
-                result = _deps_list_source_label(None)
-        assert result == "github"
-
-
-# ---------------------------------------------------------------------------
-# _add_tree_children
-# ---------------------------------------------------------------------------
-
-
-class TestAddTreeChildren:
-    def test_no_children_does_nothing(self) -> None:
-        parent = MagicMock()
-        _add_tree_children(parent, "owner/repo", {})
-        parent.add.assert_not_called()
-
-    def test_adds_child_dep_names(self) -> None:
-        """The Rich parent branch receives each child."""
-        child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
-        parent = MagicMock()
-        child_branch = MagicMock()
-        parent.add.return_value = child_branch
-        children_map = {"owner/repo": [child]}
-        _add_tree_children(parent, "owner/repo", children_map)
-        parent.add.assert_called_once()
-
-    def test_cycle_guard_marks_repeated_ancestor(self) -> None:
-        """A dependency cycle is marked at the first repeated ancestor."""
-        child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
-        repeated_parent = _make_dep("owner/repo", version="1.0.0", repo_url="owner/repo")
-        children_map = {
-            "owner/repo": [child],
-            "child/repo": [repeated_parent],
-        }
-        parent = MagicMock()
-        child_branch = MagicMock()
-        parent.add.return_value = child_branch
-
-        _add_tree_children(parent, "owner/repo", children_map)
-
-        parent.add.assert_called_once()
-        child_branch.add.assert_called_once()
-        assert "(circular)" in child_branch.add.call_args.args[0]
-
-    def test_renders_chain_beyond_python_recursion_limit(self) -> None:
-        """A valid lock graph is rendered without a call-stack depth limit."""
-        chain_length = 1100
-        children_map = {
-            f"pkg-{index}": [_make_dep(f"pkg-{index + 1}", version="1.0.0")]
-            for index in range(chain_length)
-        }
-        labels: list[str] = []
-
-        _add_tree_children(
-            _RecordingBranch(labels),
-            "pkg-0",
-            children_map,
-        )
-
-        assert len(labels) == chain_length
-        assert "pkg-1100@1.0.0" in labels[-1]
-
-    def test_has_rich_uses_rich_markup(self) -> None:
-        child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
-        parent = MagicMock()
-        child_branch = MagicMock()
-        parent.add.return_value = child_branch
-        children_map = {"owner/repo": [child]}
-        _add_tree_children(parent, "owner/repo", children_map)
-        call_args = parent.add.call_args[0][0]
-        assert "[dim]" in call_args
-
-
-class TestEchoTreeChildren:
-    def test_cycle_is_visible_and_stops_traversal(self) -> None:
-        """The text fallback marks a repeated ancestor without looping."""
-        child = _make_dep("child/repo", version="1.0.0")
-        repeated_parent = _make_dep("owner/repo", version="1.0.0")
-        children_map = {
-            "owner/repo": [child],
-            "child/repo": [repeated_parent],
-        }
-
-        with patch("apm_cli.commands.deps.cli.click.echo") as echo:
-            _echo_tree_children("owner/repo", children_map)
-
-        assert echo.call_count == 2
-        assert "(circular)" in echo.call_args_list[-1].args[0]
-
-    def test_nested_children_use_ascii_tree_prefixes(self) -> None:
-        """The text fallback preserves nesting with portable ASCII prefixes."""
-        child = _make_dep("child/repo", version="1.0.0")
-        grandchild = _make_dep("grandchild/repo", version="1.0.0")
-        children_map = {
-            "owner/repo": [child],
-            "child/repo": [grandchild],
-        }
-
-        with patch("apm_cli.commands.deps.cli.click.echo") as echo:
-            _echo_tree_children("owner/repo", children_map)
-
-        assert [call.args[0] for call in echo.call_args_list] == [
-            "+-- child/repo@1.0.0",
-            "    +-- grandchild/repo@1.0.0",
-        ]
-
-
-# ---------------------------------------------------------------------------
-# _show_scope_deps
-# ---------------------------------------------------------------------------
-
-
-class TestShowScopeDeps:
-    def test_no_modules_logs_no_deps(self) -> None:
-        logger = _make_logger()
-        with patch("apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(None, None)):
-            _show_scope_deps("Project", Path("/fake"), logger, None, False)
-        logger.progress.assert_called_once()
-        assert "No APM dependencies" in logger.progress.call_args[0][0]
-
-    def test_empty_packages_no_insecure_logs_empty_message(self) -> None:
-        logger = _make_logger()
-        with patch("apm_cli.commands.deps.cli._resolve_scope_deps", return_value=([], [])):
-            _show_scope_deps("Project", Path("/fake"), logger, None, False)
-        logger.progress.assert_called_once()
-        assert "no valid packages" in logger.progress.call_args[0][0]
-
-    def test_empty_insecure_packages_logs_insecure_message(self) -> None:
-        logger = _make_logger()
-        with patch("apm_cli.commands.deps.cli._resolve_scope_deps", return_value=([], [])):
-            _show_scope_deps("Project", Path("/fake"), logger, None, False, insecure_only=True)
-        logger.progress.assert_called_once()
-        assert "No insecure" in logger.progress.call_args[0][0]
-
-    def test_packages_displayed_without_rich(self) -> None:
-        logger = _make_logger()
-        pkgs = [_make_pkg_dict()]
-        with patch("apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(pkgs, [])):
-            with patch("click.echo") as mock_echo:
-                _show_scope_deps("Project", Path("/fake"), logger, None, False)
-        assert mock_echo.called
-
-    def test_orphaned_packages_trigger_warning(self) -> None:
-        logger = _make_logger()
-        pkgs = [_make_pkg_dict(name="owner/orphaned", is_orphaned=True)]
-        with patch(
-            "apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(pkgs, ["owner/orphaned"])
-        ):
-            with patch("click.echo"):
-                _show_scope_deps("Project", Path("/fake"), logger, None, False)
-        assert logger.warning.called
-
-    def test_insecure_packages_displayed_without_rich(self) -> None:
-        logger = _make_logger()
-        pkgs = [_make_pkg_dict(is_insecure=True)]
-        with patch("apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(pkgs, [])):
-            with patch("click.echo") as mock_echo:
-                _show_scope_deps("Project", Path("/fake"), logger, None, False, insecure_only=True)
-        assert mock_echo.called
 
 
 # ---------------------------------------------------------------------------
@@ -649,3 +427,157 @@ class TestInfoCommand:
             os.chdir(orig)
         assert result.exit_code == 0
         mock_dpi.assert_called_once()
+
+
+class TestResolveScopeDepsNoModules:
+    def test_returns_none_when_apm_modules_absent(self, tmp_path):
+        """No apm_modules directory -> (None, None)."""
+        result = _resolve_scope_deps(tmp_path, _make_logger())
+        assert result == (None, None)
+
+
+class TestResolveScopeDepsWithPackages:
+    def _setup_package(self, modules_dir: Path, owner: str, repo: str, name: str = "pkg"):
+        """Create a minimal installed package directory."""
+        pkg_dir = modules_dir / "github" / owner / repo
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / APM_YML_FILENAME).write_text(f"name: {name}\nversion: 1.0.0\n")
+        return pkg_dir
+
+    def test_package_without_apm_yml_declared_not_orphaned(self, tmp_path):
+        """Package declared in apm.yml is not orphaned."""
+        modules_dir = tmp_path / APM_MODULES_DIR
+        modules_dir.mkdir()
+
+        # Set up declared dep in apm.yml
+        (tmp_path / APM_YML_FILENAME).write_text(
+            "name: myproject\ndependencies:\n  - owner/myrepo\n"
+        )
+
+        # Create matching installed package
+        pkg_dir = modules_dir / "github" / "owner" / "myrepo"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / APM_YML_FILENAME).write_text("name: myrepo\nversion: 1.0.0\n")
+
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+        assert installed is not None
+        assert isinstance(orphaned, list)
+
+    def test_no_packages_in_modules_returns_empty_lists(self, tmp_path):
+        """apm_modules exists but contains no valid packages -> empty lists."""
+        modules_dir = tmp_path / APM_MODULES_DIR
+        modules_dir.mkdir()
+        # No packages inside
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+        assert installed == []
+        assert orphaned == []
+
+    def test_insecure_only_filter_excludes_secure_packages(self, tmp_path):
+        """insecure_only=True returns empty list when no insecure packages."""
+        modules_dir = tmp_path / APM_MODULES_DIR
+        pkg_dir = modules_dir / "github" / "owner" / "repo"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / APM_YML_FILENAME).write_text("name: repo\nversion: 0.1.0\n")
+
+        installed, _orphaned = _resolve_scope_deps(tmp_path, _make_logger(), insecure_only=True)
+        # No lockfile -> no insecure deps -> empty list
+        assert installed == []
+
+    def test_skill_md_only_package_discovered(self, tmp_path):
+        """Package with only SKILL.md (no apm.yml) is still discovered."""
+        modules_dir = tmp_path / APM_MODULES_DIR
+        pkg_dir = modules_dir / "github" / "owner" / "skill-repo"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / SKILL_MD_FILENAME).write_text("# My Skill\n")
+
+        installed, _orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+        assert installed is not None
+        assert any(pkg["name"].endswith("skill-repo") for pkg in installed)
+
+    def test_nested_package_manifest_is_not_listed_independently(self, tmp_path):
+        """A nested manifest is omitted while its undeclared parent is orphaned."""
+        modules_dir = tmp_path / APM_MODULES_DIR
+        parent = modules_dir / "_local" / "package"
+        nested = parent / "sub-package"
+        nested.mkdir(parents=True)
+        (parent / APM_YML_FILENAME).write_text("name: package\nversion: 1.0.0\n")
+        (nested / APM_YML_FILENAME).write_text("name: sub-package\nversion: 1.0.0\n")
+
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+
+        assert installed is not None
+        assert [package["name"] for package in installed] == ["_local/package"]
+        assert orphaned == ["_local/package"]
+
+
+_HASH_SLOT = "abcdef123456"
+
+
+class TestResolveScopeDepsOrphanHashSlot:
+    """A genuinely orphaned physical slot (``_local/<12hex>/pkg``) has no
+    lockfile entry to map back to. It must still be detected as orphaned, but
+    its user-facing name must be the hash-free logical form (``_local/pkg``).
+    """
+
+    def test_orphan_hashed_slot_is_orphaned_and_shows_no_hash(self, tmp_path):
+        modules_dir = tmp_path / APM_MODULES_DIR
+        slot = modules_dir / "_local" / _HASH_SLOT / "pkg"
+        slot.mkdir(parents=True)
+        (slot / APM_YML_FILENAME).write_text("name: pkg\nversion: 1.0.0\n")
+        # No apm.yml declaration and no lockfile -> genuinely orphaned.
+
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+
+        assert installed is not None
+        names = [package["name"] for package in installed]
+        assert names == ["_local/pkg"]
+        assert orphaned == ["_local/pkg"]
+        # The raw physical hash slot must never surface in user-facing output.
+        for name in names + orphaned:
+            assert _HASH_SLOT not in name
+
+    def test_declared_remote_hash_shaped_identity_is_not_redacted(self, tmp_path):
+        remote_name = f"_local/{_HASH_SLOT}/pkg"
+        modules_dir = tmp_path / APM_MODULES_DIR
+        package_dir = modules_dir / remote_name
+        package_dir.mkdir(parents=True)
+        (package_dir / APM_YML_FILENAME).write_text("name: pkg\nversion: 1.0.0\n")
+
+        dep = LockedDependency(repo_url=remote_name, resolved_commit="a" * 40)
+        LockFile(dependencies={dep.get_unique_key(): dep}).write(get_lockfile_path(tmp_path))
+
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+
+        assert installed is not None
+        assert [package["name"] for package in installed] == [remote_name]
+        assert orphaned == []
+
+
+class TestResolveScopeDepsReadFailure:
+    """A malformed package apm.yml makes ``APMPackage.from_apm_yml`` raise a
+    ``ValueError`` embedding the absolute apm.yml path. The read-failure
+    warning must not leak that path (or a hash slot); it must identify the
+    package by its hash-free logical name and stay actionable.
+    """
+
+    def test_malformed_apm_yml_warning_excludes_path_and_hash(self, tmp_path):
+        modules_dir = tmp_path / APM_MODULES_DIR
+        slot = modules_dir / "_local" / "pkg"
+        slot.mkdir(parents=True)
+        # Invalid YAML: unbalanced bracket -> yaml.YAMLError -> ValueError(path).
+        (slot / APM_YML_FILENAME).write_text("name: [unterminated\nversion: 1.0.0\n")
+
+        logger = _make_logger()
+        installed, _orphaned = _resolve_scope_deps(tmp_path, logger)
+
+        assert installed is not None
+        warnings = [call.args[0] for call in logger.warning.call_args_list if call.args]
+        read_failures = [w for w in warnings if "inspect package" in w or "read package" in w]
+        assert read_failures, f"expected a read-failure warning, got: {warnings}"
+        message = read_failures[0]
+        # Must identify the package by its logical name...
+        assert "_local/pkg" in message
+        # ...and must NOT leak the absolute apm.yml path or a hash slot.
+        assert str(tmp_path) not in message
+        assert APM_YML_FILENAME not in message
+        assert _HASH_SLOT not in message

@@ -11,6 +11,8 @@ from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
+pytestmark = pytest.mark.component
+
 
 def _package_info(package_path: Path, name: str = "superpowers") -> PackageInfo:
     return PackageInfo(

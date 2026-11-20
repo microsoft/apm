@@ -2,12 +2,16 @@
 
 from pathlib import Path
 
+import pytest
+
 from tests.workflow_contracts import (
     assert_unconditional,
     load_workflow,
     workflow_job,
     workflow_step,
 )
+
+pytestmark = pytest.mark.component
 
 ROOT = Path(__file__).resolve().parents[2]
 

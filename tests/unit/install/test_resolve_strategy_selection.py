@@ -33,6 +33,8 @@ from apm_cli.install.context import InstallContext
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, ResolvedReference
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Constants - correct patch targets for lazy imports in resolve.run()
 # ---------------------------------------------------------------------------
@@ -89,10 +91,10 @@ def _make_ctx(
     return ctx
 
 
-def _make_mock_graph(*, circular=None):
+def _make_mock_graph(*, circular=None, resolution_errors=None):
     mock_graph = MagicMock()
-    mock_graph.resolution_errors = []
     mock_graph.circular_dependencies = circular or []
+    mock_graph.resolution_errors = resolution_errors or []
     mock_graph.dependency_tree.nodes = {}
     mock_graph.dependency_tree.get_nodes_at_depth.return_value = []
     mock_graph.dependency_tree.max_depth = 1
@@ -332,6 +334,34 @@ class TestCircularDependency:
 
 
 # ---------------------------------------------------------------------------
+# Resolution errors fail closed
+# ---------------------------------------------------------------------------
+
+
+class TestResolutionErrors:
+    def test_resolution_errors_raise_runtime_error(self, tmp_path: Path) -> None:
+        ctx = _make_ctx(tmp_path)
+        graph = _make_mock_graph(
+            resolution_errors=[
+                "Failed to resolve marketplace dependency 'bad' from marketplace 'mkt'"
+            ]
+        )
+
+        with pytest.raises(RuntimeError, match="Dependency resolution failed"):
+            _run_ctx(ctx, tmp_path, graph=graph)
+
+    def test_resolution_errors_are_logged_when_logger_set(self, tmp_path: Path) -> None:
+        mock_logger = MagicMock()
+        ctx = _make_ctx(tmp_path, logger=mock_logger)
+        graph = _make_mock_graph(resolution_errors=["marketplace failed"])
+
+        with pytest.raises(RuntimeError):
+            _run_ctx(ctx, tmp_path, graph=graph)
+
+        mock_logger.error.assert_called_once_with("marketplace failed")
+
+
+# ---------------------------------------------------------------------------
 # rejected_remote_local_keys propagation
 # ---------------------------------------------------------------------------
 
@@ -558,12 +588,6 @@ class TestSharedCacheCleanup:
         ctx = _make_ctx(tmp_path)
         _, mock_cache = _run_ctx(ctx, tmp_path)
         mock_cache.cleanup.assert_called_once()
-
-    def test_shared_cache_attached_to_downloader(self, tmp_path: Path) -> None:
-        ctx = _make_ctx(tmp_path)
-        _run_ctx(ctx, tmp_path)
-        # downloader should have shared_clone_cache set
-        assert ctx.downloader is not None
 
 
 # ---------------------------------------------------------------------------

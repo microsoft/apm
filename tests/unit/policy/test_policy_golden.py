@@ -23,7 +23,11 @@ import os
 import unittest
 from pathlib import Path
 
+import pytest
+
 from apm_cli.policy.parser import load_policy
+
+pytestmark = pytest.mark.component
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "policy"
 GOLDEN_PATH = FIXTURES_DIR / "golden" / "parsed-policies.json"

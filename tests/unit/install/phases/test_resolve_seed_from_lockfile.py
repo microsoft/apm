@@ -27,6 +27,8 @@ from apm_cli.drift import detect_ref_change
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 _FAKE_SHA_RE = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
 
 

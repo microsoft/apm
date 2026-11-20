@@ -13,6 +13,8 @@ from apm_cli.marketplace.version_check import (
 )
 from apm_cli.marketplace.yml_schema import load_marketplace_from_apm_yml
 
+pytestmark = pytest.mark.component
+
 
 def _build_apm_yml(
     *,

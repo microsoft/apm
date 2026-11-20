@@ -75,8 +75,7 @@ def expected_exit(
     if command in _RESOLVING:
         if any(not model.policy_allows(package) for package in model.declared):
             return frozenset({1})
-        if frozen and model.lock in {"absent", "stale"}:
+        # A lock written by a newer generator refuses every resolving command (M-SCOPE-LOCK).
+        if model.lock == "newer-generator" or (frozen and model.lock in {"absent", "stale"}):
             return frozenset({1})
-        if frozen and model.lock == "newer-generator":
-            return contract
     return frozenset({0})

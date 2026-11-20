@@ -3181,7 +3181,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:a5f19cafb5b53ddce3d6ce842d8ef36f1335b70d789f8261f0286d03237cd28a
+  content_hash: sha256:8321b956af82cc5460b4d49e7ea60e1d4c2424d7e32541f9f957799e45bc6113
 - kind: project-relative
   target: copilot
   value: .github/instructions/cli.instructions.md
@@ -3226,7 +3226,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:42ee2a5aa3bd0a81e4c54e1900d96f4fb5118597367cd34b4ac34a8d0adffa5c
+  content_hash: sha256:eff0adddaba18a07be2ecb50fbc02003d7446e3633dc2c82659b2eba2328dd83
 - kind: project-relative
   target: copilot
   value: .github/instructions/python.instructions.md
@@ -3244,7 +3244,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:7bec6db056edd3a50b63d87ed7d048aaddbea2286af4a9ae8afd0e5e3a420d50
+  content_hash: sha256:c2b52b2e3b973f51461a8b723e0d2e21f044ba411bd256e56f99b9297094f976
 local_deployed_files:
 - .agents/skills/apm-lifecycle-tests
 - .agents/skills/apm-lifecycle-tests/SKILL.md
@@ -3722,11 +3722,11 @@ local_deployed_file_hashes:
   .github/agents/test-coverage-expert.agent.md: sha256:637c44b825f5239caf67770ae2cebe8e53f43f2935ddae20c4aeb7235a28924d
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
   .github/instructions/changelog.instructions.md: sha256:575bafcc313df6387b5724ae002858bd0d0020aee10eeb780a057f53eedf0dac
-  .github/instructions/cicd.instructions.md: sha256:a5f19cafb5b53ddce3d6ce842d8ef36f1335b70d789f8261f0286d03237cd28a
+  .github/instructions/cicd.instructions.md: sha256:8321b956af82cc5460b4d49e7ea60e1d4c2424d7e32541f9f957799e45bc6113
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
-  .github/instructions/linting.instructions.md: sha256:42ee2a5aa3bd0a81e4c54e1900d96f4fb5118597367cd34b4ac34a8d0adffa5c
+  .github/instructions/linting.instructions.md: sha256:eff0adddaba18a07be2ecb50fbc02003d7446e3633dc2c82659b2eba2328dd83
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:7bec6db056edd3a50b63d87ed7d048aaddbea2286af4a9ae8afd0e5e3a420d50
+  .github/instructions/tests.instructions.md: sha256:c2b52b2e3b973f51461a8b723e0d2e21f044ba411bd256e56f99b9297094f976
