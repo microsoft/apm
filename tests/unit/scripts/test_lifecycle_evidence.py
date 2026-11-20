@@ -1302,6 +1302,7 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
         (("deps", "list"), "+------+\n|  a   |\n+------+\n+------+\n", 0, _APM),
         (("install",), "[>] Resolving \n/tmp/work/a...\n[>] Resolving \n/tmp/work/b...\n", 0, _APM),
         (("audit", "--json"), '{"ok": true}\n', 3, ("/opt/bin/apm",)),
+        (("audit", "--format", "json", "--output", "r.json"), "[+] wrote r.json\n", 0, _APM),
         (("audit", "--json"), "", 2, _APM),
         (
             ("--version",),
