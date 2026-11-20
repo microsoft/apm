@@ -27,6 +27,20 @@ def proxy_only_lock_entries(lockfile: Any, *, update_refs: bool, ctx: Any) -> li
     return [dep for dep in entries if dep.get_unique_key() not in reresolved]
 
 
+def header_ref(resolved: Any, dep_ref: Any, locked: Any) -> str:
+    """Return the ref the package header names for one resolved reference.
+
+    A lockfile replay downloads the locked commit, so the downloader reports
+    that commit as the ref. The header then names the declared ref, as a
+    resolving install does, instead of repeating the commit (#4195).
+    """
+    ref_name = (getattr(resolved, "ref_name", None) or "") if resolved else ""
+    commit = getattr(resolved, "resolved_commit", None) if resolved else None
+    if ref_name and ref_name == commit and dep_ref.reference != commit:
+        return getattr(locked, "resolved_ref", None) or dep_ref.reference or ""
+    return ref_name
+
+
 def lockfile_refresh_command(scope: Any) -> str:
     """Return the command that re-resolves dependencies and re-pins the lockfile."""
     from apm_cli.core.scope import InstallScope

@@ -1,0 +1,18 @@
+{
+  "changelog": "`apm install --frozen` with MCP servers prints its MCP targeting line once instead of twice, at project and user scope (#4217)",
+  "ledger_row": {
+    "issue": 4196,
+    "fixed_in": "Unreleased",
+    "summary": "The frozen MCP check selected target runtimes through the announcing resolver before the install run announced them again, so install --frozen printed its 'Targeting ...' line twice.",
+    "failure_modes": ["observation"],
+    "properties": ["outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once[project-manifest-targets]",
+      "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once[user-explicit-target]"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_frozen_replay_output_lifecycle.py -k targeting_line_once -n 0 -p no:cacheprovider -q -> I9 oracle: stdout '[i] Targeting declared targets from apm.yml: claude, copilot' twice (assert 5 == 4) and '[i] Targeting specific runtime: claude' twice (assert 7 == 6); 2 failed",
+  "green": "same command -> 2 passed",
+  "owner": "src/apm_cli/integration/mcp_integrator_install.py (_resolve_target_runtimes, new select_target_runtimes_quietly for pre-checks); callers routed: src/apm_cli/install/service_integration.py (frozen check), src/apm_cli/install/dry_run_plan.py (dry-run preview, replaces its private _SilentLogger); SilentLogger lives in src/apm_cli/core/null_logger.py",
+  "notes": "Flips J06 s4 frozen-mcp-targets-line-twice and J10 s4 J10-frozen-global-repeats-targeting-line (PR #4156). Observed but out of scope: user-scope 'apm install -g --frozen' creates empty directories ~/.claude and ~/.apm/apm_modules on a converged state (no file bytes change); the test compares file bytes only."
+}
