@@ -206,7 +206,7 @@ runtime entry -- with its full ownership history:
 | `target` | string | Deploy target name (`copilot`, `claude`, `mcp`, etc.), or `legacy` when the row was recorded without one. See [unattributed rows](#unattributed-rows). |
 | `value` | string | The path (relative to its `kind`) or URI value. |
 | `runtime` | string or null | Runtime scoping the row, when applicable (e.g. an MCP client name). |
-| `scope` | string | Install scope, typically `project`. |
+| `scope` | string | Install scope: `project`, or `user` for rows in the user lockfile (`$APM_HOME/apm.lock.yaml`), such as `apm install -g` bundle files. |
 | `owners` | list of strings | Every dependency key that has ever claimed this locator, oldest to newest. |
 | `active_owner` | string | The current claimant. Always one of `owners`; a row where it is not is malformed. |
 | `content_hash` | string or null | `sha256:<hex>` digest of the deployed content, when known. |
