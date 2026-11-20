@@ -15,7 +15,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands._helpers import _build_expected_install_paths, _find_orphaned_packages
+from apm_cli.commands._helpers import _inspect_installed_orphans
 from apm_cli.commands.deps import cli as deps_cli
 from apm_cli.commands.deps._utils import _scan_installed_packages
 from apm_cli.commands.deps.cli import _resolve_scope_deps
@@ -137,8 +137,10 @@ def _prune_orphans(apm_dir: Path) -> list[str]:
     apm_modules = apm_dir / "apm_modules"
     declared = APMPackage.from_apm_yml(apm_dir / "apm.yml").get_all_apm_dependencies()
     lockfile = LockFile.read(apm_dir / "apm.lock.yaml")
-    expected = _build_expected_install_paths(declared, lockfile, apm_modules)
-    return _find_orphaned_packages(_scan_installed_packages(apm_modules), expected)
+    installed = _scan_installed_packages(apm_modules)
+    return list(
+        _inspect_installed_orphans(declared, lockfile, apm_modules, installed).removed_paths
+    )
 
 
 @pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
@@ -308,7 +310,7 @@ def test_deps_list_falls_back_to_declared_paths_when_selector_inputs_fail(
     _write_manifest(apm_dir, [f"    - {REPO}"])
     _lockfile(_whole_repo_dep()).write(apm_dir / "apm.lock.yaml")
     monkeypatch.setattr(
-        deps_cli, "_build_expected_install_paths", MagicMock(side_effect=ValueError("boom"))
+        deps_cli, "_inspect_installed_orphans", MagicMock(side_effect=ValueError("boom"))
     )
 
     installed, orphaned = _resolve_scope_deps(apm_dir, MagicMock())

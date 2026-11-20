@@ -168,8 +168,8 @@ jobs:
         if: matrix.platform == 'windows' && github.event_name == 'push' && github.ref_type == 'branch'
         shell: bash
         run: |
-          echo "Plan / installer / unit 1 / unit 2: $PUSH_RESULTS"
-          test "$PUSH_RESULTS" = "push:success:success:success:success"
+          echo "Plan / installer / unit 1 / unit 2 / unit 3: $PUSH_RESULTS"
+          test "$PUSH_RESULTS" = "push:success:success:success:success:success"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -402,7 +402,7 @@ jobs:
         run: *windows-installer-test
 
   windows-unit-1:
-    name: Windows units (1/2)
+    name: Windows units (1/3)
     if: *branch-push
     runs-on: windows-latest
     env:
@@ -418,32 +418,40 @@ jobs:
         run: >-
           uv run --frozen python -m pytest tests/unit tests/test_console.py -n auto --dist worksteal
           -vv --tb=short --show-capture=no --no-showlocals
-          -p scripts.ci_sharding --shard-count 2 --shard-index $env:SHARD
+          -p scripts.ci_sharding --shard-count 3 --shard-index $env:SHARD
           --shard-durations .github/ci-durations/windows-unit.json
 
   windows-unit-2:
-    name: Windows units (2/2)
+    name: Windows units (2/3)
     if: *branch-push
     runs-on: windows-latest
     env:
       SHARD: "2"
     steps: *windows-unit-steps
 
+  windows-unit-3:
+    name: Windows units (3/3)
+    if: *branch-push
+    runs-on: windows-latest
+    env:
+      SHARD: "3"
+    steps: *windows-unit-steps
+
   build-windows-push:
     name: Build tested Windows binary
-    needs: [release-plan, windows-installer, windows-unit-1, windows-unit-2]
+    needs: [release-plan, windows-installer, windows-unit-1, windows-unit-2, windows-unit-3]
     if: always() && github.event_name == 'push' && github.ref_type == 'branch'
     strategy: *windows-binary-strategy
     runs-on: ${{ matrix.os }}
     env:
-      PUSH_RESULTS: ${{ needs.release-plan.outputs.mode }}:${{ needs.release-plan.result }}:${{ needs.windows-installer.result }}:${{ needs.windows-unit-1.result }}:${{ needs.windows-unit-2.result }}
+      PUSH_RESULTS: ${{ needs.release-plan.outputs.mode }}:${{ needs.release-plan.result }}:${{ needs.windows-installer.result }}:${{ needs.windows-unit-1.result }}:${{ needs.windows-unit-2.result }}:${{ needs.windows-unit-3.result }}
     steps: *build-and-test-steps
 
   # Consolidated macOS Intel build + validation. macOS capacity is scarce, so
   # this stays one job per run and runs only on release-bound runs (full and
   # promoted), not on every push. Full runs add the platform-sensitive
   # integration subset; promoted tags build, smoke-test and release-validate.
-  # Root node - runs its own unit tests instead of waiting for Linux/Windows.
+  # Root node - starts immediately instead of waiting for Linux/Windows.
   build-and-validate-macos-intel:
     name: Build & Validate (macOS x86_64)
     needs: [release-plan]
@@ -451,8 +459,6 @@ jobs:
     runs-on: macos-15-intel
     env:
       MACOS_BINARY: apm-darwin-x86_64
-      # Python unit tests are architecture-agnostic: macOS arm64 runs them.
-      MACOS_RUN_UNIT: "false"
       # Intel keeps the filesystem/shell/path-sensitive slice; arm64 also
       # runs the lifecycle family on macOS.
       MACOS_MARK_EXPR: "(windows_compat or platform_sensitive) and not live and not requires_github_token and not requires_network_integration and not architecture_contract"
@@ -460,43 +466,47 @@ jobs:
       contents: read
 
     steps: &macos-steps
-      - name: Checkout code
+      - &macos-checkout
+        name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Node.js
+      - &macos-node
+        name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
-      - name: Set up Python
+      - &macos-python
+        name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup build environment
+      - &macos-xcode
+        name: Setup build environment
         run: |
           sudo xcode-select --install 2>/dev/null || true
           until xcode-select -p >/dev/null 2>&1; do sleep 5; done
 
-      - name: Install UPX
+      - &macos-upx
+        name: Install UPX
         run: brew install upx
 
-      - name: Install Unix shell startup test runtimes
+      - &macos-shells
+        name: Install Unix shell startup test runtimes
         run: |
           brew list bash >/dev/null 2>&1 || brew install bash
           brew list fish >/dev/null 2>&1 || brew install fish
 
-      - name: Install uv
+      - &macos-uv
+        name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
-      - name: Install dependencies
+      - &macos-sync
+        name: Install dependencies
         run: uv sync --frozen --extra dev --extra build
-
-      - name: Run unit tests
-        if: needs.release-plan.outputs.run_unit == 'true' && env.MACOS_RUN_UNIT == 'true'
-        run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 
       # PHASE 1: BUILD BINARY
       - name: Build binary
@@ -596,8 +606,8 @@ jobs:
         timeout-minutes: 20
 
   # Consolidated macOS ARM build + validation. Same single-job shape as
-  # Intel; never runs on push. It is the macOS authority for unit tests and
-  # the lifecycle family.
+  # Intel; never runs on push. It is the macOS authority for the lifecycle
+  # family; its unit tests run in the parallel unit-macos-arm job below.
   build-and-validate-macos-arm:
     name: Build & Validate (macOS arm64)
     needs: [release-plan]
@@ -605,10 +615,32 @@ jobs:
     runs-on: macos-latest
     env:
       MACOS_BINARY: apm-darwin-arm64
-      MACOS_RUN_UNIT: "true"
     permissions:
       contents: read
     steps: *macos-steps
+
+  # macOS arm64 unit tests, split from the build job so they run in parallel
+  # on the same SHA. Same environment and selection as before the split; it
+  # runs on full validation only (a promoted tag already passed them).
+  # create-release requires it unless the tag is promoted.
+  unit-macos-arm:
+    name: Unit Tests (macOS arm64)
+    needs: [release-plan]
+    if: needs.release-plan.outputs.mode != 'push' && needs.release-plan.outputs.run_unit == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - *macos-checkout
+      - *macos-node
+      - *macos-python
+      - *macos-xcode
+      - *macos-upx
+      - *macos-shells
+      - *macos-uv
+      - *macos-sync
+      - name: Run unit tests
+        run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 
   # Hermetic Linux integration, duration-balanced across runners. Each
   # architecture starts as soon as its own binary is built.
@@ -1020,6 +1052,7 @@ jobs:
       - build-windows
       - build-and-validate-macos-intel
       - build-and-validate-macos-arm
+      - unit-macos-arm
       - integration-tests
       - release-validation
       - release-validation-windows
@@ -1056,6 +1089,7 @@ jobs:
       - build-windows
       - build-and-validate-macos-intel
       - build-and-validate-macos-arm
+      - unit-macos-arm
       - integration-tests
       - release-validation
       - release-validation-windows
@@ -1071,7 +1105,9 @@ jobs:
       needs.release-validation.result == 'success' &&
       needs.release-validation-windows.result == 'success' &&
       (needs.integration-tests.result == 'success' ||
-        (needs.release-plan.outputs.mode == 'promoted' && needs.integration-tests.result == 'skipped'))
+        (needs.release-plan.outputs.mode == 'promoted' && needs.integration-tests.result == 'skipped')) &&
+      (needs.unit-macos-arm.result == 'success' ||
+        (needs.release-plan.outputs.mode == 'promoted' && needs.unit-macos-arm.result == 'skipped'))
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Required for release creation

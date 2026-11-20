@@ -53,14 +53,14 @@ def _make_locked_dep(key, repo_url=None, resolved_by=None):
 
 class TestBuildChildrenIndex:
     def test_empty_deps(self):
-        from apm_cli.commands.uninstall.engine import _build_children_index
+        from apm_cli.install.orphans import _build_children_index
 
         lf = _make_lockfile()
         result = _build_children_index(lf)
         assert result == {}
 
     def test_no_resolved_by_skipped(self):
-        from apm_cli.commands.uninstall.engine import _build_children_index
+        from apm_cli.install.orphans import _build_children_index
 
         dep = _make_locked_dep("org/child", resolved_by=None)
         lf = _make_lockfile({"org/child": dep})
@@ -68,7 +68,7 @@ class TestBuildChildrenIndex:
         assert result == {}
 
     def test_resolved_by_populated(self):
-        from apm_cli.commands.uninstall.engine import _build_children_index
+        from apm_cli.install.orphans import _build_children_index
 
         parent_url = "org/parent"
         child = _make_locked_dep("org/child", resolved_by=parent_url)

@@ -4237,24 +4237,30 @@ class TestMCPConflictMatrix:
 class TestDriftHelpers:
     """Tests for pure drift detection functions in drift.py."""
 
-    def test_detect_orphans_empty_on_partial_install(self) -> None:
-        """detect_orphans returns empty set on partial install."""
-        from apm_cli.drift import detect_orphans
+    @staticmethod
+    def _install_orphan_files(lockfile, intended):
+        from apm_cli.install.orphans import (
+            DeploymentClaims,
+            OrphanOperation,
+            decide_orphan_removal,
+        )
 
-        result = detect_orphans(None, set(), only_packages=["pkg-a"], logger=None)
-        assert result == set()
+        decision = decide_orphan_removal(
+            operation=OrphanOperation.INSTALL,
+            roots=(),
+            candidate_universe=lockfile,
+            installed_paths=None,
+            resolved_keys=None,
+            intended=intended,
+            materialized=None,
+            reachability=None,
+            deployment_claims=DeploymentClaims(live_files=None, retained={}),
+        )
+        return {path for files in decision.removed_files.values() for path in files}
 
-    def test_detect_orphans_empty_on_first_install(self) -> None:
-        """detect_orphans returns empty set when no existing lockfile."""
-        from apm_cli.drift import detect_orphans
-
-        result = detect_orphans(None, set(), only_packages=[], logger=None)
-        assert result == set()
-
-    def test_detect_orphans_finds_removed_packages(self) -> None:
-        """detect_orphans returns files from packages no longer in manifest."""
+    def test_install_orphans_find_removed_packages(self) -> None:
+        """The install orphan decision removes files of packages no longer in the manifest."""
         from apm_cli.deps.lockfile import LockedDependency, LockFile
-        from apm_cli.drift import detect_orphans
 
         lf = LockFile(
             dependencies={
@@ -4265,13 +4271,11 @@ class TestDriftHelpers:
             }
         )
         # Package is NOT in intended_dep_keys
-        orphans = detect_orphans(lf, set(), only_packages=[], logger=None)
-        assert ".agents/skills/pkg/run.py" in orphans
+        assert ".agents/skills/pkg/run.py" in self._install_orphan_files(lf, set())
 
-    def test_detect_orphans_no_orphans_when_present(self) -> None:
-        """detect_orphans returns empty when all packages still in manifest."""
+    def test_install_orphans_empty_when_present(self) -> None:
+        """No files are removed when every package is still in the manifest."""
         from apm_cli.deps.lockfile import LockedDependency, LockFile
-        from apm_cli.drift import detect_orphans
 
         lf = LockFile(
             dependencies={
@@ -4281,8 +4285,7 @@ class TestDriftHelpers:
                 )
             }
         )
-        orphans = detect_orphans(lf, {"owner/pkg"}, only_packages=[], logger=None)
-        assert orphans == set()
+        assert self._install_orphan_files(lf, {"owner/pkg"}) == set()
 
     def test_detect_stale_files_returns_removed_files(self) -> None:
         """detect_stale_files returns paths no longer in new_deployed."""

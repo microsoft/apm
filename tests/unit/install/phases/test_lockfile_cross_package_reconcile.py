@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from apm_cli.core.deployment_state import DeploymentReconciler
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
+from tests.utils.deployment_evidence import no_evidence
 
 
 def _target(name, root_dir=".claude"):
@@ -31,6 +32,8 @@ def _ctx(*, package_deployed_files, existing_lockfile=None, targets=None, projec
         existing_lockfile=existing_lockfile,
         targets=targets or [_target("claude")],
         project_root=project_root,
+        # Nothing on disk was deployed by APM on this machine (#3701).
+        deployment_evidence=no_evidence(project_root),
     )
 
 

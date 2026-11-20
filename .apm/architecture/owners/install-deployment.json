@@ -21,9 +21,9 @@
     },
     {
       "id": "orphan-package-selection",
-      "decision": "Declaration-aware selection of orphaned installed packages",
-      "owner": "install/orphans.py (find_orphaned_packages, build_expected_install_paths, collect_orphan_candidates), re-exported by commands/_helpers.py and commands/uninstall/engine.py",
-      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py"],
+      "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
+      "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner)",
+      "selectors": ["src/apm_cli/install/orphans.py"],
       "guards": ["install-deployment-orphan-selection"]
     },
     {
@@ -333,7 +333,11 @@
       "id": "locked-copy-validity",
       "decision": "Whether an existing apm_modules package copy holds its locked commit or content, so resolution, pre-download and integrate reuse only lock-matching copies (#3884)",
       "owner": "drift.py (locked_copy_proof: a readable git HEAD decides, else the verified content hash; the install/cache_pin.py .apm-pin marker counts only with trust_marker for resolution freshness via locked_copy_is_stale behind should_force_ref_recheck, never for deployed bytes); consumers: deps/apm_resolver.py and install/phases/resolve.py via should_force_ref_recheck, install/phases/download.py, install/phases/integrate.py, and the install/cache_pin.py marker writer via locked_copy_is_stale; apm update keeps the install/sources.py fresh-download content-hash check for any dependency whose resolved commit did not move (#4027)",
-      "selectors": ["src/apm_cli/install/cache_pin.py", "src/apm_cli/install/phases/_redownload.py"],
+      "selectors": [
+        "src/apm_cli/install/cache_pin.py",
+        "src/apm_cli/install/phases/_redownload.py",
+        "src/apm_cli/install/phases/lockfile_cache_pins.py"
+      ],
       "guards": ["install-deployment-locked-copy-validity", "install-deployment-update-content-integrity"]
     },
     {

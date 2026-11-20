@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.models.dependency.subsets import SkillTargetSelection
     from apm_cli.models.validation import PackageType
 
@@ -1582,7 +1583,10 @@ class SkillIntegrator(BaseIntegrator):
         lockfile_root = (
             get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root
         )
-        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+        from apm_cli.core.deployment_ledger import (
+            DeploymentLedgerCodec,
+            DeploymentMaterializationSession,
+        )
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
         self._skill_files = []
@@ -1591,11 +1595,7 @@ class SkillIntegrator(BaseIntegrator):
         self._skill_can_complete = True
         self._skill_completed_roots = {}
         self._skill_completed_files = {}
-        self._skill_current_owner = (
-            package_info.dependency_ref.get_unique_key()
-            if package_info.dependency_ref is not None
-            else "."
-        )
+        self._skill_current_owner = DeploymentMaterializationSession.receipt_owner(package_info)
         self._skill_current_commit = installing_commit(package_info)
         snapshots = self._hash_snapshots if self._hash_snapshots is not None else {}
         if lockfile_root not in snapshots:
@@ -1938,8 +1938,8 @@ class SkillIntegrator(BaseIntegrator):
         )
         return dest_manifest
 
-    @staticmethod
     def _copy_plugin_file(
+        self,
         src_file: Path,
         dest_file: Path,
         *,
@@ -1968,6 +1968,7 @@ class SkillIntegrator(BaseIntegrator):
 
         if not skip_copy:
             shutil.copy2(src_file, dest_file)
+            self.note_rendered_write(dest_file)
 
         if make_executable and os.name == "posix":
             # User-only (0o700-style): set the exact deploy mode so group,
@@ -1986,18 +1987,19 @@ class SkillIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         targets=None,
         removed_paths: list[Path] | None = None,
+        evidence: "DeploymentEvidence | None" = None,
     ) -> dict[str, int]:
         """Remove recorded skill paths; without a managed set remove nothing.
 
         Scope-resolved ``targets`` supply skill prefixes; absent targets use the
-        catalog. Only paths in the managed set (lockfile ownership) are removed.
+        catalog. Only paths in the managed set (lockfile ownership) whose bytes
+        *evidence* proves APM deployed are removed (#3701); ``None`` keeps them.
         Return removed-file and error counts.
         """
+        from apm_cli.integration.cleanup import remove_synced_files
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         source = targets if targets is not None else list(KNOWN_TARGETS.values())
-
-        stats = {"files_removed": 0, "errors": 0}
 
         # Build the set of valid skill prefixes from targets
         skill_prefixes: list[str] = []
@@ -2012,81 +2014,18 @@ class SkillIntegrator(BaseIntegrator):
                     skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
                 continue
             skill_prefixes.append(f"{t.skills_rel_root}/")
-        skill_prefix_tuple = tuple(skill_prefixes)
 
         if managed_files is not None:
-            # Manifest-based removal -- only remove tracked skill directories
-
-            # Lazy-resolve cowork root at most once per invocation
-            # (mirrors the pattern in cleanup.py and sync_remove_files).
-            _cowork_root_resolved: bool = False
-            _cowork_root_cached: Path | None = None
-            _cowork_skipped: int = 0
-
-            for rel_path in managed_files:
-                if not rel_path.startswith(skill_prefix_tuple):
-                    continue
-                if ".." in rel_path:
-                    continue
-
-                # Cowork:// paths
-                from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
-
-                if rel_path.startswith(COWORK_URI_SCHEME):
-                    try:
-                        if not _cowork_root_resolved:
-                            from apm_cli.integration.copilot_cowork_paths import (
-                                resolve_copilot_cowork_skills_dir,
-                            )
-
-                            _cowork_root_cached = resolve_copilot_cowork_skills_dir()
-                            _cowork_root_resolved = True
-                        if _cowork_root_cached is None:
-                            _cowork_skipped += 1
-                            continue
-                        from apm_cli.integration.copilot_cowork_paths import from_lockfile_path
-
-                        target = from_lockfile_path(rel_path, _cowork_root_cached)
-                    except Exception:
-                        stats["errors"] += 1
-                        continue
-                else:
-                    if not self.validate_deploy_path(
-                        rel_path, project_root, allowed_prefixes=skill_prefix_tuple
-                    ):
-                        continue
-                    target = project_root / rel_path
-
-                if not target.exists() and not target.is_symlink():
-                    continue
-
-                try:
-                    if target.is_dir() and not target.is_symlink():
-                        shutil.rmtree(target)
-                    else:
-                        target.unlink()
-                    stats["files_removed"] += 1
-                    if removed_paths is not None:
-                        removed_paths.append(target)
-                except Exception:
-                    stats["errors"] += 1
-
-            # One-time warning when cowork entries were skipped
-            # because the OneDrive path is unavailable.
-            if _cowork_skipped > 0:
-                from apm_cli.utils.console import _rich_warning
-
-                _rich_warning(
-                    f"Cowork: skipping {_cowork_skipped} skill "
-                    f"{'entry' if _cowork_skipped == 1 else 'entries'}"
-                    " -- OneDrive path not detected.\n"
-                    "Run: apm config set copilot-cowork-skills-dir <path>  "
-                    "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                    "to clean up these entries on the next install/uninstall.",
-                    symbol="warning",
-                )
-
-            return stats
+            cleanup = remove_synced_files(
+                managed_files,
+                project_root,
+                prefixes=tuple(skill_prefixes),
+                dep_key="<sync skills>",
+                targets=targets,
+                evidence=evidence,
+                receipt_retirements=removed_paths,
+            )
+            return {"files_removed": len(cleanup.deleted), "errors": len(cleanup.failed)}
 
         # Without lockfile ownership nothing proves which skill directories
         # APM deployed, so legacy cleanup removes nothing.
@@ -2096,4 +2035,4 @@ class SkillIntegrator(BaseIntegrator):
             "Skipped skill directory cleanup: no lockfile records which skills APM deployed.",
             symbol="info",
         )
-        return stats
+        return {"files_removed": 0, "errors": 0}
