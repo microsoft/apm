@@ -529,7 +529,8 @@ class InstallService:
                 lockfile,
                 modules_dir,
                 admission=admission,
-                logger=request.logger,
+                # The hydrated check and the MCP phase report parked servers.
+                logger=None,
                 allow_pending=allow_pending_mcp,
             )
         )

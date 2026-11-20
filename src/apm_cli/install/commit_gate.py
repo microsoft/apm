@@ -32,7 +32,8 @@ if TYPE_CHECKING:
 class _AnnouncedPolicyLogger:
     """Forward to the install logger; the policy gate already announced the policy.
 
-    That includes the notice that policy enforcement is disabled.
+    That includes the notices that enforcement is disabled or that no
+    usable org policy was found.
     """
 
     def __init__(self, logger: Any) -> None:
@@ -42,6 +43,9 @@ class _AnnouncedPolicyLogger:
         return None
 
     def policy_disabled(self, _reason: str) -> None:
+        return None
+
+    def policy_discovery_miss(self, *_args: Any, **_kwargs: Any) -> None:
         return None
 
     def __getattr__(self, name: str) -> Any:
