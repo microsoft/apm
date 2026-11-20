@@ -1731,6 +1731,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Executable trust loses its canonical project-context resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-frozen-flag-reader",
+        rule_id="install-deployment-frozen-flag-reader",
+        path="src/apm_cli/install/phases/cleanup.py",
+        old="if frozen_disposition.retain_package_orphans:",
+        new="if ctx.frozen:",
+        intent="Orphan cleanup reads the frozen flag instead of the owner's disposition.",
+    ),
+    MutationCase(
         guard_id="install-deployment-frozen-mutation-eligibility",
         rule_id="install-deployment-frozen-mutation-eligibility",
         path="src/apm_cli/install/service.py",
@@ -3832,7 +3840,7 @@ def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) 
         ),
         (
             "src/apm_cli/install/phases/integrate.py",
-            "if ctx.frozen and ctx.existing_lockfile is not None:",
+            "if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:",
             "if False:",
             "install-deployment-frozen-mutation-eligibility",
         ),
@@ -3881,6 +3889,87 @@ def test_frozen_mcp_verification_cannot_bypass_owners(
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "if lockfile_only or frozen_disposition.withhold_lockfile_writes",
+            'if lockfile_only or getattr(self.ctx, "frozen", False)',
+            id="getattr-read",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/apm_resolver.py",
+            "frozen=self._frozen,",
+            'frozen=vars(self)["frozen"],',
+            id="subscript-read-outside-install",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            "    frozen_disposition: FrozenDisposition,\n",
+            "    frozen_disposition: FrozenDisposition | None = None,\n",
+            id="disposition-fails-open-when-omitted",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition: FrozenDisposition,\n) -> None:",
+            "    frozen_disposition: FrozenDisposition,\n    frozen: bool = False,\n) -> None:",
+            id="new-bare-frozen-parameter",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            (
+                "    match vars(ctx):\n"
+                '        case {"frozen": replay}:\n'
+                "            del replay\n"
+                "    frozen_disposition = InstallService.frozen_disposition(ctx)\n"
+            ),
+            id="mapping-pattern-read",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            "    ctx.frozen |= False\n    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            id="augmented-assignment-read",
+        ),
+    ],
+)
+def test_frozen_flag_reads_outside_owner_fail_guard(path: str, old: str, new: str) -> None:
+    """Only InstallService reads the frozen flag; consumers require its disposition."""
+    rule_id = "install-deployment-frozen-flag-reader"
+    assert run_selected_rules(ROOT, (rule_id,)).violations == ()
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_frozen_flag_writes_and_defaults_are_not_reads() -> None:
+    """Writes, deletes and a get/pop default named "frozen" do not read the flag."""
+    rule_id = "install-deployment-frozen-flag-reader"
+    path = "src/apm_cli/install/phases/cleanup.py"
+    old = "    frozen_disposition = InstallService.frozen_disposition(ctx)\n"
+    new = (
+        '    options = {"frozen": False}\n'
+        '    options["frozen"] = False\n'
+        '    del options["frozen"]\n'
+        '    options.get("mode", "frozen")\n'
+        '    options.pop("mode", "frozen")\n'
+        f"{old}"
+    )
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert report.violations == ()
 
 
 def test_frozen_preflight_uses_selected_lockfile_store() -> None:
