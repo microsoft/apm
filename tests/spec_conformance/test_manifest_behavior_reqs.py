@@ -7,12 +7,9 @@ manifest bytes on disk. Spec-text checks live in test_manifest_reqs.py.
 
 from __future__ import annotations
 
-import os
-import re
 from pathlib import Path
 
 import pytest
-import yaml
 
 from apm_cli.core.errors import UnknownTargetError
 from apm_cli.core.target_detection import accepted_target_values
@@ -26,17 +23,7 @@ from apm_cli.policy.project_config import (
     parse_project_policy_hash_pin,
 )
 from apm_cli.utils.github_host import manifest_default_host_scope
-from tests.integration.conftest import apm_binary_path as apm_binary_path
-from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-from tests.utils.local_package import LocalPackageFactory
 
-# semver 2.0.0 Section 9 reference regular expression (spec req-mf-004).
-_SEMVER = re.compile(
-    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
-    r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
-    r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-)
 _V01_SCHEMA = "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json"
 
 
@@ -52,31 +39,6 @@ def _registries_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # --- req-mf-002 / req-mf-003 / req-mf-004: producer identity ------------
-
-
-@pytest.mark.req("req-mf-002", "req-mf-003", "req-mf-004")
-@pytest.mark.e2e
-@pytest.mark.requires_apm_binary
-def test_init_emits_named_project_with_semver_version_string(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """`apm init --yes` writes a non-empty string name and a semver string version."""
-    isolated = IsolatedApmEnvironment.create(tmp_path / "init", base_env=os.environ)
-    project = isolated.work_root / "demo-project"
-    project.mkdir(parents=True)
-
-    result = ApmLifecycleRunner((str(apm_binary_path),)).run(
-        ("init", "--yes"),
-        scenario_id="producer-init-identity",
-        cwd=project,
-        env=isolated.subprocess_env(),
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
-    assert isinstance(manifest["name"], str) and manifest["name"].strip()
-    assert isinstance(manifest["version"], str)
-    assert _SEMVER.fullmatch(manifest["version"]), manifest["version"]
 
 
 @pytest.mark.req("req-mf-002", "req-mf-003")
@@ -130,40 +92,6 @@ def test_vendor_extension_target_identifier_is_accepted(tmp_path: Path) -> None:
     """The x-<vendor>-<name> form is accepted, unlike an arbitrary unknown token."""
     package = _load(tmp_path, {"name": "p", "version": "1.0.0", "targets": ["x-acme-foo"]})
     assert "x-acme-foo" in package.canonical_targets
-
-
-# --- req-mf-006: rewrite preserves unknown top-level keys ---------------
-
-
-@pytest.mark.req("req-mf-006")
-@pytest.mark.e2e
-@pytest.mark.requires_apm_binary
-def test_install_rewrite_preserves_unknown_top_level_keys(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """`apm install <path>` rewrites apm.yml and keeps keys it does not understand."""
-    isolated = IsolatedApmEnvironment.create(tmp_path / "rewrite", base_env=os.environ)
-    factory = LocalPackageFactory(isolated.work_root)
-    dependency = factory.create("helper")
-    factory.add_instruction(
-        dependency, "style", "---\napplyTo: '**'\n---\n# Style\nUse short names.\n"
-    )
-    consumer = factory.create("consumer", targets=("copilot",))
-    with consumer.manifest_path.open("a", encoding="utf-8") as handle:
-        handle.write("future-field:\n  mode: strict\n  levels: [1, 2]\nx-acme-meta: keep-me\n")
-
-    result = ApmLifecycleRunner((str(apm_binary_path),)).run(
-        ("install", "../helper", "--target", "copilot"),
-        scenario_id="manifest-rewrite-unknown-keys",
-        cwd=consumer.root,
-        env=isolated.subprocess_env(),
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    rewritten = yaml.safe_load(consumer.manifest_path.read_text(encoding="utf-8"))
-    assert rewritten["dependencies"]["apm"] == ["../helper"]
-    assert rewritten["future-field"] == {"mode": "strict", "levels": [1, 2]}
-    assert rewritten["x-acme-meta"] == "keep-me"
 
 
 # --- req-mf-007: string-form dependency grammar -------------------------

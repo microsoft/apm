@@ -475,7 +475,6 @@
       "status": "active",
       "test_count": 9,
       "tests": [
-        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[blank-name]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[empty-name]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[float]",
@@ -483,6 +482,7 @@
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[int]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-name]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-version]",
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_reqs.py::test_manifest_name_is_non_empty_string"
       ]
     },
@@ -494,7 +494,6 @@
       "status": "active",
       "test_count": 9,
       "tests": [
-        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[blank-name]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[empty-name]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[float]",
@@ -502,6 +501,7 @@
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[int]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-name]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-version]",
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_reqs.py::test_manifest_missing_name_rejected_by_schema"
       ]
     },
@@ -513,7 +513,7 @@
       "status": "active",
       "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_reqs.py::test_manifest_version_is_semver_2_0_0"
       ]
     },
@@ -537,7 +537,7 @@
       "status": "active",
       "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_install_rewrite_preserves_unknown_top_level_keys",
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_install_rewrite_preserves_unknown_top_level_keys",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_missing_source_key"
       ]
     },
