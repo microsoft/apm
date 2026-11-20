@@ -37,6 +37,8 @@ from tests.utils.lifecycle_oracle import (
     Observation,
     Operation,
     check_cross_cutting,
+    partition_expected,
+    strict_misses,
 )
 from tests.utils.lifecycle_state import LifecycleStateSnapshot, LifecycleSurfaceRoots
 
@@ -66,8 +68,10 @@ COMPLETED_SPINES: set[str] = set()
 class KnownCell:
     """A cell the machine shows failing on main: a STRICT expected failure.
 
-    With ``match`` the cell is run-level strict: matching violations are
-    expected wherever ``applies`` holds, and the spine must still observe it.
+    ``match`` is mandatory: only violations whose message matches are excused,
+    so an unrelated regression on the same step still fails. A ``per_step``
+    cell must fail wherever ``applies`` holds; otherwise the spine proves it
+    still fails at least once.
     """
 
     cell_id: str
@@ -76,8 +80,9 @@ class KnownCell:
     applies: Callable[
         [GateMachine, Operation, Observation, Observation, CommandResult | None], bool
     ]
-    match: str | None = None
+    match: str
     scopes: tuple[str, ...] = SCOPES
+    per_step: bool = True
 
     @property
     def label(self) -> str:
@@ -135,6 +140,7 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         lambda machine, op, before, after, result: (
             result is not None and op.name == "audit-ci" and not op.json_output
         ),
+        match=r"^stdout has non-ASCII characters",
         scopes=("project",),
     ),
     KnownCell(
@@ -144,8 +150,15 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         lambda machine, op, before, after, result: (
             op.name == "approve" and op.cell_kinds == ("plugin",) and machine.plugin_installed
         ),
+        match=r"^approve plugin recorded no grant",
     ),
-    KnownCell("gate-cell-c-lock", "I1", "#4043", _frozen_after_tightening),
+    KnownCell(
+        "gate-cell-c-lock",
+        "I1",
+        "#4043",
+        _frozen_after_tightening,
+        match=r"^recorded file is missing: .*hook-kit-session\.json$",
+    ),
     KnownCell(
         "gate-cell-c-pair",
         "I3",
@@ -155,9 +168,16 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
             and bool(op.paired)
             and _frozen_after_tightening(machine, op, before, after, result)
         ),
+        match=r"^audit --ci exited 1 but install --frozen exited 0$",
         scopes=("project",),
     ),
-    KnownCell("gate-cell-d", "R", "#4044", _hook_parked_with_wrong_reason),
+    KnownCell(
+        "gate-cell-d",
+        "R",
+        "#4044",
+        _hook_parked_with_wrong_reason,
+        match=r"^a denied hook is reported as merely unapproved$",
+    ),
     KnownCell(
         "gate-cell-g",
         "I3",
@@ -165,6 +185,7 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         lambda machine, op, before, after, result: (
             op.name == "install-frozen" and op.paired.get("audit") == 0 and before.lock is None
         ),
+        match=r"^audit --ci exited 0 but install --frozen exited 1$",
     ),
     KnownCell(
         "gate-cell-g",
@@ -173,13 +194,15 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         lambda machine, op, before, after, result: (
             op.name == "install-frozen" and machine.converged and before.lock is None
         ),
+        match=r"^converged install-frozen exited 1$",
     ),
     KnownCell(
         "gate-cell-f",
         "I9",
         "#4048",
         lambda machine, op, before, after, result: result is not None,
-        match=r"\|-- \(files unchanged\)",
+        match=r"^identical consecutive line: '\|-- \(files unchanged\)'$",
+        per_step=False,
     ),
     KnownCell(
         "gate-cell-e",
@@ -188,6 +211,7 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         lambda machine, op, before, after, result: (
             op.name == "uninstall" and op.cell_kinds == ("lsp",) and "lsp" in before.deployed
         ),
+        match=r"^failed uninstall changed the (manifest|lockfile)$",
     ),
 )
 
@@ -395,6 +419,8 @@ class GateMachine(RuleBasedStateMachine):
         self.store_state: dict[str, str] = {}
         self.policy = "none"
         self.converged = False
+        self.ceiling: frozenset[str] | None = None
+        self.visited: set[str] = set()
         self.expected_seen: set[str] = set()
 
     # -- model ---------------------------------------------------------------
@@ -427,13 +453,17 @@ class GateMachine(RuleBasedStateMachine):
     def converged_before(self) -> bool:
         return self.converged
 
+    def deployed_ceiling(self) -> frozenset[str] | None:
+        """Surfaces deployed at the last deny, revoke or tightening (None after widening)."""
+        return self.ceiling
+
     def expected_cells(self, op, before, after, result) -> Mapping[str, tuple[ExpectedCell, ...]]:
         expected: dict[str, tuple[ExpectedCell, ...]] = {}
         for cell in KNOWN_CELLS:
             if cell.applies(self, op, before, after, result):
                 expected[cell.law] = (
                     *expected.get(cell.law, ()),
-                    ExpectedCell(cell.label, cell.match),
+                    ExpectedCell(cell.label, cell.match, cell.per_step),
                 )
         return expected
 
@@ -449,6 +479,7 @@ class GateMachine(RuleBasedStateMachine):
             gate = {"none": "none", "all": self.policy}.get(kind) or self.gate_state(kind)
             cell = f"cell:{op}|{source}|{kind}|{gate}|{self.scope}"
             VISITED_CELLS.add(cell)
+            self.visited.add(cell)
             if currently_in_test_context():
                 hypothesis.event(cell)
 
@@ -470,19 +501,31 @@ class GateMachine(RuleBasedStateMachine):
         result = action()
         after = self.world.observe()
         problems = reference(before, after, result) if reference else []
-        expected = self.expected_cells(op, before, after, result).get("R", ())
-        if problems and not expected:
-            raise AssertionError(f"R: after {op.name}: " + "; ".join(problems))
-        for cell in expected:
-            if not problems:
-                raise AssertionError(
-                    f"R: strict expected failure {cell.cell_id} did not fail on {op.name}; "
-                    "remove it"
+        cells = self.expected_cells(op, before, after, result).get("R", ())
+        unexpected, owners = partition_expected(problems, cells)
+        misses = strict_misses(cells, owners)
+        if unexpected or misses:
+            raise AssertionError(
+                f"R: after {op.name}: "
+                + "; ".join(
+                    [*unexpected, *(f"strict expected failure {m} did not fail" for m in misses)]
                 )
-            self.record_expected(cell.cell_id)
+            )
+        for cell_id in owners:
+            self.record_expected(cell_id)
         guarded = Operation(**{**op.__dict__, "forbidden": self._forbidden()})
         check_cross_cutting(before, after, result, _ExpectedWithoutReference(self), guarded)
+        self._move_ceiling(op, after)
         return result
+
+    def _move_ceiling(self, op: Operation, after: Observation) -> None:
+        if op.tightening:
+            current = after.deployed if self.ceiling is None else self.ceiling & after.deployed
+            self.ceiling = frozenset(current)
+        elif op.name in {"approve", "declare"}:
+            self.ceiling = None
+        elif op.mutating and self.ceiling is not None:
+            self.ceiling = self.ceiling & after.deployed
 
     def _edit(self, name: str, kinds: tuple[str, ...], edit: Callable[[], None], **flags) -> None:
         self.converged = False
@@ -651,6 +694,9 @@ class _ExpectedWithoutReference:
 
     def converged_before(self) -> bool:
         return self._machine.converged_before()
+
+    def deployed_ceiling(self) -> frozenset[str] | None:
+        return self._machine.deployed_ceiling()
 
     def expected_cells(self, op, before, after, result) -> Mapping[str, tuple[ExpectedCell, ...]]:
         cells = dict(self._machine.expected_cells(op, before, after, result))

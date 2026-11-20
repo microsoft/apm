@@ -22,10 +22,12 @@ from tests.integration._gate_machine_kit import (
     COMPLETED_SPINES,
     KNOWN_CELLS,
     SCOPES,
-    VISITED_CELLS,
     GateMachine,
     GateWorld,
 )
+from tests.utils.artifact_snapshot import ArtifactSnapshotSet
+from tests.utils.lifecycle_oracle import ExpectedCell, Observation, Operation, check_cross_cutting
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.world_snapshot import restore_tree
 
 pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
@@ -108,11 +110,9 @@ def test_gate_mandatory_spine_covers_obligations(
     tmp_path: Path, apm_engine_command: tuple[str, ...], scope: str
 ) -> None:
     """Replay the GATE spine through the oracle and cover every obligation cell."""
-    start = set(VISITED_CELLS)
     machine = GateMachine(GateWorld.create(tmp_path / "world", apm_engine_command, scope))
     replay_gate_spine(machine)
-    visited = VISITED_CELLS - start | {c for c in start if c.endswith(f"|{scope}")}
-    missing = gate_obligations(scope) - visited
+    missing = gate_obligations(scope) - machine.visited
     assert not missing, f"GATE obligation cells not visited: {sorted(missing)}"
     strict = {cell.label for cell in KNOWN_CELLS if scope in cell.scopes}
     assert machine.expected_seen == strict, (
@@ -155,5 +155,37 @@ def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None
     """Skipping the approval check in the gate owner must fail the machine."""
     mutant = (sys.executable, str(MUTANT_PATH))
     machine = GateMachine(GateWorld.create(tmp_path / "world", mutant, "project"))
-    with pytest.raises(AssertionError, match=r"I4|R:"):
+    with pytest.raises(AssertionError, match=r"hook deployed=True, expected False"):
         replay_gate_spine(machine)
+
+
+def test_a_known_cell_does_not_excuse_an_unrelated_surface(tmp_path: Path) -> None:
+    """A known cell owns only matching violations; another surface still fails."""
+    state = LifecycleStateSnapshot.capture(tmp_path)
+    artifacts = ArtifactSnapshotSet.capture({"project": tmp_path})
+    before = Observation(state, artifacts, frozenset(), tmp_path, None)
+    after = Observation(state, artifacts, frozenset({"hook", "lsp"}), tmp_path, None)
+
+    class _Model:
+        def __init__(self) -> None:
+            self.seen: set[str] = set()
+
+        def allowed_surfaces(self) -> frozenset[str]:
+            return frozenset()
+
+        def converged_before(self) -> bool:
+            return False
+
+        def deployed_ceiling(self) -> frozenset[str] | None:
+            return None
+
+        def expected_cells(self, op, before, after, result):
+            return {"I4": (ExpectedCell("gate-cell-x", r"^hook still deployed"),)}
+
+        def record_expected(self, cell_id: str) -> None:
+            self.seen.add(cell_id)
+
+    model = _Model()
+    with pytest.raises(AssertionError, match=r"lsp still deployed but not allowed"):
+        check_cross_cutting(before, after, None, model, Operation("install", mutating=True))
+    assert model.seen == {"gate-cell-x"}

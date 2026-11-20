@@ -66,6 +66,20 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
 
 # Bookkeeping files any command may touch without changing durable state.
 _BOOKKEEPING_NAMES = frozenset({".apm-lifecycle.lock", "last_version_check", "device-id"})
+# First-run state any command may CREATE (never change): the user config and
+# the version-check cache directory.
+_FIRST_RUN_CREATES = frozenset({".apm/config.json", "config.json", ".cache", ".cache/apm"})
+
+
+def _durable_changes(before, after) -> set[str]:
+    """Changed paths of one root, without bookkeeping or first-run creations."""
+    difference = before.diff(after)
+    return {
+        path
+        for path in difference.added | difference.removed | difference.changed
+        if path.rsplit("/", 1)[-1] not in _BOOKKEEPING_NAMES
+        and not (path in difference.added and path in _FIRST_RUN_CREATES)
+    }
 
 
 @dataclass(frozen=True)
@@ -106,15 +120,36 @@ class Violation:
 
 @dataclass(frozen=True)
 class ExpectedCell:
-    """A strict expected failure for one law on one step.
+    """A strict expected failure: violations whose message matches ``match``.
 
-    Without ``match`` the law must fail on this step. With ``match`` only
-    violations whose message matches are expected; the caller then proves the
-    cell still fails at run level, since a step may legitimately not reach it.
+    Only matching violations are excused; any other violation of the same law
+    still fails. With ``per_step`` the cell must fail on this step; otherwise
+    the caller proves at run level that it still fails somewhere.
     """
 
     cell_id: str
-    match: str | None = None
+    match: str
+    per_step: bool = True
+
+
+def partition_expected(
+    messages: Collection[str], cells: Collection[ExpectedCell]
+) -> tuple[list[str], set[str]]:
+    """Split *messages* into unexpected ones and the ids of cells that owned one."""
+    unexpected: list[str] = []
+    owners: set[str] = set()
+    for message in messages:
+        hits = {cell.cell_id for cell in cells if re.search(cell.match, message)}
+        if hits:
+            owners |= hits
+        else:
+            unexpected.append(message)
+    return unexpected, owners
+
+
+def strict_misses(cells: Collection[ExpectedCell], owners: Collection[str]) -> list[str]:
+    """Per-step cells that did not fail on this step (an unexpected pass)."""
+    return [cell.cell_id for cell in cells if cell.per_step and cell.cell_id not in owners]
 
 
 class OracleModel(Protocol):
@@ -123,6 +158,8 @@ class OracleModel(Protocol):
     def allowed_surfaces(self) -> frozenset[str]: ...
 
     def converged_before(self) -> bool: ...
+
+    def deployed_ceiling(self) -> frozenset[str] | None: ...
 
     def expected_cells(
         self, op: Operation, before: Observation, after: Observation, result: CommandResult | None
@@ -151,23 +188,18 @@ def check_cross_cutting(
     for violation in violations:
         by_law.setdefault(violation.law, []).append(violation)
     problems: list[str] = []
-    for law, items in by_law.items():
+    for law in sorted(set(by_law) | set(expected)):
+        messages = [item.message for item in by_law.get(law, ())]
         cells = expected.get(law, ())
-        for item in items:
-            owners = [
-                cell for cell in cells if cell.match is None or re.search(cell.match, item.message)
-            ]
-            if not owners:
-                problems.append(f"{law} ({ORACLE_LAWS[law].title}): {item.message}")
-            for cell in owners:
-                model.record_expected(cell.cell_id)
-    for law, cells in expected.items():
-        for cell in cells:
-            if cell.match is None and law not in by_law:
-                problems.append(
-                    f"{law}: strict expected failure {cell.cell_id} did not fail on {op.name}; "
-                    "the cell now passes, so remove its expectation"
-                )
+        unexpected, owners = partition_expected(messages, cells)
+        problems.extend(f"{law} ({ORACLE_LAWS[law].title}): {message}" for message in unexpected)
+        problems.extend(
+            f"{law}: strict expected failure {cell_id} did not fail on {op.name}; "
+            "the cell now passes, so remove its expectation"
+            for cell_id in strict_misses(cells, owners)
+        )
+        for cell_id in owners:
+            model.record_expected(cell_id)
     assert not problems, f"after {op.name}:\n" + "\n".join(problems) + _evidence(result)
 
 
@@ -247,16 +279,20 @@ def _i3_frozen_audit(
 def _i4_gate_monotonicity(
     before: Observation, after: Observation, result, model: OracleModel, op: Operation
 ) -> list[Violation]:
+    """One violation per surface, so a known cell never hides another surface."""
+    del before
     found = []
-    if op.tightening and not after.deployed <= before.deployed:
-        found.append(
-            Violation("I4", f"tightening deployed {sorted(after.deployed - before.deployed)}")
+    ceiling = model.deployed_ceiling()
+    if op.mutating and ceiling is not None:
+        found.extend(
+            Violation("I4", f"{surface} deployed above the ceiling set by the last tightening")
+            for surface in sorted(after.deployed - ceiling)
         )
-    succeeded = result is None or result.returncode == 0
-    if op.mutating and succeeded:
-        extra = after.deployed - model.allowed_surfaces()
-        if extra:
-            found.append(Violation("I4", f"still deployed but not allowed: {sorted(extra)}"))
+    if op.mutating and (result is None or result.returncode == 0):
+        found.extend(
+            Violation("I4", f"{surface} still deployed but not allowed")
+            for surface in sorted(after.deployed - model.allowed_surfaces())
+        )
     return found
 
 
@@ -266,9 +302,7 @@ def _i5_write_set(
     del result, model
     found = []
     for root_id, snapshot in before.artifacts.snapshots:
-        difference = snapshot.diff(after.artifacts.snapshot(root_id))
-        observed = difference.added | difference.removed | difference.changed
-        observed = {path for path in observed if path.rsplit("/", 1)[-1] not in _BOOKKEEPING_NAMES}
+        observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
         for prefix in op.forbidden.get(root_id, ()):
             hit = sorted(path for path in observed if _within(path, prefix))
             if hit:
@@ -351,10 +385,8 @@ def _changed_paths(before: ArtifactSnapshotSet, after: ArtifactSnapshotSet) -> l
     """Changed files, comparing the lockfile semantically (generation time may move)."""
     changed = []
     for root_id, snapshot in before.snapshots:
-        difference = snapshot.diff(after.snapshot(root_id))
-        for path in sorted(difference.added | difference.removed | difference.changed):
-            name = path.rsplit("/", 1)[-1]
-            if name not in _BOOKKEEPING_NAMES and name != "apm.lock.yaml":
+        for path in sorted(_durable_changes(snapshot, after.snapshot(root_id))):
+            if path.rsplit("/", 1)[-1] != "apm.lock.yaml":
                 changed.append(f"{root_id}:{path}")
     return changed
 
