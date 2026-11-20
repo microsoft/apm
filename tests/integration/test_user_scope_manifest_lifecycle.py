@@ -197,6 +197,10 @@ def test_user_scope_command_is_not_governed_by_home_remote_policy(
         result = _step(runner, args, cwd=cwd, env=env, step=f"{command}-g")
 
         assert _skill_deployed(home), output(result)
+        if command == "update":
+            # The update applied the moved revision, past the policy gate.
+            skill = home / ".claude" / "skills" / "pkg-user-skill" / "SKILL.md"
+            assert skill.read_text(encoding="utf-8").endswith(" v2\n"), output(result)
         assert "policy" not in output(result).lower(), output(result)
         assert _policy_requests(fx) == [], _policy_requests(fx)
         assert not policy_cache.exists(), sorted(policy_cache.rglob("*"))
