@@ -21,6 +21,11 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
 from apm_cli.install.package_resolution import effective_dependency_selection
+from apm_cli.install.phases.lockfile_cache_pins import (
+    sync_cache_pin_markers,
+    sync_cache_pin_markers_from_disk,
+    sync_cache_pin_markers_from_existing,
+)
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -117,7 +122,7 @@ class LockfileBuilder:
         # fail-closed on a stale cache. Idempotent + best-effort; warnings
         # for unpinned deps are surfaced by the primary post-build sync, so
         # this secondary pass stays silent.
-        self._sync_cache_pin_markers_from_existing()
+        sync_cache_pin_markers_from_existing(self.ctx)
         # Reconcile dropped-target merge-hook JSON/sidecar state (issue
         # #2253) unconditionally, before the early-return below. Whether
         # this cleanup is needed depends purely on "did the declared
@@ -155,7 +160,7 @@ class LockfileBuilder:
             # must still be pruned to match apm.yml (see
             # ``_has_orphan_lockfile_entries``).
             self._reconcile_target_deployed_files(self.ctx.existing_lockfile)
-            self._sync_cache_pin_markers_from_disk()
+            sync_cache_pin_markers_from_disk(self.ctx)
             return
         try:
             from apm_cli.deps.lockfile import LockFile as _LF
@@ -240,7 +245,7 @@ class LockfileBuilder:
             # #1137 follow-up): if their lockfile is already current,
             # _write_if_changed is a no-op, but markers must still be
             # written so the next `apm audit` drift replay succeeds.
-            self._sync_cache_pin_markers(lockfile)
+            sync_cache_pin_markers(self.ctx, lockfile)
         except Exception as e:
             self._handle_failure(e)
 
@@ -879,34 +884,10 @@ class LockfileBuilder:
         if self.ctx.logger:
             self.ctx.logger.error(_lock_msg)
 
-    def _sync_cache_pin_markers(self, lockfile: LockFile) -> None:
-        """Write ``.apm-pin`` markers for every cached remote dep.
-
-        Idempotent and best-effort: a missing or unwritable cache
-        directory is silently skipped at the marker-helper level and
-        will surface during the next ``apm audit`` drift replay.
-        Wrapped in a broad except because lockfile assembly success
-        must not be undone by a marker write failure.
-        """
-        try:
-            from apm_cli.install.cache_pin import sync_markers_for_lockfile
-
-            apm_modules_dir = self.ctx.apm_modules_dir
-            if apm_modules_dir is None:
-                return
-            written = sync_markers_for_lockfile(lockfile, self.ctx.project_root, apm_modules_dir)
-            if self.ctx.logger and written:
-                self.ctx.logger.verbose_detail(
-                    f"Wrote {written} cache pin marker(s) for drift replay"
-                )
-        except Exception as exc:
-            if self.ctx.logger:
-                self.ctx.logger.verbose_detail(f"Cache pin marker sync skipped: {exc}")
-
     def _reconcile_dropped_merge_hook_targets(self) -> None:
         """Clean merge-hook JSON/sidecar state for targets dropped from ``targets:``.
 
-        Best-effort, matching ``_sync_cache_pin_markers_from_existing``'s own
+        Best-effort, matching ``sync_cache_pin_markers_from_existing``'s own
         convention: a failure here must never abort the install. Internal
         malformed-state handling already fails closed and warns (see
         ``HookIntegrator.reconcile_dropped_targets``); this wrapper only
@@ -953,64 +934,6 @@ class LockfileBuilder:
         )
         if changed:
             lockfile.save(get_lockfile_path(self.ctx.apm_dir))
-
-    def _sync_cache_pin_markers_from_existing(self) -> None:
-        """Self-heal markers from the pre-existing in-memory lockfile.
-
-        Runs at the very start of ``build_and_save`` so that remote deps
-        recorded in the on-disk lockfile get their ``.apm-pin`` markers
-        even when the imminent build prunes them (orphan removal, #1926):
-        the pruned dep's cache remains under ``apm_modules/`` and the
-        supply-chain contract (#1137) requires every cached remote dep to
-        be marked. Warnings are suppressed here -- the primary post-build
-        sync over the freshly-built lockfile surfaces unpinned deps, so a
-        second warning pass would be noise. Best-effort: a marker write
-        failure must never abort the install.
-        """
-        existing = self.ctx.existing_lockfile
-        if existing is None:
-            return
-        try:
-            from apm_cli.install.cache_pin import sync_markers_for_lockfile
-
-            apm_modules_dir = self.ctx.apm_modules_dir
-            if apm_modules_dir is None:
-                return
-            written = sync_markers_for_lockfile(
-                existing,
-                self.ctx.project_root,
-                apm_modules_dir,
-                warn_unpinned=False,
-            )
-            if self.ctx.logger and written:
-                self.ctx.logger.verbose_detail(
-                    f"Self-healed {written} cache pin marker(s) from existing lockfile"
-                )
-        except Exception as exc:
-            if self.ctx.logger:
-                self.ctx.logger.verbose_detail(
-                    f"Cache pin marker self-heal (existing) skipped: {exc}"
-                )
-
-    def _sync_cache_pin_markers_from_disk(self) -> None:
-        """Self-heal markers from the on-disk lockfile when no install ran.
-
-        This handles the upgrade path: user installed an older APM,
-        runs the new APM with no manifest changes, expects the next
-        ``apm audit`` to find every remote dep correctly marked.
-        """
-        try:
-            from apm_cli.deps.lockfile import LockFile as _LF
-            from apm_cli.deps.lockfile import get_lockfile_path
-
-            lockfile_path = get_lockfile_path(self.ctx.apm_dir)
-            if not lockfile_path.exists():
-                return
-            lockfile = _LF.load_or_create(lockfile_path)
-            self._sync_cache_pin_markers(lockfile)
-        except Exception as exc:
-            if self.ctx.logger:
-                self.ctx.logger.verbose_detail(f"Cache pin marker self-heal skipped: {exc}")
 
     def compute_deployed_hashes(self, rel_paths) -> dict[str, str]:
         """Delegate to the module-level canonical implementation."""
