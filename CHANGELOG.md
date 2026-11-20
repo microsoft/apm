@@ -122,6 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` applies org MCP policy to every server the lock keeps, including transitive and local-bundle servers, and accepts a `bundle:` server only when the lock records its deployment. (#3989)
 - `apm install -g <bundle>` reads executables approvals from the user manifest (`~/.apm/apm.yml`), never the current directory's `apm.yml`, and its skip hint names that file. (#3989)
 - A cold `apm install` of a locked marketplace package with catalog-defined MCP or LSP servers reads only server metadata from the catalog and keeps the locked commit; if the catalog now selects another commit it fails with an `apm update <name>@<marketplace>` hint instead of re-pinning. (#3989)
+- `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
 
 ### Security
 
