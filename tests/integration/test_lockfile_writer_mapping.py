@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -18,8 +18,11 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.deps import lockfile_write_authority as authority
-from apm_cli.deps.lockfile_write_authority import LockfileWriter
+from apm_cli.deps.lockfile_write_authority import (
+    LockfileWriter,
+    LockfileWriterObservation,
+    observe_lockfile_writers,
+)
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
@@ -49,43 +52,14 @@ _HTTP_MCP = ("--transport", "http", "--url", "https://mcp.example.invalid/mcp")
 _NO_POLICY = ("--no-policy", "--trust-transitive-mcp")
 
 
-@dataclass
-class _Recorder:
-    declared: list[LockfileWriter] = field(default_factory=list)
-    opened: list[LockfileWriter] = field(default_factory=list)
-
-    def clear(self) -> None:
-        self.declared.clear()
-        self.opened.clear()
-
-
 @pytest.fixture
-def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Record declared writers and opened write scopes (call-through spies).
+def recorder() -> Iterator[LockfileWriterObservation]:
+    """Declared writers and opened write scopes, from the authority's public seam (#4473).
 
-    Recorded AQ004 debt, shrink-only (#4255): call-through spies prove the
-    declared writer (single-writer contract); no public observation seam yet
-    (#4473). Persisted writes are observed on disk by ``_lock_writes``.
+    Persisted writes are observed on disk by ``_lock_writes``.
     """
-    record = _Recorder()
-    original_scope = authority.lockfile_write_scope
-    original_class = authority._WriteScope
-
-    @contextmanager
-    def declaring(writer: LockfileWriter) -> Iterator[None]:
-        if authority._active_writer.get() is None:
-            record.declared.append(writer)
-        with original_scope(writer):
-            yield
-
-    class _Opening(original_class):  # type: ignore[misc, valid-type]
-        def __init__(self, writer: LockfileWriter) -> None:
-            super().__init__(writer)
-            record.opened.append(writer)
-
-    monkeypatch.setattr(authority, "lockfile_write_scope", declaring)
-    monkeypatch.setattr(authority, "_WriteScope", _Opening)
-    return record
+    with observe_lockfile_writers() as observation:
+        yield observation
 
 
 @contextmanager
@@ -185,7 +159,7 @@ def _writer_steps(
 
 
 def test_each_lock_writing_command_maps_to_its_registered_writer(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: LockfileWriterObservation
 ) -> None:
     world = _world(tmp_path / "mapping")
     steps = _writer_steps(world, _bundle(world), _apm_bundle(world))
@@ -202,7 +176,7 @@ def test_each_lock_writing_command_maps_to_its_registered_writer(
 
 
 def test_install_with_mcp_and_lsp_persists_the_lockfile_once(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: LockfileWriterObservation
 ) -> None:
     world = _world(tmp_path / "services")
     root = world.project.root
@@ -217,7 +191,7 @@ def test_install_with_mcp_and_lsp_persists_the_lockfile_once(
 
 
 def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: LockfileWriterObservation
 ) -> None:
     world = _world(tmp_path / "refusal")
     bundle = _bundle(world)
