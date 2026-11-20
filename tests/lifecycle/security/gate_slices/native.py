@@ -37,9 +37,6 @@ _PLUGIN_CHANGES = (
 _PLUGIN_UNLOCKED = (
     "#4225 the user lockfile does not record the files a native Claude plugin deployed"
 )
-_UNINSTALL_SIBLING = (
-    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
-)
 _XFAIL = {
     **{
         f"G|{path}|{change}|native": _NOT_APPROVABLE
@@ -47,7 +44,6 @@ _XFAIL = {
         for change in _ALL
         if change != "org-enables-gate"
     },
-    "G|uninstall-prune-rebuild|org-enables-gate|native": _UNINSTALL_SIBLING,
     **{f"G|native-plugin|{change}|native": _PLUGIN_UNLOCKED for change in _PLUGIN_CHANGES},
 }
 _SMOKE = {"G|install|org-enables-gate|native"}
