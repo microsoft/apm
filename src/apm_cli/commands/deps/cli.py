@@ -520,24 +520,24 @@ def _agent_plugin_version(candidate) -> str | None:
 
 
 def _report_native_plugins(apm_dir, logger) -> None:
-    """Report Agent Plugins APM registers natively with GitHub Copilot."""
+    """Report the plugins APM activates natively, from apm.lock.yaml."""
     from pathlib import Path
 
-    from ...agent_plugins.errors import AgentPluginError
-    from ...copilot_plugins.registrar import registration_status
+    from ...deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+    from ...native_plugins.record import lock_native_plugins
 
     try:
-        names = registration_status(Path(apm_dir) / "apm_modules")
-    except (AgentPluginError, OSError):
+        lockfile = LockFile.read(get_lockfile_path(Path(apm_dir)))
+    except (LockfileFormatError, OSError):
         return
+    names = sorted(record.name for record in lock_native_plugins(lockfile).values())
     if not names:
         return
-    noun = "Agent Plugin" if len(names) == 1 else "Agent Plugins"
     shown = ", ".join(names[:3])
     if len(names) > 3:
         shown += f", and {len(names) - 3} more"
     logger.info(
-        f"{len(names)} {noun} registered natively with GitHub Copilot: {shown}",
+        f"{len(names)} native plugin(s) activated from .agents/plugins: {shown}",
         symbol="info",
     )
     if len(names) > 3:

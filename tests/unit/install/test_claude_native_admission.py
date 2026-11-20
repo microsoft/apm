@@ -53,12 +53,37 @@ def test_explicit_empty_commands_keep_native_manifest(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"scope": InstallScope.PROJECT},
         {"targets": [SimpleNamespace(name="copilot")]},
+        {"scope": InstallScope.PROJECT, "targets": [SimpleNamespace(name="cursor")]},
     ],
 )
 def test_non_native_scope_keeps_existing_route(tmp_path: Path, kwargs: dict) -> None:
     assert _plan(_plugin(tmp_path), **kwargs) is None
+
+
+@pytest.mark.parametrize(
+    ("targets", "harnesses"),
+    [
+        (["claude"], {"claude"}),
+        (["copilot", "cursor"], {"copilot"}),
+        (["claude", "copilot"], {"claude", "copilot"}),
+    ],
+)
+def test_project_scope_admits_the_plugin_for_the_harnesses_it_targets(
+    tmp_path: Path, targets: list[str], harnesses: set[str]
+) -> None:
+    """#3921: at project scope Claude Code and Copilot both load the committed root."""
+    from apm_cli.utils.content_hash import compute_native_plugin_pin
+
+    info = _plugin(tmp_path)
+    plan = _plan(
+        info,
+        scope=InstallScope.PROJECT,
+        targets=[SimpleNamespace(name=name) for name in targets],
+    )
+    assert plan.harnesses == harnesses
+    # The committed lock records the portable path-and-bytes digest.
+    assert plan.bundle_hash == compute_native_plugin_pin(info.install_path)
 
 
 def test_incidental_manifest_does_not_override_apm_intent(tmp_path: Path) -> None:

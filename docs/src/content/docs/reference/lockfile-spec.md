@@ -74,10 +74,12 @@ apm_modules/
 
 :::caution[Keep installed content available while it is in use]
 Derived content is not necessarily disposable when `apm install` exits.
-Supported native integrations, including Copilot Agent Plugins, load plugins
-live from `apm_modules/`. Agents and tools can also follow deployed links to
-package resources there. Keep the directory available for as long as those
-consumers need it.
+Agents and tools can follow deployed links to package resources in
+`apm_modules/`. Keep the directory available for as long as those consumers
+need it. Native plugins are the exception: APM deploys them to the committed
+`.agents/plugins/` and harnesses load them from there. Commit
+`.agents/plugins/`, `.claude/settings.json` and `.github/copilot/settings.json`
+with this lockfile.
 :::
 
 For [CI workflows](../../integrations/ci-cd/), check out the committed manifest
@@ -308,6 +310,8 @@ on the next lockfile write. No new fields are added for this.
 | `subset_pairings` | list of mappings | no | Present only when declarations pair different skills with different targets, so `skill_subset` x `target_subset` would over-deploy. Each mapping has optional sorted `skills` and `targets` lists (omitted = all); a skill deploys to a target only when one mapping pairs them. Older lockfiles without it replay as the plain product. See [OpenAPM req-rs-018](../../specs/openapm-v01/#req-rs-018). |
 | `deployed_files` | list of strings | no | Sorted project-relative paths APM wrote for this dependency; powers `prune` and `audit`'s file-presence check. Shared paths have one canonical owner; uninstall transfers ownership to a surviving provider. Reinstall preserves other declared, gated, or dynamic targets' entries. On explicit manifest contraction, install/prune removes dropped targets' files only if recorded hashes match; edited files remain tracked on disk. `apm lock` preserves files and their `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows until normal install can verify and perform cleanup. Without `targets:` or `target:` in the consumer's `apm.yml`, reinstall preserves inactive targets' deployed files, merge-hook configuration, and ownership sidecars, even with `--target`. A `--target` override does not declare dropped targets; only explicit manifest contraction permits pruning them. |
 | `deployed_file_hashes` | map | no | `path -> sha256:<hex>` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
+| `native_plugin` | map | no | Ownership record for a plugin APM deployed intact: `name`, `root` (`.agents/plugins/<name>`), `fingerprint` (`sha256:<hex>`; paths and bytes at project scope, plus exec bits at user scope) and `marketplace` (`name`, `path`). APM's only evidence for the settings entries and roots it may remove. See [Native plugins](../../consumer/install-plugins/#native-plugins). |
+| `native_declared` | list | no | Harnesses (`claude`, `copilot`) whose settings held APM's `true` for that native plugin when the lock was written. Lets APM tell its own Copilot value from a hand edit; written only with `native_plugin`. |
 | `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
 | `exec_allowed_types` | array of strings | no | Executable types a `gated_pending_approval` or `denied` package still deployed because they are approved (for example `[hooks]`). Present only for a partial approval, so `apm update` notices when one type's approval is added or removed. |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |

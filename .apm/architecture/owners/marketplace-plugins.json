@@ -182,14 +182,16 @@
     },
     {
       "id": "claude-native-plugin-registration",
-      "decision": "Intact Claude plugin admission, lockfile-derived native ownership (native_plugin records), deployment to ~/.agents/plugins, and settings-only declaration through the shared native settings writer without any vendor CLI",
-      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_claude_plugins, verify_claude_native_cache); native_plugins/ (record, layout, settings)",
+      "decision": "Intact native plugin admission, lockfile-derived native ownership (native_plugin records), deployment to .agents/plugins (user home or committed project), and settings-only declaration to Claude Code and GitHub Copilot through the shared native settings writer without any vendor CLI",
+      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_native_plugins, verify_claude_native_cache) for Claude Code and GitHub Copilot at both scopes; native_plugins/ (record, layout, settings, scopes, uninstall)",
       "selectors": [
         "src/apm_cli/claude_plugins/admission.py",
         "src/apm_cli/claude_plugins/registrar.py",
         "src/apm_cli/native_plugins/layout.py",
         "src/apm_cli/native_plugins/record.py",
-        "src/apm_cli/native_plugins/settings.py"
+        "src/apm_cli/native_plugins/scopes.py",
+        "src/apm_cli/native_plugins/settings.py",
+        "src/apm_cli/native_plugins/uninstall.py"
       ],
       "guards": ["marketplace-integrations-claude-ownership"]
     },
@@ -211,12 +213,11 @@
     },
     {
       "id": "copilot-marketplace-ownership",
-      "decision": "APM-owned Copilot marketplace catalog, settings entries, and ownership ledger",
-      "owner": "copilot_plugins/registrar.py (synchronize_copilot_plugins, resync_native_plugins)",
+      "decision": "Migration of the legacy apm_modules Copilot registration (apm marketplace, catalog and apm-registration.json ledger); declarations go through the shared native owner",
+      "owner": "copilot_plugins/registrar.py (plan_legacy_copilot_retirement), applied inside claude_plugins/registrar.py reconcile_native_plugins",
       "selectors": [
         "src/apm_cli/copilot_plugins/registrar.py",
-        "src/apm_cli/copilot_plugins/settings.py",
-        "src/apm_cli/copilot_plugins/catalog.py"
+        "src/apm_cli/copilot_plugins/settings.py"
       ],
       "guards": ["marketplace-integrations-copilot-ownership"]
     },

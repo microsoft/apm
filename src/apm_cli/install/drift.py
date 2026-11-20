@@ -757,7 +757,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 records=codex_records,
                                 **identity,
                             )
-                    if result.get("native_claude_plugin"):
+                    if result.get("native_plugin") and lock_dep.native_plugin is not None:
                         verify_claude_native_cache(
                             modules_dir=live_modules_dir, locked=lock_dep, source_root=install_path
                         )

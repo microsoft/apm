@@ -1,9 +1,10 @@
 """The ``native_plugin`` lock record: APM's only ownership evidence.
 
 A dependency that APM deploys as an intact native plugin records the deployed
-plugin name, its root under the user's ``.agents/plugins`` directory, the
-complete native fingerprint of the deployed bytes and the marketplace binding
-it was declared under. Which harness loads it follows from the entry's
+plugin name, its root under the scope's ``.agents/plugins`` directory, the
+root digest of the deployed bytes (paths, bytes and exec bit at user scope;
+paths and bytes for a committed project-scope root) and the marketplace
+binding it was declared under. Which harness loads it follows from the entry's
 targets, so the record does not repeat them. Settings keys and deployed roots are derived from these records
 in the previous and next lockfile; no receipt file exists beside the lock.
 """

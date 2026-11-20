@@ -39,7 +39,7 @@ class PackageDeploymentPlan:
         if self.codex_native is not None:
             return []
         targets = list(self.target_selection.targets)
-        native_target_names = {self.claude_native.target_name} if self.claude_native else set()
+        native_target_names = self.claude_native.harnesses if self.claude_native else set()
         return [target for target in targets if target.name not in native_target_names]
 
 
@@ -137,9 +137,10 @@ def prepare_package_deployment(  # noqa: PLR0913
         if policy is not None
         else getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     )
+    # The project's own content is never deployed as one of its native plugins.
     native_claude_plugin = (
         None
-        if codex_native is not None
+        if codex_native is not None or is_first_party
         else plan_native_claude_plugin(
             package_info,
             package_name=package_name,
