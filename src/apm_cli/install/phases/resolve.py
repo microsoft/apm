@@ -260,8 +260,8 @@ def _setup_downloader(ctx: InstallContext) -> None:
     downloader.shared_clone_cache = shared_cache
 
     # WS3 (#1116): attach persistent cross-run git cache unless disabled
-    # via APM_NO_CACHE environment variable.
-    if not _os.environ.get("APM_NO_CACHE"):
+    # via APM_NO_CACHE; a --dry-run preview never writes the cache.
+    if not _os.environ.get("APM_NO_CACHE") and not ctx.dry_run:
         from apm_cli.cache.paths import get_cache_root
 
         try:
