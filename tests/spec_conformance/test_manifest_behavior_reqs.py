@@ -99,14 +99,17 @@ def test_unknown_target_token_is_rejected_naming_the_token(tmp_path: Path, spell
 
 
 @pytest.mark.req("req-mf-005")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4251: x-<vendor>-<name> target identifiers are rejected at parse time",
-)
 def test_vendor_extension_target_identifier_is_accepted(tmp_path: Path) -> None:
-    """The x-<vendor>-<name> form is accepted, unlike an arbitrary unknown token."""
-    package = _load(tmp_path, {"name": "p", "version": "1.0.0", "targets": ["x-acme-foo"]})
-    assert "x-acme-foo" in package.canonical_targets
+    """The x-<vendor>-<name> form is accepted, unlike an arbitrary unknown token (#4251).
+
+    APM registers no vendor handler, so the identifier is kept as a vendor
+    target and never selects a deployable target.
+    """
+    package = _load(
+        tmp_path, {"name": "p", "version": "1.0.0", "targets": ["copilot", "x-acme-foo"]}
+    )
+    assert package.vendor_targets == ("x-acme-foo",)
+    assert package.canonical_targets == ("copilot",)
 
 
 # --- req-mf-007: string-form dependency grammar -------------------------
@@ -191,10 +194,6 @@ def test_writer_strips_only_the_selected_default_host(
 
 
 @pytest.mark.req("req-mf-015")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4252: registries.<name> accepts typo keys (v0.1) or rejects x- keys (default)",
-)
 @pytest.mark.parametrize("schema", [None, _V01_SCHEMA], ids=["default", "openapm-v0.1"])
 @pytest.mark.usefixtures("_registries_enabled")
 def test_registry_entry_rejects_typos_but_keeps_vendor_keys(tmp_path: Path, schema) -> None:
@@ -270,8 +269,14 @@ def test_strong_policy_hash_algorithms_are_accepted(algorithm: str, length: int)
 
 
 @pytest.mark.req("req-mf-018")
-@pytest.mark.xfail(strict=True, reason="#4253: algorithm is not inferred from the digest prefix")
 @pytest.mark.parametrize(("algorithm", "length"), [("sha384", 96), ("sha512", 128)])
 def test_policy_hash_algorithm_is_inferred_from_digest_prefix(algorithm: str, length: int) -> None:
+    """The <algo>: prefix names the algorithm when hash_algorithm is omitted (#4253)."""
     pin = parse_project_policy_hash_pin({"hash": f"{algorithm}:" + "c" * length})
     assert (pin.algorithm, pin.digest) == (algorithm, "c" * length)
+    with pytest.raises(ProjectPolicyConfigError, match="does not match hash_algorithm 'sha256'"):
+        parse_project_policy_hash_pin(
+            {"hash_algorithm": "sha256", "hash": f"{algorithm}:" + "c" * length}
+        )
+    with pytest.raises(ProjectPolicyConfigError, match="prefix 'md5' is not supported"):
+        parse_project_policy_hash_pin({"hash": "md5:" + "c" * 32})

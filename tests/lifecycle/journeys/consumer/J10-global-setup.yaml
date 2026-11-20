@@ -53,4 +53,4 @@ steps:
     files: []
     key_lines:
       - "[+] p-skill@lifecycle-market - found in apm.yml (as lifecycle/p-skill)"
-      - "[i] Cleaned 2 stale deployed files for lifecycle/p-skill"
+      - "[i] Cleaned 1 stale deployed path for lifecycle/p-skill"

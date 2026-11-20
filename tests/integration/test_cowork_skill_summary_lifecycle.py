@@ -22,9 +22,11 @@ from tests.integration._policy_scope_kit import (
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-OWN-skills-root-derivation"),
 ]
 
 

@@ -50,8 +50,10 @@ def run(ctx: InstallContext) -> None:
     if ctx.scope is not InstallScope.PROJECT:
         return
 
-    # Skip if there is no local content (current or previous).
-    if not ctx.local_deployed_files and not ctx.old_local_deployed:
+    # Skip if there is no local content (current or previous). Root hooks that
+    # only merge into shared configs still need a lockfile so that
+    # `apm audit --ci` replays them (#4033).
+    if not ctx.local_deployed_files and not ctx.old_local_deployed and not ctx.local_hooks_merged:
         return
 
     diagnostics = ctx.diagnostics
@@ -83,8 +85,11 @@ def run(ctx: InstallContext) -> None:
     # on-disk stale cleanup, so a multi-target deploy keeps content-integrity
     # coverage for every committed deploy target (issue #1716).
     from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+    from apm_cli.install.phases.cleanup import kept_prior_values
     from apm_cli.install.phases.targets import declared_target_profiles
 
+    # Members this run skipped keep their prior rows and hashes (#4230).
+    _kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))
     _current_files = sorted(ctx.local_deployed_files)
     _current_hashes = _hash_deployed(
         ctx.local_deployed_files,
@@ -125,6 +130,7 @@ def run(ctx: InstallContext) -> None:
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
         current_run_trusted=not _local_had_errors,
+        retained_values=frozenset(_kept),
         include_ledger=True,
         user_scope=is_user_scope(getattr(ctx, "scope", None)),
     )

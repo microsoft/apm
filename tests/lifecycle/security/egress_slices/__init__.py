@@ -27,7 +27,7 @@ class EgressRow:
     # False when the host is served anonymously and APM may not send it.
     presented: bool = True
     smoke: bool = False
-    # Strict expected failure: "S-pending (neutral issue to follow): <phrase>".
+    # Strict expected failure: "#<open issue> <neutral phrase>".
     xfail: str = ""
     # Exit(s) the decisive command may end with (a refused anonymous request is 1).
     exit: int | tuple[int, ...] = 0

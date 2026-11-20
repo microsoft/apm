@@ -13,6 +13,7 @@ import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
+from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 
@@ -702,15 +704,8 @@ def test_bin_plugin_deploys_inside_its_native_root_once_approved_and_trusted(
     assert not scenario.trap.exists()
 
 
-def test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust(
-    tmp_path: Path, apm_engine_command: tuple[str, ...]
-) -> None:
-    """#4270: a plugin with root skills/ and bin/ keeps its plugin type on the cached pass.
-
-    The install after ``apm approve`` reads the cached source; it must route the
-    plugin natively, as the fresh fetch did, so bin/ lands inside the plugin root
-    and no loose skill reaches ~/.claude/skills.
-    """
+def _skills_bin_plugin(tmp_path: Path, apm_engine_command: tuple[str, ...]) -> SimpleNamespace:
+    """A user-scope consumer of one marketplace plugin with root skills/ and bin/."""
     scenario = _native_scenario(tmp_path)
     isolated, env = scenario.isolated, scenario.env
     factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
@@ -747,6 +742,35 @@ def test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust(
         assert result.returncode == 0, result.stdout + result.stderr
         return " ".join((result.stdout + result.stderr).split())
 
+    return SimpleNamespace(
+        scenario=scenario,
+        isolated=isolated,
+        env=env,
+        runner=runner,
+        run=run,
+        mkt=mkt,
+        package=package,
+    )
+
+
+def test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """#4270: a plugin with root skills/ and bin/ keeps its plugin type on the cached pass.
+
+    The install after ``apm approve`` reads the cached source; it must route the
+    plugin natively, as the fresh fetch did, so bin/ lands inside the plugin root
+    and no loose skill reaches ~/.claude/skills.
+    """
+    world = _skills_bin_plugin(tmp_path, apm_engine_command)
+    scenario, isolated, run, mkt, package = (
+        world.scenario,
+        world.isolated,
+        world.run,
+        world.mkt,
+        world.package,
+    )
+
     output = run("install", "--global")
     assert f"Parked native plugin {package}: not approved" in output
     assert not (scenario.plugins / "skills-bin-tool").exists()
@@ -768,3 +792,133 @@ def test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust(
     assert entry["package_type"] == "marketplace_plugin"
     assert entry["native_plugin"]["root"] == ".agents/plugins/skills-bin-tool"
     assert not scenario.trap.exists()
+
+
+def test_native_claude_install_with_mcp_keeps_the_lockfile_equal_to_disk(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Native registration and MCP reconciliation each commit what reached disk (I1)."""
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("native-with-mcp")
+    shutil.copytree(_RUNTIME_ROOT_FIXTURE, repository.worktree / "plugins" / "alpha")
+    revision = factory.commit(repository, message="native plugin fixture").sha
+    dependency = "fixture/native-with-mcp"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "native-consumer",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {
+            "apm": [{"git": dependency, "ref": revision, "path": "plugins/alpha"}],
+            "mcp": [
+                {"name": "native-srv", "registry": False, "transport": "stdio", "command": "srv"}
+            ],
+        },
+        "executables": {"allow": {}},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    def run(*args: str, cwd: Path = isolated.work_root) -> None:
+        result = runner.run(args, scenario_id="native-with-mcp", cwd=cwd, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    run("install", "--global", "--target", "claude", "--only", "apm")
+    run("approve", "--all", cwd=isolated.config_root)
+    run("install", "--global", "--target", "claude")
+
+    lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+    assert lock["mcp_servers"] == ["native-srv"], lock
+    assert [dep["native_plugin"]["root"] for dep in lock["dependencies"]] == [
+        ".agents/plugins/apm-hook-context"
+    ], lock
+    run("audit", "--ci", cwd=isolated.config_root)
+
+
+@pytest.mark.skipif(not INOTIFY_AVAILABLE, reason="counting lockfile writes requires Linux inotify")
+@pytest.mark.xfail(
+    strict=True,
+    reason="#4329: native Claude registration commits the lockfile before MCP/LSP reconciliation",
+)
+def test_native_claude_install_with_mcp_writes_the_lockfile_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An install that registers a native Claude plugin and an MCP server writes once."""
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("native-with-mcp")
+    shutil.copytree(_RUNTIME_ROOT_FIXTURE, repository.worktree / "plugins" / "alpha")
+    revision = factory.commit(repository, message="native plugin fixture").sha
+    dependency = "fixture/native-with-mcp"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "native-consumer",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {
+            "apm": [{"git": dependency, "ref": revision, "path": "plugins/alpha"}],
+            "mcp": [
+                {"name": "native-srv", "registry": False, "transport": "stdio", "command": "srv"}
+            ],
+        },
+        "executables": {"allow": {}},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    def run(*args: str, cwd: Path = isolated.work_root) -> None:
+        result = runner.run(args, scenario_id="native-with-mcp", cwd=cwd, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    run("install", "--global", "--target", "claude", "--only", "apm")
+    run("approve", "--all", cwd=isolated.config_root)
+    with count_lockfile_writes(isolated.config_root) as counter:
+        run("install", "--global", "--target", "claude")
+
+    assert scenario.plugins.is_dir()
+    assert counter.writes == 1, counter.events
+
+
+def test_frozen_install_verifies_native_plugin_files_like_audit(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """#4225: install --frozen -g refuses a changed native plugin root, as audit --ci does.
+
+    Neither command writes; the refusal names the plugin root, both digests and
+    the restore command. A plain install restores the locked bytes and says so.
+    """
+    world = _skills_bin_plugin(tmp_path, apm_engine_command)
+    isolated, run = world.isolated, world.run
+    run("install", "--global")
+    run("approve", "--all", cwd=isolated.config_root)
+    run("install", "--global", "--trust-bin")
+    tool = world.scenario.plugins / "skills-bin-tool" / "bin/tool"
+    lock = isolated.config_root / "apm.lock.yaml"
+    locked_tool, locked = tool.read_bytes(), lock.read_bytes()
+    tool.write_text("#!/bin/sh\necho CHANGED\n", encoding="ascii")
+    changed = tool.read_bytes()
+
+    def refused(*args: str, cwd: Path) -> str:
+        result = world.runner.run(args, scenario_id="native-root-changed", cwd=cwd, env=world.env)
+        assert result.returncode == 1, result.stdout + result.stderr
+        return " ".join((result.stdout + result.stderr).split())
+
+    audit = refused("audit", "--ci", cwd=isolated.config_root)
+    assert "Native Claude plugin 'skills-bin-tool' deployed copy differs" in audit, audit
+    frozen = refused("install", "--frozen", "--global", cwd=isolated.work_root)
+    assert "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml" in frozen
+    assert "native plugin 'skills-bin-tool' (.agents/plugins/skills-bin-tool)" in frozen, frozen
+    assert "apm install --global" in frozen, frozen
+    assert "Deployed files verified" not in frozen, frozen
+    assert "Parked native plugin" not in frozen, frozen
+    assert tool.read_bytes() == changed
+    assert lock.read_bytes() == locked
+
+    restored = run("install", "--global", "--trust-bin")
+    assert "Restored ~/.agents/plugins/skills-bin-tool" in restored, restored
+    assert tool.read_bytes() == locked_tool
+    run("install", "--frozen", "--global", "--trust-bin")
+    assert lock.read_bytes() == locked

@@ -107,6 +107,13 @@ def either_sentence(first: Remediation, *alternatives: Remediation) -> str:
     return _sentence(either(first, *alternatives))
 
 
+def kept_file_message(
+    path: str, reason: str, remedy: Remediation, *alternatives: Remediation
+) -> str:
+    """Render the one kept-file shape: ``Kept <path>: <reason>. <Remedy sentence>``."""
+    return f"Kept {path}: {reason}. {either_sentence(remedy, *alternatives)}"
+
+
 _CATALOG: dict[str, Remediation] = {}
 
 
@@ -161,8 +168,8 @@ RESTORE_EDITED = _entry(
 RESTORE_EDITED_OVERWRITE = _entry(
     "drift-restore-edited-overwrite",
     "apm install",
-    "restore the locked content (a plain 'apm install' also overwrites these edited "
-    "instructions, agents, prompts, commands and rules)",
+    "restore the locked content (a plain 'apm install' keeps these edited "
+    "instructions, agents, prompts, commands and rules, and exits 1)",
     before="delete {subject}",
     then="commit the result",
 )
@@ -173,6 +180,9 @@ RESTORE_EDITED_SKILL = _entry(
     before="delete {subject}",
     then="commit the result",
 )
+# A managed file install kept because it may hold local edits (#4360, #4504).
+KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+KEPT_FILE_OVERWRITE = _entry("kept-file-overwrite", "apm install --force", "overwrite it")
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
     "apm install --force",
@@ -327,6 +337,19 @@ AUDIT_TARGET_FLAG_DISABLED = _entry(
     "apm experimental enable {flag}",
     "audit this installation",
 )
+UNINSTALL_EVIDENCE_REINSTALL = _entry(
+    "uninstall-evidence-reinstall",
+    "apm install",
+    "re-establish deployment evidence (once, with access to the package source)",
+    before="move aside any listed file that holds your edits",
+    then="rerun '{uninstall}'",
+)
+UNINSTALL_EVIDENCE_REMOVE = _entry(
+    "uninstall-evidence-remove",
+    "apm uninstall",
+    "finish the uninstall",
+    before="if the source is unreachable, move each listed file aside or delete it",
+)
 # -- end W2 integration --
 # -- W2 marketplace --
 MARKETPLACE_DUPLICATE_ALIAS = _entry(
@@ -409,6 +432,18 @@ MARKETPLACE_REGISTER_MANUAL = _entry(
     "marketplace-register-manual",
     "apm marketplace add <source> --name <name>",
     "register one manually",
+)
+MARKETPLACE_ORIGIN_READD = _entry(
+    "marketplace-origin-readd", "apm marketplace add <source>", "re-add the marketplace"
+)
+MARKETPLACE_ORIGIN_REINSTALL = _entry(
+    "marketplace-origin-reinstall", "apm install", "record it again"
+)
+MARKETPLACE_REF_SWAP_ACCEPT = _entry(
+    "marketplace-ref-swap-accept",
+    "apm update",
+    "accept the new ref (pin '{key}')",
+    before="if the publisher moved this version on purpose",
 )
 # -- end W2 marketplace --
 # -- W2 bundle --
@@ -501,6 +536,18 @@ LOCKFILE_UNREADABLE = _entry(
     "apm install",
     "regenerate apm.lock.yaml",
     before="delete or fix {path}",
+)
+# A lockfile written by a newer APM: regenerate it, or upgrade APM (req-lk-004).
+LOCKFILE_VERSION_UNSUPPORTED = _entry(
+    "lockfile-version-unsupported",
+    "apm lock",
+    "regenerate it from apm.yml at a supported version",
+    before="move {path} aside",
+)
+LOCKFILE_VERSION_UPGRADE_APM = _entry(
+    "lockfile-version-upgrade-apm",
+    "apm self-update",
+    "install an APM release that reads lockfile version {version}",
 )
 LOCKFILE_RECORDS_INCONSISTENT = _entry(
     "lockfile-records-inconsistent",
@@ -780,6 +827,19 @@ REGISTRY_PACKAGE_INSTALL = _entry(
 PROJECT_MANIFEST_BOOTSTRAP = _entry(
     "project-manifest-bootstrap", "apm install <org/repo>", "create apm.yml with that package"
 )
+UPDATE_UNDECLARED_PACKAGE = _entry("update-undeclared-package", "apm install {package}", "add it")
+BUNDLE_EXECUTABLES_ALLOW = _entry(
+    "bundle-executables-allow",
+    "apm install <bundle>",
+    "deploy its executables",
+    before=(
+        "review each bundle, run its approve command (the same grant as its key under "
+        "executables.allow in {manifest})"
+    ),
+)
+LOCKFILE_UNMANAGED_PATHS = _entry(
+    "lockfile-unmanaged-paths", "apm install", "repair it", then="retry"
+)
 
 # -- end commands/** (W1) -----------------------------------------------------
 
@@ -926,6 +986,9 @@ LLM_TLS_BOOTSTRAP_MISSING = _entry(
     "install the OS-trust bootstrap into the llm venv",
     before="use Python 3.10+ or set PIP_CERT to your proxy CA bundle",
 )
+CLAUDE_NATIVE_PLUGIN_DRIFT = _entry(
+    "claude-native-plugin-drift", "apm install --global", "restore it"
+)
 # -- end W3 plugins-runtime --
 # -- W3 core-models --
 # Advice printed by core/, models/, security/, utils/, output/,
@@ -1066,6 +1129,12 @@ FROZEN_LOCAL_CONTENT_CHANGED = _entry(
     "apm install",
     "accept and record the local content change (without --frozen)",
 )
+FROZEN_TARGET_DROPPED = _entry(
+    "frozen-target-dropped",
+    "apm install",
+    f"retire the dropped target and update apm.lock.yaml ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
+)
 FROZEN_LOCKFILE_WITHHELD = _entry(
     "frozen-lockfile-withheld",
     "apm install",
@@ -1076,7 +1145,12 @@ LOCAL_EDITS_EXPORT = _entry(
     "local-edits-export", "apm export-patch", "export the local edits as upstream patches"
 )
 RENDERING_CHANGED = _entry(
-    "rendering-changed", "apm install", "adopt the new rendering", then="commit the result"
+    "rendering-changed",
+    "apm install",
+    "adopt the new rendering",
+    # A lockfile hash does not prove APM wrote the files, so install keeps them (#4360).
+    before="move the files aside",
+    then="commit the result",
 )
 CONTENT_HASH_UNVERIFIED = _entry(
     "content-hash-unverified",
@@ -1122,6 +1196,44 @@ FROZEN_HOOK_PINS_STALE = _entry(
     "apm install",
     "retire the hooks their approval no longer admits (without --frozen)",
     then="commit apm.yml and apm.lock.yaml",
+)
+# The way out of an org-enforced fail-closed block; never advertise a bypass.
+# {source} binds to " (<source>)" when discovery named the source it tried, else "".
+POLICY_FETCH_FAILURE_BLOCKED = _entry(
+    "policy-fetch-failure-blocked",
+    "apm policy status",
+    "check that the org policy source{source} is reachable",
+    then="retry, or ask your org admin",
+)
+FROZEN_KEPT_ADOPTED = _entry(
+    "frozen-kept-adopted",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="delete or move it aside if it is not yours to keep",
+)
+FROZEN_KEPT_EDITED = _entry(
+    "frozen-kept-edited",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="move it aside",
+)
+FROZEN_KEPT_UNREMOVABLE = _entry(
+    "frozen-kept-unremovable",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="delete it",
+)
+NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
+    "native-mcp-ownership-unrecorded",
+    "apm install",
+    "record the native MCP entries' ownership in apm.lock.yaml",
+    before="make each entry match its declaration or remove it",
+)
+FROZEN_EXEC_DECISIONS_STALE = _entry(
+    "frozen-exec-decisions-stale",
+    "apm install",
+    f"record the executables decisions the gate makes now ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
 )
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
@@ -1226,6 +1338,12 @@ NATIVE_PLUGIN_HASH_MISSING = _entry(
 )
 NATIVE_PLUGIN_CACHE_DIFFERS = _entry(
     "native-plugin-cache-differs", "apm install", "restore the package"
+)
+LOCAL_BUNDLE_EXECUTABLES_PARKED = _entry(
+    "local-bundle-executables-parked",
+    "apm approve --pending",
+    "list the approval key of each parked local bundle executable",
+    then="add it under executables.allow and reinstall the bundle",
 )
 # -- end W4 drift-trust --
 # -- W4 phases-targets --
@@ -1364,6 +1482,9 @@ CANVAS_SKIPPED_UNAPPROVED = _entry(
 )
 REPOSITORY_NOT_FOUND = _entry(
     "repository-not-found", "apm uninstall {package}", "remove it from apm.yml"
+)
+LOCAL_BUNDLE_UPDATE = _entry(
+    "local-bundle-update", "apm install <newer-bundle-file>", "update a bundle"
 )
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------

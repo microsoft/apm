@@ -2,9 +2,9 @@
 
 A dependency that ships one primitive plus a self-defined MCP server is the
 only content in the runtime's opt-in directory (``.claude/`` or
-``.opencode/``). Removing the dependency prunes that emptied directory before
-MCP cleanup runs; the server recorded for the runtime must still leave the
-project config while a user-authored server stays.
+``.opencode/``). Removing the dependency empties that directory, which stays
+in place as the user's opt-in (#4132); the server recorded for the runtime
+must still leave the project config while a user-authored server stays.
 """
 
 from __future__ import annotations
@@ -64,7 +64,8 @@ def test_recorded_server_leaves_config_after_opt_in_dir_is_pruned(
         chain.write_manifest([], targets=[target, "cursor"])
         chain.ok("install", "--no-policy", "--trust-transitive-mcp")
 
-    assert not (chain.project / opt_in).exists(), "fixture must exercise the pruned directory"
+    # The user's opt-in root survives cleanup even when emptied (#4132).
+    assert (chain.project / opt_in).is_dir()
     assert chain.servers(target) == {"mine": _USER[target]}
     assert chain.servers("cursor") == {}
     assert not chain.lock().get("mcp_servers")

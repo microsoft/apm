@@ -1400,7 +1400,23 @@ class TestRunBaselineChecks:
         )
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 11
+        # The exact baseline, in run order: a dropped or added check fails here.
+        assert [check.name for check in result.checks] == [
+            "lockfile-exists",
+            "ref-consistency",
+            "deployment-ledger-owners",
+            "deployed-files-present",
+            "no-orphaned-packages",
+            "lockfile-targets-current",
+            "skill-subset-consistency",
+            "config-consistency",
+            "native-mcp-ownership",
+            "content-integrity",
+            "local-bundle-hooks",
+            "hook-approval-pins",
+            "exec-status-current",
+            "includes-consent",
+        ]
 
     def test_mixed_pass_fail(self, tmp_path):
         # Ref mismatch (fail) + missing file (fail) + clean otherwise

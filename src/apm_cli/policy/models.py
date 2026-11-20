@@ -22,6 +22,7 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "deployment-ledger-owners": "apm.lock.yaml",
     "deployed-files-present": "apm.lock.yaml",
     "no-orphaned-packages": "apm.lock.yaml",
+    "lockfile-targets-current": "apm.lock.yaml",
     "config-consistency": "apm.lock.yaml",
     "content-integrity": "apm.lock.yaml",
     "dependency-allowlist": "apm.yml",

@@ -417,6 +417,11 @@ def run_ado_chain(
         _record_resolve_time_bearer_failure(resolver, host_info.host, attempts)
 
     def _attempt(step: str, attempt_ctx: AuthContext) -> tuple[bool, Any, AuthOutcome | None]:
+        if attempt_ctx.token:
+            # Name every source sent, in order, for the not-found diagnostic (#4322).
+            note = getattr(resolver, "note_credential_source_tried", None)
+            if note is not None:
+                note(host_info, attempt_ctx.source)
         try:
             value = operation(attempt_ctx.token, env_for(attempt_ctx))
             if isinstance(getattr(value, "status_code", None), int):

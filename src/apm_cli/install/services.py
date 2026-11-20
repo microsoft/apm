@@ -669,6 +669,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     _total_integrated += _skill_count
     _total_integrated += int(skill_result.bin_deployed)
     result["files_changed"] = _total_integrated
+    # Merged hook entries this package contributes, written or unchanged (#4033).
+    _hooks = _per_kind.get("hooks", {})
+    result["hooks_contributed"] = _hooks.get("files", 0) + _hooks.get("adopted", 0)
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
@@ -880,6 +883,7 @@ def integrate_local_bundle(
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
+    written_files: list[str] = []
     staged_files: list[str] = []
     staged_hashes: dict[str, str] = {}
     staged_fallback_hashes: dict[str, str] = {}
@@ -1116,6 +1120,7 @@ def integrate_local_bundle(
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
+            written_files.extend(() if dry_run or _staged else (record,))
             # Canonical ``sha256:<hex>`` claims, staged ones included (#3718); IM4: a
             # real deploy hashes LF-normalized disk bytes, a dry run previews them.
             (staged_hashes if _staged else deployed_hashes)[record] = (
@@ -1143,12 +1148,14 @@ def integrate_local_bundle(
         logger=logger,
     )
     deployed_files.extend(record for record in hook_result.scripts if record not in deployed_hashes)
+    written_files.extend(hook_result.written)
     deployed_hashes.update(hook_result.script_hashes)
     skipped += hook_result.skipped
 
     return {
         "deployed_files": deployed_files,
         "deployed_file_hashes": deployed_hashes,
+        "written_files": written_files,
         "staged_files": staged_files,
         "staged_file_hashes": staged_hashes,
         "staged_file_fallback_hashes": staged_fallback_hashes,

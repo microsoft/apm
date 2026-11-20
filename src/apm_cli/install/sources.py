@@ -137,6 +137,7 @@ class LocalDependencySource(DependencySource):
             InstalledPackage,
             extensions_from_resolved_package,
         )
+        from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
         from apm_cli.install.phases.local_content import _copy_local_package
         from apm_cli.install.source_helpers import package_digests
         from apm_cli.models.apm_package import (
@@ -155,39 +156,24 @@ class LocalDependencySource(DependencySource):
         diagnostics = ctx.diagnostics
         logger = ctx.logger
 
-        # User scope: relative paths are project-relative and have no
-        # meaningful root outside a project, so reject them.  Absolute
-        # paths are unambiguous and supported.
-        if ctx.scope is InstallScope.USER:
-            local_path_str = dep_ref.local_path or ""
-            if not local_path_str or not Path(local_path_str).expanduser().is_absolute():
-                diagnostics.warn(
-                    f"Skipped local package '{local_path_str}' "
-                    "-- relative local paths are not supported at user scope "
-                    "(--global). Use an absolute path or a remote reference "
-                    "(owner/repo) instead.",
-                    package=local_path_str,
-                )
-                if logger:
-                    logger.verbose_detail(
-                        f"  Skipping {local_path_str} (relative local paths "
-                        "are project-relative and have no root at user scope)"
-                    )
-                return None
-
-        # Determine the anchor for relative ``local_path`` (#857). For
-        # direct deps from the root project this is ``ctx.source_root``
-        # (which equals ``ctx.project_root`` unless ``apm install --root``
-        # redirects writes -- then it stays at $PWD).  For transitive
-        # deps declared inside another local package, the parent's
-        # source directory was captured during resolve via
-        # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
-        # has nothing to do.
-        base_dir = (
-            ctx.source_root
-            if dep_ref.replacement is not None
-            else getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
+        # The declaring package anchors relative paths (#857, #4153); resolve
+        # captured it in ``ctx.dep_base_dirs``.
+        base_dir = local_dep_base_dir(
+            dep_ref.local_path or "",
+            declaring_dir=(
+                None
+                if dep_ref.replacement is not None
+                else getattr(ctx, "dep_base_dirs", {}).get(dep_key)
+            ),
+            source_root=ctx.source_root,
+            user_scope=ctx.scope is InstallScope.USER,
         )
+        if base_dir is None:
+            diagnostics.error(
+                f"{dep_ref.local_path} -- {USER_SCOPE_RELATIVE_PATH_ERROR}",
+                package=dep_ref.local_path,
+            )
+            return None
         original_src = Path(dep_ref.local_path).expanduser()
         if not original_src.is_absolute():
             original_src = (base_dir / original_src).resolve()
@@ -664,6 +650,7 @@ class FreshDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.drift import build_download_ref
+        from apm_cli.install.transaction import stage_existing_copy
         from apm_cli.utils.path_security import safe_rmtree
 
         ctx = self.ctx
@@ -680,11 +667,8 @@ class FreshDependencySource(DependencySource):
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
-            # Workstream B (#1116): per-dep progress is owned by the
-            # shared InstallTui ``ctx.tui``; legacy local Progress is
-            # only wired when integrate is invoked outside the install
-            # pipeline (no callers do this today, but the parameter is
-            # kept for back-compat).
+            # Workstream B (#1116): the shared InstallTui ``ctx.tui`` owns per-dep
+            # progress; legacy local Progress is kept only for back-compat.
             task_id = None
             if progress is not None:
                 task_id = progress.add_task(
@@ -701,6 +685,9 @@ class FreshDependencySource(DependencySource):
                 ref_changed=ref_changed,
             )
 
+            stage_existing_copy(
+                ctx, install_path, dep_locked_chk, skip=dep_key in ctx.pre_download_results
+            )
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":

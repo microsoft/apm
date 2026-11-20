@@ -19,7 +19,7 @@ Journey YAML schema (``schema: 1``)
       project: empty             # keep (default) | empty: drop the world's apm.yml
       git: init                  # none (default) | init: git init the project
       policy: allow              # org policy variant (world.scopes.use_policy)
-      setup: [<line>]            # command lines run unchecked before step 1
+      setup: [<line>]            # command lines run before step 1; each must exit 0
       env: {K: V}                # added to the world env for the whole journey
     allow_repeat: []             # O4: lines allowed to print twice within one command
     steps:                       # exactly the index's steps, numbered 1..N
@@ -83,6 +83,7 @@ lifecycle_smoke"``. Goldens: ``goldens/<J>/<nn>.txt``, written by
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import fnmatch
 import importlib
@@ -115,6 +116,7 @@ from tests.lifecycle.oracles import (
     operation_for,
 )
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
+from tests.lifecycle.world.clone import remove_tree
 from tests.lifecycle.world.scopes import use_policy
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, ArtifactSnapshotSet
@@ -422,7 +424,11 @@ class JourneyRun:
         if world.get("policy"):
             use_policy(self.world, world["policy"])
         for line in world.get("setup") or ():
-            self._execute(line)
+            # A failing setup line is a world fault; never let it surface later as a product step.
+            cmd = self._execute(line)
+            assert cmd.result.returncode == 0, (
+                f"setup {line!r} -> {cmd.result.returncode}\n{cmd.stdout}\n{cmd.stderr}"
+            )
 
     def replay(self, other: dict) -> None:
         """Run another journey's steps as setup: exit codes only, no oracles."""
@@ -441,7 +447,7 @@ class JourneyRun:
     def _prepare(self, step: dict) -> None:
         if step.get("cold_cache"):
             cache = Path(self.world.env["APM_CACHE_DIR"])
-            shutil.rmtree(cache, ignore_errors=True)
+            remove_tree(cache)
             cache.mkdir(parents=True)
         for edit in step.get("edit") or ():
             if "serve" in edit:
@@ -483,7 +489,7 @@ class JourneyRun:
                 (work / relative).parent.mkdir(parents=True, exist_ok=True)
                 (work / relative).write_text(text, encoding="utf-8")
             subprocess.run(command, env=self.world.env, check=True, capture_output=True, timeout=60)
-        shutil.rmtree(work)
+        remove_tree(work)
 
     def close(self) -> None:
         _unreachable(self.world.services).clear()
@@ -992,7 +998,8 @@ class JourneyRun:
                     found.append(f"after the advice {line!r} still exits {result.returncode}")
                 facts.record("O8", Evidence(exit=0), result)
         finally:
-            shutil.rmtree(copy, ignore_errors=True)
+            with contextlib.suppress(OSError):
+                remove_tree(copy)
         return found
 
     def _remediate(self, world, actions, text: str) -> list[str]:
@@ -1387,12 +1394,18 @@ def journey_witnesses() -> tuple[dict[str, str], dict[str, str]]:
     return dict(sorted(required.items())), dict(sorted(known.items()))
 
 
+# Strict Windows-only expected failures of whole journeys, each tracked by an issue.
+_WINDOWS_KNOWN: dict[str, str] = {}
+
+
 def _params() -> list:
     golden = {j["id"] for j in load_index()["journeys"] if j.get("golden")}
     params = []
     for path in journey_files():
         jid = load_journey(path)["id"]
         marks = [pytest.mark.lifecycle_smoke] if jid in golden else []
+        if jid in _WINDOWS_KNOWN and os.name == "nt":
+            marks.append(pytest.mark.xfail(strict=True, reason=_WINDOWS_KNOWN[jid]))
         params.append(pytest.param(path, id=jid, marks=marks))
     return params
 

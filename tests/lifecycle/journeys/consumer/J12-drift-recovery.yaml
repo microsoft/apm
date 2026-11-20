@@ -67,8 +67,3 @@ steps:
       - "[+]   Cleaned: .agents/skills/p-skill/SKILL.md"
       - "check(s) passed"
 known_cells:
-  - id: J12-plain-audit-drift-error-line-exits-0
-    law: O5
-    tracking: "#4191"
-    step: 1
-    match: "'apm audit' printed '\\[x\\] Drift detected: 1 file\\(s\\)' but exited 0"

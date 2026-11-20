@@ -25,7 +25,12 @@ from apm_cli.core.remediation import (
     USER_PACKAGE_MATERIALIZATION_MISSING,
 )
 from apm_cli.core.scope import manifest_file
-from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+from apm_cli.deps.lockfile import (
+    LockFile,
+    LockfileFormatError,
+    UnsupportedLockfileVersionError,
+    get_lockfile_path,
+)
 from apm_cli.install.drift import (
     CheckLogger,
     ReplayConfig,
@@ -112,7 +117,11 @@ def prepare_ci_audit_replay(
     except InvalidManifestError as exc:
         # Reported as a failed check, so JSON/SARIF output still renders.
         raise CiAuditReplayError(str(exc)) from exc
-    lockfile = LockFile.read(lockfile_path)
+    try:
+        lockfile = LockFile.read(lockfile_path)
+    except UnsupportedLockfileVersionError as exc:
+        # Reported as a failed check that names both remedies (#4233).
+        raise CiAuditReplayError(str(exc)) from exc
     if lockfile is None:
         raise CiAuditReplayError(f"lockfile at {lockfile_path} is empty or unreadable")
 
@@ -238,10 +247,12 @@ def resolve_ci_audit_materialization(
             _rich_warning(f"{line} Verifying from the locked source.", symbol="warning", err=True)
     if get_workspace_deploy_root(project_root) != project_root.resolve():
         if warm:
+            from apm_cli.core.cache_drift import package_cache_drift
+
             return CiAuditMaterialization(
-                error=(
-                    f"package copies in {project_root / APM_MODULES_DIR} do not match "
-                    f"apm.lock.yaml; {USER_PACKAGE_COPIES_STALE.clause()}"
+                error=package_cache_drift(
+                    f"Package copies in {project_root / APM_MODULES_DIR}",
+                    USER_PACKAGE_COPIES_STALE.clause(),
                 )
             )
         try:

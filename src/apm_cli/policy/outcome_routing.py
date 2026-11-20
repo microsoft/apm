@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import POLICY_FETCH_FAILURE_BLOCKED
 from apm_cli.install.errors import PolicyViolationError
 
 if TYPE_CHECKING:  # pragma: no cover - type-checking only
@@ -52,12 +53,15 @@ POLICY_DISCOVERY_OUTCOMES = frozenset(
         "empty",
         "hash_mismatch",
         "incomplete_chain",
+        "ambiguous_git_remote",
     }
 )
 
 
 # Genuine resolution failures with no policy usable by approval fallback.
 POLICY_HASH_MISMATCH_OUTCOME = "hash_mismatch"
+# Several git remotes and no ``origin``: discovery fails closed (req-pl-012).
+AMBIGUOUS_GIT_REMOTE_OUTCOME = "ambiguous_git_remote"
 POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
     {
         "cache_miss_fetch_fail",
@@ -93,16 +97,11 @@ _OUTCOME_ROUTES: dict[str, str] = {
     "garbage_response": _FETCH_FAILURE_DEFAULT,
     "hash_mismatch": _ALWAYS_BLOCK,
     "incomplete_chain": _ALWAYS_BLOCK,
+    "ambiguous_git_remote": _ALWAYS_BLOCK,
 }
 
 if set(_OUTCOME_ROUTES) != POLICY_DISCOVERY_OUTCOMES:  # pragma: no cover - import-time guard
     raise RuntimeError("every policy-discovery outcome needs exactly one route")
-
-# The way out of an org-enforced fail-closed block; never advertise a bypass.
-_FETCH_FAILURE_BLOCK_REMEDY = (
-    "Check that the org policy source is reachable (apm policy status) "
-    "and retry, or ask your org admin."
-)
 
 
 @dataclass(frozen=True)
@@ -168,14 +167,23 @@ def classify_discovery_outcome(
         reason = None
         if fetch_failure_default == "block":
             hint = getattr(fetch_result, "discovery_hint", None)
+            err_text = (
+                getattr(fetch_result, "error", None)
+                or getattr(fetch_result, "fetch_error", None)
+                or outcome
+            )
+            cause = outcome_cause(outcome, source, err_text)
             sentences = [
                 f"no enforceable org policy was resolved (outcome={outcome}) and "
                 "project apm.yml has policy.fetch_failure_default=block "
-                f"(source={source})"
+                f"(source={source})",
+                cause.rstrip("."),
             ]
             if hint:
                 sentences.append(hint.rstrip("."))
-            reason = ". ".join([*sentences, _FETCH_FAILURE_BLOCK_REMEDY])
+            named = f" ({source})" if source != "unknown" else ""
+            remedy = POLICY_FETCH_FAILURE_BLOCKED.bind(source=named).sentence()
+            reason = ". ".join([*sentences, remedy])
         return DiscoveryRoute(
             outcome,
             route,
@@ -197,9 +205,31 @@ def classify_discovery_outcome(
             f"org policy inheritance chain is incomplete (source={source}). "
             "Restore the unreachable parent policy before retrying."
         )
+    elif outcome == AMBIGUOUS_GIT_REMOTE_OUTCOME:
+        reason = getattr(fetch_result, "error", None) or "several git remotes and no 'origin'"
     else:
         reason = f"unrecognized policy discovery outcome {outcome!r} (source={source})"
     return DiscoveryRoute(outcome, _ALWAYS_BLOCK, None, block_reason=reason, unresolved=True)
+
+
+def outcome_cause(outcome: str, source: str | None, err_text: str | None) -> str:
+    """Why discovery resolved no usable policy, in the words every reader prints.
+
+    ``audit --ci`` prints it on its own line; a block under
+    ``fetch_failure_default=block`` appends it to the routed reason, so a
+    refusal always says why the org policy did not resolve (#1159).
+    """
+    src = source or "unknown"
+    if outcome == "no_git_remote":
+        return "Could not determine org from git remote"
+    if outcome == "absent":
+        return f"No org policy found at {src}"
+    if outcome == "empty":
+        return f"Org policy at {src} is present but empty"
+    # malformed / cache_miss_fetch_fail / garbage_response (and any
+    # `error` set on the result): preserve the legacy wording so existing
+    # consumers parsing the line keep working.
+    return f"Policy fetch failed: {err_text or outcome}"
 
 
 def route_discovery_outcome(
@@ -257,7 +287,10 @@ def route_discovery_outcome(
                 subgroup_scoped=fetch_result.subgroup_scoped,
                 chain=fetch_result.chain_sources,
             )
-        if route.report_miss:
+        # A fetch_failure_default block raises, and the exception (which
+        # carries any hint) is its only report: the miss wording ("proceeding
+        # without policy enforcement") would contradict it (#4180).
+        if route.report_miss and not (route.from_fetch_failure_default and raise_blocking_errors):
             miss: dict = {
                 "outcome": route.outcome,
                 "source": source,
@@ -273,6 +306,9 @@ def route_discovery_outcome(
             f"{blocked_label}: {route.block_reason}",
             policy_source=source or "unknown",
         )
+    if route.blocks and logger is not None:
+        # A dry run previews the block the real command applies (#4455).
+        logger.warning(f"Would be blocked by policy: {route.block_reason}")
     return policy
 
 

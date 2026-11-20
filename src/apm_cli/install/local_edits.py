@@ -26,11 +26,16 @@ _SELF_KEY = "."
 def install_keeps_edit(path: str) -> bool:
     """Whether a plain ``apm install`` keeps a local edit to managed *path* (RA-009).
 
-    The skill integrator refuses to overwrite a modified skill file, so an
-    edited skill survives a plain install. Every other primitive kind
-    (instructions, agents, prompts, commands, rules) is overwritten with the
-    locked content.
+    Every kind is kept: the skill integrator refuses to overwrite a modified
+    skill file, and a file-primitive integrator replaces an existing managed
+    file only with deployment evidence, which an edited file never has; it
+    keeps the file, names it and exits 1 (#4360).
     """
+    del path
+    return True
+
+
+def _is_skill(path: str) -> bool:
     return "skills" in PurePosixPath(path).parts
 
 
@@ -75,15 +80,15 @@ def edited_file_remediations(
     """Return the remediations that restore the locked content of edited *paths*.
 
     Delete-then-install restores every kind; the promise states what a plain
-    ``apm install`` does to that kind (RA-009): it overwrites edited
-    non-skill files and refuses to overwrite an edited skill. Files a local
+    ``apm install`` does to that kind (RA-009): it keeps an edited non-skill
+    file and exits 1 (#4360), and refuses to overwrite an edited skill. Files a local
     bundle deployed are only restored by reinstalling that bundle (#3994).
     """
     from apm_cli.core import remediation
 
     if bundle:
         return (remediation.RESTORE_BUNDLE_EDITED.bind(subject="the edited bundle files"),)
-    kinds = {install_keeps_edit(path) for path in paths}
+    kinds = {_is_skill(path) for path in paths}
     found: list[Remediation] = []
     if False in kinds:
         found.append(remediation.RESTORE_EDITED_OVERWRITE.bind(subject="the edited files"))

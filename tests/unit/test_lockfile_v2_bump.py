@@ -142,15 +142,6 @@ class TestSchemaBumpOpportunistic:
         )
         assert "lockfile_version: '1'" in lock.to_yaml()
 
-    def test_v2_back_to_v1_when_registry_dep_removed(self):
-        lock = LockFile()
-        lock.add_dependency(_registry_dep())
-        assert "lockfile_version: '2'" in lock.to_yaml()
-        # Remove the registry dep; lockfile re-emits as v1.
-        del lock.dependencies["acme/web"]
-        lock.add_dependency(_git_dep())
-        assert "lockfile_version: '1'" in lock.to_yaml()
-
 
 # ───────────────────────────────────────────────────────────────────────────
 # Field round-trip

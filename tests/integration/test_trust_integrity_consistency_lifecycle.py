@@ -243,10 +243,10 @@ def test_uninstall_survivor_rebuild_fails_closed_on_unverifiable_policy(
 
         text = output(result)
         assert "hash mismatch" in text.lower(), text
-        assert "integration cleanup is incomplete" in text, text
-        # The requested removal completes; the survivor's hooks are neither
-        # rebuilt nor re-admitted under the unverifiable policy.
-        assert lock_repo_urls(project) == {hooked.slug}
+        assert "no APM writes were made" in text, text
+        # The refusal comes before the first write (#4185): nothing is removed
+        # and the survivor's hooks are neither rebuilt nor re-admitted.
+        assert lock_repo_urls(project) == {hooked.slug, other.slug}
         assert file_digest(project / ".claude" / "settings.json") == settings_before
 
 
@@ -667,6 +667,34 @@ def test_revoked_bundle_grant_retires_its_hooks(
         assert _COPILOT_HOOK not in lock.get("local_deployed_files", []), lock
     if "--frozen" not in command:
         run_step(runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit")
+
+
+def test_changed_bundle_content_retires_its_approved_hooks(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    _world, runner, env, bundle, project = _bundle_hook_world(tmp_path, apm_binary_path)
+    before = load_yaml(project / "apm.lock.yaml").get("local_deployed_files") or []
+    assert any(path.endswith("/x.sh") for path in before), before
+    producer = bundle.parent.parent / "producer-changed"
+    shutil.copytree(_world.isolated.work_root / "hookpkg", producer)
+    write(producer / ".apm" / "hooks" / "scripts" / "x.sh", "#!/bin/sh\necho changed\n")
+    changed_out = tmp_path / "changed"
+    run_step(runner, ("pack", "-o", str(changed_out)), cwd=producer, env=env, step="repack")
+    changed = changed_out / "hookpkg-1.0.0"
+    assert _bundle_key(changed) != _bundle_key(bundle)
+
+    result = run_step(
+        runner, ("install", str(changed), "--no-policy"), cwd=project, env=env, step="changed"
+    )
+
+    assert not _hooks_deployed(project), output(result)
+    lock = load_yaml(project / "apm.lock.yaml")
+    deployed = lock.get("local_deployed_files") or []
+    assert not any(path.endswith("/x.sh") for path in deployed), lock
+    assert not any((project / path).exists() for path in before if path.endswith("/x.sh"))
+    assert "Retired hooks from local bundle 'hookpkg'" in output(result), output(result)
+    assert _bundle_key(changed) in output(result), output(result)
+    run_step(runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit")
 
 
 def test_copilot_bundle_hook_without_a_record_fails_closed(
@@ -1393,3 +1421,156 @@ def test_one_prune_retires_revoked_bundle_hooks_and_removes_an_orphan(
     lock = load_yaml(project / "apm.lock.yaml") or {}
     assert _COPILOT_HOOK not in (lock.get("local_deployed_files") or []), lock
     assert _COPILOT_HOOK not in {row.get("value") for row in lock.get("deployments") or []}, lock
+
+
+def _deny(project: Path, key: str) -> None:
+    manifest = load_yaml(project / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}, "deny": {key: {"hooks": True}}}
+    dump_yaml(manifest, project / "apm.yml")
+
+
+def _bundle_hook_residue(project: Path) -> list[str]:
+    """Every file under a harness root that is or registers the bundle hook script."""
+    residue = []
+    for root in (".claude", ".github"):
+        for path in sorted((project / root).rglob("*")):
+            if not path.is_file() or path.name == "apm-hooks.json":
+                continue
+            if path.name == "x.sh" or "scripts/x.sh" in path.read_text(encoding="utf-8"):
+                residue.append(path.relative_to(project).as_posix())
+    return residue
+
+
+def _lock_bundle_rows(project: Path) -> set[str]:
+    lock = load_yaml(project / "apm.lock.yaml") or {}
+    rows = set(lock.get("local_deployed_files") or [])
+    rows.update(row.get("value") for row in lock.get("deployments") or [])
+    return {row for row in rows if row and "/hooks/" in row}
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+@pytest.mark.parametrize("trigger", ["revoked", "bundle-deny", "org-deny-all"])
+def test_bundle_reinstall_retires_hooks_trust_no_longer_admits(
+    tmp_path: Path, apm_binary_path: Path, trigger: str, target: str
+) -> None:
+    """#4216: reinstalling a bundle re-evaluates the hooks it deployed (I4, I3, I7)."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_policy(_POLICY)
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
+        key = _bundle_key(bundle)
+        project = world.consumer(targets=(target,))
+        if target == "claude":
+            (project / ".claude").mkdir()
+        _allow(project, key)
+        result = run_step(runner, ("install", str(bundle)), cwd=project, env=env, step="granted")
+        assert _bundle_hook_residue(project), output(result)
+        assert _lock_bundle_rows(project), output(result)
+
+        if trigger == "revoked":
+            _revoke(project)
+        elif trigger == "bundle-deny":
+            _deny(project, key)
+        else:
+            world.publish_policy({**_POLICY, "executables": {"deny_all": True}})
+            world.clear_policy_cache()
+        result = run_step(runner, ("install", str(bundle)), cwd=project, env=env, step="reinstall")
+        text = " ".join(output(result).split())
+
+        assert _bundle_hook_residue(project) == [], text
+        assert _lock_bundle_rows(project) == set(), text
+        assert "Retired hooks from local bundle 'hookpkg'" in text, text
+        assert text.count("Retired hooks from local bundle") == 1, text
+
+        # Paired probe: install --frozen and audit --ci agree on the retired state.
+        frozen = runner.run(("install", "--frozen"), scenario_id="frozen", cwd=project, env=env)
+        audit = runner.run(("audit", "--ci"), scenario_id="audit", cwd=project, env=env)
+        assert (frozen.returncode, audit.returncode) == (0, 0), output(frozen) + output(audit)
+        assert _bundle_hook_residue(project) == []
+
+
+def test_frozen_and_audit_refuse_alike_a_git_row_without_content_hash_under_require_hashes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I3: with require_hashes, a git lock row without content_hash fails both readers.
+
+    ``apm install --frozen`` and ``apm audit --ci`` reach one verdict on the same
+    lockfile: both exit 1 and name the row, and neither writes the project,
+    the lockfile or ``apm_modules``.
+    """
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg = world.publish_package("pkg-a")
+    world.publish_policy({**_POLICY, "security": {"integrity": {"require_hashes": True}}})
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        project = world.consumer(dependencies=[f"{pkg.slug}#v1.0.0"])
+        run_step(runner, ("install",), cwd=project, env=env, step="install")
+        run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="audit-clean")
+        run_step(runner, ("install", "--frozen"), cwd=project, env=env, step="frozen-clean")
+
+        lock_path = project / "apm.lock.yaml"
+        lock = load_yaml(lock_path)
+        rows = [row for row in lock["dependencies"] if row["repo_url"] == pkg.slug]
+        assert len(rows) == 1 and rows[0].pop("content_hash"), rows
+        dump_yaml(lock, lock_path)
+        before = tree_snapshot(project)
+
+        audit = run_step(
+            runner, ("audit", "--ci"), cwd=project, env=env, step="audit-unhashed", expected=1
+        )
+        assert tree_snapshot(project) == before, "I5: audit --ci wrote"
+        frozen = run_step(
+            runner,
+            ("install", "--frozen"),
+            cwd=project,
+            env=env,
+            step="frozen-unhashed",
+            expected=1,
+        )
+        assert tree_snapshot(project) == before, "I7: refused frozen install wrote"
+
+    for result in (audit, frozen):
+        text = " ".join(output(result).split())
+        assert "require_hashes" in text, text
+        assert pkg.slug in text, text
+
+
+def test_frozen_and_audit_agree_on_a_git_row_without_content_hash_by_default(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I3: without require_hashes both readers accept the row alike (security.md defaults)."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg = world.publish_package("pkg-a")
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        project = world.consumer(dependencies=[f"{pkg.slug}#v1.0.0"])
+        run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="install")
+        lock_path = project / "apm.lock.yaml"
+        lock = load_yaml(lock_path)
+        rows = [row for row in lock["dependencies"] if row["repo_url"] == pkg.slug]
+        assert len(rows) == 1 and rows[0].pop("content_hash"), rows
+        dump_yaml(lock, lock_path)
+        before = tree_snapshot(project, exclude=(".git", "apm_modules"))
+
+        for args, step in (
+            (("audit", "--ci", "--no-policy"), "audit-unhashed"),
+            (("install", "--frozen", "--no-policy"), "frozen-unhashed"),
+        ):
+            result = run_step(runner, args, cwd=project, env=env, step=step)
+            assert tree_snapshot(project, exclude=(".git", "apm_modules")) == before, step
+            if step == "audit-unhashed":
+                # #4453: one advisory names the row and the knob that requires hashes.
+                advisory = [
+                    line for line in result.stderr.splitlines() if "without a content hash" in line
+                ]
+                assert len(advisory) == 1, result.stderr
+                text = " ".join(result.stderr.split())
+                assert f"verified by commit only: {pkg.slug}." in text, result.stderr
+                assert "security.integrity.require_hashes: true" in text, result.stderr

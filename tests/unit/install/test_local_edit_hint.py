@@ -25,7 +25,6 @@ from apm_cli.install.local_edits import (
     count_local_edits,
     is_upstream_package,
     local_edit_hint,
-    overwrite_notice,
     rendering_change_hint,
     unedited_modified_paths,
 )
@@ -225,9 +224,13 @@ def _hint_calls(logger: MagicMock) -> list[str]:
 class TestInstallPipelineHint:
     def test_project_install_shows_hint_once(self, tmp_path: Path) -> None:
         logger, counter = _run_pipeline(tmp_path, 3, scope=InstallScope.PROJECT)
-        assert _hint_calls(logger) == [
-            overwrite_notice([f".github/agents/a{i}.agent.md" for i in range(3)])
-        ]
+        # Install keeps every edit (#4360): no overwrite warning, one export hint.
+        assert _hint_calls(logger) == []
+        assert [
+            str(call.args[0])
+            for call in logger.info.call_args_list
+            if call.args and "apm export-patch" in str(call.args[0])
+        ] == [local_edit_hint(3, overwritten=0)]
         _, _, keys = counter.call_args.args
         assert set(keys) == {"org/pkg"}
 
@@ -269,7 +272,7 @@ class TestRenderingChangeIsNotALocalEdit:
     def test_drift_text_separates_edits_from_rendering_changes(self, tmp_path: Path) -> None:
         lock, findings = self._findings(tmp_path)
         out = render_drift_text(findings, lockfile=lock, project_root=tmp_path)
-        assert local_edit_hint(1) in out
+        assert local_edit_hint(1, overwritten=0) in out
         assert rendering_change_hint(1) in out
         assert rendering_change_hint(1).isascii()
 
@@ -284,5 +287,5 @@ class TestRenderingChangeIsNotALocalEdit:
     ) -> None:
         lock, findings = self._findings(tmp_path)
         out = render_drift_text(findings, lockfile=lock)
-        assert local_edit_hint(2) in out
+        assert local_edit_hint(2, overwritten=0) in out
         assert "renders them differently" not in out

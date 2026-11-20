@@ -50,16 +50,32 @@ def deployment_evidence(ctx: InstallContext) -> DeploymentEvidence:
     every install deletion path shares one evidence owner.
     """
     evidence = getattr(ctx, "deployment_evidence", None)
-    if not isinstance(evidence, DeploymentEvidence):
+    kept = getattr(ctx, "kept_deployed_values", frozenset())
+    if isinstance(evidence, DeploymentEvidence):
+        # Evidence may be built before integration finishes; the skip set is the run's latest.
+        evidence.retain(kept)
+    else:
         evidence = DeploymentEvidence.collect(
             ctx.project_root,
             user_scope=is_user_scope(getattr(ctx, "scope", None)),
             lockfile=ctx.existing_lockfile,
             lockfile_root=ctx.apm_dir,
             diagnostics=ctx.diagnostics,
+            kept=kept,
         )
         ctx.deployment_evidence = evidence
     return evidence
+
+
+def kept_prior_values(ctx: InstallContext, prior_files: list[str]) -> list[str]:
+    """Return prior lock values this run skipped, kept or refused (#4230).
+
+    The integrate phase's skip set reaches cleanup through one channel
+    (``ctx.kept_deployed_values`` -> ``DeploymentEvidence.kept``). Such a
+    value is never stale: it stays on disk and keeps its lock entry.
+    """
+    evidence = deployment_evidence(ctx)
+    return [path for path in prior_files if evidence.kept(path)]
 
 
 def run(ctx: InstallContext) -> None:
@@ -239,6 +255,14 @@ def _run_cleanup(
             if not prev_dep:
                 continue  # new package this install -- nothing stale yet
             stale = set(detect_stale_files(prev_dep.deployed_files, new_deployed))
+            kept = kept_prior_values(ctx, prev_dep.deployed_files)
+            if kept:
+                stale -= set(kept)
+                new_deployed.extend(path for path in kept if path not in new_deployed)
+                package_cleanup_retained[dep_key] = {
+                    **package_cleanup_retained.get(dep_key, {}),
+                    **{path: prev_dep.deployed_file_hashes.get(path) for path in kept},
+                }
             if not stale:
                 continue
 
@@ -283,7 +307,8 @@ def _run_cleanup(
                 path for path in cleanup_result.retained if path not in new_deployed
             )
             if cleanup_result.retained:
-                package_cleanup_retained[dep_key] = {
+                # Merge: integrate may already keep this package's unproven files (#4360).
+                package_cleanup_retained[dep_key] = package_cleanup_retained.get(dep_key, {}) | {
                     path: prev_dep.deployed_file_hashes.get(path)
                     for path in cleanup_result.retained
                 }
