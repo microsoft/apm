@@ -236,8 +236,9 @@ def test_each_world_starts_with_an_empty_egress_log(lifecycle_world: World) -> N
 
 # The Codex native plugin's post-approval install at user scope runs the real
 # Codex CLI. The world traps codex (exit 91), so this one cell puts the host's
-# QUALIFIED codex ahead of the trap; without one it is skipped locally and fails
-# under CI or APM_REQUIRE_CODEX, so CI never silently loses the cell (#4154).
+# QUALIFIED codex ahead of the trap. Without one the cell is skipped with the
+# named reason, except under APM_REQUIRE_CODEX: the one CI job that provisions
+# Codex sets it, so that job fails loudly instead of losing the cell (#4154).
 _CODEX_CELL = ("p-native-codex", "user")
 
 
@@ -266,7 +267,7 @@ def _use_qualified_codex(world: World) -> None:
     """Put the host's qualified codex ahead of the world trap for this cell only."""
     codex, reason = qualified_codex(os.environ.get("PATH"))
     if codex is None:
-        if os.environ.get("CI") or os.environ.get("APM_REQUIRE_CODEX"):
+        if os.environ.get("APM_REQUIRE_CODEX"):
             pytest.fail(reason)
         pytest.skip(reason)
     qualified = world.root / "qualified-codex"
@@ -1032,14 +1033,14 @@ def test_qualified_codex_matches_production_qualification(
         assert "reports 'codex-cli" in reason or "exited 3" in reason, reason
 
 
-def test_missing_codex_fails_the_cell_under_ci(tmp_path: Path, monkeypatch) -> None:
-    """Under CI a runner without a qualified codex fails the cell instead of skipping."""
+def test_missing_codex_fails_the_cell_only_when_required(tmp_path: Path, monkeypatch) -> None:
+    """APM_REQUIRE_CODEX fails a runner without a qualified codex; elsewhere it skips."""
     monkeypatch.setenv("PATH", str(tmp_path))
-    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("APM_REQUIRE_CODEX", "1")
     world = MagicMock(root=tmp_path, env={"PATH": str(tmp_path)})
     with pytest.raises(pytest.fail.Exception, match=r"none found"):
         _use_qualified_codex(world)
-    monkeypatch.delenv("CI")
-    monkeypatch.delenv("APM_REQUIRE_CODEX", raising=False)
+    monkeypatch.delenv("APM_REQUIRE_CODEX")
+    monkeypatch.setenv("CI", "true")
     with pytest.raises(pytest.skip.Exception, match=r"none found"):
         _use_qualified_codex(world)
