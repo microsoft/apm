@@ -14,8 +14,8 @@ import pytest
 
 import apm_cli
 from scripts import windows_native_symlink_probe_entry as probe
-from tests.unit.cache.test_git_symlink_config import _git
-from tests.unit.cache.test_git_symlink_config import config_env as config_env
+from tests.integration.test_git_symlink_config import _git
+from tests.integration.test_git_symlink_config import config_env as config_env
 
 pytestmark = pytest.mark.component
 
@@ -281,7 +281,7 @@ def test_phase_uses_pinned_python_and_inspects_actual_result(
     args = command.call_args.args[0]
     assert args[:4] == [sys.executable, "-B", "-m", "pytest"]
     assert args[-1] == probe.NATIVE_NODE
-    assert ("tests/unit/cache/test_git_symlink_config.py" in args) is (phase == "baseline")
+    assert ("tests/integration/test_git_symlink_config.py" in args) is (phase == "baseline")
     assert (probe.FROZEN_LIFECYCLE in args) is (phase == "baseline")
     assert command.call_args.kwargs["timeout"] == probe.PHASE_TIMEOUT_SECONDS
     assert command.call_args.kwargs["env"].get("APM_WINDOWS_NATIVE_MUTATION") == (

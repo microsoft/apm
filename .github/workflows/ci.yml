@@ -336,7 +336,7 @@ jobs:
       run: >-
         uv run --frozen --extra dev pytest -p no:cacheprovider -v
         -m trusted_executable
-        tests/unit/cache/test_git_env.py
+        tests/integration/test_git_env.py
         tests/integration/test_trusted_executable_discovery.py
 
     - name: Prove legacy PATHEXT regression

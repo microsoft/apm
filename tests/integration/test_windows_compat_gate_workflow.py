@@ -267,7 +267,7 @@ def test_legacy_windows_git_discovery_runs_real_consumer_contracts() -> None:
     args = _gate_pytest_args(step)
     assert args[args.index("-m") + 1] == "trusted_executable"
     assert _positional_test_paths(args) == [
-        "tests/unit/cache/test_git_env.py",
+        "tests/integration/test_git_env.py",
         "tests/integration/test_trusted_executable_discovery.py",
     ]
     assert "--frozen" in _gate_pytest_command(step)

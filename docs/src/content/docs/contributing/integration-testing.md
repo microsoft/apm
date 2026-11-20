@@ -530,7 +530,7 @@ Python 3.11 job. That version needs explicit `PATHEXT` candidates
 for directory-qualified executable lookup. The same tests also carry
 `windows_compat`, so the existing Python 3.12 gate checks compatibility.
 Run the focused contracts locally with
-`uv run --frozen --extra dev pytest -m trusted_executable tests/unit/cache/test_git_env.py tests/integration/test_trusted_executable_discovery.py`.
+`uv run --frozen --extra dev pytest -m trusted_executable tests/integration/test_git_env.py tests/integration/test_trusted_executable_discovery.py`.
 The legacy job collects only these files so unrelated tests requiring newer
 interpreters cannot prevent collection. They select the same discovery cases
 as the marker across both test roots. Production imports on this path remain

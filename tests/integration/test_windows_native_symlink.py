@@ -19,9 +19,9 @@ from apm_cli.utils import git_sparse
 from apm_cli.utils.content_hash import compute_package_hash
 from apm_cli.utils.file_ops import robust_copytree
 from scripts.windows_native_symlink_probe_entry import MUTATION_FAILURE, probe_native_context
-from tests.unit.cache.test_git_symlink_config import _git, _posix_package_hash
-from tests.unit.cache.test_git_symlink_config import config_env as config_env
-from tests.unit.cache.test_git_symlink_config import symlink_source as symlink_source
+from tests.integration.test_git_symlink_config import _git, _posix_package_hash
+from tests.integration.test_git_symlink_config import config_env as config_env
+from tests.integration.test_git_symlink_config import symlink_source as symlink_source
 
 pytestmark = [pytest.mark.component, pytest.mark.requires_windows_native_standard_user]
 
