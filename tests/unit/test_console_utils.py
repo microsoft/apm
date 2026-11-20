@@ -706,7 +706,7 @@ def test_windows_console_width_full_when_piped_rich_detection_when_interactive(m
 
     import apm_cli.utils.console as console_mod
 
-    monkeypatch.setattr(console_mod, "os", types.SimpleNamespace(name="nt"))
+    monkeypatch.setattr(console_mod, "os", types.SimpleNamespace(name="nt"), raising=False)
     monkeypatch.setattr(rich_console, "detect_legacy_windows", lambda: True)
     monkeypatch.setenv("COLUMNS", "400")
     piped = console_mod.new_console(file=_Stream(False))
