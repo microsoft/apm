@@ -230,10 +230,14 @@ class ReceiptWitnessPlugin:
 
     def __init__(self, catalog: Catalog) -> None:
         self._catalog = catalog
+        self._owns_default_directory = False
 
     def pytest_configure(self, config: pytest.Config) -> None:
         if not os.environ.get(receipts.DIRECTORY_ENV):
             os.environ[receipts.DIRECTORY_ENV] = str(_receipts_dir(config))
+            # The default cache directory holds one session; an explicitly
+            # configured directory may merge several (e.g. CI shards).
+            self._owns_default_directory = not os.environ.get("PYTEST_XDIST_WORKER")
         if not os.environ.get("PYTEST_XDIST_WORKER"):
             os.environ.setdefault(receipts.SESSION_ENV, uuid.uuid4().hex[:12])
 
@@ -253,8 +257,16 @@ class ReceiptWitnessPlugin:
             return
         directory = os.environ.get(receipts.DIRECTORY_ENV)
         session_id = os.environ.get(receipts.SESSION_ENV)
-        if directory and session_id:
-            receipts.merge_session(Path(directory), session_id)
+        if not (directory and session_id):
+            return
+        merged = receipts.merge_session(Path(directory), session_id)
+        # Only a session that executed a witness replaces the earlier ones; a
+        # collect-only run or a run without witnesses keeps them.
+        if merged and self._owns_default_directory and self._ran_a_witness(merged):
+            receipts.drop_completed_sessions(Path(directory), keep=merged)
+
+    def _ran_a_witness(self, merged: Path) -> bool:
+        return any(self._catalog.witnessed_by(r.node) for r in receipts.load_session(merged))
 
 
 def _receipts_dir(config: pytest.Config) -> Path:

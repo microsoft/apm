@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 
-from apm_cli.core.scope import manifest_file
+from apm_cli.core.scope import is_user_scope_root, manifest_file
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -1054,6 +1054,7 @@ def _collect_locked_dependencies(
                     str(verdict.reason),
                     layer=verdict.layer,
                     unverifiable=subject.fingerprint is None,
+                    user_scope=is_user_scope_root(project_root),
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message)
@@ -1099,9 +1100,14 @@ def parked_mcp_message(
     *,
     layer: str = "",
     unverifiable: bool = False,
+    user_scope: bool = False,
 ) -> str:
     """Return the warning for one dependency MCP server the trust owner parked."""
+    from apm_cli.security.trust import approve_command, explain_command
+
     name = dependency.name
+    approve = approve_command(package, user_scope=user_scope)
+    explain = explain_command(package, user_scope=user_scope)
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         detail = (
             "self-defined"
@@ -1111,7 +1117,7 @@ def parked_mcp_message(
         return (
             f"Parked MCP server '{name}' from transitive package {package} "
             f"({detail}, not approved)\n"
-            f"    Approve for everyone: apm approve {package}  |  "
+            f"    Approve for everyone: {approve}  |  "
             "This run only: --trust-transitive-mcp"
         )
     if reason == REASON_DEFINITION_CHANGED:
@@ -1122,16 +1128,14 @@ def parked_mcp_message(
         )
         return (
             f"Parked MCP server '{name}' ({package}): {why}\n"
-            f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+            f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
+            f"Re-approve: {approve}"
         )
     if reason == REASON_DENIED:
-        return (
-            f"Parked MCP server '{name}' ({package}): denied ({layer})\n"
-            f"    Explain: apm policy explain {package}"
-        )
+        return f"Parked MCP server '{name}' ({package}): denied ({layer})\n    Explain: {explain}"
     return (
         f"Parked MCP server '{name}' ({package}): executables not approved\n"
-        f"    Explain: apm policy explain {package}  |  Approve: apm approve {package}"
+        f"    Explain: {explain}  |  Approve: {approve}"
     )
 
 

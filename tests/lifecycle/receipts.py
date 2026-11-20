@@ -113,6 +113,11 @@ def load(directory: Path) -> list[Receipt]:
     return found
 
 
+def load_session(path: Path) -> list[Receipt]:
+    """Every receipt of one merged session file."""
+    return list(_read(path))
+
+
 def merge_session(directory: Path, session: str) -> Path | None:
     """Merge one session's per-process files into ``session-<id>.jsonl``."""
     parts = sorted(directory.glob(f"{session}-*.part.jsonl"))
@@ -124,6 +129,17 @@ def merge_session(directory: Path, session: str) -> Path | None:
     for part in parts:
         part.unlink()
     return merged
+
+
+def drop_completed_sessions(directory: Path, *, keep: Path) -> None:
+    """Remove merged sessions other than *keep*, so a reader judges only the newest run.
+
+    Receipts from earlier partial runs, older code or an older catalog would
+    otherwise make a witness that did not run this time look under-covered.
+    """
+    for path in directory.glob("session-*.jsonl") if directory.is_dir() else ():
+        if path != keep:
+            path.unlink(missing_ok=True)
 
 
 def _read(path: Path) -> Iterable[Receipt]:

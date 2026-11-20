@@ -57,6 +57,7 @@
         "transport-platform-auth-outcome-owner",
         "transport-platform-authenticated-egress",
         "transport-platform-credential-report-owner",
+        "transport-platform-github-credential-class",
         "transport-platform-host-credential-resolution"
       ]
     },
