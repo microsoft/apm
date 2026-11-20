@@ -520,7 +520,6 @@ def _perform_init(
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
-                "Lock before packing:     apm install",
                 "Pack as Agent Plugins v1:             apm pack --format agent-plugin",
                 "Pack as Claude plugin:                apm pack --format claude-plugin",
             ]
