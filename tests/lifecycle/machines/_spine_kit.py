@@ -177,6 +177,8 @@ _READ_ONLY_COMMANDS = frozenset(
     }
 )
 _GROUPED_COMMANDS = frozenset({"deps", "lock", "cache"})
+# Commands that reconcile the deployed set with the declarations (I4 in this machine).
+_RECONCILING_COMMANDS = frozenset({"install", "update", "uninstall", "prune"})
 
 
 @dataclass(frozen=True)
@@ -376,6 +378,7 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         self.installed_commit = fixture.source.commit.sha
         self.converged = False
         self.expected_seen: set[str] = set()
+        self._command = ""
         fixture.scenario.runner.machine = self
 
     @property
@@ -424,7 +427,12 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         return self.skill_path.relative_to(self.deploy_root).as_posix()
 
     def allowed_surfaces(self) -> frozenset[str]:
-        return frozenset({"skill"}) if self.declared else frozenset()
+        """I4: a command that reconciles declarations must retire an undeclared skill.
+
+        ``compile`` or ``lock`` never retire packages, so they keep it allowed.
+        """
+        reconciles = self._command in _RECONCILING_COMMANDS
+        return frozenset({"skill"}) if self.declared or not reconciles else frozenset()
 
     def converged_before(self) -> bool:
         return self.converged
@@ -467,6 +475,7 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         self, args: tuple[str, ...], *, cwd: Path, env: Mapping[str, str]
     ) -> CommandResult:
         """Run one command through the driver and check I1-I9 around it."""
+        self._command = args[0]
         before = self.observe()
         result = driver.run(_At(cwd, dict(env)), args, entry_point=self.scenario.runner.entry_point)
         check_cross_cutting(before, self.observe(), result, self, self._operation(args))
@@ -792,7 +801,12 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
-    @precondition(lambda self: self.fixture.global_scope and self.materialized and self.clean)
+    @precondition(
+        # Rehydration reinstalls the declared set, so the package must stay declared.
+        lambda self: (
+            self.fixture.global_scope and self.declared and self.materialized and self.clean
+        )
+    )
     def clean_sources(self) -> None:
         before, state = self._capture(), self._state()
         self._run(
