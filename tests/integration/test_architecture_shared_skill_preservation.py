@@ -72,8 +72,8 @@ def test_skill_guard_rejects_split_materialization(path: str, old: str, new: str
         ),
         (
             "src/apm_cli/install/phases/cleanup.py",
-            "if deployed_file not in surviving_files",
-            "if True",
+            "DeploymentClaims(live_files=surviving_files,",
+            "DeploymentClaims(live_files=frozenset(),",
         ),
     ],
     ids=["second-survivor-owner", "second-target-owner", "orphan-survivor-bypass"],
