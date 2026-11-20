@@ -168,14 +168,33 @@ class TestSchemaBumpOpportunistic:
         )
         assert "lockfile_version: '1'" in lock.to_yaml()
 
-    def test_v2_back_to_v1_when_registry_dep_removed(self):
+    @pytest.mark.parametrize(
+        "v2_dep",
+        [_registry_dep, lambda: _git_dep(repo_url="acme/semver", constraint="^1.0.0")],
+        ids=["registry", "git-semver"],
+    )
+    def test_rewrite_keeps_v2_after_the_v2_entry_is_removed(self, tmp_path: Path, v2_dep):
+        """req-lk-002: a rewrite of a v2 lockfile never demotes it to v1."""
+        path = tmp_path / "apm.lock.yaml"
+        first = LockFile()
+        first.add_dependency(_git_dep())
+        first.add_dependency(v2_dep())
+        first.write(path)
+        assert "lockfile_version: '2'" in path.read_text(encoding="utf-8")
+
+        rewrite = LockFile()
+        rewrite.add_dependency(_git_dep())
+        rewrite.write(path)
+
+        assert "lockfile_version: '2'" in path.read_text(encoding="utf-8")
+        assert LockFile.read(path).lockfile_version == "2"
+
+    def test_new_lockfile_without_v2_entries_is_v1(self, tmp_path: Path):
+        path = tmp_path / "apm.lock.yaml"
         lock = LockFile()
-        lock.add_dependency(_registry_dep())
-        assert "lockfile_version: '2'" in lock.to_yaml()
-        # Remove the registry dep; lockfile re-emits as v1.
-        del lock.dependencies["acme/web"]
         lock.add_dependency(_git_dep())
-        assert "lockfile_version: '1'" in lock.to_yaml()
+        lock.write(path)
+        assert "lockfile_version: '1'" in path.read_text(encoding="utf-8")
 
 
 # ───────────────────────────────────────────────────────────────────────────
