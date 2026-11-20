@@ -2877,6 +2877,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Codex native configuration loses its public compare-and-swap no-write control.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-codex-offline-launch",
+        rule_id="marketplace-integrations-codex-offline-launch",
+        path="src/apm_cli/codex_plugins/client.py",
+        old='"app-server", "--stdio", *_offline_launch_args(self._launch_dir)',
+        new='"app-server", "--stdio"',
+        intent="Codex app-server starts without the trusted offline launch config again (#4432).",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-copilot-ownership",
         rule_id="marketplace-integrations-copilot-ownership",
         path="src/apm_cli/copilot_plugins/registrar.py",

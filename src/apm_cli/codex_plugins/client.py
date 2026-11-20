@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import shutil
@@ -53,10 +54,18 @@ def _offline_launch_dir() -> Path:
     requests that load the configuration of a marketplace path still see plugins.
     """
     launch_dir = Path(tempfile.mkdtemp(prefix="apm-codex-")).resolve()
-    (launch_dir / ".codex").mkdir()
-    (launch_dir / ".codex" / "config.toml").write_text(
-        "[features]\nplugins = false\n", encoding="utf-8"
-    )
+    try:
+        (launch_dir / ".codex").mkdir(mode=0o700)
+        config = os.open(
+            launch_dir / ".codex" / "config.toml",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(config, "w", encoding="utf-8") as handle:
+            handle.write("[features]\nplugins = false\n")
+    except OSError:
+        shutil.rmtree(launch_dir, ignore_errors=True)
+        raise
     return launch_dir
 
 

@@ -212,6 +212,9 @@ def _assert_codex_stayed_offline(world: _World) -> None:
     """No Codex app-server start synced its curated marketplace from the network."""
     sync_log = world.home / ".codex" / ".stand-in-curated-sync"
     assert not sync_log.exists(), sync_log.read_text("utf-8")
+    # Every private launch directory is removed when its connection closes.
+    leftovers = sorted(Path(world.env["TMPDIR"]).glob("apm-codex-*"))
+    assert not leftovers, leftovers
 
 
 def _codex_registered(world: _World, plugin: Path) -> bool:
