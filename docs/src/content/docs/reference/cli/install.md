@@ -282,6 +282,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   currently locked version renders, fetched from its locked commit.
   Lockfile hashes are never that proof. Preserve your edits and move the
   conflicting file aside before reinstalling. Invalid evidence fails explicitly.
+- **Edited managed files.** Install replaces an existing instruction, agent, prompt, command or rule file that differs from what it renders only with the same evidence: a local deployment receipt, or bytes equal to what the locked version renders. Lockfile hashes are never that proof. Without evidence (for example a fresh clone, or a project last installed by an APM that recorded no receipts) the file is kept and named, the files that could be written are written and recorded, the kept file keeps its previous lockfile entry, and install exits `1`. Move the file aside and rerun `apm install` to restore it, or use `--force` to overwrite it.
   Creating this state requires filesystem hard-link support. State-write failures
   are reported; successful earlier deployment writes are not rolled back.
   Audit and dry-run never establish this authority. Frozen install may record
