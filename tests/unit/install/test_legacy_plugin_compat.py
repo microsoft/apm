@@ -524,24 +524,54 @@ def test_verified_legacy_cache_routes_through_canonical_validator(tmp_path: Path
     assert validate.call_args_list[-1].kwargs == {"source_path": package}
 
 
-@pytest.mark.parametrize("locked_type", [None, "skill_bundle"])
-def test_normalized_plugin_with_root_skills_keeps_skill_bundle_type(
-    tmp_path: Path, locked_type: str | None
-) -> None:
-    """A root skills/ bundle outranks its plugin publishing surface (--skill subsets)."""
-    from apm_cli.models.validation import validate_apm_package
+def _classification_tree(root: Path, manifest: str | None, shape: str) -> Path:
+    if manifest is not None:
+        (root / manifest).parent.mkdir(parents=True, exist_ok=True)
+        (root / manifest).write_text('{"name":"bundle","version":"1.0.0"}', encoding="ascii")
+    if shape == "skills":
+        (root / "skills/review").mkdir(parents=True)
+        (root / "skills/review/SKILL.md").write_text(
+            "---\nname: review\ndescription: review\n---\nbody\n", encoding="ascii"
+        )
+    else:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "SKILL.md").write_text(
+            "---\nname: bundle\ndescription: bundle\n---\nbody\n", encoding="ascii"
+        )
+    (root / "bin").mkdir()
+    (root / "bin/tool").write_text("#!/bin/sh\n", encoding="ascii")
+    return root
 
-    root = tmp_path / "plugin-with-skills"
-    (root / ".github/plugin").mkdir(parents=True)
-    (root / ".github/plugin/plugin.json").write_text('{"name":"bundle"}', encoding="ascii")
-    (root / "skills/review").mkdir(parents=True)
-    (root / "skills/review/SKILL.md").write_text("---\nname: review\n---\nbody\n")
+
+@pytest.mark.parametrize("locked_type", [None, "skill_bundle", "hybrid"])
+@pytest.mark.parametrize("shape", ["skills", "root-skill"])
+@pytest.mark.parametrize(
+    "manifest",
+    [".claude-plugin/plugin.json", ".github/plugin/plugin.json", "plugin.json", None],
+)
+def test_cached_pass_classifies_as_the_fresh_pass(
+    tmp_path: Path, manifest: str | None, shape: str, locked_type: str | None
+) -> None:
+    """A cached pass gives the fresh fetch's type, whatever the parser wrote (#4270).
+
+    A plugin manifest makes the tree a marketplace plugin on its fresh pass,
+    with or without root skills/ or SKILL.md; without one, a skills/ bundle
+    stays skill_bundle (its --skill subsets) and a root SKILL.md a claude_skill.
+    """
+    from apm_cli.models.validation import detect_package_type, validate_apm_package
+
+    root = _classification_tree(tmp_path / "pkg", manifest, shape)
+    fresh = detect_package_type(root)[0]
     validate_apm_package(root)
     locked = (
         LockedDependency(repo_url="owner/repo", package_type=locked_type) if locked_type else None
     )
 
-    assert (
-        preserve_normalized_marketplace_plugin_type(root, locked, PackageType.SKILL_BUNDLE)
-        is PackageType.SKILL_BUNDLE
-    )
+    cached = preserve_normalized_marketplace_plugin_type(root, locked, detect_package_type(root)[0])
+
+    assert cached is fresh
+    if manifest is None:
+        expected = PackageType.SKILL_BUNDLE if shape == "skills" else PackageType.CLAUDE_SKILL
+        assert cached is expected
+    else:
+        assert cached is PackageType.MARKETPLACE_PLUGIN

@@ -425,12 +425,23 @@ class HookFileAdmission:
         self._keys = package_keys
         self._path = package_path
         self.parked: list[tuple[str, str]] = []
+        self._verdicts: dict[str, bool] = {}
 
     def __call__(self, hook_file: Path) -> bool:
-        verdict = admit(self._ctx, hook_subject(self._keys, self._path, hook_file))
-        if not verdict.allowed:
-            self.parked.append((hook_item_key(self._path, hook_file), str(verdict.reason)))
-        return verdict.allowed
+        item = hook_item_key(self._path, hook_file)
+        if item not in self._verdicts:
+            verdict = admit(self._ctx, hook_subject(self._keys, self._path, hook_file))
+            if not verdict.allowed:
+                self.parked.append((item, str(verdict.reason)))
+            self._verdicts[item] = verdict.allowed
+        return self._verdicts[item]
+
+    def admits_any(self) -> bool:
+        """Return whether some hook file of the package is admitted on its pin."""
+        from apm_cli.integration.hook_integrator import HookIntegrator
+
+        verdicts = [self(hook_file) for hook_file in HookIntegrator().find_hook_files(self._path)]
+        return any(verdicts)
 
 
 def hook_file_filter(
@@ -801,15 +812,80 @@ def parked_plugin_message(
     )
 
 
-def hooks_package_admissible(allow_executables: Any, package_keys: tuple[str, ...]) -> bool:
-    """Return whether pinned hook items may admit some hook file of the package."""
+def hooks_package_admissible(
+    allow_executables: Any, package_keys: tuple[str, ...], package_info: Any
+) -> bool:
+    """Return whether pinned hook items admit some hook file of the package.
+
+    A package none of whose hook files matches its pin is not admissible, so
+    install retires the hooks it deployed earlier, as for a revoked approval.
+    """
     ctx = getattr(allow_executables, "trust_context", None)
     if ctx is None or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS):
         return False
-    return not any(
-        resolve_exec_decision(ctx, key, EXEC_TYPE_HOOKS).trust_state == TRUST_DENIED
-        for key in package_keys
+    # admit() applies the deny ladder first, so a denied package admits nothing.
+    return HookFileAdmission(ctx, package_keys, Path(package_info.install_path)).admits_any()
+
+
+@dataclass(frozen=True)
+class HookPinMismatch:
+    """A hook file the lockfile records as deployed that its approval no longer admits."""
+
+    package: str
+    item: str
+    reason: str
+
+    def describe(self) -> str:
+        why = (
+            "its definition changed since approval"
+            if self.reason == REASON_DEFINITION_CHANGED
+            else "it is not approved"
+        )
+        return (
+            f"{self.package}: hook file '{self.item}' is deployed per apm.lock.yaml but "
+            f"{why}; re-approve with 'apm approve {self.package}' or retire it with 'apm install'"
+        )
+
+
+def recorded_hook_pin_mismatches(
+    ctx: ExecTrustContext | Callable[[], ExecTrustContext | None] | None,
+    package_keys: tuple[str, ...],
+    install_path: Path,
+    *,
+    package: str,
+    recorded_status: str | None,
+    recorded_allowed: tuple[str, ...] = (),
+) -> list[HookPinMismatch]:
+    """Return the recorded-deployed hook files whose pinned approval no longer admits them.
+
+    ``apm install --frozen`` (before anything deploys) and ``apm audit --ci``
+    both ask this, so they reach one verdict (#4188). A deny is not reported
+    here: the deny ladder owns that verdict. *ctx* may be a provider; it is
+    called only for a package the lock records as deploying hook files.
+    """
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    from .executables import TRUST_DEPLOYED
+
+    recorded_deployed = (
+        recorded_status in (None, TRUST_DEPLOYED) or EXEC_TYPE_HOOKS in recorded_allowed
     )
+    root = install_path.resolve()
+    hook_files = HookIntegrator().find_hook_files(root) if recorded_deployed else []
+    if not hook_files:
+        return []
+    if callable(ctx):
+        ctx = ctx()
+    if ctx is None or not ctx.gate_enabled or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS):
+        return []
+    mismatches: list[HookPinMismatch] = []
+    for hook_file in hook_files:
+        verdict = admit(ctx, hook_subject(package_keys, root, hook_file))
+        if not verdict.allowed and verdict.reason != REASON_DENIED:
+            mismatches.append(
+                HookPinMismatch(package, hook_item_key(root, hook_file), str(verdict.reason))
+            )
+    return mismatches
 
 
 def package_mcp_declarations(install_path: Path) -> list[Any]:
