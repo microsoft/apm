@@ -286,6 +286,42 @@ def _status(_world: _World) -> tuple[str, ...]:
     return ("approve", "--list")
 
 
+def _bare_package_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    world = _bare_world(tmp_path, apm_binary_path)
+    assert not (world.scenario.isolated.config_root / "apm.yml").exists()
+    return world
+
+
+_OWN = ".github/instructions/own.instructions.md"
+_OWN_EDITED = "---\napplyTo: '**'\n---\n# own edited\n"
+
+
+def _own_source_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    world = _installed_world(tmp_path, apm_binary_path)
+    world.scenario.consumers.add_instruction(
+        world.consumer, "own", "---\napplyTo: '**'\n---\n# own\n"
+    )
+    _run_success(
+        world.scenario,
+        world.consumer,
+        _INSTALL_ARGS,
+        environment=world.source.environment,
+        scenario_id="remediation-own-install",
+    )
+    assert (world.consumer.root / _OWN).is_file()
+    return world
+
+
+def _edit_own_source(world: _World) -> None:
+    source = world.consumer.root / ".apm" / "instructions" / "own.instructions.md"
+    source.write_text(_OWN_EDITED, encoding="ascii")
+
+
+def _own_redeployed(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert "# own edited" in (world.consumer.root / _OWN).read_text(encoding="utf-8")
+
+
 TEXT_PROOFS: tuple[_TextProof, ...] = (
     _TextProof(
         "project-manifest-missing",
@@ -294,6 +330,25 @@ TEXT_PROOFS: tuple[_TextProof, ...] = (
         lambda _world: ("prune",),
         1,
         _expect_ok,
+    ),
+    _TextProof(
+        "user-manifest-missing",
+        _bare_package_world,
+        lambda _world: None,
+        lambda _world: ("lock", "-g", "--no-policy"),
+        1,
+        _expect_ok,
+        values=lambda world: {"<org/repo>": _slug(world.source)},
+    ),
+    _TextProof(
+        "project-owned-file",
+        _own_source_world,
+        lambda _world: None,
+        lambda _world: ("view", "--file", _OWN),
+        0,
+        _own_redeployed,
+        before=_edit_own_source,
+        reprobe=lambda _world: _AUDIT_ARGS[:-2],
     ),
     _TextProof(
         "dependencies-not-installed",

@@ -36,6 +36,8 @@ EXECUTED = frozenset(
         "lockfile-unreadable",
         "orphaned-packages-prune",
         "project-manifest-missing",
+        "project-owned-file",
+        "user-manifest-missing",
     }
 )
 
@@ -82,8 +84,6 @@ COMPONENT_ONLY: dict[str, str] = {
     "mcp-entry-stale": _FAULT,
     "mcp-registry-url-override": _OUTSIDE,
     "outside-constraint-release": _NETWORK,
-    "project-owned-file": "editing the project source is the manual step; covered by the "
-    "view --file provenance tests",
     "prune-incomplete": _FAULT,
     "prune-partial": _FAULT,
     "registry-canonical-unrecorded": _NETWORK,
@@ -92,8 +92,6 @@ COMPONENT_ONLY: dict[str, str] = {
     "target-not-deployed": _OUTSIDE,
     "user-instructions-missing": _OUTSIDE,
     "user-manifest-invalid": _OUTSIDE,
-    "user-manifest-missing": "installs a user-scope package; covered by the global lifecycle tests",
-    "user-packages-missing": _OUTSIDE,
     "lifecycle-scripts-untrusted": _OUTSIDE,
 }
 
