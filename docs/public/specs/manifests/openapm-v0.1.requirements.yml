@@ -213,6 +213,7 @@ requirements:
     keyword: MUST
     section: "5.6.4"
     conformance_class: consumer
+    notes: "Amendment 0.1.71, adopted 2026-11-20 (#4092): every git-sourced entry records content_hash (sha256 envelope over the package tree); frozen install and apm audit recompute it and fail closed naming the entry, expected and observed envelopes; tree_sha256 is reserved for v0.2"
   - id: req-lk-016
     keyword: MUST
     section: "5.2"
@@ -586,6 +587,7 @@ requirements:
     keyword: MUST
     section: "10.5"
     conformance_class: consumer
+    notes: "Amendment 0.1.70, adopted 2026-11-20 (issue #4234): tar.gz and zip are both accepted, every other container is rejected; one limit set (size cap, streamed entry-count cap, refusal of traversal, absolute paths, links and duplicate entries) applies to both"
   - id: req-sc-005
     keyword: MUST
     section: "10.3"

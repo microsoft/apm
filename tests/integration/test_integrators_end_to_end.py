@@ -38,6 +38,7 @@ from apm_cli.integration.skill_integrator import (
 )
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -649,10 +650,17 @@ class TestSkillIntegratorSyncIntegration:
         (skill_dir / "SKILL.md").write_text("old")
 
         apm_package = _make_apm_package()
-        managed_files = {".agents/skills/old-skill"}
+        # The lockfile records the skill directory and its members; deleting a
+        # member needs deployment evidence (#3701).
+        managed_files = {".agents/skills/old-skill", ".agents/skills/old-skill/SKILL.md"}
 
         integrator = SkillIntegrator()
-        stats = integrator.sync_integration(apm_package, project_root, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            apm_package,
+            project_root,
+            managed_files=managed_files,
+            evidence=receipted_evidence(skill_dir, deploy_root=project_root),
+        )
         assert stats["files_removed"] >= 1
         assert not skill_dir.exists()
 
