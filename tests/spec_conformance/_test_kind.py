@@ -11,7 +11,10 @@ names resolve to. The test is BEHAVIORAL when that closure reaches:
 
 * a name imported from a module under one of BEHAVIORAL_IMPORT_ROOTS, unless
   the module is one of NON_BEHAVIORAL_IMPORTS (parsing and constant helpers
-  that read fixtures but run no APM decision); or
+  that read fixtures but run no APM decision);
+* a name imported from one of BEHAVIORAL_TEST_HELPERS, the test helpers that
+  run the installed CLI (other ``tests.utils`` modules build or read fixtures
+  and never count); or
 * a fixture parameter named in BEHAVIORAL_FIXTURES (the installed CLI).
 
 Everything else is TEXT_SHAPE.
@@ -31,8 +34,8 @@ BEHAVIORAL_IMPORT_ROOTS: tuple[str, ...] = (
     "apm_cli",
     "tests.integration",
     "tests.unit",
-    "tests.utils",
 )
+BEHAVIORAL_TEST_HELPERS: frozenset[str] = frozenset({"tests.utils.apm_lifecycle_runner"})
 NON_BEHAVIORAL_IMPORTS: frozenset[str] = frozenset(
     {
         "apm_cli.constants",
@@ -45,6 +48,8 @@ BEHAVIORAL_FIXTURES: frozenset[str] = frozenset({"apm_binary_path"})
 def _is_behavioral_module(module: str) -> bool:
     if module in NON_BEHAVIORAL_IMPORTS:
         return False
+    if module in BEHAVIORAL_TEST_HELPERS:
+        return True
     return any(module == root or module.startswith(f"{root}.") for root in BEHAVIORAL_IMPORT_ROOTS)
 
 

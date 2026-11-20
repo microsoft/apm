@@ -33,10 +33,10 @@ _ERROR_SYMBOLS = frozenset({"error", "cross"})
 # (path, enclosing function) -> reason. Only shrinks.
 _ALLOWED_STDOUT_ERROR_ROWS: dict[tuple[str, str], str] = {
     ("src/apm_cli/integration/mcp_integrator_install.py", "_install_registry_group"): (
-        "per-server row of the install progress tree; the failure is reported on stderr"
+        "per-server row of the install progress tree; the failure is reported on stderr (#4089)"
     ),
     ("src/apm_cli/integration/mcp_integrator_install.py", "_install_self_defined_deps"): (
-        "per-server row of the install progress tree; the failure is reported on stderr"
+        "per-server row of the install progress tree; the failure is reported on stderr (#4089)"
     ),
 }
 
