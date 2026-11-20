@@ -5,8 +5,12 @@ explicit virtual git dependency. The lockfile must persist those expanded fields
 and never use ``parent`` as durable ``repo_url`` / ``source`` identity.
 """
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _expanded_parent_equivalent_ref() -> DependencyReference:

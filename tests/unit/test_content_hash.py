@@ -12,6 +12,8 @@ from apm_cli.utils.content_hash import (
     verify_package_hash,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # compute_package_hash
 # ---------------------------------------------------------------------------

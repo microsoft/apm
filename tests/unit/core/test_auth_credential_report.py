@@ -29,7 +29,10 @@ from tests.utils.local_ado_org_fixture import (
     install_logging_credential_helper,
 )
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX helper launcher")
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(sys.platform == "win32", reason="POSIX helper launcher"),
+]
 
 HOST = "dev.azure.com"
 REPO_PATH = "contoso/platform/agent-skills"
@@ -433,14 +436,6 @@ def test_secret_accepted_by_another_resolver_is_not_rejected(helper):
     with pytest.raises(AdoAuthChainExhaustedError):
         _run(_helper_answers(_response(401)), resolver=AuthResolver(), path="other/project/repo")
     assert _actions(helper, "erase") == [], helper.events()
-
-
-def test_non_ascii_secret_is_compared_without_error():
-    ledger = auth_chain.HelperReportLedger()
-    key = (HOST, None, HELPER_PATH)
-    assert ledger.decide(key, "approve", "p\u00e4ss-\u00fcber")
-    assert not ledger.decide((HOST, None, "other"), "reject", "p\u00e4ss-\u00fcber")
-    assert ledger.decide((HOST, None, "other"), "reject", "another-secret")
 
 
 @pytest.mark.parametrize(

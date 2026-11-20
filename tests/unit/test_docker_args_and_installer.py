@@ -3,8 +3,12 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.core.docker_args import DockerArgsProcessor
 from apm_cli.core.safe_installer import InstallationSummary, SafeMCPInstaller
+
+pytestmark = pytest.mark.unit
 
 
 class TestDockerArgsProcessor(unittest.TestCase):

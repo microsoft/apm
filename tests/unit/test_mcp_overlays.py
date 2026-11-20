@@ -9,6 +9,8 @@ import pytest
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import MCPDependency
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # MCPDependency Model

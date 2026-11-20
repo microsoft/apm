@@ -15,6 +15,8 @@ from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder, Resolv
 from apm_cli.marketplace.migration import load_marketplace_config
 from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS
 
+pytestmark = pytest.mark.component
+
 _APM_WITH_LOCAL_BLOCK = """\
 name: my-project
 description: A project.

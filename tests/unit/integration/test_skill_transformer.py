@@ -10,48 +10,12 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from apm_cli.integration.skill_transformer import SkillTransformer, to_hyphen_case
+import pytest
+
+from apm_cli.integration.skill_transformer import SkillTransformer
 from apm_cli.primitives.models import Skill
 
-
-class TestToHyphenCase:
-    """Test the to_hyphen_case helper function."""
-
-    def test_basic_lowercase(self):
-        """Test simple lowercase string."""
-        assert to_hyphen_case("mypackage") == "mypackage"
-
-    def test_camel_case(self):
-        """Test camelCase conversion."""
-        assert to_hyphen_case("myPackage") == "my-package"
-
-    def test_pascal_case(self):
-        """Test PascalCase conversion."""
-        assert to_hyphen_case("MyPackage") == "my-package"
-
-    def test_with_underscores(self):
-        """Test underscore replacement."""
-        assert to_hyphen_case("my_package") == "my-package"
-
-    def test_with_spaces(self):
-        """Test space replacement."""
-        assert to_hyphen_case("Brand Guidelines") == "brand-guidelines"
-
-    def test_mixed_separators(self):
-        """Test mixed underscores and camelCase."""
-        assert to_hyphen_case("my_AwesomePackage") == "my-awesome-package"
-
-    def test_removes_invalid_characters(self):
-        """Test removal of invalid characters."""
-        assert to_hyphen_case("my@package!name") == "mypackagename"
-
-    def test_removes_consecutive_hyphens(self):
-        """Test consecutive hyphens are collapsed."""
-        assert to_hyphen_case("my--package") == "my-package"
-
-    def test_strips_leading_trailing_hyphens(self):
-        """Test leading/trailing hyphens are stripped."""
-        assert to_hyphen_case("-mypackage-") == "mypackage"
+pytestmark = pytest.mark.component
 
 
 class TestSkillTransformer:

@@ -2,6 +2,8 @@
 
 import unittest
 
+import pytest
+
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.policy.matcher import (
     check_dependency_allowed,
@@ -10,6 +12,8 @@ from apm_cli.policy.matcher import (
     matches_pattern,
 )
 from apm_cli.policy.schema import DependencyPolicy, McpPolicy
+
+pytestmark = pytest.mark.unit
 
 
 class TestFirstMatchingPattern(unittest.TestCase):

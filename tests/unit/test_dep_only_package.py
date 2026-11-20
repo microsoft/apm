@@ -10,11 +10,15 @@ commit a placeholder directory just to satisfy the structural check.
 
 from pathlib import Path
 
+import pytest
+
 from src.apm_cli.models.apm_package import (
     PackageType,
     validate_apm_package,
 )
 from src.apm_cli.models.validation import detect_package_type
+
+pytestmark = pytest.mark.component
 
 
 class TestDepOnlyPackageDetection:

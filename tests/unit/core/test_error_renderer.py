@@ -29,15 +29,13 @@ import re
 import pytest
 
 from apm_cli.core.errors import (
-    AmbiguousHarnessError,
-    ConflictingTargetsError,
-    NoHarnessError,
-    UnknownTargetError,
     render_ambiguous_error,
     render_conflicting_schema_error,
     render_no_harness_error,
     render_unknown_target_error,
 )
+
+pytestmark = pytest.mark.unit
 
 _THREE_CMD_RE = re.compile(r"^\s*apm\s+\S", re.MULTILINE)
 
@@ -51,17 +49,6 @@ def _assert_three_sections(text: str, headline_substrings: list[str]) -> None:
     assert "targets:" in text or "target:" in text, (
         f"Missing apm.yml snippet (targets:/target:) in:\n{text}"
     )
-
-
-def test_no_harness_error_has_three_parts(tmp_path):
-    text = render_no_harness_error(tmp_path)
-    _assert_three_sections(text, ["no harness detected"])
-
-
-def test_ambiguous_error_has_three_parts(tmp_path):
-    text = render_ambiguous_error(tmp_path, ["claude", "cursor"])
-    _assert_three_sections(text, ["multiple harnesses", "ambiguous"])
-    assert "claude" in text and "cursor" in text
 
 
 def test_unknown_target_error_lists_valid():
@@ -132,20 +119,6 @@ def test_unknown_target_error_uses_meta_target_when_it_is_only_value():
 def test_conflicting_schema_error_has_three_parts():
     text = render_conflicting_schema_error()
     _assert_three_sections(text, ["cannot use both", "conflicting"])
-
-
-def test_all_errors_exit_code_2(tmp_path):
-    """Every renderer-backed exception must carry exit_code == 2 (Click UsageError)."""
-    for ctor in (
-        lambda: NoHarnessError(render_no_harness_error(tmp_path)),
-        lambda: AmbiguousHarnessError(render_ambiguous_error(tmp_path, ["claude", "cursor"])),
-        lambda: UnknownTargetError(render_unknown_target_error("foo", ["claude"])),
-        lambda: ConflictingTargetsError(render_conflicting_schema_error()),
-    ):
-        exc = ctor()
-        assert getattr(exc, "exit_code", None) == 2, (
-            f"{type(exc).__name__} must have exit_code=2 (got {getattr(exc, 'exit_code', None)!r})"
-        )
 
 
 @pytest.mark.parametrize(

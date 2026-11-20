@@ -12,6 +12,10 @@ import typing
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def _try_symlink(link: Path, target: Path):
     """Create a symlink or skip the test on platforms that don't support it."""

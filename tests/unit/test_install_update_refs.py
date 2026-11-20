@@ -23,6 +23,8 @@ from apm_cli.install.phases._skip_logic import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Both helpers are imported directly from the production module so that any
 # change to the real condition immediately surfaces as a test failure.

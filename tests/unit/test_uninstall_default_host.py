@@ -14,6 +14,8 @@ from click.testing import CliRunner
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize("requested", ["acme/x", "gitlab.com/acme/x"])
 def test_uninstall_selects_the_default_host_lock_entry(

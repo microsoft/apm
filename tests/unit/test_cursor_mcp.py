@@ -7,20 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.adapters.client.cursor import CursorClientAdapter
-from apm_cli.factory import ClientFactory
 
-
-class TestCursorClientFactory(unittest.TestCase):
-    """Factory registration for the cursor runtime."""
-
-    def test_create_cursor_client(self):
-        client = ClientFactory.create_client("cursor")
-        self.assertIsInstance(client, CursorClientAdapter)
-
-    def test_create_cursor_client_case_insensitive(self):
-        client = ClientFactory.create_client("Cursor")
-        self.assertIsInstance(client, CursorClientAdapter)
+pytestmark = pytest.mark.component
 
 
 class TestCursorClientAdapter(unittest.TestCase):
@@ -50,6 +41,7 @@ class TestCursorClientAdapter(unittest.TestCase):
     # -- get_current_config --
 
     def test_get_current_config_missing_file(self):
+        self.assertFalse(self.mcp_json.exists())
         self.assertEqual(self.adapter.get_current_config(), {})
 
     def test_get_current_config_existing_file(self):

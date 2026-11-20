@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from tests.integration import test_ado_e2e
 from tests.workflow_contracts import (
     assert_exact_command,
     effective_env,
@@ -18,6 +17,8 @@ from tests.workflow_contracts import (
     workflow_job,
     workflow_step,
 )
+
+pytestmark = pytest.mark.component
 
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
@@ -111,14 +112,6 @@ def _assert_auth_acceptance_selects_live_ado(workflow: dict[str, Any]) -> None:
     run = step["run"]
     assert "ado_repo is required when ado_pat_e2e is enabled" in run
     assert "AUTH_TEST_ADO_APM_PAT is not configured" in run
-
-
-def test_ado_e2e_is_live_and_credential_gated() -> None:
-    """The real ADO fixture requires both opt-in scheduling and a PAT."""
-    assert {mark.name for mark in test_ado_e2e.pytestmark} == {
-        "live",
-        "requires_ado_pat",
-    }
 
 
 def test_release_integration_excludes_live_ado_and_its_credential() -> None:

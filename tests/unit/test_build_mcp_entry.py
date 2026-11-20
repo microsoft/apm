@@ -10,6 +10,8 @@ import pytest
 from apm_cli.commands.install import _build_mcp_entry
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.unit
+
 
 def _build(name="foo", **kw):
     defaults = dict(

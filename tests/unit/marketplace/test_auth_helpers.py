@@ -5,7 +5,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.marketplace.auth_helpers import resolve_auth_for_host, resolve_token_for_host
+
+pytestmark = pytest.mark.unit
 
 
 def test_resolve_token_for_host_offline_returns_none_without_resolver() -> None:

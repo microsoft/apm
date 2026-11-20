@@ -2,6 +2,8 @@
 
 import unittest
 
+import pytest
+
 from apm_cli.policy.schema import (
     ApmPolicy,
     AuditPolicy,
@@ -16,6 +18,8 @@ from apm_cli.policy.schema import (
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestPolicyCacheDefaults(unittest.TestCase):

@@ -336,7 +336,7 @@ assert the cross-platform contract, unless (per module) virtually
 every test in the file already exercises that same code path (in
 which case a module-level `pytestmark = pytest.mark.windows_compat`
 is the right level of granularity -- see
-`tests/unit/test_shepherd_owner_touch_gate.py` for an example where
+`tests/integration/test_shepherd_owner_touch_gate.py` for an example where
 nearly every test goes through the same git-executable-resolution
 helper).
 
@@ -364,7 +364,7 @@ helper).
    ```bash
    uv run --extra dev pytest -m windows_compat tests/unit --collect-only -q
    ```
-5. `tests/unit/test_windows_compat_gate_workflow.py` asserts the
+5. `tests/integration/test_windows_compat_gate_workflow.py` asserts the
    *shape* of the gate (marker-scoped, bounded, non-empty, required,
    non-duplicative of the Linux full suite) -- it does not enumerate
    file names, so it does not need editing when you add or remove a

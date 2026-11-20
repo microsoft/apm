@@ -6,6 +6,8 @@ import dataclasses
 import unittest
 from typing import ClassVar
 
+import pytest
+
 from apm_cli.policy.inheritance import (
     MAX_CHAIN_DEPTH,
     PolicyInheritanceError,
@@ -31,6 +33,8 @@ from apm_cli.policy.schema import (
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestEnforcementEscalation(unittest.TestCase):

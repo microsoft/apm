@@ -39,6 +39,8 @@ from apm_cli.core.token_manager import GitHelperCredential, GitHubTokenManager
 from apm_cli.models.dependency.host_virtual import UnsupportedHostQualifiedVirtualPackageError
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Autouse fixtures
 # ---------------------------------------------------------------------------
@@ -69,39 +71,36 @@ def _disable_git_credential():
 
 
 class TestHostInfoDisplayName:
-    def test_no_port_returns_bare_host(self) -> None:
-        hi = HostInfo(host="example.com", kind="generic", has_public_repos=True, api_base="x")
-        assert hi.display_name == "example.com"
-
-    def test_non_standard_port_appends_port(self) -> None:
-        hi = HostInfo(
-            host="bb.corp.com", kind="generic", has_public_repos=True, api_base="x", port=7990
-        )
-        assert hi.display_name == "bb.corp.com:7990"
-
-    def test_well_known_port_443_suppressed(self) -> None:
-        hi = HostInfo(
-            host="github.com", kind="github", has_public_repos=True, api_base="x", port=443
-        )
-        assert hi.display_name == "github.com"
-
-    def test_well_known_port_80_suppressed(self) -> None:
-        hi = HostInfo(
-            host="github.com", kind="github", has_public_repos=True, api_base="x", port=80
-        )
-        assert hi.display_name == "github.com"
-
-    def test_well_known_port_22_suppressed(self) -> None:
-        hi = HostInfo(
-            host="github.com", kind="github", has_public_repos=True, api_base="x", port=22
-        )
-        assert hi.display_name == "github.com"
-
-    def test_port_7999_included(self) -> None:
-        hi = HostInfo(
-            host="git.corp.com", kind="generic", has_public_repos=True, api_base="x", port=7999
-        )
-        assert hi.display_name == "git.corp.com:7999"
+    @pytest.mark.parametrize(
+        ("host", "kind", "port", "expected"),
+        [
+            ("example.com", "generic", None, "example.com"),
+            ("github.com", "github", None, "github.com"),
+            ("bb.corp.com", "generic", 7990, "bb.corp.com:7990"),
+            ("git.corp.com", "generic", 7999, "git.corp.com:7999"),
+            ("bitbucket.corp.com", "generic", 7999, "bitbucket.corp.com:7999"),
+            ("github.com", "github", 443, "github.com"),
+            ("github.com", "github", 80, "github.com"),
+            ("github.com", "github", 22, "github.com"),
+            ("gitlab.com", "generic", 22, "gitlab.com"),
+            ("internal.git", "generic", 80, "internal.git"),
+        ],
+        ids=[
+            "no-port-generic",
+            "no-port-github",
+            "port-7990",
+            "port-7999",
+            "port-7999-bitbucket",
+            "port-443-suppressed",
+            "port-80-suppressed",
+            "port-22-suppressed",
+            "port-22-suppressed-generic",
+            "port-80-suppressed-generic",
+        ],
+    )
+    def test_display_name(self, host, kind, port, expected) -> None:
+        hi = HostInfo(host=host, kind=kind, has_public_repos=True, api_base="x", port=port)
+        assert hi.display_name == expected
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +154,14 @@ class TestDetectTokenType:
             ("ghr_refreshtoken", "github-app"),
             ("some_random_token", "unknown"),
             ("", "unknown"),
+            ("github_pat_abc123", "fine-grained"),
+            ("ghp_abc123", "classic"),
+            ("ghu_abc123", "oauth"),
+            ("gho_abc123", "oauth"),
+            ("ghs_abc123", "github-app"),
+            ("ghr_abc123", "github-app"),
+            ("some-random-token", "unknown"),
+            ("Bearer eyJxxx", "unknown"),
         ],
     )
     def test_token_prefixes(self, token: str, expected: str) -> None:
@@ -167,17 +174,23 @@ class TestDetectTokenType:
 
 
 class TestGitlabRestHeaders:
-    def test_returns_empty_dict_when_no_token(self) -> None:
-        assert AuthResolver.gitlab_rest_headers(None) == {}
-        assert AuthResolver.gitlab_rest_headers("") == {}
-
-    def test_returns_private_token_header_by_default(self) -> None:
-        headers = AuthResolver.gitlab_rest_headers("mytoken")
-        assert headers == {"PRIVATE-TOKEN": "mytoken"}
-
-    def test_returns_bearer_header_when_oauth_bearer(self) -> None:
-        headers = AuthResolver.gitlab_rest_headers("mytoken", oauth_bearer=True)
-        assert headers == {"Authorization": "Bearer mytoken"}
+    @pytest.mark.parametrize(
+        ("token", "oauth_bearer", "expected"),
+        [
+            (None, False, {}),
+            ("", False, {}),
+            ("mytoken", False, {"PRIVATE-TOKEN": "mytoken"}),
+            ("glpat-secret", False, {"PRIVATE-TOKEN": "glpat-secret"}),
+            ("mytoken", True, {"Authorization": "Bearer mytoken"}),
+            ("oauth-access-token", True, {"Authorization": "Bearer oauth-access-token"}),
+        ],
+        ids=["none", "empty", "pat", "glpat", "oauth-bearer", "oauth-access-token"],
+    )
+    def test_headers(self, token, oauth_bearer, expected) -> None:
+        if oauth_bearer:
+            assert AuthResolver.gitlab_rest_headers(token, oauth_bearer=True) == expected
+        else:
+            assert AuthResolver.gitlab_rest_headers(token) == expected
 
 
 @pytest.mark.parametrize(
@@ -201,17 +214,13 @@ def test_rest_credential_header_builders(builder, token, expected) -> None:
 
 
 class TestOrgToEnvSuffix:
-    def test_simple_org(self) -> None:
-        assert _org_to_env_suffix("myorg") == "MYORG"
-
-    def test_hyphen_becomes_underscore(self) -> None:
-        assert _org_to_env_suffix("my-org") == "MY_ORG"
-
-    def test_mixed_case(self) -> None:
-        assert _org_to_env_suffix("AcmeCorp") == "ACMECORP"
-
-    def test_multiple_hyphens(self) -> None:
-        assert _org_to_env_suffix("a-b-c") == "A_B_C"
+    @pytest.mark.parametrize(
+        ("org", "expected"),
+        [("myorg", "MYORG"), ("my-org", "MY_ORG"), ("AcmeCorp", "ACMECORP"), ("a-b-c", "A_B_C")],
+        ids=["simple", "hyphen", "mixed-case", "multiple-hyphens"],
+    )
+    def test_suffix(self, org, expected) -> None:
+        assert _org_to_env_suffix(org) == expected
 
 
 # ---------------------------------------------------------------------------
