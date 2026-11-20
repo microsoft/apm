@@ -11,10 +11,11 @@ removes the entries APM wrote to those files:
   write fingerprint matches, or it equals the render that release wrote for
   the same self-defined declaration. Anything else (a user-authored or
   user-edited entry) stays where it is and is reported once.
-* Other keys and the file itself are kept. ``.vscode/mcp.json`` is deleted
-  only when APM created it: every server it held was removed by this heal and
-  nothing but empty scaffolding (VS Code's ``inputs: []``) remains in it.
-  ``.github/mcp.json`` is never deleted (it is a target-detection signal).
+* Other keys and the file itself are kept. ``.vscode/mcp.json`` and
+  ``.github/mcp.json`` are deleted only when APM created them: every server
+  the file held was removed by this heal and nothing but empty scaffolding
+  (VS Code's ``inputs: []``) remains in it. A file that held a non-APM entry
+  stays (it is the user's target-detection signal).
 
 The heal runs after the install wrote ``.mcp.json``, so an entry leaves its
 retired file only once its replacement exists (:func:`healable_names`).
@@ -39,8 +40,9 @@ class RetiredMcpDestination:
     """One project MCP file APM no longer writes.
 
     ``deletable``: whether the heal may delete the file once APM's entries are
-    gone. ``.github/mcp.json`` is kept, because it is a ``copilot``
-    target-detection signal for projects that declare no targets.
+    gone and the file held nothing APM did not write. An emptied
+    ``.github/mcp.json`` that kept a user entry stays, because it is a
+    ``copilot`` target-detection signal for projects that declare no targets.
     """
 
     runtime: str
@@ -68,7 +70,7 @@ RETIRED_PROJECT_MCP_DESTINATIONS: tuple[RetiredMcpDestination, ...] = (
         ".github/mcp.json",  # architecture-authority-exempt: retired MCP destination
         "mcpServers",
         _legacy_copilot_adapter,
-        deletable=False,
+        deletable=True,
     ),
     RetiredMcpDestination(
         "vscode",
@@ -461,8 +463,8 @@ def split_mcp_claims(
         names["copilot"] |= candidates
         hashes["copilot"].update({name: live[name] for name in candidates if name in live})
         moved |= candidates
-        # The heal never deletes .github/mcp.json, so a copilot claim counts as
-        # moved only while that file is still there.
+        # The heal deletes .github/mcp.json only when it emptied an APM-created
+        # one, so a copilot claim counts as moved only while that file is there.
         github_kept = (project_root / _RETIRED_PATHS["copilot"]).is_file()
         moved_unrecorded = _absent_from_retired_files(
             (candidates if github_kept else set()) | vscode,

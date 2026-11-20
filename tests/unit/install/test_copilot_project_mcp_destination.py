@@ -158,9 +158,25 @@ def test_dry_run_preview_names_exactly_what_the_heal_moves(tmp_path: Path) -> No
     assert (preview.moves, preview.removals) == ({}, {})
 
 
-def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
-    """.github/mcp.json is a copilot detection signal, so the heal never deletes it."""
+def test_heal_deletes_an_emptied_apm_created_github_mcp_json(tmp_path: Path) -> None:
+    """The heal removed every server .github/mcp.json held, so APM created it: delete it (#4524)."""
     _write(tmp_path / ".github/mcp.json", {"mcpServers": {"echo": _LEGACY_COPILOT}})
+
+    heal = heal_retired_project_mcp_destinations(
+        {"copilot": {"echo"}},
+        stored_configs={"echo": _ECHO},
+        native_hashes={},
+        project_root=tmp_path,
+    )
+
+    assert heal.removed == {"copilot": {"echo"}}
+    assert heal.deleted_files == [".github/mcp.json"]
+    assert not (tmp_path / ".github/mcp.json").exists()
+
+
+def test_heal_keeps_a_user_github_mcp_json_and_reports_it(tmp_path: Path) -> None:
+    """A .github/mcp.json that held a non-APM entry stays: it is the user's detection signal."""
+    _write(tmp_path / ".github/mcp.json", {"mcpServers": {"echo": _LEGACY_COPILOT, "user": {"command": "u"}}})
 
     heal = heal_retired_project_mcp_destinations(
         {"copilot": {"echo"}},
@@ -172,7 +188,7 @@ def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
     assert heal.removed == {"copilot": {"echo"}}
     assert heal.deleted_files == []
     assert json.loads((tmp_path / ".github/mcp.json").read_text(encoding="utf-8")) == {
-        "mcpServers": {}
+        "mcpServers": {"user": {"command": "u"}}
     }
 
 
@@ -476,7 +492,7 @@ def test_uninstall_heals_retired_claims_and_never_touches_user_root_entries(
     )
 
     assert json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"] == {"echo": user_root}
-    assert json.loads((tmp_path / ".github/mcp.json").read_text())["mcpServers"] == {}
+    assert not (tmp_path / ".github/mcp.json").exists()
     assert not lock.mcp_target_servers
     # Uninstall reports the heal exactly as install does (C5d).
     progress = " ".join(str(call.args[0]) for call in logger.progress.call_args_list)

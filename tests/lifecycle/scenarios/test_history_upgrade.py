@@ -125,6 +125,10 @@ def test_upgrade_from_prior_generator(lifecycle_world, generator) -> None:
     assert "srv" in _servers(project / ".mcp.json")
     with known_defect("#4169", r"retired entry") if silent else nullcontext():
         assert "srv" not in _servers(project / ".github/mcp.json"), "the retired entry is healed"
+    if silent:
+        assert (project / ".github/mcp.json").is_file(), "the silent upgrade keeps the retired file"
+    else:
+        assert not (project / ".github/mcp.json").exists(), "the upgrade removed the emptied retired file"
 
     scenario.pair()
     rerun = scenario.run("install")
