@@ -32,7 +32,7 @@ steps:
   - n: 3
     run: [apm marketplace add lifecycle/marketplace]
     exit: 0
-    key_lines: ["[+] Marketplace 'lifecycle-market' registered (3 plugins)"]
+    key_lines: ["[+] Marketplace 'lifecycle-market' registered (5 plugins)"]
   - n: 4
     run: [apm update --yes]
     exit: 0
