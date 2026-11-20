@@ -32,6 +32,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _summary,
 )
 from scripts.architecture_linter.checks.install_orphan_removal_sites import (
+    installed_scan_findings,
     lock_row_subtraction_findings,
     removal_site_findings,
 )
@@ -89,11 +90,11 @@ def check_orphan_selection(provider: FactsProvider) -> tuple[Violation, ...]:
         if failures or index is None or index.root is None:
             continue
         findings.extend(_FileScan(path, index.nodes, public, required, owner_symbols).violations())
+        lines = getattr(facts, "lines", ())
         findings.extend(
-            lock_row_subtraction_findings(
-                path, index.nodes, getattr(facts, "lines", ()), GUARD_ORPHAN_SELECTION
-            )
+            lock_row_subtraction_findings(path, index.nodes, lines, GUARD_ORPHAN_SELECTION)
         )
+        findings.extend(installed_scan_findings(path, index, lines, GUARD_ORPHAN_SELECTION))
     findings.extend(removal_site_findings(provider, GUARD_ORPHAN_SELECTION))
     return tuple(findings)
 

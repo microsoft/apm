@@ -3095,6 +3095,36 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "retained_lock_keys feeds removal decisions",
             id="aliased-reachability-import",
         ),
+        # In-place sink growth and helpers outside the registered sites.
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = list(decision.removed_paths)\n"
+            "        orphaned_packages.extend(p for p in installed_packages if p not in declared_deps)\n",
+            "orphaned_packages must come from the decide_orphan_removal decision",
+            id="sink-extend",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = list(decision.removed_paths)\n"
+            "        for package in installed_packages:\n"
+            "            if package not in declared_deps:\n"
+            "                orphaned_packages.append(package)\n",
+            "Removal sites must not filter installed or locked sets",
+            id="sink-append-loop",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "def _preflight_prune_survivors(",
+            "def _sweep(apm_modules_dir, keep):\n"
+            "    for package in _scan_installed_packages(apm_modules_dir):\n"
+            "        if package not in keep:\n"
+            "            safe_rmtree(apm_modules_dir / package, apm_modules_dir)\n\n\n"
+            "def _preflight_prune_survivors(",
+            "Deleted package paths must come from the decide_orphan_removal decision",
+            id="unregistered-deletion-helper",
+        ),
         pytest.param(
             "src/apm_cli/install/orphans.py",
             "    deployment_claims: DeploymentClaims | None,\n) -> OrphanRemovalDecision:",

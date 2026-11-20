@@ -55,6 +55,9 @@ _UNIVERSE_CALLS = frozenset(
     }
 )
 _UNIVERSE_ATTRIBUTES = frozenset({"dependencies", "packages"})
+# Outside registered sites, only the apm_modules package scan is a universe.
+_INSTALLED_SCAN = "_scan_installed_packages"
+_GROWTH_METHODS = frozenset({"add", "append", "extend", "insert", "update"})
 _CONSTANT_CALLS = frozenset({"set", "frozenset", "list", "tuple", "dict"})
 # Lock rows are the lock model's own business.
 _LOCK_MODEL = "src/apm_cli/deps/lockfile.py"
@@ -153,6 +156,44 @@ def removal_site_findings(provider: FactsProvider, rule_id: str) -> list[Violati
     return findings
 
 
+def installed_scan_findings(
+    path: str, index, lines: tuple[str, ...], rule_id: str
+) -> list[Violation]:
+    """Hold every function that scans ``apm_modules`` to the site rules.
+
+    Outside the registered sites, a function that enumerates installed
+    packages may neither subtract nor filter that scan, nor delete a path
+    the orphan decision did not name.
+    """
+    nodes = index.nodes
+    if any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == _INSTALLED_SCAN
+        for node in nodes
+    ):
+        return []  # the scanner's own module (or an unrelated namesake)
+    findings: dict[tuple[int, str], Violation] = {}
+    for function in index.functions():
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if (path, function.name) in _SINKS or not any(
+            isinstance(node, ast.Call) and _terminal(node.func) == _INSTALLED_SCAN
+            for node in ast.walk(function)
+        ):
+            continue
+        scan = _SiteScan(
+            path,
+            function,
+            frozenset(),
+            rule_id,
+            lines,
+            universe_calls=frozenset({_INSTALLED_SCAN}),
+            universe_attributes=frozenset(),
+        )
+        for finding in scan.run():
+            findings.setdefault((finding.line, finding.message), finding)
+    return list(findings.values())
+
+
 def lock_row_subtraction_findings(
     path: str, nodes: Iterable[ast.AST], lines: tuple[str, ...], rule_id: str
 ) -> list[Violation]:
@@ -205,9 +246,20 @@ def _reads_lock_rows(node: ast.AST) -> bool:
 class _SiteScan:
     """Decision-derived data flow inside one removal-site function."""
 
-    def __init__(self, path, function, sinks, rule_id, lines) -> None:
+    def __init__(
+        self,
+        path,
+        function,
+        sinks,
+        rule_id,
+        lines,
+        universe_calls=_UNIVERSE_CALLS,
+        universe_attributes=_UNIVERSE_ATTRIBUTES,
+    ) -> None:
         self.path = path
         self.lines = lines
+        self.universe_calls = universe_calls
+        self.universe_attributes = universe_attributes
         self.function = function
         self.sinks = sinks
         self.rule_id = rule_id
@@ -222,12 +274,16 @@ class _SiteScan:
 
     def run(self) -> list[Violation]:
         derived = self._closure(self._decision_seeds(), _calls_producer, _flows_from)
-        universe = self._closure(set(), self._is_universe_source, _copies)
+        universe = self._closure(set(), self._is_universe, _copies)
         for node in self.nodes:
             for target, value in _bindings(node):
                 key = _key(target)
                 if key in self.sinks and not (_constant(value) or _flows_from(value, derived)):
                     self._flag(node, f"{key} must come from the {_ENTRY} decision")
+            grown = _grown_sink(node)
+            if grown is not None and grown[0] in self.sinks:
+                if not all(_flows_from(argument, derived) for argument in grown[1]):
+                    self._flag(node, f"{grown[0]} must come from the {_ENTRY} decision")
             if (
                 isinstance(node, ast.Return)
                 and "return" in self.sinks
@@ -253,32 +309,6 @@ class _SiteScan:
             if argument.arg in _DECISION_PARAMETERS
         }
 
-    @staticmethod
-    def _is_universe_source(value: ast.AST) -> bool:
-        """Return whether *value* is (a copy or view of) an installed or locked set."""
-        while True:
-            if isinstance(value, ast.Call) and _terminal(value.func) in _UNIVERSE_CALLS:
-                return True
-            if isinstance(value, ast.Attribute) and value.attr in _UNIVERSE_ATTRIBUTES:
-                return True
-            if (
-                isinstance(value, ast.Call)
-                and isinstance(value.func, ast.Name)
-                and value.func.id in _COPY_CALLS
-                and value.args
-            ):
-                value = value.args[0]
-            elif (
-                isinstance(value, ast.Call)
-                and isinstance(value.func, ast.Attribute)
-                and value.func.attr in {"items", "keys", "values", "copy"}
-            ):
-                value = value.func.value
-            elif isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-                value = value.generators[0].iter
-            else:
-                return False
-
     def _closure(self, seeds: set[str], is_source, flows) -> set[str]:
         tainted = set(seeds)
         changed = True
@@ -294,26 +324,106 @@ class _SiteScan:
                         changed = True
         return tainted
 
+    def _is_universe(self, value: ast.AST) -> bool:
+        return _is_universe_source(value, self.universe_calls, self.universe_attributes)
+
     def _check_local_predicate(self, node: ast.AST, universe: set[str], derived: set[str]) -> None:
         """Reject subtracting or filtering an installed/locked universe at a site."""
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub):
-            if _in_universe(node.left, universe):
+            if self._in_universe(node.left, universe):
                 self._flag(node, f"Removal sites must not subtract their own sets; ask {_ENTRY}")
-        elif isinstance(node, ast.comprehension) and _in_universe(node.iter, universe):
-            for test in node.ifs:
-                for compare in ast.walk(test):
-                    if (
-                        isinstance(compare, ast.Compare)
-                        and any(isinstance(op, (ast.In, ast.NotIn)) for op in compare.ops)
-                        and not any(
-                            _reads(item, derived) or _in_universe(item, universe)
-                            for item in compare.comparators
-                        )
-                    ):
-                        self._flag(
-                            compare,
-                            f"Removal sites must not filter installed or locked sets; ask {_ENTRY}",
-                        )
+            return
+        if isinstance(node, ast.comprehension) and self._in_universe(node.iter, universe):
+            tests = list(node.ifs)
+        elif (
+            isinstance(node, (ast.For, ast.AsyncFor))
+            and self._in_universe(node.iter, universe)
+            and self._feeds_removal(node)
+        ):
+            tests = [
+                child.test
+                for statement in node.body
+                for child in ast.walk(statement)
+                if isinstance(child, (ast.If, ast.IfExp, ast.While))
+            ]
+        else:
+            return
+        for test in tests:
+            for compare in ast.walk(test):
+                if (
+                    isinstance(compare, ast.Compare)
+                    and any(isinstance(op, (ast.In, ast.NotIn)) for op in compare.ops)
+                    and not any(
+                        _reads(item, derived) or self._in_universe(item, universe)
+                        for item in compare.comparators
+                    )
+                ):
+                    self._flag(
+                        compare,
+                        f"Removal sites must not filter installed or locked sets; ask {_ENTRY}",
+                    )
+
+    def _feeds_removal(self, loop: ast.AST) -> bool:
+        """Return whether a loop body deletes, or binds or grows a removal sink."""
+        for statement in loop.body:
+            for node in ast.walk(statement):
+                if isinstance(node, ast.Call) and _terminal(node.func) in _DELETERS:
+                    return True
+                grown = _grown_sink(node)
+                if grown is not None and grown[0] in self.sinks:
+                    return True
+                if any(_key(target) in self.sinks for target, _ in _bindings(node)):
+                    return True
+        return False
+
+    def _in_universe(self, value: ast.AST, universe: set[str]) -> bool:
+        return self._is_universe(value) or _copies(value, universe)
+
+
+def _is_universe_source(value, universe_calls, universe_attributes) -> bool:
+    """Return whether *value* is (a copy or view of) an installed or locked set."""
+    pending = [value]
+    while pending:
+        value = pending.pop()
+        while value is not None:
+            if isinstance(value, ast.IfExp):
+                pending.append(value.orelse)
+                value = value.body
+            elif (isinstance(value, ast.Call) and _terminal(value.func) in universe_calls) or (
+                isinstance(value, ast.Attribute) and value.attr in universe_attributes
+            ):
+                return True
+            elif (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id in _COPY_CALLS
+                and value.args
+            ):
+                value = value.args[0]
+            elif (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute)
+                and value.func.attr in {"items", "keys", "values", "copy"}
+            ):
+                value = value.func.value
+            elif isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+                value = value.generators[0].iter
+            else:
+                value = None
+    return False
+
+
+def _grown_sink(node: ast.AST) -> tuple[str, list[ast.AST]] | None:
+    """Return ``(sink, arguments)`` when *node* grows a collection in place."""
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _GROWTH_METHODS
+    ):
+        key = _key(node.func.value)
+        if key is not None:
+            return key, [*node.args, *(keyword.value for keyword in node.keywords)]
+    return None
 
 
 def _bindings(node: ast.AST) -> list[tuple[ast.AST, ast.AST]]:
@@ -433,10 +543,6 @@ def _copies(value: ast.AST, names: set[str]) -> bool:
     return False
 
 
-def _in_universe(value: ast.AST, universe: set[str]) -> bool:
-    return _SiteScan._is_universe_source(value) or _copies(value, universe)
-
-
 def _constant(value: ast.AST) -> bool:
     if isinstance(value, ast.Constant):
         return True
@@ -458,4 +564,4 @@ def _terminal(node: ast.AST) -> str | None:
     return None
 
 
-__all__ = ["lock_row_subtraction_findings", "removal_site_findings"]
+__all__ = ["installed_scan_findings", "lock_row_subtraction_findings", "removal_site_findings"]
