@@ -27,6 +27,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_e2e_mode,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-OWN-package-format-precedence", "P-OWN-dependency-selection"),
 ]
 
 _AUDIT_ARGS = (
