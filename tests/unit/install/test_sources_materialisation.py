@@ -96,6 +96,7 @@ def _make_ctx(
     node_stub.is_dev = False
     ctx.dependency_graph.dependency_tree.get_node.return_value = node_stub
 
+    ctx.dep_base_dirs = {}
     return ctx
 
 

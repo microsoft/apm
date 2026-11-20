@@ -46,6 +46,7 @@ def _make_ctx(
     ctx.content_hash_verified_deps = content_hash_verified_deps or set()
     ctx.installed_packages = []
     ctx.package_hashes = {}
+    ctx.dep_base_dirs = {}
     ctx.package_types = {}
     ctx.diagnostics = MagicMock()
     ctx.apm_modules_dir = Path("/fake/apm_modules")
@@ -141,7 +142,7 @@ class TestLocalDependencySourceAcquire:
         return LocalDependencySource(ctx, dep_ref, install_path, dep_key)
 
     def test_user_scope_relative_path_returns_none(self) -> None:
-        """USER scope + relative local_path → warn + return None."""
+        """USER scope + root-declared relative local_path -> error + None (#4153)."""
         from apm_cli.core.scope import InstallScope
 
         ctx = _make_ctx(scope=InstallScope.USER)
@@ -151,12 +152,13 @@ class TestLocalDependencySourceAcquire:
         result = source.acquire()
 
         assert result is None
-        ctx.diagnostics.warn.assert_called_once()
-        warn_msg = ctx.diagnostics.warn.call_args[0][0]
-        assert "relative local paths" in warn_msg
+        ctx.diagnostics.warn.assert_not_called()
+        error_msg = ctx.diagnostics.error.call_args[0][0]
+        assert "relative/pkg" in error_msg
+        assert "relative local paths" in error_msg
 
     def test_user_scope_relative_path_with_logger_verbose(self) -> None:
-        """USER scope + relative path + logger → verbose_detail called."""
+        """USER scope + relative path + logger: the refusal is an error, not a verbose skip."""
         from apm_cli.core.scope import InstallScope
 
         mock_logger = MagicMock()
@@ -167,7 +169,8 @@ class TestLocalDependencySourceAcquire:
         result = source.acquire()
 
         assert result is None
-        mock_logger.verbose_detail.assert_called_once()
+        mock_logger.verbose_detail.assert_not_called()
+        ctx.diagnostics.error.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
