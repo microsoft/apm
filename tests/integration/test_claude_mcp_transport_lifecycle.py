@@ -223,7 +223,7 @@ def test_legacy_mixed_state_is_repaired_only_on_redeclaration(
         before = scenario.snapshot(scenario.user_scope)
         result = scenario.install(*flags)
         assert result.returncode != 0
-        assert "conflicts with the existing claude" in result.stdout
+        assert "conflicts with the existing claude" in result.stdout + result.stderr
         assert scenario.snapshot(scenario.user_scope) == before
         assert scenario.snapshot(not scenario.user_scope) == opposite
 
@@ -232,7 +232,7 @@ def test_legacy_mixed_state_is_repaired_only_on_redeclaration(
         before = scenario.snapshot(scenario.user_scope)
         result = scenario.install(*flags)
         assert result.returncode != 0
-        assert "conflicts with the existing claude" in result.stdout
+        assert "conflicts with the existing claude" in result.stdout + result.stderr
         assert scenario.snapshot(scenario.user_scope) == before
         assert scenario.snapshot(not scenario.user_scope) == opposite
 

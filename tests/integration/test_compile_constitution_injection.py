@@ -133,4 +133,4 @@ def test_no_failure_if_constitution_absent(apm_binary_path: Path):
         # Should not create AGENTS.md
         assert not (proj / "AGENTS.md").exists()
         # Should indicate nothing to compile
-        assert "No APM content found to compile" in result.stdout
+        assert "No APM content found to compile" in result.stderr

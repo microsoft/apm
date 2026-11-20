@@ -347,7 +347,7 @@ class TestPromoteSubSkills:
         assert not (target_root / "skill-b").exists()
 
     def test_content_identical_existing_skill_skipped_no_copy(self, tmp_path):
-        """Lines 591-594: content-identical existing skill => increments count, no rmtree."""
+        """Content-identical existing skill => still deployed, not counted as changed (#4184)."""
         sub = self._make_sub_skills_dir(tmp_path, ["skill-a"])
         target_root = tmp_path / "target"
         target_root.mkdir()
@@ -357,8 +357,9 @@ class TestPromoteSubSkills:
         (target_skill / "SKILL.md").write_text("# skill-a\n")
         mtime_before = target_skill.stat().st_mtime
 
-        count, _deployed = SkillIntegrator._promote_sub_skills(sub, target_root, "parent-pkg")
-        assert count == 1
+        count, deployed = SkillIntegrator._promote_sub_skills(sub, target_root, "parent-pkg")
+        assert count == 0
+        assert deployed == [target_skill]
         # Directory was NOT replaced (mtime unchanged)
         assert target_skill.stat().st_mtime == mtime_before
 

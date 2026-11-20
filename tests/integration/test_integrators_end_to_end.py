@@ -769,7 +769,7 @@ class TestPromoteSubSkills:
         assert not (target_root / "exclude-me").exists()
 
     def test_identical_content_skips_copy(self, tmp_path: Path) -> None:
-        """If target already has identical content, no error and count still 1."""
+        """Identical content re-promotes without error; only the first promote counts (#4184)."""
         sub_skills = tmp_path / "sub"
         sub_skills.mkdir()
         _make_skill_dir(sub_skills, "idempotent-skill")
@@ -778,10 +778,12 @@ class TestPromoteSubSkills:
         target_root.mkdir()
 
         # First promote
-        SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
-        # Second promote with identical content
-        count, _deployed = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
-        assert count == 1
+        first_count, _ = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
+        assert first_count == 1
+        # Second promote with identical content: still deployed, but unchanged
+        count, deployed = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
+        assert count == 0
+        assert deployed == [target_root / "idempotent-skill"]
 
 
 # ===========================================================================
