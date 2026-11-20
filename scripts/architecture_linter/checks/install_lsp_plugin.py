@@ -64,8 +64,16 @@ _TRUST_OWNER_CALLERS = frozenset(
         (_EXEC_GATE, "_trust_ctx"),
         (_EXEC_GATE, "_resolve"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
+        # ``apm install <bundle>`` reads grants from the scope manifest, never
+        # the working directory's apm.yml under -g (#3989 M2).
+        (_LOCAL_BUNDLE, "effective_bundle_allow_map"),
     }
 )
+# The root-taking convenience wrapper derives the PROJECT manifest from its
+# root, so only the caller that first maps a root through the scope owner
+# (core.scope.manifest_root) may use it.
+_ROOT_TRUST_WRAPPER = "effective_exec_map_for_project"
+_ROOT_TRUST_WRAPPER_CALLERS = frozenset({(_EXECUTABLES, "resolve_project_exec_allow_map")})
 # One owner decides a package's exec status and the types a partial approval
 # still deploys (#3991); one comparer reads them back. A second reader would let
 # update and install disagree on whether a recorded decision still holds.
@@ -177,6 +185,8 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _LOCAL_BUNDLE: (
                     "bundle_approval_key = local_bundle_approval_key(",
                     "approval_key=bundle_approval_key,",
+                    "grants_manifest = project_manifest_path(manifest_root(project_root, "
+                    "user_scope=user_scope))",
                 ),
                 _INSTALL_SERVICES: (
                     "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
@@ -188,6 +198,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
         )
     )
     findings.extend(_trust_owner_closed_world(provider))
+    findings.extend(_bundle_trust_scope_findings(provider))
     # A second locked-row trust derivation beside the owner is a split authority.
     facts, failures = _facts_for(provider, _APPROVE_COMMAND, GUARD_EXECUTABLE_TRUST)
     if not failures:
@@ -218,6 +229,28 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 )
             )
     return tuple(findings)
+
+
+def _bundle_trust_scope_findings(provider: FactsProvider) -> list[Violation]:
+    """``apm install <bundle>`` hands the bundle trust owner the command's scope."""
+    facts, failures = _facts_for(provider, _INSTALL_COMMAND, GUARD_EXECUTABLE_TRUST)
+    if failures:
+        return list(failures)
+    text = "\n".join(_lines(facts))
+    marker = "_effective_bundle_allow_map("
+    calls = [
+        _balanced_call(text, index) for index in range(len(text)) if text.startswith(marker, index)
+    ]
+    if len(calls) == 1 and "user_scope=global_," in calls[0]:
+        return []
+    return [
+        _summary(
+            GUARD_EXECUTABLE_TRUST,
+            _INSTALL_COMMAND,
+            "apm install <bundle> must pass effective_bundle_allow_map user_scope=global_ "
+            "so -g reads grants from the user manifest (#3989)",
+        )
+    ]
 
 
 # What a registered caller may hand the trust owner as the manifest (A8): a
@@ -374,6 +407,18 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
             violation(
                 GUARD_EXECUTABLE_TRUST,
                 path,
+                f"{call.scope} calls {_ROOT_TRUST_WRAPPER} with a root; read grants from "
+                "the scope manifest (project_manifest_path(manifest_root(...)))",
+                line=call.line,
+            )
+            for call in path_facts.calls
+            if call.qualname.rsplit(".", 1)[-1] == _ROOT_TRUST_WRAPPER
+            and (path, call.scope) not in _ROOT_TRUST_WRAPPER_CALLERS
+        )
+        findings.extend(
+            violation(
+                GUARD_EXECUTABLE_TRUST,
+                path,
                 f"{call.scope} calls {name} outside its registered callers; the exec "
                 "decision and its staleness check have one owner each (#3990, #3991)",
                 line=call.line,
@@ -487,7 +532,7 @@ def check_lsp_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
                 ),
                 _LOCAL_BUNDLE: (
                     "def effective_bundle_allow_map(",
-                    "return effective_exec_map_for_project(",
+                    "exec_trust_context_for_project(",
                     "def _wire_bundle_lsp_servers(",
                     "force=force,",
                 ),

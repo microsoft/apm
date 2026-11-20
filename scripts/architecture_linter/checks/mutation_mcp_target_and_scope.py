@@ -67,6 +67,8 @@ _EXECUTABLES_OWNER = "src/apm_cli/security/executables.py"
 # Uninstall only intersects with managed servers and never admits one.
 _MCP_RAW_VIEW_CONSUMER = "src/apm_cli/commands/uninstall/engine.py"
 _MCP_AUDIT_CONSUMER = "src/apm_cli/policy/ci_checks.py"
+# Audit's org-policy wrapper judges the MCP servers the audit view keeps.
+_MCP_POLICY_AUDIT = "src/apm_cli/policy/policy_checks.py"
 
 
 _MCP_ADAPTER_BASE = "src/apm_cli/adapters/client/base.py"
@@ -515,6 +517,56 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
             exempt=False,
         )
     )
+    findings.extend(_check_bundle_baseline_admission(provider, rule_id, facts))
+    return findings
+
+
+def _check_bundle_baseline_admission(
+    provider: FactsProvider, rule_id: str, facts: FileFacts
+) -> list[Violation]:
+    """A ``bundle:`` claim is baseline only with its receipt, and audit policy judges it.
+
+    The baseline owner requires the lock's MCP deployment receipt, and the
+    audit policy wrapper judges exactly the view's kept servers: apm.yml
+    servers alone only when there is no lock to keep anything.
+    """
+    findings: list[Violation] = []
+    baseline_span = _function_span(facts, "_bundle_owned_baseline")
+    if (
+        baseline_span is None
+        or not _span_has_fixed(
+            facts, baseline_span, "DeploymentLedgerCodec.mcp_native_hashes(lockfile)"
+        )
+        or not _span_has_fixed(facts, baseline_span, "and name in deployed")
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "a bundle: provenance is baseline only with the lock's MCP deployment receipt",
+            )
+        )
+    policy, failures = checked_facts(provider, _MCP_POLICY_AUDIT, rule_id, require_python=True)
+    if failures:
+        return [*findings, *failures]
+    span = _function_span(policy, "run_policy_checks")
+    lines = [text.strip() for _, text in _span_lines(policy, span)] if span else []
+    reads = [index for index, text in enumerate(lines) if "get_all_mcp_dependencies()" in text]
+    if (
+        not span
+        or "view, _admission = audit_mcp_view(" not in lines
+        or "mcp_deps = list(view.kept_dependencies())" not in lines
+        or "mcp_brought_in_by=mcp_brought_in_by," not in lines
+        or len(reads) != 1
+        or lines[reads[0] - 1] != "if lock is None:"
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_POLICY_AUDIT,
+                "audit MCP policy must judge every server CurrentMcpConfigView keeps",
+            )
+        )
     return findings
 
 

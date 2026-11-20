@@ -28,9 +28,11 @@ if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
     from ..install.audit_replay import PreparedCiAuditReplay
     from ..install.drift import DriftFinding
+    from ..integration.mcp_config_view import CurrentMcpConfigView
     from ..integration.targets import TargetProfile
     from ..models.apm_package import APMPackage
     from ..models.dependency.reference import DependencyReference
+    from ..security.trust import McpAdmission
 
 _logger = logging.getLogger(__name__)
 
@@ -519,6 +521,38 @@ def _missing_recorded_skill_subset_paths(
     return missing_requested_components(requested=subset, available=available)
 
 
+def audit_mcp_view(
+    manifest: APMPackage,
+    lock: LockFile,
+    *,
+    modules_root: Path | None = None,
+    no_policy: bool = False,
+) -> tuple[CurrentMcpConfigView, McpAdmission]:
+    """The MCP view audit judges: config consistency and MCP policy read one baseline.
+
+    Consent is re-evaluated from apm.yml and org policy, never from the
+    lockfile or personal config, so CI and laptops reach one verdict. Audit
+    accepts structural omission evidence and re-checks consent.
+    """
+    from ..constants import APM_MODULES_DIR
+    from ..integration.mcp_config_view import CurrentMcpConfigView
+    from ..security.trust import McpAdmission
+
+    project_root = manifest.package_path or Path.cwd()
+    admission = McpAdmission.for_project(
+        project_root, user_scope=False, include_user=False, no_policy=no_policy
+    )
+    view = CurrentMcpConfigView.select(
+        manifest,
+        lock,
+        modules_root if modules_root is not None else project_root / APM_MODULES_DIR,
+        admission=admission,
+        recorded=lock,
+        exact=False,
+    )
+    return view, admission
+
+
 def _check_config_consistency(
     manifest: APMPackage,
     lock: LockFile,
@@ -528,11 +562,6 @@ def _check_config_consistency(
     no_policy: bool = False,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
-    from ..constants import APM_MODULES_DIR
-    from ..integration.mcp_config_view import CurrentMcpConfigView
-    from ..security.trust import McpAdmission
-
-    project_root = manifest.package_path or Path.cwd()
     if prepared_replay_error is not None:
         return CheckResult(
             name="config-consistency",
@@ -540,21 +569,11 @@ def _check_config_consistency(
             message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
-    # Consent is re-evaluated from apm.yml and org policy, never from the
-    # lockfile or personal config, so CI and laptops reach one verdict. Audit
-    # accepts structural omission evidence and re-checks consent.
-    admission = McpAdmission.for_project(
-        project_root, user_scope=False, include_user=False, no_policy=no_policy
-    )
-    view = CurrentMcpConfigView.select(
+    view, admission = audit_mcp_view(
         manifest,
         lock,
-        prepared_replay.modules_root
-        if prepared_replay is not None
-        else project_root / APM_MODULES_DIR,
-        admission=admission,
-        recorded=lock,
-        exact=False,
+        modules_root=prepared_replay.modules_root if prepared_replay is not None else None,
+        no_policy=no_policy,
     )
     policy_note = (
         f" Org policy unavailable ({admission.policy_unavailable}); consent was "

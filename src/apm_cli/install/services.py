@@ -944,16 +944,15 @@ def integrate_local_bundle(
             if _canvas_enabled:
                 # Canvas feature on but not approved: block and surface message.
                 skipped += len(_blocked)
+                from ..security.executables import local_bundle_approval_hint
+
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
                     "and are not approved for this exact bundle content. "
-                    "Add this to apm.yml:\n"
-                    "executables:\n"
-                    "  allow:\n"
-                    f'    "{approval_key}":\n'
-                    "      canvas: true\n"
-                    "Then rerun the install."
+                    + local_bundle_approval_hint(
+                        str(approval_key), "canvas", user_scope=scope is InstallScope.USER
+                    )
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message=_msg, package=str(slug))

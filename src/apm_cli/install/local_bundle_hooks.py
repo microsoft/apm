@@ -60,15 +60,15 @@ def integrate_local_bundle_hooks(
         result.skipped = len(hook_paths)
         if retire:
             _retire_bundle_hooks(project_root, targets, slug)
+        from ..core.scope import InstallScope
+        from ..security.executables import local_bundle_approval_hint
+
         _warn(
             f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: hooks are "
-            "executable and not approved for this exact bundle content. To approve "
-            "this exact local bundle, add:\n"
-            "executables:\n"
-            "  allow:\n"
-            f'    "{approval_key}":\n'
-            "      hooks: true\n"
-            "Then rerun the install.",
+            "executable and not approved for this exact bundle content. "
+            + local_bundle_approval_hint(
+                str(approval_key), "hooks", user_scope=scope == InstallScope.USER
+            ),
             slug,
             diagnostics,
             logger,
