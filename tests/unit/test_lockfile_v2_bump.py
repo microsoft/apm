@@ -7,6 +7,8 @@ never uses the registry keeps lockfile_version "1" forever (§2.1.4).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from apm_cli.deps.lockfile import (
@@ -161,6 +163,20 @@ class TestSchemaBumpOpportunistic:
         rewrite.write(path)
 
         assert "lockfile_version: '2'" in path.read_text(encoding="utf-8")
+        assert LockFile.read(path).lockfile_version == "2"
+
+    def test_v4_marker_follows_framed_content_hashes_not_the_floor(self, tmp_path: Path):
+        """Versions 3 and 4 follow their own rules; the floor only rules out version 1."""
+        path = tmp_path / "apm.lock.yaml"
+        first = LockFile()
+        first.add_dependency(_git_dep(content_hash="sha256:" + "b" * 64))
+        first.write(path)
+        assert LockFile.read(path).lockfile_version == "4"
+
+        rewrite = LockFile()
+        rewrite.add_dependency(_git_dep())
+        rewrite.write(path)
+
         assert LockFile.read(path).lockfile_version == "2"
 
     def test_new_lockfile_without_v2_entries_is_v1(self, tmp_path: Path):
