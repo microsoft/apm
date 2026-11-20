@@ -10,7 +10,8 @@ Layout under ``base`` (an ``IsolatedApmEnvironment`` root, cloned per test)::
     bundles/         ``apm pack`` output of p-exec (default plugin format)
     bundles-apm/     ``apm pack --format apm`` of a consumer of approved p-exec
                      (what ``apm unpack`` reads: the deployed hook and MCP entry)
-    executables/     trap ``claude`` / ``codex`` binaries that must never run
+    executables/     OS-aware shims (``shims.py``): trap ``claude`` / ``codex``
+                     binaries that must never run, and a hermetic ``az``
 
 APM_HOME/config.json enables the experimental ``canvas`` primitive.
 
@@ -43,12 +44,12 @@ from tests.lifecycle.world.services import (
     policy_documents,
     policy_org,
 )
+from tests.lifecycle.world.shims import install_shims, shim_environment
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 TAG = "v1.0.0"
 _NATIVE = frozenset({"p-native-claude", "p-native-codex", "p-native-claude-bin"})
-_TRAPPED = ("claude", "codex")
 
 
 def _manifest(name: str) -> dict[str, object]:
@@ -65,17 +66,6 @@ def _manifest(name: str) -> dict[str, object]:
 def _write_manifest(path: Path, name: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(_manifest(name)), encoding="utf-8")
-
-
-def _traps(root: Path) -> Path:
-    """Native CLIs on PATH that record any call: APM must never run them."""
-    directory = root / "executables"
-    directory.mkdir()
-    for name in _TRAPPED:
-        trap = directory / name
-        trap.write_text(f"#!/bin/sh\ntouch '{root / f'{name}-was-run'}'\nexit 91\n", "ascii")
-        trap.chmod(0o755)
-    return directory
 
 
 def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
@@ -213,7 +203,8 @@ def build_template(base: Path) -> World:
     env["COLUMNS"] = "400"
     env["CLAUDE_CONFIG_DIR"] = str(isolated.home / ".claude")
     env["CODEX_HOME"] = str(isolated.home / ".codex")
-    env["PATH"] = os.pathsep.join((str(_traps(base)), env.get("PATH", "")))
+    azure_config = isolated.home / ".azure"
+    env = shim_environment(env, base, azure_config, install_shims(base, azure_config))
     env = services.child_environment(env)
     for user_root in (".copilot", ".claude", ".codex"):
         (isolated.home / user_root).mkdir()

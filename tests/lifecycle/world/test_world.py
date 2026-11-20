@@ -9,7 +9,9 @@ expected failures naming their tracking issue.
 from __future__ import annotations
 
 import json
+import shutil
 import statistics
+import subprocess
 import time
 from pathlib import Path
 
@@ -30,6 +32,7 @@ from tests.lifecycle.world.services import (
     REGISTRY_SERVER,
     policy_org,
 )
+from tests.lifecycle.world.shims import AZ_CALL_LOG, TRAP_EXIT, TRAPPED
 
 pytestmark = [
     pytest.mark.e2e,
@@ -356,6 +359,48 @@ def test_host_alias_serves_the_world_repository(lifecycle_world: World, shape: s
     host = HOST_ALIASES[shape][0]
     assert _hosts(world) == {host}, world.services.egress_log()
     assert any(entry["path"].endswith("/git-upload-pack") for entry in world.services.egress_log())
+
+
+# -- OS-aware shims ------------------------------------------------------------
+
+
+def _shim(world: World, name: str) -> str:
+    found = shutil.which(name, path=world.env["PATH"])
+    assert found is not None, f"{name} is not on the world PATH"
+    assert Path(found).is_relative_to(world.root), f"{name} resolves outside the world: {found}"
+    return found
+
+
+def _run_shim(world: World, name: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        (_shim(world, name), *args),
+        env=world.env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("name", TRAPPED)
+def test_trap_binary_records_and_fails_on_this_os(lifecycle_world: World, name: str) -> None:
+    world = lifecycle_world
+    result = _run_shim(world, name, "--version")
+    assert result.returncode == TRAP_EXIT, result
+    assert (world.root / f"{name}-was-run").read_text(encoding="utf-8") == "--version\n"
+
+
+def test_azure_cli_is_the_hermetic_world_stub(lifecycle_world: World) -> None:
+    """The runner's real az must never run: it phones home through the proxy."""
+    world = lifecycle_world
+    config = Path(world.env["AZURE_CONFIG_DIR"])
+    assert config.is_relative_to(world.root)
+    assert world.env["AZURE_CORE_COLLECT_TELEMETRY"] == "no"
+    result = _run_shim(world, "az", "account", "get-access-token", "-o", "json")
+    assert result.returncode == 1 and "az login" in result.stderr, result
+    calls = (config / AZ_CALL_LOG).read_text(encoding="utf-8").splitlines()
+    assert json.loads(calls[-1])[:2] == ["account", "get-access-token"]
+    assert world.services.egress_log() == []
 
 
 _POLICY_EXIT = {
