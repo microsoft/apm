@@ -220,6 +220,7 @@ markers = [
     "requires_runtime_llm: requires llm runtime installed",
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
+    "promise: links a test module to one or more ids from tests/quality/promise-catalog.json (required on new test modules)",
     "lifecycle_smoke: promoted to the required PR-time Lifecycle Smoke (Linux) job -- see ci.yml's lifecycle-smoke job and docs/src/content/docs/contributing/integration-testing.md",
     "lifecycle_merge_group: unique lifecycle contracts retained in the full merge-group integration suite",
     "architecture_contract: platform-agnostic architecture-linter contract over repository source (applied to tests/integration/test_architecture_*); runs once on Linux, deselected on macOS, Windows and Linux arm64 release lanes",
