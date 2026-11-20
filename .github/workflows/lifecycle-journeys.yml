@@ -1,10 +1,12 @@
 name: Lifecycle Journeys Nightly
 
 # All 25 docs journeys (#4110) through the real CLI in the hermetic lifecycle
-# world, on Linux, Windows and macOS. The PR lifecycle smoke job runs only the
-# golden journeys on Linux. A scheduled failure opens (or updates) one tracking
-# issue; the next green scheduled run closes it. Dispatch with `ref` set to a
-# release-candidate SHA to validate it before tagging.
+# world, on Linux, Windows and macOS, plus the full tests/lifecycle suite on
+# Linux. PR and main-push CI run only the lifecycle smoke subset, so this is
+# the only scheduled run of every lifecycle witness. A scheduled failure opens
+# (or updates) one tracking issue; the next green scheduled run closes it.
+# Dispatch with `ref` set to a release-candidate SHA to validate it before
+# tagging.
 
 on:
   schedule:
@@ -63,9 +65,49 @@ jobs:
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 2 --durations=10 -m "not live" tests/lifecycle/journeys/test_journeys.py
 
+  lifecycle-full:
+    name: Lifecycle Full Suite (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install Unix shell startup test runtimes
+        run: bash scripts/ci-apt-install.sh fish zsh
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      # The journeys job above covers tests/lifecycle/journeys on every OS.
+      - name: Run the full lifecycle suite
+        env:
+          APM_E2E_TESTS: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 4 --dist loadgroup --durations=20 -m "not live" \
+            --ignore=tests/lifecycle/journeys tests/lifecycle
+
   signal:
     name: Lifecycle Journeys Nightly Signal
-    needs: [journeys]
+    needs: [journeys, lifecycle-full]
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -75,7 +117,7 @@ jobs:
       - name: Open, update or close the tracking issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          RESULT: ${{ needs.journeys.result }}
+          RESULT: ${{ needs.journeys.result == 'success' && needs.lifecycle-full.result || needs.journeys.result }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -100,7 +142,7 @@ jobs:
             if (failed) {
               const body = [
                 MARKER,
-                'The nightly lifecycle journeys run is failing on at least one OS.',
+                'The nightly lifecycle run (journeys on any OS, or the full Linux suite) is failing.',
                 '',
                 `- Run: [${context.runNumber}](${runUrl})`,
                 `- Head SHA: \`${context.sha}\``,

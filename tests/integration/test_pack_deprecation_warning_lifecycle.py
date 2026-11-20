@@ -5,6 +5,7 @@ pack must route its raw target read through the same warning owner that
 install and compile use, once per run.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -69,3 +70,40 @@ def test_plugin_only_pack_warns_once_with_exact_replacement(
     assert (project / manifest).is_file()
     err = " ".join(result.stderr.split())
     assert err.count(warning) == 1, result.stderr
+
+
+_LICENSE_WARNING = (
+    "No 'license:' field in apm.yml; the SBOM will record NOASSERTION for this "
+    "package. Add a 'license:' field to apm.yml (an SPDX expression such as "
+    "MIT or Apache-2.0, or UNLICENSED) to declare it."
+)
+
+
+def test_pack_json_keeps_the_missing_license_warning(tmp_path: Path, apm_binary_path: Path) -> None:
+    """``apm pack --json`` reports the authoring license nudge in ``warnings`` (#4203)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
+    env = dict(isolated.subprocess_env())
+    env.pop("CI", None)
+    project = isolated.work_root / "my-package"
+    project.mkdir()
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    init = runner.run(("init", "-y"), cwd=project, env=env)
+    assert init.returncode == 0, init.stdout + init.stderr
+    skill = project / ".apm" / "skills" / "hello" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: hello\ndescription: hi\n---\n# hi\n", encoding="utf-8")
+
+    text = runner.run(("pack", "--dry-run"), cwd=project, env=env)
+    assert text.returncode == 0, text.stdout + text.stderr
+    assert " ".join((text.stdout + text.stderr).split()).count(_LICENSE_WARNING) == 1
+
+    args = ("pack", "--archive", "--check-versions", "--strict-metadata", "--json")
+    result = runner.run(args, cwd=project, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.isascii() and result.stderr.isascii()
+    report = json.loads(result.stdout)
+    assert report["ok"] is True, report
+    assert report["warnings"].count(_LICENSE_WARNING) == 1, report
+    assert _LICENSE_WARNING not in " ".join(result.stderr.split()), result.stderr
+    assert sorted(report["bundle"]["files"]) == ["plugin.json", "skills/hello/SKILL.md"]
+    assert (project / report["bundle"]["path"]).is_file()
