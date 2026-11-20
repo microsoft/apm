@@ -848,6 +848,21 @@
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
+    },
+    {
+      "issue": 4319,
+      "fixed_in": "Unreleased",
+      "summary": "apm install with a post-install script committed apm.lock.yaml before MCP/LSP reconciliation, so the script saw a lockfile without the final service state and the command wrote it twice; scripts now fire after reconciliation and the lockfile is written once.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_post_install_script_sees_the_final_lockfile_written_once"
+      ]
     }
   ],
   "lifecycle_contracts": [

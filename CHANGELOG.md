@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` and `apm update` run `post-install` scripts after MCP and LSP reconciliation, so scripts see the final lockfile and it is written once. (#PR4319)
 - `apm uninstall` resolves the remaining packages' org-policy trust before changing state, so that refusal leaves `apm.yml`, the lockfile and deployed files unchanged, and uninstall refuses out-of-project paths before any change. (closes #4185, #4255)
 - `apm uninstall` keeps your own files inside a removed package's skill directory and succeeds, as `apm prune` does. (closes #4162, #4255)
 - `apm install` refuses a symlinked `apm.lock.yaml` before it deploys anything, at project and user scope. (closes #4168, #4255)
