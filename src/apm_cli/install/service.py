@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +46,27 @@ if TYPE_CHECKING:
 
 class InstallNotAvailableError(RuntimeError):
     """Raised when the APM dependency subsystem failed to import."""
+
+
+@dataclass(frozen=True)
+class FrozenDisposition:
+    """What a ``--frozen`` replay withholds from install phases (req-lk-006).
+
+    Built only by :meth:`InstallService.frozen_disposition`, the single reader
+    of the ``frozen`` flag. Phases consume this answer instead of the flag.
+    """
+
+    replay: bool
+
+    @property
+    def retain_package_orphans(self) -> bool:
+        """Undeclared packages keep files, checkout and lock claims (#3662)."""
+        return self.replay
+
+    @property
+    def withhold_lockfile_writes(self) -> bool:
+        """apm.lock.yaml is never rewritten, so nothing new may be recorded."""
+        return self.replay
 
 
 def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
@@ -75,6 +97,17 @@ class InstallService:
     extension point for collaborator injection (downloader, scanner,
     integrator factory) when programmatic callers need to swap them.
     """
+
+    @staticmethod
+    def frozen_disposition(source: Any) -> FrozenDisposition:
+        """The single reader of an install context's ``frozen`` flag."""
+        return FrozenDisposition(replay=source.frozen is True)
+
+    @staticmethod
+    def frozen_replay_lockfile(source: Any) -> LockFile | None:
+        """The recorded lockfile a frozen replay deploys against; None otherwise."""
+        frozen = InstallService.frozen_disposition(source)
+        return source.existing_lockfile if frozen.replay else None
 
     @staticmethod
     def frozen_writes(frozen: bool) -> AbstractContextManager[list[str] | None]:
