@@ -700,3 +700,71 @@ def test_bin_plugin_deploys_inside_its_native_root_once_approved_and_trusted(
     assert not (scenario.plugins / "bin-tool").exists()
     assert enabled() == {f"clean-tool@{mkt}": True}
     assert not scenario.trap.exists()
+
+
+def test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """#4270: a plugin with root skills/ and bin/ keeps its plugin type on the cached pass.
+
+    The install after ``apm approve`` reads the cached source; it must route the
+    plugin natively, as the fresh fetch did, so bin/ lands inside the plugin root
+    and no loose skill reaches ~/.claude/skills.
+    """
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("bin-skills-plugin")
+    source = repository.worktree / "plugins/tool"
+    (source / ".claude-plugin").mkdir(parents=True)
+    (source / ".claude-plugin/plugin.json").write_text(
+        '{"name":"skills-bin-tool","version":"1.0.0"}', encoding="ascii"
+    )
+    (source / "skills/use-tool").mkdir(parents=True)
+    (source / "skills/use-tool/SKILL.md").write_text(
+        "---\nname: use-tool\ndescription: Use the tool\n---\nRun tool.\n", encoding="ascii"
+    )
+    (source / "bin").mkdir()
+    (source / "bin/tool").write_text("#!/bin/sh\necho TOOL\n", encoding="ascii")
+    (source / "bin/tool").chmod(0o755)
+    revision = factory.commit(repository, message="plugin with root skills and bin").sha
+    dependency = "fixture/bin-skills-plugin"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "bin-skills-consumer",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {"apm": [{"git": dependency, "ref": revision, "path": "plugins/tool"}]},
+        "executables": {"allow": {}},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner(apm_engine_command)
+    mkt = marketplace_name(isolated.config_root)
+    package = f"{dependency}/plugins/tool"
+
+    def run(*args: str, cwd: Path = isolated.work_root) -> str:
+        result = runner.run(args, scenario_id="claude-native-skills-bin", cwd=cwd, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return " ".join((result.stdout + result.stderr).split())
+
+    output = run("install", "--global")
+    assert f"Parked native plugin {package}: not approved" in output
+    assert not (scenario.plugins / "skills-bin-tool").exists()
+
+    run("approve", "--all", cwd=isolated.config_root)
+    run("install", "--global", "--trust-bin")
+
+    root = scenario.plugins / "skills-bin-tool"
+    deployed = root / "bin/tool"
+    assert deployed.is_file(), sorted(str(p) for p in isolated.home.rglob("*") if p.is_file())
+    if os.name != "nt":
+        assert deployed.stat().st_mode & stat.S_IXUSR
+    assert (root / ".claude-plugin/plugin.json").is_file()
+    assert (root / "skills/use-tool/SKILL.md").is_file()
+    assert not (isolated.home / ".claude/skills/use-tool").exists()
+    assert scenario.declared()["enabledPlugins"] == {f"skills-bin-tool@{mkt}": True}
+    lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+    (entry,) = lock["dependencies"]
+    assert entry["package_type"] == "marketplace_plugin"
+    assert entry["native_plugin"]["root"] == ".agents/plugins/skills-bin-tool"
+    assert not scenario.trap.exists()
