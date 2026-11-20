@@ -2317,6 +2317,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The Build ID owner loses its canonical verification entry point.",
     ),
     MutationCase(
+        guard_id="registry-delegation-cli-startup-import-budget",
+        rule_id="registry_delegation.cli_startup_imports",
+        path="src/apm_cli/cli.py",
+        old="from apm_cli.version_output import print_version\n",
+        new=(
+            "from apm_cli.version_output import print_version\n"
+            "from apm_cli.commands.install import install\n"
+        ),
+        intent="CLI startup eagerly imports a command module again (and GitPython with it).",
+    ),
+    MutationCase(
         guard_id="registry-delegation-compiled-output-writes",
         rule_id="registry_delegation.compiled_output_writes",
         path="src/apm_cli/compilation/context_optimizer.py",

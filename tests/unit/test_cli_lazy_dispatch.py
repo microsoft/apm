@@ -119,20 +119,55 @@ def test_install_help_does_load_install_command():
     assert output_ok
 
 
-def test_lazy_stub_short_help_matches_resolved_command():
-    from apm_cli.cli import _LAZY_COMMANDS, _LazyCommand
+def _root_stubs():
+    from apm_cli.cli import _LazyCommand, cli
 
+    return {name: cmd for name, cmd in cli.commands.items() if isinstance(cmd, _LazyCommand)}
+
+
+def test_every_root_verb_is_a_lazy_stub():
+    from apm_cli.cli import cli
+
+    assert set(_root_stubs()) == set(cli.commands)
+
+
+def test_lazy_stub_short_help_matches_resolved_command():
     mismatches: list[str] = []
-    for name, module, attr, help_text in _LAZY_COMMANDS:
-        stub = _LazyCommand(name, module, attr, help_text)
+    for name, stub in _root_stubs().items():
         real = stub.resolve()
-        stub_short = stub.get_short_help_str(120)
-        real_short = real.get_short_help_str(120)
-        if stub_short != real_short:
-            mismatches.append(f"{name}: stub={stub_short!r} real={real_short!r}")
+        if stub.hidden != real.hidden:
+            mismatches.append(f"{name}: hidden stub={stub.hidden} real={real.hidden}")
+        for limit in (20, 45, 74, 120, 10_000):
+            stub_short = stub.get_short_help_str(limit)
+            real_short = real.get_short_help_str(limit)
+            if stub_short != real_short:
+                mismatches.append(f"{name}@{limit}: stub={stub_short!r} real={real_short!r}")
     assert not mismatches, "Lazy stub short_help drifted from the real command: " + "; ".join(
         mismatches
     )
+
+
+def test_root_help_from_stubs_matches_resolved_commands():
+    code = r"""
+import click
+from click.testing import CliRunner
+from apm_cli.cli import cli
+
+widths = (40, 80, 200)
+lazy = [CliRunner().invoke(cli, ['--help'], terminal_width=w).output for w in widths]
+for name, cmd in list(cli.commands.items()):
+    cli.commands[name] = cmd.resolve()
+eager = [
+    CliRunner().invoke(cli, ['--help'], terminal_width=w).output
+    for w in widths
+]
+print('MATCH', lazy == eager and all('Commands:' in out for out in lazy))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert "MATCH True" in result.stdout
 
 
 def test_shell_complete_does_not_load_heavyweight_commands():

@@ -529,6 +529,18 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4118,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H5: apm --help imported every command module and GitPython (767 modules, spawning git version); verbs now load lazily under an installed-CLI import budget with help output and exit codes unchanged.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_cli_startup_import_budget.py::test_installed_cli_startup_stays_within_import_budget",
+        "tests/unit/test_cli_lazy_dispatch.py::test_root_help_from_stubs_matches_resolved_commands",
+        "tests/unit/test_cli_lazy_dispatch.py::test_lazy_stub_short_help_matches_resolved_command"
+      ]
     }
   ],
   "lifecycle_contracts": [

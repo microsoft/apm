@@ -141,6 +141,17 @@
       "owner": "cli.py (main, _route_sigterm_to_interrupt)",
       "selectors": ["src/apm_cli/cli.py"],
       "guards": ["registry-delegation-process-interrupt-signals"]
+    },
+    {
+      "id": "cli-startup-import-budget",
+      "decision": "CLI startup (apm --help / --version) imports no command module and no GitPython; root verbs register as lazy stubs and deps exports resolve lazily",
+      "owner": "cli.py (_LazyCommand, _LAZY_COMMANDS, _OutputModeGroup) + deps/__init__.py (PEP 562 __getattr__); installed-CLI budget in tests/integration/test_cli_startup_import_budget.py",
+      "selectors": [
+        "src/apm_cli/cli.py",
+        "src/apm_cli/deps/__init__.py",
+        "tests/integration/test_cli_startup_import_budget.py"
+      ],
+      "guards": ["registry-delegation-cli-startup-import-budget"]
     }
   ]
 }
