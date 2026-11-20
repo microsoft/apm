@@ -62,11 +62,6 @@ def _make_dep_ref(
 
 
 # ---------------------------------------------------------------------------
-# _ScopedInstallDependencyResolver
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # _validate_and_add_packages_to_apm_yml -- read/write error paths
 # ---------------------------------------------------------------------------
 
@@ -505,13 +500,3 @@ class TestProtocolPreferenceBranches:
             result = runner.invoke(install, ["--ssh", "--https"], catch_exceptions=True)
         # Exit code 2 for bad options, or error text present
         assert result.exit_code != 0 or "mutually exclusive" in (result.output or "")
-
-
-# ---------------------------------------------------------------------------
-# install() -- skill_names wildcard branch
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# frozen + apm_count > 0 info message
-# ---------------------------------------------------------------------------

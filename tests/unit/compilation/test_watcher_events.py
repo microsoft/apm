@@ -415,8 +415,3 @@ class TestAPMFileHandlerRecompile:
             handler._recompile("any.md")
 
         assert mock_from_yml.call_args.kwargs["target"] == target
-
-
-# ===========================================================================
-# _watch_mode tests
-# ===========================================================================

@@ -1,16 +1,9 @@
-"""Comprehensive unit tests for ``apm_cli.commands.pack`` helpers.
+"""CLI tests for ``apm pack`` and ``apm unpack`` run against real project files.
 
-Covers uncovered branches in:
-- ``_mapping_summary``: empty / non-empty mappings.
-- ``_warn_empty``: with target vs. without target, with/without path_mappings.
-- ``_render_bundle_result``: dry-run (files / no-files / mapped), live (success /
-  no-files / plugin-format / share-line), pack_result=None guard.
-- ``_render_marketplace_catalog``: profiles / no-profiles / no info method.
-- ``_log_bundle_meta``: no meta, with meta/no-mismatch, with meta/mismatch.
-- ``_log_unpack_file_list``: with/without dependency_files.
-- ``_emit_json_error_or_raise``: json_output=True / False.
+Covers:
 - ``pack_cmd`` CLI: --legacy-skill-paths, --offline, --include-prerelease,
-  --force flags, deprecation notice for --marketplace-output.
+  --force flags, help text, deprecation notice for --marketplace-output.
+- ``pack_cmd`` release gates and license warnings.
 - ``unpack_cmd``: deprecation warning, FileNotFoundError handling.
 """
 
@@ -29,36 +22,6 @@ from apm_cli.commands.pack import (
 )
 
 pytestmark = pytest.mark.component
-
-
-# ===========================================================================
-# _warn_empty tests
-# ===========================================================================
-
-
-# ===========================================================================
-# _render_bundle_result tests
-# ===========================================================================
-
-
-# ===========================================================================
-# _render_marketplace_catalog tests
-# ===========================================================================
-
-
-# ===========================================================================
-# _log_bundle_meta tests
-# ===========================================================================
-
-
-# ===========================================================================
-# _log_unpack_file_list tests
-# ===========================================================================
-
-
-# ===========================================================================
-# _emit_json_error_or_raise tests
-# ===========================================================================
 
 
 # ===========================================================================

@@ -7,6 +7,10 @@ Strategy: mock ``DependencyReference.parse()`` and
 ``_validate_package_exists()`` so tests run without network or filesystem
 access while exercising the identity-set mutation logic inside the
 function under test.
+
+Also covers the pure install helpers _split_argv_at_double_dash,
+_get_invocation_argv, _check_package_conflicts, install context defaults and
+the scoped resolver, skill-subset and frozen-info branches.
 """
 
 from __future__ import annotations
@@ -380,11 +384,6 @@ class TestResolvePackageReferencesInvalidInput:
         assert existing == set()
         assert validated == []
         assert len(invalid) == 1
-
-
-# ---------------------------------------------------------------------------
-# Direct GitLab FQDN shorthand — virtual probe persistence (object-form apm.yml)
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

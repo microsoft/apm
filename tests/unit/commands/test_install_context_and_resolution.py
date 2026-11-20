@@ -1,10 +1,8 @@
 """Comprehensive unit tests for apm_cli.commands.install.
 
 Targets the uncovered branches in:
-- _split_argv_at_double_dash
-- _get_invocation_argv
-- _check_package_conflicts
 - _merge_packages_into_yml
+- _resolve_package_references (GitLab direct shorthand persistence)
 - _validate_and_add_packages_to_apm_yml (key branches)
 - install CLI command (key validation / early-exit branches)
 """
@@ -60,21 +58,6 @@ def _make_dep_ref(
     ref.is_virtual_subdirectory = MagicMock(return_value=False)
     ref.reference = None
     return ref
-
-
-# ---------------------------------------------------------------------------
-# _get_invocation_argv
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# _split_argv_at_double_dash
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# _check_package_conflicts
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

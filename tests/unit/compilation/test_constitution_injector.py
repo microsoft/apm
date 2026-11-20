@@ -164,8 +164,3 @@ class TestInjectOrUpdate:
         updated, status = inject_or_update("", new_block)
         assert status == "CREATED"
         assert _BEGIN in updated
-
-
-# ---------------------------------------------------------------------------
-# ConstitutionInjector
-# ---------------------------------------------------------------------------

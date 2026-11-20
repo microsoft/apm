@@ -1,4 +1,9 @@
-"""Unit tests for ``apm pack`` command helpers."""
+"""Unit tests for ``apm pack`` command helpers.
+
+Covers path-override and marketplace-filter parsing, marketplace result and
+catalog rendering, bundle result rendering, bundle metadata logging, unpack
+file lists and JSON error emission.
+"""
 
 from __future__ import annotations
 

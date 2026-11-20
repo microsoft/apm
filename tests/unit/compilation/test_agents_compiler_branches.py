@@ -1,7 +1,6 @@
 """Unit tests for apm_cli.compilation.agents_compiler.
 
 Focuses on:
-- CompilationConfig.__post_init__ (single_agents=True triggers strategy="single-file")
 - AgentsCompiler.compile() unknown frozenset target families
 - AgentsCompiler.compile() unknown string target
 - AgentsCompiler.compile() no-results (agent-skills, windsurf)
@@ -21,7 +20,6 @@ Focuses on:
   - file not APM-generated (skip)
   - APM-generated file removed
   - OSError on remove
-- AgentsCompiler._finalize_build_id()
   - placeholder present
   - placeholder absent
 - AgentsCompiler._generate_copilot_root_instructions_content()
@@ -99,11 +97,6 @@ def _make_result(
         errors=errors or [],
         stats=stats or {},
     )
-
-
-# ---------------------------------------------------------------------------
-# CompilationConfig.__post_init__
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -312,11 +305,6 @@ class TestCompileGeminiMd(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertTrue(any("write denied" in e for e in result.errors))
-
-
-# ---------------------------------------------------------------------------
-# AgentsCompiler._finalize_build_id()
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -812,11 +800,6 @@ class TestValidatePrimitivesLinkErrors(unittest.TestCase):
         self.assertEqual(errors, [])
         # Broken link should be recorded as warning
         self.assertTrue(len(compiler.warnings) >= 1)
-
-
-# ---------------------------------------------------------------------------
-# AgentsCompiler._log() — delegates when logger wired
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
