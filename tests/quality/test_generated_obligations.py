@@ -9,7 +9,10 @@ cover it; journey obligations are the step oracles of the journey index.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,7 +27,12 @@ from tests.lifecycle.obligations import (
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-INV-I1", "P-INV-I4", "P-INV-I5", "P-INV-I7", "P-LAW-auth.credentials_isolated"
+    ),
+]
 
 
 def test_security_space_matches_the_reviewed_counts() -> None:
@@ -161,3 +169,50 @@ def test_receipts_for_generated_ids_cannot_be_forged() -> None:
     )
     with pytest.raises(receipts.ReceiptForgeryError):
         receipts.emit(forged)
+
+
+# -- real negative control: remove the oracle call path from a real witness ----
+
+_DROP_CALL_PLUGIN = """\
+import tests.lifecycle.oracles as oracles
+
+
+def pytest_configure(config):
+    oracles.check_obligation = lambda *args, **kwargs: None
+"""
+
+
+def _run_witness(node: str, tmp_path: Path, *plugins: str) -> subprocess.CompletedProcess[str]:
+    root = Path(__file__).parents[2]
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([str(tmp_path), str(root)]),
+        receipts.DIRECTORY_ENV: str(tmp_path / "receipts"),
+    }
+    env.pop("PYTEST_XDIST_WORKER", None)
+    env.pop(receipts.SESSION_ENV, None)
+    extra = [item for plugin in plugins for item in ("-p", plugin)]
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", node, "-q", "-n", "0", "-p", "no:cacheprovider", *extra],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+
+
+def test_a_real_witness_without_its_oracle_call_fails_the_ratchet(tmp_path: Path) -> None:
+    """Negative control: the same witness passes with the call and fails without it."""
+    catalog = load_catalog()
+    owner_rows = sorted(key for key in catalog.generated_required if key.startswith("P|owner|"))
+    assert owner_rows, "no P|owner witness is registered"
+    witness = catalog.generated_required[owner_rows[0]]
+    kept = _run_witness(witness, tmp_path)
+    assert kept.returncode == 0, kept.stdout + kept.stderr
+    (tmp_path / "drop_obligation_call.py").write_text(_DROP_CALL_PLUGIN, encoding="ascii")
+    dropped = _run_witness(witness, tmp_path, "drop_obligation_call")
+    assert dropped.returncode != 0, dropped.stdout
+    assert "no oracle receipt covered" in dropped.stdout, dropped.stdout
+    assert owner_rows[0] in dropped.stdout, dropped.stdout

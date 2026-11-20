@@ -15,22 +15,12 @@ _ALL = (
     "revoke-approval",
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
-_UPDATE_REDEFINED = (
-    "#0 apm update keeps a hook deployed after its definition changed since approval; "
-    "apm install retires it"
-)
-_UPDATE_DEP_DENY = (
-    "#0 apm update exits 0 and keeps the package deployed when the org policy denies a "
-    "declared dependency; apm install refuses it"
-)
+_UPDATE_REDEFINED = "S-pending (neutral issue to follow): update and install agreement on gated surfaces after a definition change"
+_UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
 _UNINSTALL_SIBLING = (
-    "#0 apm uninstall of another package keeps a hook deployed that the gate no longer "
-    "allows; the next apm install retires it"
+    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
 )
-_DRY_RUN = (
-    "#0 apm install --dry-run does not preview that a hook the gate no longer allows "
-    "will be removed"
-)
+_DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
 _XFAIL = {
     "G|update|definition-changed|hook": _UPDATE_REDEFINED,
     "G|update|policy-dep-deny|hook": _UPDATE_DEP_DENY,

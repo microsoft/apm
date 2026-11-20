@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import re
 import shutil
 import subprocess
+import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -72,6 +74,7 @@ STRENGTH = "e2e"
 # op id -> command line (package names resolve to the slice's PackageRef spec).
 OPS: Mapping[str, Callable[[str], str]] = {
     "audit-ci": lambda pkg: "apm audit --ci",
+    "bundle-install": lambda pkg: f"apm install {pkg}",
     "frozen": lambda pkg: "apm install --frozen",
     "install": lambda pkg: "apm install",
     "uninstall-prune": lambda pkg: f"apm uninstall {pkg}",
@@ -193,24 +196,30 @@ def _package_copies(world: World, name: str) -> list[Path]:
     ]
 
 
-@contextlib.contextmanager
-def _moved_upstream(world: World, slug: str, file_name: str, edit: Callable[[str], str]):
-    """Serve *slug* from a private copy whose tag moved to a commit that edits *file_name*.
+def _served_repositories(world: World) -> dict[str, Path]:
+    """The world's served ``owner/repo`` -> bare repository map.
 
-    Core gap: WorldServices has no public repository override; the shared
-    per-worker map is swapped for this test only and restored after.
+    TODO(world): replace with a public ``WorldServices.override_repository(slug, path)``
+    context manager; this is the only place the test reaches into the services.
     """
-    services = world.services
-    original = services._repositories[slug]
+    return world.services._repositories
+
+
+@contextlib.contextmanager
+def _moved_upstream(world: World, slug: str, change: Callable[[Path], None]):
+    """Serve *slug* from a private copy whose tag moved to a commit made by *change*.
+
+    *change* edits a work tree of the repository; the shared per-worker map is
+    swapped for this test only and restored after.
+    """
+    served = _served_repositories(world)
+    original = served[slug]
     copy = world.root / "upstream" / slug.replace("/", "__")
     shutil.copytree(original, copy)
     work = world.root / "upstream-work" / slug.replace("/", "__")
     git = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
     subprocess.run(("git", "clone", "-q", str(copy), str(work)), env=world.env, check=True)
-    changed = [path for path in work.rglob(file_name) if ".git" not in path.parts]
-    assert changed, f"{slug} has no {file_name}"
-    for path in changed:
-        path.write_text(edit(path.read_text(encoding="utf-8")), encoding="utf-8")
+    change(work)
     branch = subprocess.run(
         ("git", "--git-dir", str(copy), "symbolic-ref", "HEAD"),
         env=world.env,
@@ -219,18 +228,31 @@ def _moved_upstream(world: World, slug: str, file_name: str, edit: Callable[[str
         check=True,
     ).stdout.strip()
     for args in (
-        ("commit", "-qam", "moved"),
+        ("add", "-A"),
+        ("commit", "-qm", "moved"),
         ("tag", "-f", TAG),
         ("push", "-qf", "origin", f"HEAD:{branch}", f"refs/tags/{TAG}"),
     ):
         subprocess.run(
             (*git, "-C", str(work), *args), env=world.env, check=True, capture_output=True
         )
-    services._repositories[slug] = copy
+    served[slug] = copy
     try:
         yield
     finally:
-        services._repositories[slug] = original
+        served[slug] = original
+
+
+def _edit_files(name: str, edit: Callable[[str], str]) -> Callable[[Path], None]:
+    """A work-tree change that rewrites every file called *name* through *edit*."""
+
+    def change(work: Path) -> None:
+        paths = [path for path in work.rglob(name) if ".git" not in path.parts]
+        assert paths, f"no {name} in {work}"
+        for path in paths:
+            path.write_text(edit(path.read_text(encoding="utf-8")), encoding="utf-8")
+
+    return change
 
 
 def _pending(phrase: str) -> str:
@@ -272,7 +294,14 @@ class ArtifactSlice:
     tampers: Mapping[str, Tamper]
     cells: Mapping[tuple[str, str], Expect]
     setup: Callable[[World], None] | None = None  # input edits before arrange
+    # Steps after ``arrange`` that need the replay (for example an approval key).
+    after_arrange: Callable[[World, TamperReplay], None] | None = None
     ops: Mapping[str, Callable[[str], str]] = field(default_factory=lambda: OPS)
+    # Slice package name -> world package key (git sources by default, so the
+    # upstream tamper is a real moved tag on the world's git server).
+    package_keys: Mapping[str, str] = field(
+        default_factory=lambda: {"p-skill": "p-skill:git", "p-exec": "p-exec:git"}
+    )
 
 
 # -- slice: deployed_file_hashes (p-skill from git) ------------------------------
@@ -303,9 +332,8 @@ def _drop_recorded_skill_hash(world: World, stack: contextlib.ExitStack) -> None
 
 
 def _move_skill_upstream(world: World, stack: contextlib.ExitStack) -> None:
-    stack.enter_context(
-        _moved_upstream(world, "lifecycle/p-skill", "SKILL.md", lambda text: text + "\nMoved.\n")
-    )
+    change = _edit_files("SKILL.md", lambda text: text + "\nMoved.\n")
+    stack.enter_context(_moved_upstream(world, "lifecycle/p-skill", change))
 
 
 def _skill_hash_matches_disk(world: World) -> None:
@@ -505,7 +533,9 @@ def _move_hook_upstream(world: World, stack: contextlib.ExitStack) -> None:
     def edit(text: str) -> str:
         return text.replace("echo p-exec", "echo moved")
 
-    stack.enter_context(_moved_upstream(world, "lifecycle/p-exec", "session.json", edit))
+    stack.enter_context(
+        _moved_upstream(world, "lifecycle/p-exec", _edit_files("session.json", edit))
+    )
 
 
 _HOOK_STATE = (LOCK, MANIFEST, ".github/hooks")
@@ -559,21 +589,319 @@ APPROVAL_PINS = ArtifactSlice(
 )
 
 
-# Artifact id (second field of the obligation id) -> slice.
-SLICES: dict[str, ArtifactSlice] = {
-    "deployed_file_hashes": DEPLOYED_FILE_HASHES,
-    "git-content_hash": GIT_CONTENT_HASH,
-    "approval-pins": APPROVAL_PINS,
+# -- shared: an outside-the-project file every containment row keeps intact -----
+
+_OUTSIDE_TEXT = "outside the project\n"
+
+
+def _outside(world: World) -> Path:
+    """A file outside the project (and outside every snapshot root's managed paths)."""
+    path = world.root / "outside" / "sentinel.txt"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_OUTSIDE_TEXT, encoding="ascii")
+    return path
+
+
+def _outside_intact(world: World) -> None:
+    assert _outside(world).read_text(encoding="ascii") == _OUTSIDE_TEXT
+    escaped = sorted(str(path) for path in world.root.rglob("escape.txt"))
+    assert not escaped, escaped
+
+
+def _link_to_outside(world: World, relative: str) -> None:
+    path = world.project / relative
+    path.unlink()
+    path.symlink_to(_outside(world))
+
+
+# -- slice: path-containment (p-skill from git) ---------------------------------
+# A deployed path that is a symlink out of the project is never written or
+# deleted through (install.md "Refusing deployment through a symlinked
+# destination"); a package symlink that leaves its checkout is refused at
+# download (utils/git_sparse.py, "resolves outside the repository").
+
+
+def _link_deployed_skill(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+    _link_to_outside(world, SKILL)
+
+
+def _commit_escaping_link(world: World, stack: contextlib.ExitStack) -> None:
+    def change(work: Path) -> None:
+        skill = next(path for path in work.rglob("SKILL.md") if ".git" not in path.parts)
+        link = skill.parent / "notes.md"
+        link.symlink_to(os.path.relpath(_outside(world), link.parent))
+
+    stack.enter_context(_moved_upstream(world, "lifecycle/p-skill", change))
+
+
+PATH_CONTAINMENT = ArtifactSlice(
+    packages=("p-skill",),
+    arrange=("apm install p-skill",),
+    tampers={
+        "disk-or-cache": Tamper(_link_deployed_skill, lock_paths=(SKILL,)),
+        "upstream-or-proxy": Tamper(_commit_escaping_link),
+    },
+    cells={
+        ("install", "disk-or-cache"): Expect(
+            1, (r"outside the project tree",), unchanged=(LOCK, MANIFEST), check=_outside_intact
+        ),
+        ("update", "disk-or-cache"): Expect(0, unchanged=(LOCK, MANIFEST), check=_outside_intact),
+        ("uninstall-prune", "disk-or-cache"): Expect(
+            1, (_RETAINED,), unchanged=(LOCK, MANIFEST), check=_outside_intact
+        ),
+        # The commit pin holds: the moved tag is not fetched.
+        ("install", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE, check=_outside_intact),
+        ("update", "upstream-or-proxy"): Expect(
+            1,
+            (r"resolves outside the repository",),
+            unchanged=_SKILL_STATE,
+            check=_outside_intact,
+        ),
+        ("uninstall-prune", "upstream-or-proxy"): Expect(
+            0, absent=(SKILL, LOCK), check=_outside_intact
+        ),
+    },
+)
+
+
+# -- local bundle helpers (p-exec packed by the world builder) -------------------
+
+BUNDLE_HOOK = ".github/hooks/p-exec-hooks.json"
+_BUNDLE_KEY = re.compile(r'"(p-exec#1\.0\.0@sha256:[0-9a-f]{64})"')
+_BUNDLE_STATE = (LOCK, MANIFEST, ".github", ".mcp.json")
+
+
+def _bundle(world: World) -> Path:
+    return Path(world.packages["p-exec:bundle"].spec)
+
+
+def _rewrite_bundle(world: World, change: Callable[[list], list]) -> None:
+    """Rewrite the world's bundle archive in place; *change* maps (ZipInfo, bytes) items."""
+    path = _bundle(world)
+    with zipfile.ZipFile(path) as archive:
+        items = [(info, archive.read(info.filename)) for info in archive.infolist()]
+    items = change(items)
+    staged = path.with_suffix(".staged")
+    with zipfile.ZipFile(staged, "w", zipfile.ZIP_DEFLATED) as archive:
+        for info, data in items:
+            archive.writestr(info, data)
+    staged.replace(path)
+
+
+def _edit_bundle_files(edit: Callable[[dict], None]) -> Callable[[list], list]:
+    """Edit ``pack.bundle_files`` in the bundle's own apm.lock.yaml."""
+
+    def change(items: list) -> list:
+        out = []
+        for info, data in items:
+            if info.filename.endswith("/apm.lock.yaml"):
+                document = yaml.safe_load(data)
+                edit(document["pack"]["bundle_files"])
+                data = yaml.safe_dump(document, sort_keys=False).encode("utf-8")
+            out.append((info, data))
+        return out
+
+    return change
+
+
+def _edit_bundle_hook(*, rehash: bool) -> Callable[[list], list]:
+    """Change the packed hook command; *rehash* keeps ``bundle_files`` consistent."""
+
+    def change(items: list) -> list:
+        out, digest = [], None
+        for info, data in items:
+            if info.filename.endswith("/hooks.json"):
+                data = data.replace(b"echo p-exec", b"echo changed")
+                digest = hashlib.sha256(data).hexdigest()
+            out.append((info, data))
+        assert digest is not None, "bundle has no hooks.json"
+        if rehash:
+            out = _edit_bundle_files(lambda files: files.__setitem__("hooks.json", digest))(out)
+        return out
+
+    return change
+
+
+def _approve_bundle(world: World, replay: TamperReplay) -> None:
+    """Approve the exact bundle the first install named, then install it again.
+
+    The approval key is the bundle digest the install prints (approve.md,
+    local bundles); the model learns the approval so I4 stays exact.
+    """
+    assert replay.last is not None
+    found = _BUNDLE_KEY.search(replay.last.stdout + replay.last.stderr)
+    assert found, "bundle install printed no approval key"
+    manifest = world.project / MANIFEST
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["executables"]["allow"][found.group(1)] = {"hooks": True, "mcp": True}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    replay.model = replay.model.approve("p-exec", replay.kinds["p-exec"])
+    replay.step("apm install p-exec")
+    assert (world.project / BUNDLE_HOOK).is_file(), "approved bundle hook was not deployed"
+
+
+def _bundle_slice(tampers: Mapping[str, Tamper], cells: Mapping[tuple[str, str], Expect]):
+    return ArtifactSlice(
+        packages=("p-exec",),
+        arrange=("apm install p-exec",),
+        after_arrange=_approve_bundle,
+        tampers=tampers,
+        cells=cells,
+        package_keys={"p-exec": "p-exec:bundle"},
+    )
+
+
+# -- slice: path-containment through a local bundle -----------------------------
+
+
+def _link_deployed_bundle_hook(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+    _link_to_outside(world, BUNDLE_HOOK)
+
+
+def _bundle_with_parent_entry(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+
+    def change(items: list) -> list:
+        root = items[0][0].filename.split("/", 1)[0]
+        return [*items, (zipfile.ZipInfo(f"{root}/../../escape.txt"), b"escape\n")]
+
+    _rewrite_bundle(world, change)
+
+
+BUNDLE_PATH_CONTAINMENT = _bundle_slice(
+    tampers={
+        "disk-or-cache": Tamper(_link_deployed_bundle_hook, lock_paths=(BUNDLE_HOOK,)),
+        "upstream-or-proxy": Tamper(_bundle_with_parent_entry),
+    },
+    cells={
+        ("bundle-install", "disk-or-cache"): Expect(
+            1,
+            (r"Refusing deployment through a symlinked destination",),
+            unchanged=(LOCK, MANIFEST, ".mcp.json"),
+            check=_outside_intact,
+        ),
+        # bundle/local_bundle.py refuses the archive before extraction (usage error, exit 2).
+        ("bundle-install", "upstream-or-proxy"): Expect(
+            2,
+            (r"Refusing to extract path-traversal entry",),
+            unchanged=_BUNDLE_STATE,
+            check=_outside_intact,
+        ),
+    },
+)
+
+
+# -- slice: bundle-files (pack.bundle_files of a local bundle) -------------------
+# lockfile-spec.md: the pack block is read to verify bundle integrity.
+
+_BUNDLE_INTEGRITY = r"Bundle integrity check failed"
+
+
+def _bundle_tamper(change: Callable[[list], list]) -> Tamper:
+    def apply(world: World, stack: contextlib.ExitStack) -> None:
+        del stack
+        _rewrite_bundle(world, change)
+
+    return Tamper(apply)
+
+
+BUNDLE_FILES = _bundle_slice(
+    tampers={
+        "lock-edited": _bundle_tamper(
+            _edit_bundle_files(lambda files: files.__setitem__("hooks.json", "1" * 64))
+        ),
+        "missing-hash": _bundle_tamper(_edit_bundle_files(lambda files: files.pop("hooks.json"))),
+        "upstream-or-proxy": _bundle_tamper(_edit_bundle_hook(rehash=False)),
+    },
+    cells={
+        ("bundle-install", "lock-edited"): Expect(
+            1, (_BUNDLE_INTEGRITY, r"Hash mismatch for hooks\.json"), unchanged=_BUNDLE_STATE
+        ),
+        ("bundle-install", "missing-hash"): Expect(
+            1,
+            (_BUNDLE_INTEGRITY, r"Unlisted bundle file \(not in pack\.bundle_files\): hooks\.json"),
+            unchanged=_BUNDLE_STATE,
+        ),
+        ("bundle-install", "upstream-or-proxy"): Expect(
+            1, (_BUNDLE_INTEGRITY, r"Hash mismatch for hooks\.json"), unchanged=_BUNDLE_STATE
+        ),
+    },
+)
+
+
+# -- slice: approval-pins through a local bundle ---------------------------------
+# A local bundle approval is keyed by the exact bundle digest; changed content
+# no longer matches it, so the next install deploys none of its executables.
+
+
+def _edit_bundle_approval_key(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+    manifest = world.project / MANIFEST
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    allow = data["executables"]["allow"]
+    key = next(name for name in allow if _BUNDLE_KEY.fullmatch(f'"{name}"'))
+    allow[key.split("@sha256:")[0] + "@sha256:" + "3" * 64] = allow.pop(key)
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _repack_changed_bundle(world: World, stack: contextlib.ExitStack) -> None:
+    """Run ``apm pack`` on a changed copy of p-exec and replace the bundle with it."""
+    del stack
+    source = world.root / "repack" / "p-exec"
+    shutil.copytree(world.packages["p-exec"].spec, source)
+    _edit_files("session.json", lambda text: text.replace("echo p-exec", "echo changed"))(source)
+    output = world.root / "repack" / "out"
+    output.mkdir()
+    packed = driver.run(replace(world, project=source), ["pack", "--archive", "-o", str(output)])
+    assert packed.returncode == 0, packed.stdout + packed.stderr
+    (archive,) = output.iterdir()
+    shutil.copyfile(archive, _bundle(world))
+
+
+_BUNDLE_PARKED = r"hooks are executable and not approved for this exact bundle content"
+_BUNDLE_RETIRES = _pending("bundle reinstall retires a hook whose approval no longer matches")
+
+BUNDLE_APPROVAL_PINS = _bundle_slice(
+    tampers={
+        "disk-or-cache": _bundle_tamper(_edit_bundle_hook(rehash=True)),
+        "lock-edited": Tamper(_edit_bundle_approval_key),
+        "upstream-or-proxy": Tamper(_repack_changed_bundle),
+    },
+    cells={
+        # I4: the deployed hook is no longer approved, so the install removes it.
+        ("bundle-install", "disk-or-cache"): Expect(
+            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
+        ),
+        ("bundle-install", "lock-edited"): Expect(
+            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
+        ),
+        ("bundle-install", "upstream-or-proxy"): Expect(
+            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
+        ),
+    },
+)
+
+
+# Artifact id (second field of the obligation id) -> its slices (one per arrangement).
+SLICES: dict[str, tuple[ArtifactSlice, ...]] = {
+    "deployed_file_hashes": (DEPLOYED_FILE_HASHES,),
+    "git-content_hash": (GIT_CONTENT_HASH,),
+    "approval-pins": (APPROVAL_PINS, BUNDLE_APPROVAL_PINS),
+    "path-containment": (PATH_CONTAINMENT, BUNDLE_PATH_CONTAINMENT),
+    "bundle-files": (BUNDLE_FILES,),
 }
 
-# Slice package keys resolve to these world packages (git sources, so the
-# upstream tamper is a real moved tag on the world's git server).
-_PACKAGE_KEYS = {"p-skill": "p-skill:git", "p-exec": "p-exec:git"}
+
+def _slice_of(artifact: str, op: str, tamper: str) -> ArtifactSlice:
+    return next(slice_ for slice_ in SLICES[artifact] if (op, tamper) in slice_.cells)
 
 
 def _rows():
-    for artifact, slice_ in SLICES.items():
-        for (op, tamper), expect in slice_.cells.items():
+    for artifact, slices in SLICES.items():
+        for (op, tamper), expect in (item for s in slices for item in s.cells.items()):
             cell_id = f"I|{artifact}|{op}|{tamper}"
             marks = []
             if expect.smoke:
@@ -587,17 +915,17 @@ ROW_IDS = [param.values[0] for param in _rows()]
 
 
 def _view(world: World, slice_: ArtifactSlice) -> World:
-    """The world with each slice package name bound to its git PackageRef."""
+    """The world with each slice package name bound to the slice's PackageRef."""
     packages = dict(world.packages)
     for name in slice_.packages:
-        packages[name] = world.packages[_PACKAGE_KEYS.get(name, name)]
+        packages[name] = world.packages[slice_.package_keys.get(name, name)]
     return replace(world, packages=packages)
 
 
 def run_integrity_row(world: World, cell_id: str) -> None:
     """Arrange, tamper, run the op, check I1-I9 and the obligation evidence."""
     _, artifact, op, tamper_id = cell_id.split("|")
-    slice_ = SLICES[artifact]
+    slice_ = _slice_of(artifact, op, tamper_id)
     expect = slice_.cells[(op, tamper_id)]
     tamper = slice_.tampers[tamper_id]
     if slice_.setup is not None:
@@ -616,6 +944,8 @@ def run_integrity_row(world: World, cell_id: str) -> None:
     replay._set_targets()
     for step in slice_.arrange:
         replay.step(step)
+    if slice_.after_arrange is not None:
+        slice_.after_arrange(world, replay)
     with contextlib.ExitStack() as stack:
         tamper.apply(world, stack)
         replay.tampered = True
@@ -654,6 +984,7 @@ def test_every_row_is_a_generated_integrity_obligation() -> None:
     assert not unknown, f"rows with no I obligation id: {unknown}"
     assert len(ROW_IDS) == len(set(ROW_IDS))
     assert {space[cell_id] for cell_id in ROW_IDS} <= {STRENGTH}
-    for artifact, slice_ in SLICES.items():
-        assert set(slice_.ops) >= {op for op, _ in slice_.cells}, artifact
-        assert set(slice_.tampers) >= {tamper for _, tamper in slice_.cells}, artifact
+    for artifact, slices in SLICES.items():
+        for slice_ in slices:
+            assert set(slice_.ops) >= {op for op, _ in slice_.cells}, artifact
+            assert set(slice_.tampers) >= {tamper for _, tamper in slice_.cells}, artifact
