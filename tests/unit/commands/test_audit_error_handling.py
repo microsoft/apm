@@ -30,6 +30,7 @@ from apm_cli.commands.audit import (
     _render_summary,
     _scan_single_file,
 )
+from apm_cli.core.command_logger import CommandLogger
 from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.file_scanner import FileScanResult
 
@@ -216,30 +217,26 @@ class TestRenderFindingsTable:
         mock_echo.assert_not_called()
         console.print.assert_not_called()
 
-    def test_info_included_in_verbose_mode(self) -> None:
+    def test_info_included_in_verbose_mode(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Info findings pass through filter in verbose mode."""
         findings = {"file.md": [_make_finding("info")]}
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=True)
-        # Should have produced some output
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=True)
+        assert "INFO       test.md 1:5  U+200B" in capsys.readouterr().out
 
-    def test_critical_rendered_without_console(self) -> None:
+    def test_critical_rendered_without_console(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("critical")]}
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=False)
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=False)
+        assert "CRITICAL   test.md 1:5  U+200B  Zero-width space" in capsys.readouterr().out
 
-    def test_warning_rendered_without_console(self) -> None:
+    def test_warning_rendered_without_console(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("warning")]}
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=False)
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=False)
+        assert "WARNING    test.md 1:5  U+200B  Zero-width space" in capsys.readouterr().out
 
-    def test_severity_ordering(self) -> None:
+    def test_severity_ordering(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Critical findings should appear before warnings in output."""
         findings = {
             "file.md": [
@@ -248,9 +245,9 @@ class TestRenderFindingsTable:
             ]
         }
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=True)
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=True)
+        out = capsys.readouterr().out
+        assert out.index("CRITICAL   test.md 1:5") < out.index("WARNING    test.md 2:5")
 
 
 # ---------------------------------------------------------------------------
@@ -259,45 +256,46 @@ class TestRenderFindingsTable:
 
 
 class TestRenderSummary:
-    def test_no_findings_logs_success(self) -> None:
-        logger = _make_logger()
-        _render_summary({}, files_scanned=5, logger=logger)
-        logger.success.assert_called_once()
-        args = logger.success.call_args[0][0]
-        assert "5" in args
+    def test_no_findings_logs_success(self, capsys: pytest.CaptureFixture[str]) -> None:
+        _render_summary({}, files_scanned=5, logger=CommandLogger("audit"))
+        assert "[*] 5 file(s) scanned -- no issues found" in capsys.readouterr().out
 
-    def test_critical_findings_logs_error(self) -> None:
-        logger = _make_logger()
+    def test_critical_findings_logs_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("critical")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 1, "warning": 0, "info": 0}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        logger.error.assert_called_once()
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = capsys.readouterr().out
+        assert (
+            out.count("[x] 1 critical finding(s) in 1 file(s) -- hidden characters detected") == 1
+        )
 
-    def test_warning_only_logs_warning(self) -> None:
-        logger = _make_logger()
+    def test_warning_only_logs_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("warning")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 0, "warning": 2, "info": 0}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        logger.warning.assert_called_once()
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = capsys.readouterr().out
+        assert out.count("[!] 2 warning(s) in 1 file(s) -- hidden characters detected") == 1
 
-    def test_info_only_logs_progress(self) -> None:
-        logger = _make_logger()
+    def test_info_only_logs_progress(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("info")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 0, "warning": 0, "info": 3}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        logger.progress.assert_called()
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = " ".join(capsys.readouterr().out.split())
+        assert "3 info-level finding(s) in 1 file(s) -- unusual characters" in out
 
-    def test_info_plus_critical_logs_extra_progress(self) -> None:
-        logger = _make_logger()
+    def test_info_plus_critical_logs_extra_progress(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         findings = {"file.md": [_make_finding("critical"), _make_finding("info")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 1, "warning": 0, "info": 1}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        # Both error + progress for "Plus N info-level findings" should be called
-        assert logger.progress.call_count >= 1
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = capsys.readouterr().out
+        assert "1 critical finding(s) in 1 file(s)" in out
+        assert "These characters may embed invisible instructions" in out
 
 
 # ---------------------------------------------------------------------------
@@ -375,12 +373,11 @@ class TestApplyStrip:
 
 
 class TestPreviewStrip:
-    def test_no_strippable_returns_zero(self) -> None:
-        logger = _make_logger()
+    def test_no_strippable_returns_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("info")]}
-        result = _preview_strip(findings, logger)
+        result = _preview_strip(findings, CommandLogger("audit"))
         assert result == 0
-        logger.progress.assert_called()
+        assert "Nothing to clean -- no strippable characters found" in capsys.readouterr().out
 
     def test_strippable_returns_affected_count(self) -> None:
         logger = _make_logger()
