@@ -387,6 +387,14 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
+        "install-org-policy-banner-per-phase",
+        "I9",
+        "#4241",
+        _runs("install"),
+        r"\[!\] Policy: org:",
+        output=r"^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
+    ),
+    KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
         "#4196",
