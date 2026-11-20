@@ -9,8 +9,11 @@ contacting the source host.
 
 from __future__ import annotations
 
+import io
 import os
+import shutil
 import sys
+import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -37,7 +40,7 @@ pytestmark = [
 class _RegistryOnlyChain:
     """One consumer installing ``acme/pkg`` through the recording proxy."""
 
-    def __init__(self, tmp_path: Path, apm_binary_path: Path) -> None:
+    def __init__(self, tmp_path: Path, apm_binary_path: Path, ref: str = "1.0.0") -> None:
         self.isolated = IsolatedApmEnvironment.create(
             tmp_path / "scenario", base_env=dict(os.environ)
         )
@@ -45,7 +48,7 @@ class _RegistryOnlyChain:
         self.project.mkdir()
         self.manifest = self.project / "apm.yml"
         self.manifest.write_text(
-            f"name: consumer\nversion: 0.0.1\ndependencies:\n  apm:\n    - {_PACKAGE}#1.0.0\n",
+            f"name: consumer\nversion: 0.0.1\ndependencies:\n  apm:\n    - {_PACKAGE}#{ref}\n",
             encoding="utf-8",
         )
         self.git_log = self.isolated.root / "git-network.log"
@@ -87,6 +90,23 @@ class _RegistryOnlyChain:
 _INSTALL = ("install", "--target", "copilot", "--no-policy")
 
 
+def _changed_archive() -> bytes:
+    """The same package path served with different instruction bytes."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("pkg-1.0.0/", "")
+        archive.writestr("pkg-1.0.0/apm.yml", "name: pkg\nversion: 1.0.0\n")
+        archive.writestr(
+            "pkg-1.0.0/.apm/instructions/guide.instructions.md",
+            "---\napplyTo: '**'\n---\nChanged behind the same ref.\n",
+        )
+    return buffer.getvalue()
+
+
+def _deployed_bytes(project: Path) -> dict[Path, bytes]:
+    return {path: path.read_bytes() for path in project.joinpath(".github").rglob("*.md")}
+
+
 def test_registry_only_exact_pin_chain_is_idempotent(tmp_path: Path, apm_binary_path: Path) -> None:
     chain = _RegistryOnlyChain(tmp_path, apm_binary_path)
     with _recording_proxy() as proxy:
@@ -112,11 +132,12 @@ def test_registry_only_exact_pin_chain_is_idempotent(tmp_path: Path, apm_binary_
 
 
 @pytest.mark.lifecycle_smoke
+@pytest.mark.parametrize("ref", ["1.0.0", "v1.0.0"])
 def test_registry_only_frozen_replays_lock_written_through_proxy(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, ref: str
 ) -> None:
-    """--frozen replays the proxy-routed lock the same proxy just wrote (#3657)."""
-    chain = _RegistryOnlyChain(tmp_path, apm_binary_path)
+    """--frozen replays the proxy-routed lock the same proxy just wrote (#3657, #4172)."""
+    chain = _RegistryOnlyChain(tmp_path, apm_binary_path, ref)
     frozen = ("install", "--frozen", "--target", "copilot", "--no-policy")
     with _recording_proxy() as proxy:
         env = chain.env(proxy)
@@ -145,3 +166,30 @@ def test_registry_only_frozen_replays_lock_written_through_proxy(
         assert rc == 1, text
         assert "out of sync" in text, text
         assert (chain.project / "apm.lock.yaml").read_bytes() == lock_bytes
+
+
+def test_registry_only_frozen_refuses_proxy_archive_that_changed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A proxy lock row without a commit is still verified by its content hash (#4172)."""
+    chain = _RegistryOnlyChain(tmp_path, apm_binary_path, "v1.0.0")
+    with _recording_proxy() as proxy:
+        env = chain.env(proxy)
+        rc, text = chain.run(env, "install", "--target", "copilot", step="1-tag")
+        assert rc == 0, text
+        locked = LockFile.read(chain.project / "apm.lock.yaml").get_dependency(_PACKAGE)
+        assert locked is not None and locked.resolved_commit is None
+        assert locked.registry_prefix == "artifactory/github" and locked.content_hash
+        lock_bytes = (chain.project / "apm.lock.yaml").read_bytes()
+        deployed = _deployed_bytes(chain.project)
+
+        proxy.archive = _changed_archive()
+        rc, text = chain.run(env, "cache", "clean", "--yes", step="2-cache-clean")
+        assert rc == 0, text
+        shutil.rmtree(chain.project / "apm_modules")
+        rc, text = chain.run(env, "install", "--frozen", "--target", "copilot", step="3-frozen")
+        assert rc == 1, text
+        assert f"Content hash mismatch for {_PACKAGE}: expected {locked.content_hash}" in text, text
+        assert (chain.project / "apm.lock.yaml").read_bytes() == lock_bytes
+        assert _deployed_bytes(chain.project) == deployed
+        chain.no_upstream(proxy)

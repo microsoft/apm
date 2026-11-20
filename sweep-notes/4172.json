@@ -1,0 +1,19 @@
+{
+  "changelog": "`apm install --frozen` replays a lockfile written through `PROXY_REGISTRY_URL` for tag and branch refs, verifying the proxy route, ref and locked content hash (#4217)",
+  "ledger_row": {
+    "issue": 4172,
+    "fixed_in": "Unreleased",
+    "summary": "A lockfile written through the registry proxy records the proxy route and archive content hash but no commit, so install --frozen refused it as having no verifiable commit for any non-semver tag or branch ref.",
+    "failure_modes": ["reference", "outcome"],
+    "properties": ["lockfile.frozen_preserves_bytes", "outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_frozen_replays_lock_written_through_proxy[v1.0.0]",
+      "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_frozen_refuses_proxy_archive_that_changed",
+      "tests/unit/deps/test_immutable_requirement_conflicts.py::test_frozen_proxy_archive_row_is_verifiable_only_on_its_route"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest 'tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_frozen_replays_lock_written_through_proxy' -n 0 -p no:cacheprovider -q -> [v1.0.0] and [main] failed: '[x] --frozen: apm.lock.yaml has no verifiable commit for consumer -> acme/pkg@v1.0.0. Run 'apm install' without --frozen to regenerate the lockfile.' assert 1 == 0 ([1.0.0] passed: exact semver is exempt). Unit negative control: reverting immutable_requirements.py fails test_frozen_proxy_archive_row_is_verifiable_only_on_its_route[same-proxy].",
+  "green": "APM_BINARY_PATH=... APM_E2E_TESTS=1 uv run --extra dev pytest tests/integration/test_registry_only_chain_lifecycle.py tests/integration/test_immutable_requirements_install.py tests/integration/test_architecture_immutable_requirements.py tests/integration/test_registry_only_enumeration_contract.py tests/integration/test_dependency_replacement_lifecycle.py tests/integration/test_frozen_replay_output_lifecycle.py -n 4 -> 105 passed; unit module 36 passed",
+  "owner": "src/apm_cli/deps/immutable_requirements.py (ImmutableRequirements._check_locked via _replays_locked_proxy_archive, which reuses deps/artifactory_orchestrator.py ArtifactoryRouter.routes_to_locked_proxy)",
+  "notes": "Recording was already sufficient: the proxy lock row carries host, registry_prefix, resolved_ref and content_hash. A commit-less row is accepted only when the current routing lands on the same proxy route, the ref is unchanged and a content hash is locked; materialization then enforces the content hash (tamper test: changed archive -> exit 1 'Content hash mismatch', lock and deployed bytes unchanged). The tamper test runs with policy ON; the pre-existing parametrized replay test keeps its --no-policy. Not fixed (outside the scope line): the unprefixed 'cache-pin:' warning line on the first proxy install mentioned in the issue body. Flips E03 s5 e03-frozen-refuses-proxy-lockfile (PR #4156)."
+}
