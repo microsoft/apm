@@ -1509,7 +1509,7 @@ class TestCursorCommandPanelFindings:
                 ),
             },
         )
-        diag = DiagnosticCollector()
+        diag = DiagnosticCollector(verbose=True)
         CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS["cursor"],
             pkg_info,
@@ -1517,7 +1517,7 @@ class TestCursorCommandPanelFindings:
             diagnostics=diag,
         )
 
-        warnings = diag.by_category().get("warning", [])
+        warnings = diag.by_category().get("info", [])
         assert any(
             "frontmatter keys not supported" in w.message
             and "author" in w.message
@@ -1677,14 +1677,14 @@ class TestCursorCommandPanelFindings:
                 "x.prompt.md": ("---\ndescription: X\nauthor: alice\n---\nbody\n"),
             },
         )
-        diag = DiagnosticCollector()
+        diag = DiagnosticCollector(verbose=True)
         CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS["cursor"],
             pkg_info,
             temp_project,
             diagnostics=diag,
         )
-        warnings = diag.by_category().get("warning", [])
+        warnings = diag.by_category().get("info", [])
         msgs = [w.message for w in warnings]
         assert msgs, "expected at least one dropped-keys warning"
         assert all("shared command transformer" not in m for m in msgs), (

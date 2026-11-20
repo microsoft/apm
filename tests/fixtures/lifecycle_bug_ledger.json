@@ -608,6 +608,16 @@
       ]
     },
     {
+      "issue": 4182,
+      "fixed_in": "0.37.0",
+      "summary": "A command frontmatter key the target format cannot carry (for example mode: for Claude commands) printed a [!] warning on every install and install --frozen although nothing was wrong; it is now a verbose note.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_command_frontmatter_note_lifecycle.py::test_dropped_command_key_is_a_verbose_note"
+      ]
+    },
+    {
       "issue": 4184,
       "fixed_in": "0.37.0",
       "summary": "A converged apm install reported unchanged commands, skills and hooks as integrated and claimed to install dependencies, local packages and the project root's own .apm content always counted as installed dependencies, and uninstall counted one package once per store with internal names and an absolute manifest path.",

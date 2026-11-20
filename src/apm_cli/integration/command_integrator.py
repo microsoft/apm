@@ -334,12 +334,12 @@ class CommandIntegrator(BaseIntegrator):
 
         # Surface dropped (lossy-transform) frontmatter keys.  The shared
         # claude_command transformer preserves only a common subset of
-        # frontmatter; any other source key is silently discarded by the
-        # transformer.  Warn so users see the lossy transform at install
-        # time -- core "install adds, never silently mutates" contract.
-        if dropped_keys and diagnostics is not None:
+        # frontmatter.  A key the target format cannot carry is expected
+        # behaviour, not a problem the user must act on, so it is a verbose
+        # note rather than a [!] warning (#4182).
+        if dropped_keys and diagnostics is not None and getattr(diagnostics, "verbose", False):
             preserved_list = ", ".join(sorted(_PRESERVED_COMMAND_KEYS_DISPLAY))
-            diagnostics.warn(
+            diagnostics.info(
                 message=(
                     f"{target_name.capitalize()} command {command_name}: "
                     f"frontmatter keys not supported for {target_name} commands "
