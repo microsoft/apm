@@ -210,9 +210,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_INSTALL, 980, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 749, "is an MCP server, not a package"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 912, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 741, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 727, "is an MCP server, not a package"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 890, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 719, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 557, "No APM dependencies to update"),
             Ev("src/apm_cli/core/command_logger.py", 289, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
@@ -227,9 +227,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 830, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 831, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 834, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 743, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 744, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 747, 'target.name == "claude"'),
         ),
     ),
     "U9": (
