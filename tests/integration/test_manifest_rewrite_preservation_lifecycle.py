@@ -103,3 +103,41 @@ def test_manifest_rewrites_preserve_comments_and_layout(
 
     rerun = apm("reinstall", "install", "--no-policy")
     assert rerun == removed
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_manifest_rewrites_name_the_manifest_by_relative_path(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    """install --mcp and uninstall name apm.yml relative to the project or HOME (#4190)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    alpha = project / "pkgs" / "alpha"
+    _package(alpha, "alpha", hook=False)
+    if scope == "user":
+        flags, manifest, package = ("-g",), isolated.config_root / "apm.yml", str(alpha)
+        label = "~/.apm/apm.yml"
+    else:
+        flags, manifest, label, package = (), project / "apm.yml", "apm.yml", "./pkgs/alpha"
+        dump_yaml({"name": "consumer", "version": "0.1.0", "targets": ["claude"]}, manifest)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str) -> list[str]:
+        result = runner.run((*args[:1], *flags, *args[1:]), cwd=project, env=env)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert output.isascii(), output
+        assert str(manifest) not in "".join(output.split()), output
+        return [line.strip() for line in result.stdout.splitlines()]
+
+    added = apm("install", "--mcp", "local-echo", "--", "echo")
+    assert f"manifest: {label}" in added, added
+    assert (f"[*] Created {label}" in added) is (scope == "user"), added
+    assert "local-echo" in manifest.read_text(encoding="utf-8")
+
+    apm("install", package)
+    assert package in manifest.read_text(encoding="utf-8")
+    removed = apm("uninstall", package)
+    assert f"[*] Updated {label} (removed 1 package(s))" in removed, removed
+    assert package not in manifest.read_text(encoding="utf-8")
