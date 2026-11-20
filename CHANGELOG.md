@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
 - `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
 - A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
+- A failing `apm audit --ci -f sarif` or `-f json` names each failed check on stderr instead of only reporting where it wrote the file. (closes #4224, #4338)
 
 ## [0.37.0] - 2026-11-20
 

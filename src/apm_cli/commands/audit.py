@@ -534,6 +534,29 @@ def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
     )
 
 
+def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:
+    """Name each failed check and its details on stderr (#4224).
+
+    A structured report (json/sarif) keeps stdout machine-readable, so a
+    failing run states its verdict and next steps on stderr, as text does.
+    """
+    if ci_result.passed:
+        return
+    failed = [check for check in ci_result.checks if not check.passed and not check.warned]
+    for check in failed:
+        click.echo(
+            f"{STATUS_SYMBOLS['cross']} {check.name}: {printable_ascii_text(check.message)}",
+            err=True,
+        )
+        for detail in check.details:
+            click.echo(f"    - {printable_ascii_text(detail)}", err=True)
+    summary = ci_result.to_json()["summary"]
+    click.echo(
+        f"{STATUS_SYMBOLS['cross']} {summary['failed']} of {summary['total']} check(s) failed",
+        err=True,
+    )
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -888,6 +911,7 @@ def _audit_ci_gate(
             logger.success(f"CI audit report written to {cfg.output_path}")
         else:
             click.echo(output)
+        _render_ci_failures_to_stderr(ci_result)
     else:
         _render_ci_results(ci_result)
         if drift_findings:
