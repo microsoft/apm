@@ -76,6 +76,7 @@ _POLICY_READERS = frozenset(
         "read_project_policy_hash_pin",
         "run_policy_preflight",
         "run_mcp_policy_preflight",
+        "admit_bundle",
     }
 )
 _POLICY_ROOT_KEYWORDS = frozenset({"project_root", "policy_root"})
@@ -104,7 +105,7 @@ _SCOPE_ROOT_CONSUMERS: dict[str, tuple[str, ...]] = {
         "project_root=manifest_root(project_root, user_scope=user_scope),",
     ),
     "src/apm_cli/install/local_bundle_handler.py": (
-        "project_root=manifest_root(source_root, user_scope=global_),",
+        "policy_root=manifest_root(source_root, user_scope=global_),",
     ),
     "src/apm_cli/security/trust.py": ("route = classify_project_policy(policy_root)",),
     "src/apm_cli/commands/policy.py": (
