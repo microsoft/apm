@@ -160,28 +160,6 @@ def _recorded(observation: Observation) -> frozenset[str]:
 
 KNOWN_CELLS: tuple[KnownCell, ...] = (
     KnownCell(
-        "gate-cell-approve-usage",
-        "R",
-        "#4262",
-        lambda machine, op, before, after, result: (
-            op.name == "approve" and not op.cell_kinds and result is not None
-        ),
-        match=r"^approve without a package exited 1, expected 2$",
-    ),
-    KnownCell(
-        "gate-cell-update-empty",
-        "R",
-        "#4263",
-        lambda machine, op, before, after, result: (
-            op.name == "update"
-            and bool(op.cell_kinds)
-            and not machine.declared
-            and result is not None
-            and result.returncode == 0
-        ),
-        match=r"^update [a-z]+ exited 0, expected 1$",
-    ),
-    KnownCell(
         "gate-cell-c-lock",
         "I1",
         "#4043",

@@ -383,7 +383,6 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
     return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
 
 
-_FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runtimes?)|Skipped targets without MCP support)"
 _POLICY_PHASE_BANNER = (
     r"Policy enforcement disabled by --no-policy|Org policy at \S+ is present but empty"
 )
@@ -425,14 +424,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?=.*^\[!\] Org policy at \S+ is present but empty).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
-        "install-org-policy-banner-when-mcp-blocked",
-        "I9",
-        "#4267",
-        _runs("install"),
-        r"\[!\] Policy: org:",
-        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
-    ),
-    KnownOutputCell(
         "approve-org-policy-warning-twice",
         "I9",
         "#4178",
@@ -440,15 +431,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         r"\[!\] (Org policy not applied|Using stale cached org policy)",
         # Only runs that print the same warning line twice (a single warning is correct).
         output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
-    ),
-    KnownOutputCell(
-        "install-frozen-mcp-targeting-twice",
-        "I9",
-        "#4196",
-        _runs("install", "--frozen"),
-        _FROZEN_MCP_TARGETING,
-        # Auto-detected targets print no targeting line, so there is nothing to repeat.
-        output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
     ),
     KnownOutputCell(
         "uninstall-unattributed-survivor-lines",
@@ -544,28 +526,12 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
     KnownOutputCell(
-        "install-echoes-non-ascii-path",
-        "I6",
-        "#4330",
-        _runs("install"),
-        r"stdout has characters outside printable ASCII",
-        output=r"[^\x00-\x7f]",
-    ),
-    KnownOutputCell(
         "uninstall-duplicate-declaration-lines",
         "I9",
         "#4331",
         _runs("uninstall"),
         r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-adapter-unreadable-config-warning-twice",
-        "I9",
-        "#4332",
-        _runs("install"),
-        r"stderr repeats a line: 'WARNING apm_cli\.adapters\.client\.\w+ Could not read",
-        output=r"as a JSON object -- skipping config write",
     ),
     KnownOutputCell(
         "update-deny-all-lifecycle-notice-repeats",
@@ -582,28 +548,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-hook-summary-line-twice",
-        "I9",
-        "#4336",
-        _runs("install"),
-        r"repeats a line: '\|   \w+: runs ",
-        # Not the per-target shape #4243 owns.
-        output=(
-            r"\A(?!.*(?:^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, "
-            r"\.windsurf/hooks\.json$|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n"
-            r"  \|   Hook file integrated: ))"
-            r".*^\s*(\|   \w+: runs [^\n]*)$.*^\s*\1$"
-        ),
-    ),
-    KnownOutputCell(
-        "install-frozen-parked-mcp-notice-per-phase",
-        "I9",
-        "#4299",
-        _runs("install", "--frozen"),
-        r"Parked MCP server",
-        output=r"^\s*(\[!\] Parked MCP server [^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
