@@ -678,7 +678,7 @@ def test_bin_plugin_deploys_inside_its_native_root_once_approved_and_trusted(
 
     output = run("install", "--global", "--target", "claude", "--trust-bin")
     assert f"Parked native plugin {package}: not approved" in output
-    assert "&& apm approve --pending" in output
+    assert "apm approve -g --pending" in output
     assert enabled() == {f"clean-tool@{mkt}": True}
     assert not (scenario.plugins / "bin-tool").exists()
 
