@@ -1391,9 +1391,7 @@ def journey_witnesses() -> tuple[dict[str, str], dict[str, str]]:
 
 
 # Strict Windows-only expected failures of whole journeys, each tracked by an issue.
-_WINDOWS_KNOWN = {
-    "J07": "#4417 apm outdated misses a newer annotated tag on Windows",
-}
+_WINDOWS_KNOWN: dict[str, str] = {}
 
 
 def _params() -> list:
