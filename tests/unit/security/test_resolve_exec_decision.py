@@ -209,8 +209,16 @@ class TestShadowedLayers:
 
 
 class TestMaterializeExecMap:
-    def test_gate_disabled_returns_none(self):
-        assert materialize_exec_map(_ctx(gate_enabled=False)) is None
+    def test_gate_disabled_returns_explicit_authorization(self):
+        from apm_cli.security.executables import (
+            AUTHORIZED_GATE_DISABLED,
+            exec_map_authorizes_all,
+        )
+
+        allow_map = materialize_exec_map(_ctx(gate_enabled=False))
+        assert exec_map_authorizes_all(allow_map)
+        assert allow_map.authorized_by == AUTHORIZED_GATE_DISABLED
+        assert dict(allow_map) == {}
 
     def test_project_allow_emits_key_and_versionblind_alias(self):
         m = materialize_exec_map(_ctx(project_allow={PKG: {EXEC_TYPE_HOOKS: True}}))

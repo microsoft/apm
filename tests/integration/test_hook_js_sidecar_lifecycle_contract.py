@@ -172,6 +172,16 @@ def _run_success(
     return result
 
 
+def _assert_legacy_sidecar_kept(result: CommandResult, sidecar: Path, claim: str) -> None:
+    """A legacy sidecar an older APM wrote has no receipt and is not in the
+    locked render, so a lockfile hash alone no longer deletes it (#3701): it is
+    kept and named. The documented manual fix is to delete it."""
+    output = " ".join((result.stdout + result.stderr).split())
+    assert sidecar.is_file()
+    assert claim in output and "no local deployment receipt" in output, output
+    sidecar.unlink()
+
+
 def _capture_copilot(consumer: LocalPackage) -> LifecycleStateSnapshot:
     return LifecycleStateSnapshot.capture(
         consumer.root,
@@ -408,12 +418,21 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
         "--parallel-downloads",
         "0",
     )
-    _run_success(
+    updated = _run_success(
         scenario,
         consumer,
         update_args,
         environment=published.environment,
         scenario_id=f"{target_selector}-update",
+    )
+    legacy_sidecar = consumer.root.joinpath(*_FORBIDDEN_SIDECAR.parts)
+    _assert_legacy_sidecar_kept(updated, legacy_sidecar, _FORBIDDEN_SIDECAR.as_posix())
+    _run_success(
+        scenario,
+        consumer,
+        install_args,
+        environment=published.environment,
+        scenario_id=f"{target_selector}-install-after-manual-fix",
     )
     _assert_copilot_contract(consumer, expected_marker="esm-hook-v2")
     _execute_hook(
@@ -458,6 +477,14 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
     _assert_exact_state(after_update, _capture_copilot(consumer))
 
     _seed_legacy_managed_sidecar(consumer)
+    refused = scenario.runner.run(
+        ("uninstall", _REMOTE_URL),
+        scenario_id=f"{target_selector}-uninstall-refused",
+        cwd=consumer.root,
+        env=published.environment,
+    )
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    _assert_legacy_sidecar_kept(refused, legacy_sidecar, _FORBIDDEN_SIDECAR.as_posix())
     _run_success(
         scenario,
         consumer,
@@ -746,6 +773,26 @@ def test_required_global_copilot_sidecar_lifecycle(
             "0",
         ),
         scenario_id="global-copilot-reinstall",
+        cwd=cwd,
+        env=published.environment,
+    )
+    assert reinstall.returncode == 0, f"stdout={reinstall.stdout!r}\nstderr={reinstall.stderr!r}"
+    _assert_legacy_sidecar_kept(
+        reinstall,
+        copilot_root.joinpath(*_GLOBAL_FORBIDDEN_SIDECAR.parts),
+        _GLOBAL_FORBIDDEN_SIDECAR.name,
+    )
+    reinstall = scenario.runner.run(
+        (
+            "install",
+            "--global",
+            "--target",
+            "copilot",
+            "--no-policy",
+            "--parallel-downloads",
+            "0",
+        ),
+        scenario_id="global-copilot-reinstall-after-manual-fix",
         cwd=cwd,
         env=published.environment,
     )

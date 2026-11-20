@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,6 +58,12 @@ def _get_configure_fn():
 
 class TestSSLCertRuntimeHook:
     """Tests for _configure_ssl_certs behaviour."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_environ(self):
+        """The hook writes os.environ directly (SSL_CERT_FILE and its marker)."""
+        with patch.dict(os.environ):
+            yield
 
     def test_hook_file_exists(self):
         """The runtime hook must exist at the expected path."""
