@@ -652,6 +652,11 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
      diagrams). `lean` and `delta` omit diagrams.
    - The recommended follow-ups list renders the CEO's curated subset,
      not every finding. Full per-persona findings collapse at the bottom.
+   - Follow-ups are fixes for THIS PR, not new issues. Review follow-ups
+     are fixed and folded into the PR where they were found (or a
+     successor PR in the same lane if that PR already merged); never
+     recommend filing a follow-up issue. Only explicit design or scope
+     decisions may be tracked as issues.
    - NEVER render the words "Verdict", "APPROVE", "REJECT", "blocked",
      "merge gate", or any equivalent. The panel is advisory.
    - Reconcile with prior panel receipts and later human replies.

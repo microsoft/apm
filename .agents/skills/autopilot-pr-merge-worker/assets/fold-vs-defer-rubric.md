@@ -71,6 +71,12 @@ deferred_items:
     suggested_followup_issue: "open a new issue tagged refactor"
 ```
 
+A deferral never becomes a follow-up issue for a review finding. Review
+follow-ups are fixed and folded into the PR where they were found (or a
+successor PR in the same lane if that PR already merged). Only an
+explicit design or scope decision may be tracked as an issue; name that
+decision in `scope_boundary_crossed`.
+
 ## Anti-reasons for deferral (NEVER use these)
 
 - "We have limited subagent capacity." False. Capacity is unlimited.
