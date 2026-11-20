@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - The unused `marketplace-authoring` experimental flag; marketplace authoring has been GA since 0.11. (closes #3994, #4004)
-- `apm init --plugin` and `apm init --marketplace`: they exit 2 without writing and name the replacement. Use `apm plugin init` (now with `--version`, `--author`, `--description`) or `apm marketplace init`. (closes #4073, #PR4073)
+- `apm init --plugin` and `apm init --marketplace`: they exit 2 without writing and name the replacement. Use `apm plugin init` (now with `--version`, `--author`, `--description`) or `apm marketplace init`. (closes #4073, #4074)
 
 ### Fixed
 
