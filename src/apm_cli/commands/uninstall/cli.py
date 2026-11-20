@@ -100,29 +100,6 @@ class _LockPersistence:
     removal_pending: bool
 
 
-def _uninstall_deletion_evidence(
-    lockfile, lockfile_path, deploy_root, cleanup_keys, logger, *, user_scope: bool
-):
-    """Collect deletion evidence and render it before package sources go (#3701)."""
-    from ...integration.cleanup import DeploymentEvidence
-
-    evidence = DeploymentEvidence.collect(
-        deploy_root,
-        user_scope=user_scope,
-        lockfile=lockfile,
-        lockfile_root=lockfile_path.parent,
-        diagnostics=logger.diagnostics,
-    )
-    if lockfile:
-        evidence.prepare(
-            path
-            for key in cleanup_keys
-            if key in lockfile.dependencies
-            for path in lockfile.dependencies[key].deployed_files
-        )
-    return evidence
-
-
 def _persist_uninstall_lockfile(
     lockfile,
     lockfile_path,
@@ -391,6 +368,29 @@ def _abort_if_retained_target_cleanup_paths(
         logger.error(f"  - {path}")
     logger.error("Resolve or remove the listed files, then retry uninstall.")
     sys.exit(1)
+
+
+def _uninstall_deletion_evidence(
+    lockfile, lockfile_path, deploy_root, cleanup_keys, logger, *, user_scope: bool
+):
+    """Collect deletion evidence and render it before package sources go (#3701)."""
+    from ...integration.cleanup import DeploymentEvidence
+
+    evidence = DeploymentEvidence.collect(
+        deploy_root,
+        user_scope=user_scope,
+        lockfile=lockfile,
+        lockfile_root=lockfile_path.parent,
+        diagnostics=logger.diagnostics,
+    )
+    if lockfile:
+        evidence.prepare(
+            path
+            for key in cleanup_keys
+            if key in lockfile.dependencies
+            for path in lockfile.dependencies[key].deployed_files
+        )
+    return evidence
 
 
 def _report_package_removal_failure(
