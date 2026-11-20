@@ -11,9 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
-- Internal: PR checks run the full Windows unit suite (3 shards), the same selection main push runs. (closes #4115)
+- Internal: PR checks run the full Windows unit suite (3 shards), the same selection main push runs. (closes #4115, #4150)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
-- Faster CLI startup: `apm --help` and every verb load command modules and GitPython only when needed (`apm --help` imports 332 modules instead of 767); help text and exit codes are unchanged. (#4118)
+- Faster CLI startup: `apm --help` and every verb load command modules and GitPython only when needed (`apm --help` imports 332 modules instead of 767); help text and exit codes are unchanged. (closes #4118, #4150)
 - Internal: architecture-linter mutation tests share one session cache, so each file is walked and parsed once instead of once per case; findings are unchanged. (closes #4119, #4150)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 
