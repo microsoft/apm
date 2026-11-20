@@ -1123,7 +1123,7 @@ class HookIntegrator(BaseIntegrator):
             if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
                 self.note_rendered_write(target_path)
                 hooks_integrated += 1
-            else:
+            elif not self.receipted_unchanged(target_path):
                 # A managed file already holding the render is APM's bytes (#3701).
                 if managed_files and rel_path in managed_files:
                     self.note_rendered_write(target_path)
@@ -1549,7 +1549,8 @@ class HookIntegrator(BaseIntegrator):
             files_skipped=0,
             target_paths=target_paths,
             scripts_copied=scripts_copied,
-            files_adopted=scripts_adopted + (0 if changed else hooks_integrated),
+            # An unchanged merged config is unchanged, never an adoption (RA-007).
+            files_adopted=scripts_adopted,
             display_payloads=display_payloads,
         )
 

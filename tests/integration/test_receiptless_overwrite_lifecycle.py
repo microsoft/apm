@@ -132,12 +132,17 @@ def _locked_hashes(world: _World) -> dict[str, str]:
     return dict(dependency["deployed_file_hashes"])
 
 
-def _kept_line(entry: str, *, user_scope: bool) -> str:
+def _kept_line(entry: str, *, user_scope: bool, proven_edit: bool = False) -> str:
     install = "apm install -g" if user_scope else "apm install"
-    return (
-        f"Kept {entry}: it differs from what APM renders and there is no local "
+    reason = (
+        "it was modified since APM deployed it"
+        if proven_edit
+        else "it differs from what APM renders and there is no local "
         "deployment receipt or locked render proving APM wrote it, so it may hold "
-        f"local edits. Move it aside, then run '{install}' to restore it, or "
+        "local edits"
+    )
+    return (
+        f"Kept {entry}: {reason}. Move it aside, then run '{install}' to restore it, or "
         f"'{install} --force' to overwrite it."
     )
 
@@ -348,5 +353,8 @@ def test_receipted_file_edited_after_deployment_is_kept_on_upgrade(
     output = _output(result)
     assert result.returncode == 1, output
     for path in paths.values():
-        assert _kept_line(_entry(world, path), user_scope=user_scope) in output, output
+        # The receipt proves the edit: the true reason, never "no receipt" (RA-012).
+        line = _kept_line(_entry(world, path), user_scope=user_scope, proven_edit=True)
+        assert line in output, output
+        assert "no local deployment receipt" not in output, output
     assert {path: path.read_bytes() for path in paths.values()} == edited
