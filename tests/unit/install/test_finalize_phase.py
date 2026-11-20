@@ -171,7 +171,10 @@ def _make_pkg(repo_url: str | None = None, reference: str | None = None) -> Magi
     dep_ref = MagicMock()
     dep_ref.reference = reference  # None means unpinned
     dep_ref.repo_url = repo_url
+    dep_ref.is_local = False
+    dep_ref.to_display_reference.return_value = repo_url
     pkg.dep_ref = dep_ref
+    pkg.resolved_commit = None
     return pkg
 
 
