@@ -309,7 +309,7 @@ def test_user_scope_with_apm_home_outside_home(lifecycle_world: World) -> None:
 # p-lsp declares only LSP servers. Locally its empty .apm/ satisfies package
 # validation; git cannot carry an empty directory, so the served copy is
 # refused ("missing the required .apm/ directory"). Found by the world.
-_LSP_ONLY_REMOTE = "LSP-only package rejected from git/marketplace (no .apm/)"
+_LSP_ONLY_REMOTE = "tracking #4257: LSP-only package rejected from git/marketplace (no .apm/)"
 _REMOTE_CELLS = [
     pytest.param(
         package,
