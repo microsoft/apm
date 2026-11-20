@@ -930,6 +930,9 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
         logger=MagicMock(),
         package_deployed_files={"active-identity": ["shared.md"]},
         frozen=False,
+        deps_to_install=[],
+        dependency_graph=None,
+        apm_modules_dir=None,
     )
     removal = CleanupResult()
     with patch(

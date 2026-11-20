@@ -3028,6 +3028,73 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "is a second orphan removal selector",
             id="second-selector",
         ),
+        # main's four bypass tests (#3502, #2926), restated in set-difference form.
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            "        return list(\n"
+            "            _inspect_installed_orphans(\n"
+            "                declared_deps, lockfile, apm_modules_dir, installed\n"
+            "            ).removed_paths\n"
+            "        )\n",
+            "        return sorted(set(installed) - wanted)\n",
+            "_check_orphaned_packages must",
+            id="warning-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    for relative in decision.removed_paths:\n",
+            "    for relative in sorted(set(installed) - expected):\n",
+            "Deleted package paths must come from the decide_orphan_removal decision",
+            id="targeted-install-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "        for orphan in decision.superseded_entries(entries):\n",
+            "        for orphan in sorted(set(entries) - retained):\n",
+            "Removal sites must not subtract their own sets",
+            id="superseded-root-trim-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/deps/cli.py",
+            "        selected_orphans = set(inspection.removed_paths)\n",
+            "        selected_orphans = {\n"
+            "            name for _c, name, _h, _s in scanned_candidates if name not in expected_paths\n"
+            "        }\n",
+            "selected_orphans must come from the decide_orphan_removal decision",
+            id="deps-list-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = [key for key in lockfile.dependencies if key not in wanted]\n",
+            "orphaned_packages must come from the decide_orphan_removal decision",
+            id="renamed-evidence-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "def _preflight_prune_survivors(",
+            "def _stale_lock_keys(lock, wanted):\n"
+            "    return set(lock.dependencies) - set(wanted)\n\n\n"
+            "def _preflight_prune_survivors(",
+            "Subtracting from lock rows is an orphan removal predicate",
+            id="new-lock-row-helper",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "    from ..install.orphans import OrphanOperation, decide_orphan_removal\n",
+            "    from ..commands.prune import decide_orphan_removal\n"
+            "    from ..install.orphans import OrphanOperation\n",
+            "never through a re-export",
+            id="re-exported-entry",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "from ._helpers import _scan_installed_packages\n",
+            "from ..deps.reachability import retained_lock_keys as _keep\n"
+            "from ._helpers import _scan_installed_packages\n",
+            "retained_lock_keys feeds removal decisions",
+            id="aliased-reachability-import",
+        ),
         pytest.param(
             "src/apm_cli/install/orphans.py",
             "    deployment_claims: DeploymentClaims | None,\n) -> OrphanRemovalDecision:",
@@ -3049,6 +3116,22 @@ def test_orphan_owner_guard_is_closed_world(path: str, old: str, new: str, messa
         violation.rule_id == _ORPHAN_RULE and message in violation.message
         for violation in report.violations
     )
+
+
+def test_prune_hands_the_reachability_walk_to_the_orphan_owner() -> None:
+    """Prune's retained keys still come from deps/reachability.py, via the owner (#3668)."""
+    path = "src/apm_cli/commands/prune.py"
+    source = _source(path)
+    old = "                reachability=ReachabilityProbe(\n"
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old, "                reachability=None if True else ReachabilityProbe(\n", 1
+    )
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-uninstall-reachability"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 _GIT_CHILD_ENV_RULE = "transport-platform-git-child-environment"

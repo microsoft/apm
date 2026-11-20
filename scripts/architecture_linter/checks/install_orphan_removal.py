@@ -12,7 +12,10 @@ rather than a list of known callers, so a new command cannot skip the owner:
 * every entry-point call, under any alias, passes every required input by
   keyword, and the entry point is never handed around by reference;
 * no other module defines a removal selector, tests membership against
-  removal evidence, or runs the reachability walks the owner consumes.
+  removal evidence, subtracts from lock rows, imports the entry point from a
+  re-export, or imports or runs the reachability walks the owner consumes;
+* every removal site still calls the owner, and its deletion inputs derive
+  from the decision (``install_orphan_removal_sites``).
 
 Compilation's AGENTS.md orphan files are a separate decision and are out of
 this guard's vocabulary scope.
@@ -27,6 +30,10 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
     _python_paths,
     _summary,
+)
+from scripts.architecture_linter.checks.install_orphan_removal_sites import (
+    lock_row_subtraction_findings,
+    removal_site_findings,
 )
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import violation
@@ -76,12 +83,18 @@ def check_orphan_selection(provider: FactsProvider) -> tuple[Violation, ...]:
     for path in _python_paths(provider, "src/apm_cli/"):
         if path == _OWNER:
             continue
-        _facts, failures = _facts_for(provider, path, GUARD_ORPHAN_SELECTION)
+        facts, failures = _facts_for(provider, path, GUARD_ORPHAN_SELECTION)
         findings.extend(failures)
         index = provider.tree_index(path)
         if failures or index is None or index.root is None:
             continue
         findings.extend(_FileScan(path, index.nodes, public, required, owner_symbols).violations())
+        findings.extend(
+            lock_row_subtraction_findings(
+                path, index.nodes, getattr(facts, "lines", ()), GUARD_ORPHAN_SELECTION
+            )
+        )
+    findings.extend(removal_site_findings(provider, GUARD_ORPHAN_SELECTION))
     return tuple(findings)
 
 
@@ -227,6 +240,22 @@ class _FileScan:
             return
         module = _resolve_from(self.path, node)
         for alias in node.names:
+            if (
+                alias.name in _REACHABILITY_WALKS
+                and self.path != _REACHABILITY_OWNER
+                and not self.path.startswith(_OUT_OF_VOCABULARY)
+            ):
+                self._flag(
+                    node,
+                    f"{alias.name} feeds removal decisions; pass a ReachabilityProbe "
+                    f"to {_ENTRY} instead",
+                )
+            if alias.name == _ENTRY and module != _OWNER_MODULE:
+                self._flag(
+                    node,
+                    f"Import {_ENTRY} from install/orphans.py only, never through a re-export",
+                )
+                self.entry_aliases.add(alias.asname or alias.name)
             if module == _OWNER_MODULE:
                 if alias.name not in self.public:
                     self._flag(

@@ -556,7 +556,13 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
         findings.extend(failures)
         if failures:
             continue
-        if path == _ORPHAN_OWNER and not _present_re(facts, re.compile(r"\bretained_lock_keys\(")):
+        # The owner runs the walk; prune hands it the walk's inputs.
+        needle = (
+            re.compile(r"\bretained_lock_keys\(")
+            if path == _ORPHAN_OWNER
+            else re.compile(r"\breachability=ReachabilityProbe\(")
+        )
+        if not _present_re(facts, needle):
             findings.append(
                 _summary(rule_id, path, "Retained lock keys must come from deps/reachability.py")
             )

@@ -84,6 +84,15 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
     partial_dropped = (
         frozenset(getattr(ctx, "partial_dropped_dep_keys", ())) if only_packages else frozenset()
     )
+    # Owners this install keeps: the manifest intent, or for a partial install
+    # every previous entry except the dropped descendants. The survivor
+    # projection and the orphan owner both read this one intent.
+    desired_owners: frozenset[str] = frozenset(intended_dep_keys or ())
+    if existing_lockfile and only_packages:
+        desired_owners = frozenset(
+            set(existing_lockfile.dependencies)
+            - partial_dropped  # architecture-authority-exempt: survivor intent input, not a removal predicate
+        )
     if existing_lockfile:
         from apm_cli.install.manifest_reconcile import surviving_deployed_paths
         from apm_cli.install.phases.targets import declared_target_profiles
@@ -93,11 +102,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
             package_deployed_files,
             _targets or [],
             declared_target_profiles(ctx),
-            desired_owners=frozenset(
-                set(existing_lockfile.dependencies) - partial_dropped
-                if only_packages
-                else intended_dep_keys
-            ),
+            desired_owners=desired_owners,
             failed_owners=frozenset(
                 key
                 for key in existing_lockfile.dependencies
@@ -124,7 +129,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
         # set would then misclassify it as removed and delete its previously
         # deployed files even though it is still in apm.yml. A partial install
         # passes only the selected packages' dropped descendants as candidates.
-        decision = _orphan_decision(ctx, surviving_files, orphan_cleanup_retained)
+        decision = _orphan_decision(ctx, desired_owners, surviving_files, orphan_cleanup_retained)
         _orphan_total_deleted = 0
         _orphan_deleted_targets: list = []
         for _orphan_key in sorted(decision.candidate_keys):
@@ -177,7 +182,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 logger.frozen_orphans_kept(sorted(orphan_cleanup_retained))
         # Re-decide with the files cleanup could not delete: their packages
         # (and, for a partial install, their dropped ancestors) stay locked.
-        settled = _orphan_decision(ctx, surviving_files, orphan_cleanup_retained)
+        settled = _orphan_decision(ctx, desired_owners, surviving_files, orphan_cleanup_retained)
         if partial_dropped:
             ctx.partial_pinned_dep_keys = settled.retained_keys
             _remove_dropped_package_dirs(ctx, settled)
@@ -265,6 +270,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
 
 def _orphan_decision(
     ctx: InstallContext,
+    desired_owners: frozenset[str],
     surviving_files: frozenset[str],
     retained: dict[str, dict[str, str | None]],
 ):
@@ -276,15 +282,13 @@ def _orphan_decision(
         decide_orphan_removal,
     )
 
-    # Partial contexts (tests, embedders) may omit the graph and selections.
-    graph = getattr(ctx, "dependency_graph", None)
-    materialized = [*getattr(ctx, "deps_to_install", ())]
+    graph = ctx.dependency_graph
+    materialized = [*ctx.deps_to_install]
     if graph is not None:
         # Resolved graph references, not raw declarations: unresolved
         # marketplace entries have no install path of their own.
         materialized.extend(node.dependency_ref for node in graph.dependency_tree.nodes.values())
-    # Partial contexts (tests, embedders) may omit apm_modules_dir entirely.
-    apm_modules_dir = getattr(ctx, "apm_modules_dir", None)
+    apm_modules_dir = ctx.apm_modules_dir
     lockfile = ctx.existing_lockfile
     partial = bool(ctx.only_packages)
     return decide_orphan_removal(
@@ -299,11 +303,7 @@ def _orphan_decision(
         resolved_keys=None,
         # A partial install settles the resolve phase's decision: every
         # previous entry except the selected packages' dropped descendants.
-        intended=(
-            set(lockfile.dependencies) - frozenset(getattr(ctx, "partial_dropped_dep_keys", ()))
-            if partial
-            else ctx.intended_dep_keys
-        ),
+        intended=desired_owners,
         materialized=materialized,
         reachability=None,
         deployment_claims=DeploymentClaims(live_files=surviving_files, retained=retained),
