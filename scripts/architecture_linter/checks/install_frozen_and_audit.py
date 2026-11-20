@@ -297,21 +297,40 @@ def _is_frozen_flag(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and node.value == _FROZEN_FLAG
 
 
+def _is_frozen_target(node: ast.AST) -> bool:
+    """Return whether *node* names the install flag as an attribute or key."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == _FROZEN_FLAG and (
+            dotted_name(node.value) not in _FOREIGN_FROZEN_RECEIVERS
+        )
+    return isinstance(node, ast.Subscript) and _is_frozen_flag(node.slice)
+
+
 def _frozen_flag_read(node: ast.AST) -> str | None:
-    """Describe one read of an install ``frozen`` flag, else None."""
+    """Describe one read of an install ``frozen`` flag, else None.
+
+    Plain writes and deletes (``options["frozen"] = False``) are not reads;
+    an augmented assignment reads the previous value first.
+    """
+    if isinstance(node, ast.Call):
+        return _frozen_call_read(node)
+    if isinstance(node, ast.AugAssign) and _is_frozen_target(node.target):
+        return "augmented frozen read"
     if (
-        isinstance(node, ast.Attribute)
+        isinstance(node, (ast.Attribute, ast.Subscript))
         and isinstance(node.ctx, ast.Load)
-        and node.attr == _FROZEN_FLAG
-        and dotted_name(node.value) not in _FOREIGN_FROZEN_RECEIVERS
+        and _is_frozen_target(node)
     ):
-        return "raw .frozen read"
-    if isinstance(node, ast.Subscript) and _is_frozen_flag(node.slice):
-        return "raw ['frozen'] read"
+        return "raw .frozen read" if isinstance(node, ast.Attribute) else "raw ['frozen'] read"
     if isinstance(node, ast.MatchClass) and _FROZEN_FLAG in node.kwd_attrs:
         return "frozen= class pattern read"
-    if not isinstance(node, ast.Call):
-        return None
+    if isinstance(node, ast.MatchMapping) and any(_is_frozen_flag(key) for key in node.keys):
+        return "{'frozen': ...} mapping pattern read"
+    return None
+
+
+def _frozen_call_read(node: ast.Call) -> str | None:
+    """Describe a call that reads the install ``frozen`` flag by name, else None."""
     name = dotted_name(node.func).rsplit(".", 1)[-1]
     if (
         name in {"getattr", "hasattr"}
@@ -320,7 +339,10 @@ def _frozen_flag_read(node: ast.AST) -> str | None:
         and dotted_name(node.args[0]) not in _FOREIGN_FROZEN_RECEIVERS
     ):
         return f"{name}(..., 'frozen') read"
-    if name in {"attrgetter", "get", "pop"} and any(_is_frozen_flag(arg) for arg in node.args):
+    if name == "attrgetter" and any(_is_frozen_flag(arg) for arg in node.args):
+        return "attrgetter('frozen') read"
+    # Only the first argument of get/pop is the key; later ones are defaults.
+    if name in {"get", "pop"} and node.args and _is_frozen_flag(node.args[0]):
         return f"{name}('frozen') read"
     return None
 
