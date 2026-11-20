@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -16,7 +17,12 @@ _HASH = "sha256:" + "a" * 64
 def test_staged_files_are_recorded_apart_from_claims_and_round_trip(tmp_path: Path) -> None:
     lock = LockFile()
     DeploymentLedgerCodec.record_local_bundle_files(
-        lock, [_SKILL], {_SKILL: _HASH}, staged=[_STAGED], staged_hashes={_STAGED: _HASH}
+        lock,
+        [_SKILL],
+        {_SKILL: _HASH},
+        staged=[_STAGED],
+        staged_hashes={_STAGED: _HASH},
+        scope=InstallScope.PROJECT,
     )
 
     assert lock.local_deployed_files == [_SKILL]
@@ -40,13 +46,13 @@ def test_staged_files_are_recorded_apart_from_claims_and_round_trip(tmp_path: Pa
 def test_pre_3705_staging_claims_converge_on_reinstall() -> None:
     lock = LockFile()
     DeploymentLedgerCodec.record_local_bundle_files(
-        lock, [_SKILL, _STAGED], {_SKILL: _HASH, _STAGED: _HASH}
+        lock, [_SKILL, _STAGED], {_SKILL: _HASH, _STAGED: _HASH}, scope=InstallScope.PROJECT
     )
     assert _STAGED in DeploymentLedgerCodec.local_bundle_paths(lock)
     assert lock.local_staging_slugs() == ["bundler"]
 
     DeploymentLedgerCodec.record_local_bundle_files(
-        lock, [_SKILL], {_SKILL: _HASH}, staged=[_STAGED]
+        lock, [_SKILL], {_SKILL: _HASH}, staged=[_STAGED], scope=InstallScope.PROJECT
     )
 
     assert lock.local_deployed_files == [_SKILL]
@@ -79,12 +85,16 @@ def test_staged_hashes_carry_with_their_records_and_bundle_fallback_never_wins()
 
     bundle = "sha256:" + "b" * 64
     DeploymentLedgerCodec.record_local_bundle_files(
-        carried, [], {}, staged_fallback_hashes={_STAGED: bundle, other: bundle}
+        carried,
+        [],
+        {},
+        staged_fallback_hashes={_STAGED: bundle, other: bundle},
+        scope=InstallScope.PROJECT,
     )
     assert carried.local_staged_file_hashes == {_STAGED: _HASH}
     unhashed = LockFile(local_staged_files=[_STAGED])
     DeploymentLedgerCodec.record_local_bundle_files(
-        unhashed, [], {}, staged_fallback_hashes={_STAGED: bundle}
+        unhashed, [], {}, staged_fallback_hashes={_STAGED: bundle}, scope=InstallScope.PROJECT
     )
     assert unhashed.local_staged_file_hashes == {_STAGED: bundle}
 
@@ -107,10 +117,12 @@ def test_pre_3705_staging_claims_migrate_even_when_not_restaged() -> None:
     """A newer bundle that omits or skips an instruction still retires its old claim."""
     lock = LockFile()
     DeploymentLedgerCodec.record_local_bundle_files(
-        lock, [_SKILL, _STAGED], {_SKILL: _HASH, _STAGED: _HASH}
+        lock, [_SKILL, _STAGED], {_SKILL: _HASH, _STAGED: _HASH}, scope=InstallScope.PROJECT
     )
 
-    DeploymentLedgerCodec.record_local_bundle_files(lock, [_SKILL], {_SKILL: _HASH})
+    DeploymentLedgerCodec.record_local_bundle_files(
+        lock, [_SKILL], {_SKILL: _HASH}, scope=InstallScope.PROJECT
+    )
 
     assert lock.local_deployed_files == [_SKILL]
     assert DeploymentLedgerCodec.local_bundle_paths(lock) == {_SKILL}
