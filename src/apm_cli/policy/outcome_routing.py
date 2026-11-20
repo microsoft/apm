@@ -344,10 +344,9 @@ def classify_project_policy(
     from .project_config import read_project_fetch_failure_default
 
     root = Path(project_root)
-    if fetch_result is None:
-        fetch_result = discover_trust_policy(root)
+    result = fetch_result if fetch_result is not None else discover_trust_policy(root)
     return classify_discovery_outcome(
-        fetch_result, fetch_failure_default=read_project_fetch_failure_default(root)
+        result, fetch_failure_default=read_project_fetch_failure_default(root)
     )
 
 
