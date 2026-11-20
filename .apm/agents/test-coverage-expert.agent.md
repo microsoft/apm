@@ -119,8 +119,9 @@ certify `outcome: passed`:
 | Error wording (string shape only) | string assertion | `unit` |
 
 Never emit `tier: lifecycle-state-machine`; the panelist schema
-rejects it. Lifecycle evidence is `e2e` with the lifecycle receipt
-quoted in `run_evidence`.
+rejects it. Lifecycle evidence is `e2e`. On durable-state surfaces,
+certify `e2e` only when the quoted assertion is a state fact (snapshot
+equality or absence, bytes, egress log) backed by `run_evidence`.
 
 Three disciplines follow from this table:
 
@@ -280,11 +281,10 @@ listed evidence; without it, drop the finding.
    no test asserts it. I1 lock == deployed; I2 idempotent rerun; I3
    `install --frozen` and `audit --ci` agree on verdict and
    remediation; I4 gates monotone; I5 declared write set, no scope
-   crossing; I6 ASCII output; I7 nothing succeeds silently, and a
-   failure before the commit boundary preserves state (documented
-   partial-write exceptions apply); I8 per-command exit contract; I9 no duplicate
-   or noise lines. Cite: invariant id, command, and the test that
-   should assert it.
+   crossing; I6 ASCII output; I7 nothing is skipped silently, a failed
+   command preserves state; I8 per-command exit contract; I9 no
+   duplicate or noise lines. Cite: invariant id, command, and the test
+   that should assert it.
 7. **Printed hints** -- `recommended`. A CLI hint the diff adds or
    edits must be executed by a test that reaches the stated outcome.
    Cite: hint string `file:line` and the probe for a test running it.
