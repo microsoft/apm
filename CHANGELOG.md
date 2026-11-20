@@ -179,7 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` reports a dependency MCP server parked for unapproved executables once. (closes #4422, #4440)
 
 ## [0.37.0] - 2026-11-20
-- `apm uninstall` refuses before any change when a deployed skill file was replaced by a symbolic link, instead of removing the package copy first. (closes #4451, #4294)
+- `apm uninstall` refuses before any change when a deployed skill file was replaced by a symbolic link, instead of removing the package copy first; the same holds for an edited deployed file. (closes #4451, #4467, #4294)
 
 ### Highlights
 

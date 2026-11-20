@@ -3987,6 +3987,17 @@
         "tests/lifecycle/security/test_integrity.py::test_integrity_row",
         "tests/unit/integration/test_cleanup_helper.py::test_refusals_name_a_symlinked_member_of_a_claimed_directory"
       ]
+    },
+    {
+      "issue": 4467,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall removed the package's apm_modules copy and then exited 1 when an edited deployed target file had to be retained; the evidence preflight now refuses before any change.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row",
+        "tests/integration/test_cleanup_deployment_evidence_lifecycle.py::test_uninstall_refusal_changes_nothing_and_its_remedy_runs"
+      ]
     }
   ],
   "lifecycle_contracts": [
