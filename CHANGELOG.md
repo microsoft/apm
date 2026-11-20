@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes and upgrade notes
+
+- **BREAKING:** `apm install` runs as `--frozen` when `CI` is truthy (req-lk-018); pass `--no-frozen` or commit `apm.lock.yaml` to resolve in CI. (#4509)
+
 ### Changed
 
 - Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)
