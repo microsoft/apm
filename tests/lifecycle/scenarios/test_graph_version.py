@@ -101,9 +101,7 @@ def test_transitive_chain_deploys_every_depth(lifecycle_world) -> None:
 
 
 def test_diamond_keeps_shared_child_until_last_parent(lifecycle_world) -> None:
-    scenario = _scenario(
-        lifecycle_world, ("p-parent", "p-parent2", "p-child"), requires=DIAMOND
-    )
+    scenario = _scenario(lifecycle_world, ("p-parent", "p-parent2", "p-child"), requires=DIAMOND)
     step = scenario.run("install p-parent p-parent2")
     assert_changes(
         step.changed,
@@ -162,9 +160,7 @@ def test_constraint_compatibility(lifecycle_world, root_ref, parent_ref, exit_co
     specs = {"p-skill": f"lifecycle/p-skill#{root_ref}"}
     requires = {}
     if parent_ref is not None:
-        parent = skill_package(
-            factory, "g-pin", dependencies=(f"lifecycle/p-skill#{parent_ref}",)
-        )
+        parent = skill_package(factory, "g-pin", dependencies=(f"lifecycle/p-skill#{parent_ref}",))
         specs["g-pin"] = str(parent)
         requires["g-pin"] = ("p-skill",)
     kinds = {"p-skill": ("skill",), "g-pin": ("skill",)}

@@ -126,7 +126,9 @@ def _deployed_tree(scenario: Scenario, name: str) -> dict[str, bytes]:
 
 def _rename_dependency(manifest: Path, old: str, new: str) -> None:
     data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-    data["dependencies"]["apm"] = [new if item == old else item for item in data["dependencies"]["apm"]]
+    data["dependencies"]["apm"] = [
+        new if item == old else item for item in data["dependencies"]["apm"]
+    ]
     manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
@@ -284,7 +286,9 @@ def test_symlink_escaping_the_package_fails_closed(lifecycle_world) -> None:
     source = _skill_package(lifecycle_world, "p-link")
     outside = Tree(lifecycle_world.root)
     outside.write("outside/secret.md", "not part of any package\n")
-    (source / "skills" / "p-link" / "ref.md").symlink_to(lifecycle_world.root / "outside" / "secret.md")
+    (source / "skills" / "p-link" / "ref.md").symlink_to(
+        lifecycle_world.root / "outside" / "secret.md"
+    )
     scenario = Scenario(lifecycle_world, {"p-link": str(source)}, kinds={"p-link": ["skill"]})
 
     refused = scenario.run(["install", str(source)], exit=1)

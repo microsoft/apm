@@ -58,7 +58,7 @@ pytestmark = [
 
 # A failed install that already deployed: the lockfile or the MCP config write
 # fails after target files were written, and the deploy is not rolled back.
-_DEPLOYED_BEFORE_FAILURE = "#4160"
+_DEPLOYED_BEFORE_FAILURE = "#4164"
 _UNTRACKED_SKILL = Known(
     _DEPLOYED_BEFORE_FAILURE, r"deployed file is not in the lock: .agents/skills/p-child/SKILL.md"
 )

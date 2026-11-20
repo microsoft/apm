@@ -394,10 +394,23 @@ class Scenario:
         self.steps.append(step)
         return step
 
-    def pair(self, audit_line: str = "audit --ci", frozen_line: str = "install --frozen") -> Step:
-        """The I3 probe: ``audit --ci`` then ``install --frozen`` on the same state."""
-        audit = self.run(audit_line, read_only=True)
-        return self.run(frozen_line, paired={"audit": audit.result.returncode})
+    def pair(
+        self,
+        audit_line: str = "audit --ci",
+        frozen_line: str = "install --frozen",
+        *,
+        audit_known: Mapping[str, Known] | None = None,
+        frozen_known: Mapping[str, Known] | None = None,
+    ) -> Step:
+        """The I3 probe: ``audit --ci`` then ``install --frozen`` on the same state.
+
+        ``audit --ci`` is expected clean exactly when the model predicts
+        ``install --frozen`` succeeds.
+        """
+        frozen_exit = expected_exit("install", self.model, frozen=True)
+        audit_exit = 0 if frozen_exit == frozenset({0}) else None
+        audit = self.run(audit_line, read_only=True, exit=audit_exit, known=audit_known)
+        return self.run(frozen_line, paired={"audit": audit.result.returncode}, known=frozen_known)
 
     def finish(self) -> None:
         """Every law-level strict known cell failed where it was declared."""
