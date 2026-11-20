@@ -30,6 +30,8 @@ from tests.lifecycle.security import u_bin
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 
+RATCHET_TEST_SCOPE = "repository"
+
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.promise("P-OWN-executable-item-admission", "P-OWN-executable-trust-context"),
