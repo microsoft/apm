@@ -422,7 +422,15 @@ def _perform_init(
                 logger.warning(f"Generated files already exist: {rendered_paths}")
 
             if not yes:
-                confirm = click.confirm("Continue and overwrite?")
+                try:
+                    confirm = click.confirm("Continue and overwrite?")
+                except click.exceptions.Abort:
+                    # No answer (closed stdin): refuse with the way forward.
+                    logger.error(
+                        f"{rendered_paths} not overwritten; rerun with --yes to overwrite, "
+                        "or pass a new project name to scaffold into its own directory."
+                    )
+                    sys.exit(1)
 
                 if not confirm:
                     logger.progress("Initialization cancelled.")
@@ -540,7 +548,7 @@ def _perform_init(
                 install_step += " -t <harness>"
             next_steps = [
                 f"Install a package:               {install_step}",
-                "Build a plugin? Scaffold one:    apm plugin init",
+                "Build a plugin? Scaffold one:    apm plugin init <name>",
                 "Publishing a marketplace?:       apm marketplace init",
             ]
         else:
@@ -589,6 +597,7 @@ def _perform_init(
                     "  Docs: https://microsoft.github.io/apm  |  "
                     "Star: https://github.com/microsoft/apm",
                     style="dim",
+                    soft_wrap=True,
                 )
             else:
                 click.echo(
