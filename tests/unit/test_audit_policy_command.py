@@ -325,8 +325,21 @@ class TestCiWithoutPolicy:
         data = json.loads(result.stdout)
         # Baseline checks only, including deployment ownership and the
         # recorded executables decisions (#4053); no policy checks.
-        assert data["summary"]["total"] == data["summary"]["passed"]
-        assert "exec-status-current" in json.dumps(data["checks"])
+        assert data["summary"]["total"] == data["summary"]["passed"] == 12
+        assert [check["name"] for check in data["checks"]] == [
+            "lockfile-exists",
+            "ref-consistency",
+            "deployment-ledger-owners",
+            "deployed-files-present",
+            "no-orphaned-packages",
+            "skill-subset-consistency",
+            "config-consistency",
+            "content-integrity",
+            "local-bundle-hooks",
+            "hook-approval-pins",
+            "exec-status-current",
+            "includes-consent",
+        ]
 
 
 # -- #3195: explicit --policy fails closed when it cannot be loaded -------
