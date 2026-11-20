@@ -675,3 +675,52 @@ class TestCheckParallelException:
 
         assert len(rows) == 1
         assert rows[0].status == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _check_marketplace_ref: locked-row origin check (#3959)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckMarketplaceRefOriginCheck:
+    def test_rebound_alias_reports_origin_conflict_without_fetching(self):
+        from apm_cli.commands.outdated import _check_marketplace_ref
+        from apm_cli.marketplace.errors import MarketplaceOriginConflictError
+
+        dep = _make_dep(
+            resolved_ref="v1.0.0", discovered_via="acme", marketplace_plugin_name="tool"
+        )
+        with (
+            patch(
+                "apm_cli.marketplace.catalog_origin.require_locked_row_origin",
+                side_effect=MarketplaceOriginConflictError(
+                    "acme", "tool", "acme-org/catalog", "other-org/catalog"
+                ),
+            ),
+            patch("apm_cli.marketplace.client.fetch_or_cache") as fetch,
+        ):
+            row = _check_marketplace_ref(dep, verbose=False)
+
+        assert row is not None
+        assert row.package == "tool@acme"
+        assert row.status == "origin-conflict"
+        assert row.latest == "-"
+        assert row.error
+        fetch.assert_not_called()
+
+    def test_unregistered_alias_falls_back_to_git_check(self):
+        from apm_cli.commands.outdated import _check_marketplace_ref
+        from apm_cli.marketplace.errors import MarketplaceError
+
+        dep = _make_dep(discovered_via="acme", marketplace_plugin_name="tool")
+        with (
+            patch(
+                "apm_cli.marketplace.catalog_origin.require_locked_row_origin",
+                side_effect=MarketplaceError("unknown alias"),
+            ),
+            patch(
+                "apm_cli.marketplace.registry.get_marketplace_by_name",
+                side_effect=MarketplaceError("not found"),
+            ),
+        ):
+            assert _check_marketplace_ref(dep, verbose=False) is None
