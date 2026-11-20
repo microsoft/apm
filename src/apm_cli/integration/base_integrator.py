@@ -28,6 +28,15 @@ def discover_primitives(*args: Any, **kwargs: Any) -> Any:
     return _discover_primitives(*args, **kwargs)
 
 
+def _target_root_dirs(base: Path) -> frozenset[Path]:
+    """Every target root directory (project or user layout) under *base*."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    names = {profile.root_dir for profile in KNOWN_TARGETS.values()}
+    names |= {profile.user_root_dir for profile in KNOWN_TARGETS.values() if profile.user_root_dir}
+    return frozenset((base / name).resolve() for name in names)
+
+
 def _managed_absolute_target_root(
     candidate: Path,
     targets: Any,
@@ -958,6 +967,8 @@ class BaseIntegrator:
         if not deleted_paths:
             return
         stop_resolved = stop_at.resolve()
+        # A harness looks for its target root; cleanup never removes one (#4132).
+        target_roots = _target_root_dirs(stop_resolved)
         # Collect unique parents (skip stop_at itself)
         candidates: set = set()
         for p in deleted_paths:
@@ -970,7 +981,11 @@ class BaseIntegrator:
             except (ValueError, OSError):
                 cleanup_boundary = p.parent.resolve()
             parent = p.parent
-            while parent not in (parent.parent, stop_at) and parent.resolve() != cleanup_boundary:
+            while (
+                parent not in (parent.parent, stop_at)
+                and parent.resolve() != cleanup_boundary
+                and parent.resolve() not in target_roots
+            ):
                 candidates.add(parent)
                 parent = parent.parent
         # Sort deepest-first for safe bottom-up removal
