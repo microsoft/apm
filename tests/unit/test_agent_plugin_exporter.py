@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from jsonschema import Draft202012Validator
 from apm_cli.agent_plugins import load_agent_plugin
 from apm_cli.bundle.agent_plugin_exporter import export_agent_plugin_bundle
 from apm_cli.bundle.packer import pack_bundle
+from apm_cli.core.remediation import PACK_LOCKFILE_MISSING
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 _SCHEMA_DIR = Path(__file__).parent.parent / "fixtures" / "schemas"
@@ -339,7 +341,7 @@ def test_agent_bundle_lsp_only_failure_does_not_steer_to_claude(tmp_path: Path) 
     message = str(exc_info.value)
     assert "lsp" in message
     assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in message
-    assert "Use 'apm pack --format claude-plugin'" not in message
+    assert "apm pack --format claude-plugin" not in message
     assert not build.exists()
 
 
@@ -712,7 +714,7 @@ def test_agent_bundle_without_lockfile_refuses_declared_dependencies(
         manifest.read_text(encoding="utf-8") + "dependencies:\n" + _DECLARED_DEPS[kind],
         encoding="utf-8",
     )
-    with pytest.raises(FileNotFoundError, match="run 'apm install' first"):
+    with pytest.raises(FileNotFoundError, match=re.escape(PACK_LOCKFILE_MISSING.clause())):
         export_agent_plugin_bundle(project, tmp_path / "build")
     assert not (tmp_path / "build").exists()
 

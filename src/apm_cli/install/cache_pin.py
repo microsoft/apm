@@ -180,13 +180,14 @@ def sync_markers_for_lockfile(
     if warn_unpinned:
         unpinned = find_unpinned_remote_deps(lockfile)
         if unpinned:
+            from apm_cli.core.remediation import REMOTE_DEPENDENCY_UNPINNED
             from apm_cli.utils.console import _rich_warning
 
             for repo in unpinned:
                 _rich_warning(
                     f"cache-pin: remote dep {repo!r} has no resolved_commit; "
-                    "drift cannot verify its cache freshness. Re-run 'apm install' "
-                    "with a pinned ref (commit, tag, or specific branch HEAD)."
+                    "drift cannot verify its cache freshness. "
+                    f"{REMOTE_DEPENDENCY_UNPINNED.sentence()}"
                 )
 
     written = 0

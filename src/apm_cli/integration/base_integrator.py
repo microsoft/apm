@@ -8,10 +8,11 @@ import stat
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.core.deployment_state import MaterializationResult
+from apm_cli.core.remediation import LOCAL_FILE_UNMANAGED
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
@@ -20,6 +21,9 @@ from apm_cli.utils.path_security import (
     has_symlink_component,
 )
 from apm_cli.utils.paths import stored_alias
+
+if TYPE_CHECKING:
+    from apm_cli.integration.cleanup import DeploymentEvidence
 
 
 def discover_primitives(*args: Any, **kwargs: Any) -> Any:
@@ -281,7 +285,7 @@ class BaseIntegrator:
         else:
             _rich_warning(
                 f"Skipping {rel_path} -- local file exists (not managed by APM). "
-                f"Use 'apm install --force' to overwrite."
+                f"{LOCAL_FILE_UNMANAGED.sentence()}"
             )
         return True
 
@@ -1147,10 +1151,15 @@ class BaseIntegrator:
         legacy_glob_pattern: str | None = None,
         targets=None,
         logger=None,
+        *,
+        evidence: "DeploymentEvidence | None",
     ) -> dict[str, int]:
         """Remove APM-managed files matching *prefix* from *managed_files*.
 
-        Falls back to a legacy glob when *managed_files* is ``None``.
+        Lockfile-listed files are removed only through the cleanup owner,
+        which requires deployment evidence (#3701): *evidence* has no default,
+        and ``None`` keeps every listed file with a warning. Falls back to a
+        legacy glob when *managed_files* is ``None``.
 
         Args:
             project_root: Workspace root.
@@ -1163,7 +1172,8 @@ class BaseIntegrator:
             targets: Optional target profiles for path validation.
                      Passed through to ``validate_deploy_path()`` so
                      user-scope prefixes are recognised.
-            logger: Optional logger for diagnostic messages.
+            logger: Unused; diagnostics render through the cleanup owner.
+            evidence: Deployment evidence for this transition.
 
         Returns:
             ``{"files_removed": int, "errors": int}``
@@ -1171,62 +1181,18 @@ class BaseIntegrator:
         stats: dict[str, int] = {"files_removed": 0, "errors": 0}
 
         if managed_files is not None:
-            # Lazy-resolve cowork root at most once per invocation.
-            _cowork_root_resolved: bool = False
-            _cowork_root_cached: Path | None = None
-            _cowork_orphans_skipped: int = 0
+            from apm_cli.integration.cleanup import remove_synced_files
 
-            for rel_path in managed_files:
-                # managed_files is pre-normalized  -- no .replace() needed
-                if not rel_path.startswith(prefix):
-                    continue
-                if not BaseIntegrator.validate_deploy_path(rel_path, project_root, targets=targets):
-                    continue
-                # Resolve cowork:// paths to absolute before filesystem ops.
-                from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
-
-                if rel_path.startswith(COWORK_URI_SCHEME):
-                    try:
-                        if not _cowork_root_resolved:
-                            from apm_cli.integration.copilot_cowork_paths import (
-                                resolve_copilot_cowork_skills_dir,
-                            )
-
-                            _cowork_root_cached = resolve_copilot_cowork_skills_dir()
-                            _cowork_root_resolved = True
-                        if _cowork_root_cached is None:
-                            _cowork_orphans_skipped += 1
-                            continue
-                        from apm_cli.integration.copilot_cowork_paths import (
-                            from_lockfile_path,
-                        )
-
-                        target = from_lockfile_path(rel_path, _cowork_root_cached)
-                    except Exception:  # noqa: S112
-                        continue
-                else:
-                    target = project_root / rel_path
-                if target.exists():
-                    try:
-                        target.unlink()
-                        stats["files_removed"] += 1
-                    except Exception:
-                        stats["errors"] += 1
-
-            # Emit a one-time warning when cowork orphans were skipped.
-            if _cowork_orphans_skipped > 0:
-                _orphan_msg = (
-                    f"Cowork: skipping {_cowork_orphans_skipped} orphaned lockfile "
-                    f"{'entry' if _cowork_orphans_skipped == 1 else 'entries'}"
-                    " -- OneDrive path not detected.\n"
-                    "Run: apm config set copilot-cowork-skills-dir <path>  "
-                    "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                    "to clean up these entries on the next install/uninstall."
-                )
-                if logger:
-                    logger.warning(_orphan_msg, symbol="warning")
-                else:
-                    _rich_warning(_orphan_msg, symbol="warning")
+            cleanup = remove_synced_files(
+                managed_files,
+                project_root,
+                prefixes=(prefix,),
+                dep_key="<sync>",
+                targets=targets,
+                evidence=evidence,
+            )
+            stats["files_removed"] = len(cleanup.deleted)
+            stats["errors"] = len(cleanup.failed)
         elif legacy_glob_dir and legacy_glob_pattern and legacy_glob_dir.exists():
             for f in legacy_glob_dir.glob(legacy_glob_pattern):
                 try:

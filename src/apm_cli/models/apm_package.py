@@ -231,12 +231,13 @@ def _parse_registries_block(
             )
         # Token trap: tokens must never appear in repo-tracked YAML files.
         if "token" in body:
+            from ..core.remediation import REGISTRY_TOKEN_IN_MANIFEST
             from ..deps.registry.auth import registry_token_env_var
 
             raise ValueError(
                 f"Registry {name!r}: 'token' must not appear in apm.yml. "
-                f"Use the {registry_token_env_var(name)} "
-                f"environment variable or 'apm config set registry.{name}.token <value>'."
+                f"Use the {registry_token_env_var(name)} environment variable, or "
+                f"{REGISTRY_TOKEN_IN_MANIFEST.bind(name=name).clause()}."
             )
         url = body.get("url")
         if not isinstance(url, str) or not url.strip():

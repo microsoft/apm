@@ -17,13 +17,14 @@ Safety gates, in order:
    individual files are removed first; if the directory is then empty (or
    only contains APM-tracked files with matching hashes) it is safely
    removed. Non-skill directory entries are still rejected as untrusted.
-3. **Provenance check** -- a file is deleted only when the previous
-   lockfile recorded a content hash for it and the on-disk content still
-   matches. If the user edited the file after APM deployed it the hash
-   differs and the deletion is skipped with a warning. A claim without a
-   recorded hash (legacy or hand-edited lockfile) is kept with a warning,
-   so a lockfile row alone never authorizes deleting a file (#3663).
-   ``cowork://`` rows are exempt until install records their hashes.
+3. **Deployment evidence** -- a file is deleted only when
+   :class:`DeploymentEvidence` proves APM deployed its current bytes: a
+   matching local deployment receipt, or byte equality with what the
+   locked package versions render. A lockfile hash alone never authorizes
+   deletion (#3663, #3701): it proves content, not that APM wrote it. A
+   file that differs from its evidence is user-edited and kept; a file
+   without evidence is kept with a warning naming it and the manual fix.
+   ``cowork://`` rows follow the same rule.
 
 The helper records cleanup diagnostics via *diagnostics* (collect-then-
 render) and returns a :class:`CleanupResult` summarizing deleted, failed,
@@ -34,16 +35,312 @@ takes no logger.
 
 from __future__ import annotations
 
+import contextlib
+import copy
+import io
 import os
 import shutil
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import COWORK_SKILLS_DIR_UNDETECTED
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
 
 from .base_integrator import BaseIntegrator
+
+if TYPE_CHECKING:
+    from apm_cli.deps.lockfile import LockFile
+
+AUTHORIZED = "authorized"
+EDITED = "edited"
+UNPROVEN = "unproven"
+UNREADABLE = "unreadable"
+
+
+class DeploymentEvidence:
+    """Proof that APM deployed the bytes a lockfile-driven deletion removes (#3701).
+
+    Deletion is authorized by a local deployment receipt whose hash matches
+    the file, or by byte equality (the canonical hash domain of req-lk-012)
+    with what the locked package versions render. A stale receipt does not
+    block the render comparison. The render replays the pre-transition lock
+    once, with the targets it recorded; when that fails, each owning package
+    renders alone, so one unmaterializable package costs only its own
+    evidence. Lockfile hashes are never consulted: on a clone they prove
+    content, not deployment.
+    """
+
+    def __init__(
+        self,
+        *,
+        deploy_root: Path,
+        receipts: Mapping[str, str],
+        render: Callable[[str | None], Path | None] | None,
+        owners: Mapping[str, tuple[str, ...]] | None = None,
+        user_scope: bool = False,
+    ) -> None:
+        self._deploy_root = deploy_root
+        self.user_scope = user_scope
+        self._receipts = dict(receipts)
+        self._render = render
+        self._owners = dict(owners or {})
+        self._renders: dict[str | None, Path | None] = {}
+
+    @classmethod
+    def none(cls, deploy_root: Path) -> DeploymentEvidence:
+        """Evidence that authorizes nothing: every lockfile-listed file is kept."""
+        return cls(deploy_root=deploy_root, receipts={}, render=None)
+
+    @classmethod
+    def collect(
+        cls,
+        deploy_root: Path,
+        *,
+        user_scope: bool,
+        lockfile: LockFile | None,
+        lockfile_root: Path,
+        diagnostics,
+    ) -> DeploymentEvidence:
+        """Load this installation's receipts and bind a lazy render of *lockfile*.
+
+        *lockfile* must be the lock before this transition (the versions whose
+        files may be deleted); *lockfile_root* is the directory holding it.
+        Invalid receipt state authorizes nothing and is reported.
+        """
+        from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+        from apm_cli.core.scope import InstallScope
+
+        scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+        try:
+            receipts = DeploymentMaterializationSession(deploy_root, scope, None).receipt_hashes()
+        except (OSError, ValueError) as exc:
+            diagnostics.warn(f"Ignored local deployment receipts: {exc}")
+            receipts = {}
+        if lockfile is None or not lockfile.dependencies:
+            return cls(
+                deploy_root=deploy_root, receipts=receipts, render=None, user_scope=user_scope
+            )
+        # Freeze the pre-transition lock: callers mutate theirs before rendering.
+        locked = copy.deepcopy(lockfile)
+        owners: dict[str, list[str]] = {}
+        for key, dependency in locked.dependencies.items():
+            for path in dependency.deployed_files:
+                owners.setdefault(path.rstrip("/"), []).append(key)
+
+        def render(owner: str | None) -> Path | None:
+            return _render_locked(locked, owner, lockfile_root, user_scope, diagnostics)
+
+        return cls(
+            deploy_root=deploy_root,
+            receipts=receipts,
+            render=render,
+            owners={path: tuple(keys) for path, keys in owners.items()},
+            user_scope=user_scope,
+        )
+
+    def prepare(self, claims: Iterable[str]) -> None:
+        """Render now when any existing candidate file lacks a matching receipt.
+
+        Uninstall and prune call this before removing package sources, so the
+        locked render can still read them.
+        """
+        if self._render is None:
+            return
+        unproven: list[str] = []
+        for claim in claims:
+            physical = self._physical(claim)
+            if physical is None or physical.is_symlink() or not physical.is_file():
+                continue
+            try:
+                if self._receipt_match(physical) is True:
+                    continue
+            except OSError:
+                continue
+            unproven.append(claim)
+        for claim in unproven:
+            self._rendered_roots(claim)
+
+    def _physical(self, claim: str) -> Path | None:
+        from .copilot_cowork_paths import (
+            COWORK_URI_SCHEME,
+            from_lockfile_path,
+            resolve_copilot_cowork_skills_dir,
+        )
+
+        if claim.startswith(COWORK_URI_SCHEME):
+            try:
+                root = resolve_copilot_cowork_skills_dir()
+                return from_lockfile_path(claim, root) if root is not None else None
+            except Exception:
+                return None
+        if "://" in claim:
+            return None
+        path = Path(claim)
+        return path if path.is_absolute() else self._deploy_root / path
+
+    def _render_root(self, owner: str | None) -> Path | None:
+        if owner not in self._renders:
+            self._renders[owner] = self._render(owner) if self._render is not None else None
+        return self._renders[owner]
+
+    def _owners_of(self, claim: str) -> tuple[str, ...]:
+        """Return the locked owners of *claim* or of its claimed skill directory."""
+        path = claim.rstrip("/")
+        while path:
+            if path in self._owners:
+                return self._owners[path]
+            path = path.rpartition("/")[0]
+        return ()
+
+    def _rendered_roots(self, claim: str) -> list[Path]:
+        """Return the render trees that can show *claim*: the whole lock, else its owners."""
+        if self._render is None:
+            return []
+        whole = self._render_root(None)
+        if whole is not None:
+            return [whole]
+        roots = (self._render_root(owner) for owner in self._owners_of(claim))
+        return [root for root in roots if root is not None]
+
+    def _receipt_match(self, physical: Path) -> bool | None:
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        recorded = self._receipts.get(physical.resolve().as_posix())
+        if recorded is None:
+            return None
+        return compute_file_hash(physical) == recorded
+
+    def _rendered_paths(self, claim: str, owner_claim: str) -> list[Path]:
+        relative: Path | None
+        if "://" in claim:
+            from apm_cli.install.audit_target_roots import external_replay_root
+            from apm_cli.integration.targets import KNOWN_TARGETS, target_name_for_locator
+
+            name = target_name_for_locator(claim)
+            if name is None:
+                return []
+            return [
+                external_replay_root(root, KNOWN_TARGETS[name]) / claim.split("://", 1)[1]
+                for root in self._rendered_roots(owner_claim)
+            ]
+        relative = Path(claim)
+        if relative.is_absolute():
+            try:
+                relative = relative.relative_to(self._deploy_root)
+            except ValueError:
+                return []
+        return [root / relative for root in self._rendered_roots(owner_claim)]
+
+    def verdict(self, claim: str, physical: Path, *, rendered_as: str | None = None) -> str:
+        """Classify deleting *physical* (lockfile *claim*) as authorized or kept.
+
+        *rendered_as* names where the locked render may place the same member
+        instead (skill path migration renders the converged layout).
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            receipt = self._receipt_match(physical)
+            if receipt is True:
+                return AUTHORIZED
+            # A stale receipt (the file was later adopted unchanged from a newer
+            # render) does not block the render comparison: receipt OR render.
+            claim = claim.replace("\\", "/")
+            rendered = [
+                path
+                for candidate in (claim, rendered_as)
+                if candidate
+                for path in self._rendered_paths(candidate, claim)
+                if not path.is_symlink() and path.is_file()
+            ]
+            if not rendered:
+                return EDITED if receipt is False else UNPROVEN
+            actual = compute_file_hash(physical)
+            same = any(compute_file_hash(path) == actual for path in rendered)
+        except OSError:
+            return UNREADABLE
+        return AUTHORIZED if same else EDITED
+
+    def authorizes(self, claim: str, physical: Path, *, rendered_as: str | None = None) -> bool:
+        """Return whether every file at *physical*, a file or a tree, is proven APM's."""
+        if physical.is_symlink():
+            return False
+        if physical.is_file():
+            return self.verdict(claim, physical, rendered_as=rendered_as) == AUTHORIZED
+        for child in physical.rglob("*"):
+            relative = child.relative_to(physical)
+            if child.is_symlink():
+                return False
+            if child.is_dir() or is_python_bytecode_cache_path(relative):
+                continue
+            member = relative.as_posix()
+            alias = f"{rendered_as}/{member}" if rendered_as else None
+            if self.verdict(f"{claim}/{member}", child, rendered_as=alias) != AUTHORIZED:
+                return False
+        return True
+
+
+def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
+    """Return *lockfile* narrowed to *owner* and the local parents anchoring it."""
+    subset = copy.deepcopy(lockfile)
+    keep = {owner}
+    by_url = {dependency.repo_url: key for key, dependency in subset.dependencies.items()}
+    parent = subset.dependencies[owner].resolved_by if owner in subset.dependencies else None
+    while parent and by_url.get(parent) not in (None, *keep):
+        keep.add(by_url[parent])
+        parent = subset.dependencies[by_url[parent]].resolved_by
+    for key in list(subset.dependencies):
+        if key not in keep:
+            del subset.dependencies[key]
+    return subset
+
+
+def _render_locked(
+    lockfile: LockFile, owner: str | None, lockfile_root: Path, user_scope: bool, diagnostics
+) -> Path | None:
+    """Render the locked packages (or only *owner*) into a private scratch tree.
+
+    The replay uses every target the lock recorded as well as the current
+    manifest's, so files of a target the manifest just dropped stay provable.
+    """
+    from apm_cli.install.drift import (
+        CheckLogger,
+        ReplayConfig,
+        _make_scratch_root,
+        run_replay,
+    )
+
+    if owner is not None and owner not in lockfile.dependencies:
+        return None
+    # The scratch tree is private and removed at exit; the snapshot sits
+    # under a name no target deploys to.
+    scratch = _make_scratch_root(lockfile_root)
+    snapshot = scratch / ".apm-locked-render" / "apm.lock.yaml"
+    config = ReplayConfig(
+        project_root=lockfile_root,
+        lockfile_path=snapshot,
+        cache_only=False,
+        scratch_root=scratch,
+        modules_root=scratch / "apm_modules",
+        user_scope=user_scope,
+        include_recorded_targets=True,
+    )
+    try:
+        snapshot.parent.mkdir()
+        (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
+        with contextlib.redirect_stdout(io.StringIO()):
+            with contextlib.redirect_stderr(io.StringIO()):
+                return run_replay(config, CheckLogger(verbose=False))
+    except Exception as exc:
+        if owner is not None:
+            diagnostics.warn(
+                f"Could not render the locked version of {owner} to verify cleanup "
+                f"({exc}). Its files without a matching local deployment receipt are kept."
+            )
+        return None
 
 
 @dataclass
@@ -64,6 +361,10 @@ class CleanupResult:
     skipped_unmanaged: list[str] = field(default_factory=list)
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
+
+    unproven: list[str] = field(default_factory=list)
+    """Files kept because no deployment evidence proves APM wrote them (#3701);
+    also listed in ``skipped_unmanaged``. Callers name them to the user."""
 
     released: list[str] = field(default_factory=list)
     """Skill directories of a departing owner (orphan cleanup) kept on disk
@@ -109,7 +410,8 @@ def _is_skill_directory_entry(rel_path: str) -> bool:
     """
     from apm_cli.integration.targets import skills_root_prefixes
 
-    normalized = rel_path.replace("\\", "/")
+    # Legacy ``deployed_skills`` migrations record directories with a trailing slash.
+    normalized = rel_path.replace("\\", "/").rstrip("/")
     parent, _, name = normalized.rpartition("/")
     if not name:
         return False
@@ -131,6 +433,7 @@ def _safe_remove_skill_directory(
     rel_path: str,
     recorded_hashes: dict[str, str],
     all_stale: set[str],
+    evidence: DeploymentEvidence,
     result: CleanupResult,
     diagnostics,
     dep_key: str,
@@ -143,8 +446,8 @@ def _safe_remove_skill_directory(
 
     - It no longer exists (already cleaned or never created).
     - It is empty (all files already deleted in the first pass).
-    - All remaining files are tracked in *recorded_hashes* with matching
-      content hashes (APM-owned, unmodified).
+    - Every remaining file is tracked by the lockfile and *evidence*
+      authorizes its bytes (APM-deployed, unmodified).
 
     When the directory contains user-created or user-edited files, removal
     is skipped with a diagnostic listing the blocking entries.
@@ -172,66 +475,33 @@ def _safe_remove_skill_directory(
             _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
         return
 
-    # Non-empty: verify every remaining file is APM-tracked with
-    # matching hashes.  Recurse into subdirectories (skills can
-    # contain scripts/, assets/, references/ subdirectories).
+    # Non-empty: every remaining file must be APM-tracked AND carry deployment
+    # evidence (#3701). Recurse into subdirectories (skills can contain
+    # scripts/, assets/, references/ subdirectories). Member claims extend the
+    # directory claim, so project paths and cowork:// URIs share one rule.
     blocking: list[str] = []
     # True while every blocking entry is user content (untracked and never
     # deployed); then nothing APM-owned remains and ownership is released.
     user_content_only = True
-    project_root = skill_dir
-    # Walk up to reconstruct project_root from the rel_path
-    rel_parts = Path(rel_path).parts
-    project_root = skill_dir
-    for _ in rel_parts:
-        project_root = project_root.parent
 
     for child in skill_dir.rglob("*"):
+        relative_child = child.relative_to(skill_dir)
+        child_rel = f"{rel_path.rstrip('/')}/{relative_child.as_posix()}"
         # Symlinks are treated as unmanaged -- APM does not deploy
         # symlinks, so any symlink is user-created content.
         if child.is_symlink():
-            try:
-                child_rel = child.relative_to(project_root).as_posix()
-            except ValueError:
-                child_rel = str(child.name)
             blocking.append(child_rel)
             continue
-        relative_child = child.relative_to(skill_dir)
         if is_python_bytecode_cache_path(relative_child):
             continue
         if child.is_dir():
             continue
-        try:
-            child_rel = child.relative_to(project_root).as_posix()
-        except ValueError:
-            blocking.append(str(child.name))
-            user_content_only = False
-            continue
-        expected_hash = recorded_hashes.get(child_rel)
-        if expected_hash is None:
-            # File not tracked by APM -- could be user-created.
-            # Check if it was in the stale set (already processed
-            # and potentially deleted). If not in stale set at all,
-            # it is definitely user content.
-            if child_rel not in all_stale:
-                blocking.append(child_rel)
-                continue
-            # Was in stale set but file still exists -- might have
-            # been skipped (user-edit, failed unlink). Block removal.
+        if child_rel not in recorded_hashes and child_rel not in all_stale:
+            # Never tracked by APM: user content.
             blocking.append(child_rel)
-            user_content_only = False
             continue
-        # Verify hash matches.
-        try:
-            from ..utils.content_hash import compute_file_hash
-
-            actual_hash = compute_file_hash(child)
-        except Exception:
-            blocking.append(child_rel)
-            user_content_only = False
-            continue
-        _strip = _strip_sha256_prefix
-        if _strip(actual_hash) != _strip(expected_hash):
+        # Tracked but still present: deletion needs the member's own evidence.
+        if evidence.verdict(child_rel, child) != AUTHORIZED:
             blocking.append(child_rel)
             user_content_only = False
 
@@ -292,9 +562,32 @@ def _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
         )
 
 
-def _strip_sha256_prefix(h: str) -> str:
-    """Strip the ``sha256:`` prefix for hash comparison."""
-    return h[len("sha256:") :] if h.startswith("sha256:") else h
+def _keep_without_evidence(
+    result: CleanupResult, diagnostics, stale_path: str, verdict: str, dep_key: str
+) -> None:
+    """Keep a file whose deployment evidence does not authorize deletion."""
+    if verdict == UNPROVEN:
+        result.skipped_unmanaged.append(stale_path)
+        result.unproven.append(stale_path)
+        message = (
+            f"Kept {stale_path}: no local deployment receipt or render of the locked "
+            "package version proves APM deployed it. Delete it manually if you no "
+            "longer need it."
+        )
+    elif verdict == UNREADABLE:
+        result.skipped_user_edit.append(stale_path)
+        message = (
+            f"Skipped removing {stale_path}: could not verify file content. "
+            "Inspect the file and delete it manually if no longer needed."
+        )
+    else:
+        result.skipped_user_edit.append(stale_path)
+        message = (
+            f"Skipped removing {stale_path}: file has been edited since APM "
+            "deployed it. Delete it manually if you no longer need it, or "
+            "ignore this warning to keep your changes."
+        )
+    diagnostics.warn(message, package=dep_key)
 
 
 def remove_stale_deployed_files(
@@ -304,6 +597,7 @@ def remove_stale_deployed_files(
     dep_key: str,
     targets,
     diagnostics,
+    evidence: DeploymentEvidence,
     recorded_hashes: dict[str, str] | None = None,
     failed_path_retained: bool = True,
     user_scope: bool = False,
@@ -326,9 +620,13 @@ def remove_stale_deployed_files(
         diagnostics: ``DiagnosticCollector`` -- recoverable warnings
             (user-edit skip, unlink failure, refused directory entry)
             are pushed here.
+        evidence: Required :class:`DeploymentEvidence` for this transition.
+            A file is deleted only when it authorizes the file's bytes; there
+            is deliberately no default, so no caller can fail open.
         recorded_hashes: Mapping from rel-path to ``"sha256:<hex>"`` as
-            stored on the previous ``LockedDependency``. A project file
-            without an entry is kept and reported in ``skipped_unmanaged``.
+            stored on the previous ``LockedDependency``. Never deletion
+            evidence; it only marks which members a skill directory tracked
+            and which final symlinks replaced a hashed file.
         failed_path_retained: When ``True`` (default, intra-package
             stale cleanup) the failure diagnostic tells the user APM
             will retry on the next install -- the caller is expected
@@ -425,8 +723,6 @@ def remove_stale_deployed_files(
                 from .copilot_cowork_paths import from_lockfile_path
 
                 stale_target = from_lockfile_path(stale_path, _cowork_root_cached)
-                # The lockfile records no hash for cowork:// rows yet.
-                hash_required = False
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -446,7 +742,6 @@ def remove_stale_deployed_files(
                 result.skipped_unmanaged.append(stale_path)
                 continue
             stale_target = project_root / stale_path
-            hash_required = True
 
         if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
             # File already gone -- treat as cleaned (no-op success).
@@ -493,29 +788,14 @@ def remove_stale_deployed_files(
                 )
             continue
 
-        # Gate 3: provenance check. Deletion requires a recorded content
-        # hash that still matches: a claim without a recorded hash proves
-        # nothing (#3663) and a mismatch means the user edited the file;
-        # both are kept with a warning. Fails CLOSED on hash-read errors: if
-        # APM cannot prove the file is unmodified (PermissionError, race,
-        # etc.) we keep it rather than risk destroying user work.
-        expected_hash = recorded_hashes.get(stale_path.replace("\\", "/"))
+        # Gate 3: deployment evidence (#3701). Only a matching local receipt
+        # or byte equality with the locked render proves APM deployed these
+        # bytes; a lockfile hash alone never authorizes deletion. Fails
+        # CLOSED: edited, unproven or unreadable files are kept with a warning.
         # Unlinking a managed final symlink removes no file content, so it
-        # needs no content-hash proof (callers opt in via allow_final_symlink).
-        final_link = allow_final_symlink and stale_target.is_symlink()
-        if hash_required and not expected_hash and not final_link:
-            result.skipped_unmanaged.append(stale_path)
-            diagnostics.warn(
-                (
-                    f"Kept {stale_path}: the lockfile records no content hash "
-                    "proving APM deployed it. Delete it manually if you no "
-                    "longer need it."
-                ),
-                package=dep_key,
-            )
-            continue
-        if expected_hash:
-            if allow_final_symlink and stale_target.is_symlink():
+        # keeps its own rule (callers opt in via allow_final_symlink).
+        if allow_final_symlink and stale_target.is_symlink():
+            if recorded_hashes.get(stale_path.replace("\\", "/")):
                 result.skipped_user_edit.append(stale_path)
                 diagnostics.warn(
                     (
@@ -526,40 +806,10 @@ def remove_stale_deployed_files(
                     package=dep_key,
                 )
                 continue
-            try:
-                from ..utils.content_hash import compute_file_hash
-
-                actual_hash = compute_file_hash(stale_target)
-            except Exception as _hash_exc:
-                result.skipped_user_edit.append(stale_path)
-                diagnostics.warn(
-                    (
-                        f"Skipped removing {stale_path}: could not verify "
-                        f"file content ({_hash_exc.__class__.__name__}). "
-                        "Inspect the file and delete it manually if no "
-                        "longer needed."
-                    ),
-                    package=dep_key,
-                )
-                continue
-
-            # Defensive normalization: ``recorded_hashes`` may carry either
-            # the canonical ``sha256:<hex>`` (regular install pipeline) or
-            # bare ``<hex>`` (legacy local-bundle installs prior to the
-            # 0.12.0 fix).  ``compute_file_hash`` always returns the
-            # prefixed form, so strip the prefix from both sides before
-            # comparing to avoid false "user-edited" classifications.
-            if _strip_sha256_prefix(actual_hash) != _strip_sha256_prefix(expected_hash):
-                result.skipped_user_edit.append(stale_path)
-                diagnostics.warn(
-                    (
-                        f"Skipped removing {stale_path}: file has been "
-                        "edited since APM deployed it. Delete it manually "
-                        "if you no longer need it, or ignore this warning "
-                        "to keep your changes."
-                    ),
-                    package=dep_key,
-                )
+        else:
+            verdict = evidence.verdict(stale_path, stale_target)
+            if verdict != AUTHORIZED:
+                _keep_without_evidence(result, diagnostics, stale_path, verdict, dep_key)
                 continue
 
         # All gates passed -- safe to delete.
@@ -597,6 +847,7 @@ def remove_stale_deployed_files(
             _dir_path,
             recorded_hashes,
             _stale_set,
+            evidence,
             result,
             diagnostics,
             dep_key,
@@ -609,10 +860,8 @@ def remove_stale_deployed_files(
             (
                 f"Cowork: skipping {_cowork_orphans_skipped} stale lockfile "
                 f"{'entry' if _cowork_orphans_skipped == 1 else 'entries'}"
-                " -- OneDrive path not detected.\n"
-                "Run: apm config set copilot-cowork-skills-dir <path>  "
-                "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                "to clean up these entries on the next install/uninstall."
+                f" -- OneDrive path not detected.\n{COWORK_SKILLS_DIR_UNDETECTED.sentence()} "
+                "Alternatively, set APM_COPILOT_COWORK_SKILLS_DIR."
             ),
             package=dep_key,
         )
@@ -636,4 +885,49 @@ def remove_stale_deployed_files(
         )
     else:
         receipt_retirements.extend(retired)
+    return result
+
+
+def remove_synced_files(
+    managed_files: Iterable[str],
+    project_root: Path,
+    *,
+    prefixes: tuple[str, ...],
+    dep_key: str,
+    targets,
+    evidence: DeploymentEvidence | None,
+    recorded_hashes: dict[str, str] | None = None,
+    allow_final_symlink: bool = False,
+    receipt_retirements: list[Path] | None = None,
+) -> CleanupResult:
+    """Remove lockfile-listed files under *prefixes* for an integrator sync (#3701).
+
+    Integrator syncs (uninstall Phase 1 and survivor refresh) delete through
+    :func:`remove_stale_deployed_files`, so they need the same deployment
+    evidence. *evidence* is required; ``None`` authorizes nothing and keeps
+    every file with a warning. Diagnostics are rendered before returning.
+    """
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    paths: set[str] = set()
+    for rel_path in managed_files:
+        normalized = rel_path.replace("\\", "/")
+        if normalized.startswith(prefixes) and ".." not in Path(normalized).parts:
+            paths.add(rel_path if Path(rel_path).is_absolute() else normalized)
+    diagnostics = DiagnosticCollector()
+    result = remove_stale_deployed_files(
+        paths,
+        project_root,
+        dep_key=dep_key,
+        targets=targets,
+        diagnostics=diagnostics,
+        evidence=evidence or DeploymentEvidence.none(project_root),
+        recorded_hashes=recorded_hashes,
+        failed_path_retained=False,
+        # Evidence is scope-bound: user-scope syncs validate and retire receipts there.
+        user_scope=evidence is not None and evidence.user_scope,
+        allow_final_symlink=allow_final_symlink,
+        receipt_retirements=receipt_retirements,
+    )
+    diagnostics.render_summary()
     return result

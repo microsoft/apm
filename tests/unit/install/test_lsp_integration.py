@@ -22,7 +22,9 @@ from apm_cli.install.lsp.integration import (
     run_lsp_integration,
     run_owned_lsp_integration,
 )
+from apm_cli.install.service import FrozenDisposition
 from apm_cli.models.dependency.lsp import LSPDependency
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -484,6 +486,7 @@ def test_mcp_only_service_install_does_not_reconcile_lsp(tmp_path) -> None:
             diagnostics=None,
             explicit_target=["claude"],
             target_decision=target_decision,
+            frozen_disposition=FrozenDisposition(replay=False),
         )
 
     assert run_lsp.call_args.kwargs["should_install"] is False
@@ -947,7 +950,10 @@ class TestLspCapabilityPreflight:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
         with (
-            patch("apm_cli.install.template.effective_allow_map", return_value=None),
+            patch(
+                "apm_cli.install.template.effective_allow_map",
+                return_value=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
+            ),
             pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
         ):
             preflight_lsp_targets(self._ctx(tmp_path))
@@ -955,7 +961,10 @@ class TestLspCapabilityPreflight:
     def test_capable_target_passes(self, tmp_path) -> None:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
-        with patch("apm_cli.install.template.effective_allow_map", return_value=None):
+        with patch(
+            "apm_cli.install.template.effective_allow_map",
+            return_value=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
+        ):
             preflight_lsp_targets(self._ctx(tmp_path, target="opencode"))
 
     def test_excluded_capable_target_fails_like_the_service_phase(self, tmp_path) -> None:
@@ -963,7 +972,10 @@ class TestLspCapabilityPreflight:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
         with (
-            patch("apm_cli.install.template.effective_allow_map", return_value=None),
+            patch(
+                "apm_cli.install.template.effective_allow_map",
+                return_value=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
+            ),
             pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
         ):
             preflight_lsp_targets(self._ctx(tmp_path, target="opencode", exclude="opencode"))
@@ -1020,6 +1032,7 @@ class TestLspCapabilityPreflight:
                 diagnostics=None,
                 explicit_target="cursor",
                 target_decision=EffectiveTargetDecision("cursor", "--target flag"),
+                frozen_disposition=FrozenDisposition(replay=False),
             )
 
         run_mcp.assert_not_called()

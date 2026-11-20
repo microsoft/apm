@@ -32,9 +32,11 @@ def promote_content_hashes(ctx: Any, lockfile: LockFile) -> bool:
     """
     from apm_cli.deps.carried_license import verified_framed_digest
     from apm_cli.deps.lockfile import _SELF_KEY, records_framed_content_hashes
+    from apm_cli.install.service import InstallService
 
     recorded_framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))
-    if getattr(ctx, "frozen", False) or getattr(ctx, "dry_run", False):
+    withheld = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
+    if withheld or getattr(ctx, "dry_run", False):
         lockfile.set_content_hash_stream(framed=recorded_framed)
         return False
     recorded = getattr(ctx, "package_hashes", {})
@@ -80,7 +82,9 @@ def _carried_install_path(ctx: Any, dep: LockedDependency):
 
 
 def _keep_stream(ctx: Any, lockfile: LockFile, dep_key: str, recorded_framed: bool) -> None:
-    hint = f"reinstall {dep_key} so its bytes are verified, then run 'apm install' again"
+    from apm_cli.core.remediation import CONTENT_HASH_UNVERIFIED
+
+    hint = CONTENT_HASH_UNVERIFIED.bind(package=dep_key).clause()
     if recorded_framed:  # this run's rows are framed: never mislabel them
         raise RuntimeError(f"Cannot verify the locked content of {dep_key}; {hint}")
     lockfile.set_content_hash_stream(framed=False)

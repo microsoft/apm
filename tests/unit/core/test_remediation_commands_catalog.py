@@ -31,10 +31,13 @@ EXECUTED = frozenset(
         "executables-approved",
         "executables-denied",
         "executables-unapproved",
+        "hidden-characters-found",
+        "hidden-characters-previewed",
         "installed-files-differ",
         "lockfile-missing-lock",
         "lockfile-unreadable",
         "orphaned-packages-prune",
+        "project-manifest-bootstrap",
         "project-manifest-missing",
     }
 )
@@ -44,6 +47,10 @@ _NETWORK = "runs against the network or a real installer"
 _OUTSIDE = "advised by a command outside the executed command families"
 
 COMPONENT_ONLY: dict[str, str] = {
+    "bundle-hooks-unchecked": (
+        "needs target resolution to fail mid-prune; tests/unit/test_prune_command.py "
+        "drives that branch"
+    ),
     "agent-plugin-bundle-consumer": _OUTSIDE,
     "auth-token-unexported": _NETWORK,
     "bundle-target-mismatch": _OUTSIDE,
@@ -95,6 +102,12 @@ COMPONENT_ONLY: dict[str, str] = {
     "user-manifest-missing": "installs a user-scope package; covered by the global lifecycle tests",
     "user-packages-missing": _OUTSIDE,
     "lifecycle-scripts-untrusted": _OUTSIDE,
+    "frozen-update-conflict": "usage refusal; the reported state is the flag combination, "
+    "not project state",
+    "bundle-repack-plugin": "runs in the publisher's source project, not the consumer that "
+    "reported the bundle",
+    "legacy-bundle-unpack": _OUTSIDE,
+    "registry-package-install": _NETWORK,
 }
 
 

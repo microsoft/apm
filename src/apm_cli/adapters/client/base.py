@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ...core.command_logger import library_logger
+from ...core.remediation import MCP_ENV_VARS_UNRESOLVED
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
 from ...utils.atomic_io import atomic_write_text, umask_file_mode
 from ...utils.path_security import has_symlink_component
@@ -1985,8 +1986,8 @@ class MCPClientAdapter(ABC):
             var_names = [ev.get("name") for ev in empty_value_vars]
             library_logger().warning(
                 f"Required environment variables have no default value and cannot be "
-                f"prompted in non-interactive mode: {var_names}. Set them in your "
-                "environment and rerun `apm install`."
+                f"prompted in non-interactive mode: {var_names}. "
+                + MCP_ENV_VARS_UNRESOLVED.bind(names="them").sentence()
             )
 
         for env_var in env_vars:
@@ -2044,8 +2045,8 @@ class MCPClientAdapter(ABC):
             elif required:
                 library_logger().warning(
                     f"Required environment variable '{name}' could not be resolved. "
-                    f"The MCP server may not function correctly. Set {name} in your "
-                    "environment and rerun `apm install`."
+                    "The MCP server may not function correctly. "
+                    + MCP_ENV_VARS_UNRESOLVED.bind(names=name).sentence()
                 )
                 resolved[name] = ""
 

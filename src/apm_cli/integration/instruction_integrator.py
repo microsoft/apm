@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import yaml
 
+from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
@@ -34,6 +35,7 @@ from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
 
 
@@ -134,7 +136,7 @@ class InstructionIntegrator(BaseIntegrator):
         """Raise the package-facing malformed-frontmatter error."""
         raise yaml.YAMLError(
             f"Rejected frontmatter in {source.name}: {exc}\n"
-            "Fix or remove the invalid frontmatter, then rerun apm install."
+            f"{INSTRUCTION_FRONTMATTER_REJECTED.sentence()}"
         ) from exc
 
     def _prepare_instruction(
@@ -498,6 +500,7 @@ class InstructionIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed instruction files for a single *target*."""
         mapping = target.primitives.get("instructions")
@@ -513,6 +516,7 @@ class InstructionIntegrator(BaseIntegrator):
             managed_files,
             prefix=prefix,
             targets=[target],
+            evidence=evidence,
         )
 
     # ------------------------------------------------------------------

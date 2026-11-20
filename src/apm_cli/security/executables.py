@@ -25,6 +25,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ..core.remediation import (
+    EXECUTABLES_IDENTITY_UNLOCKED,
+    EXECUTABLES_PIN_MALFORMED,
+    MCP_EXECUTABLES_UNTRUSTED,
+)
+
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
 EXEC_TYPE_MCP = "mcp"
@@ -1003,18 +1009,106 @@ class EffectiveExecMap(dict):
     """
 
     trust_context: ExecTrustContext | None = None
+    # Why this map authorizes every executable type of every package, when it
+    # does. Set only by :func:`authorized_exec_map`; never inferred from None.
+    authorized_by: str | None = None
 
 
-def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:
+# The project's own content (``_local``) is first-party and always trusted.
+FIRST_PARTY_PACKAGE = "_local"
+# Explicit blanket authorizations. A missing or omitted map is never one.
+AUTHORIZED_GATE_DISABLED = LAYER_GATE_DISABLED
+AUTHORIZED_REPLAY = "replay-already-authorized"
+AUTHORIZED_FIRST_PARTY = "first-party"
+_BLANKET_AUTHORIZATIONS = frozenset(
+    {AUTHORIZED_GATE_DISABLED, AUTHORIZED_REPLAY, AUTHORIZED_FIRST_PARTY}
+)
+
+
+def authorized_exec_map(reason: str) -> EffectiveExecMap:
+    """Return a map that explicitly authorizes every executable for *reason*.
+
+    ``AUTHORIZED_GATE_DISABLED``: no layer opted into the gate (no policy
+    signals), so every executable deploys. ``AUTHORIZED_REPLAY``: audit replay
+    re-derives content the install gate already authorized.
+    ``AUTHORIZED_FIRST_PARTY``: the project's own content (``_local``).
+    """
+    if reason not in _BLANKET_AUTHORIZATIONS:
+        raise ValueError(f"Unknown executable authorization: {reason!r}")
+    allow_map = EffectiveExecMap()
+    allow_map.authorized_by = reason
+    return allow_map
+
+
+def exec_map_authorizes_all(allow_map: object) -> bool:
+    """Return whether *allow_map* explicitly authorizes every executable.
+
+    ``None``, a plain dict, and an omitted map authorize nothing beyond their
+    own literal grants.
+    """
+    return isinstance(allow_map, EffectiveExecMap) and allow_map.authorized_by is not None
+
+
+def closed_exec_map(allow_map: object) -> object:
+    """Return *allow_map*, or an empty grant map when it is missing.
+
+    Item admission reads ``None`` as "gate off"; a missing map handed to it
+    becomes a gate-on map with no grants, so it admits nothing.
+    """
+    return EffectiveExecMap() if allow_map is None else allow_map
+
+
+def package_type_approved(allow_map: object, package_keys: Any, exec_type: str) -> bool:
+    """Return the package-level approval of *exec_type* for any of *package_keys*.
+
+    Pinned items are not read here; ``security/trust.py`` admits them.
+    """
+    if exec_map_authorizes_all(allow_map):
+        return True
+    if not isinstance(allow_map, dict):
+        return False
+    return any(is_package_approved(allow_map, key, exec_type) for key in package_keys)
+
+
+def package_type_approvals(allow_map: object, package_keys: Any) -> dict[str, bool]:
+    """Return :func:`package_type_approved` for every executable type."""
+    keys = tuple(package_keys)
+    return {
+        exec_type: package_type_approved(allow_map, keys, exec_type) for exec_type in ALL_EXEC_TYPES
+    }
+
+
+def compose_trust_bin(
+    bin_approved: bool,
+    trust_bin: bool | None,
+    *,
+    non_interactive: bool,
+) -> tuple[bool, str | None]:
+    """Compose the bin approval with the ``--trust-bin`` posture.
+
+    Returns ``(skip_bin, reason)``. Without the flag a non-interactive run
+    does not trust bin/ executables.
+    """
+    if not bin_approved:
+        return True, "not_approved"
+    if trust_bin is False:
+        return True, "not_trusted"
+    if trust_bin is None and non_interactive:
+        return True, "not_trusted"
+    return False, None
+
+
+def materialize_exec_map(ctx: ExecTrustContext) -> EffectiveExecMap:
     """Materialise the deny-wins effective allow-map from a trust context.
 
-    Returns ``None`` when the gate is disabled; otherwise every candidate
-    package key is run through :func:`resolve_exec_decision` and only ALLOWED
-    ``(key, exec_type)`` pairs are emitted, each also under its version-blind
-    name so the gate's exact-membership lookup matches any installed version.
+    Returns an explicit :data:`AUTHORIZED_GATE_DISABLED` map when the gate is
+    disabled; otherwise every candidate package key is run through
+    :func:`resolve_exec_decision` and only ALLOWED ``(key, exec_type)`` pairs
+    are emitted, each also under its version-blind name so the gate's
+    exact-membership lookup matches any installed version.
     """
     if not ctx.gate_enabled:
-        return None
+        return authorized_exec_map(AUTHORIZED_GATE_DISABLED)
 
     candidate_keys: set[str] = set()
     candidate_keys |= set(ctx.project_allow) | set(ctx.project_deny)
@@ -1100,14 +1194,15 @@ def build_effective_exec_map(
     policy: Any | None,
     project_data: dict[str, Any] | None,
     migrate_user_legacy: bool = True,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Materialise the deny-wins effective allow-map consumed by the install gate.
 
     This is the #1873 replacement for the legacy ``{**project, **user}``
     user-wins merge. See :func:`materialize_exec_map` for the emission rules.
 
-    Returns ``None`` when the gate is disabled (backward-compatible: every
-    executable deploys), mirroring :attr:`ExecTrustContext.gate_enabled`.
+    Returns an explicit :data:`AUTHORIZED_GATE_DISABLED` map when the gate is
+    disabled (backward-compatible: every executable deploys), mirroring
+    :attr:`ExecTrustContext.gate_enabled`.
     """
     ctx = build_exec_trust_context(
         policy=policy,
@@ -1170,7 +1265,7 @@ def effective_exec_map_for_project(
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
     migrate_user_legacy: bool = True,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Materialize the canonical trust context for one project."""
     return materialize_exec_map(
         exec_trust_context_for_project(
@@ -1191,7 +1286,7 @@ def resolve_project_exec_allow_map(
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
     logger: Any | None = None,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Return the deny-wins executables map for one project command.
 
     Reuses a map the caller already resolved (``executable_context`` is
@@ -1241,7 +1336,7 @@ def _filter_declared_services(
     gated: Any = None,
 ) -> list:
     """Keep root-declared services and services whose declaring package is approved."""
-    if effective_allow_execs is None or not dependencies:
+    if exec_map_authorizes_all(effective_allow_execs) or not dependencies:
         return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
@@ -1251,9 +1346,7 @@ def _filter_declared_services(
         if (
             owner is None
             or (gated is not None and not gated(dependency))
-            or any(
-                is_package_approved(effective_allow_execs, key, exec_type) for key in approval_keys
-            )
+            or package_type_approved(effective_allow_execs, approval_keys, exec_type)
         ):
             filtered.append(dependency)
             continue
@@ -1262,14 +1355,13 @@ def _filter_declared_services(
         if approval_keys:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
-                f"executables not trusted. Run 'apm policy explain {owner}'; "
-                f"if policy permits, run 'apm approve {owner}'."
+                f"executables not trusted. {MCP_EXECUTABLES_UNTRUSTED.bind(package=owner).sentence()}"
             )
         else:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': package "
-                "identity cannot be verified without lock state. Run 'apm install' "
-                "to regenerate apm.lock.yaml, then approve the package."
+                "identity cannot be verified without lock state. "
+                f"{EXECUTABLES_IDENTITY_UNLOCKED.bind(subject='the package').sentence()}"
             )
     if len(filtered) < len(dependencies):
         skipped_count = len(dependencies) - len(filtered)
@@ -1290,7 +1382,7 @@ def _filter_declared_services(
         if unlocked_owners:
             package_noun = "that package" if len(unlocked_owners) == 1 else "each package"
             remediation_parts.append(
-                f"Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
+                EXECUTABLES_IDENTITY_UNLOCKED.bind(subject=package_noun).sentence()
             )
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
@@ -1324,7 +1416,7 @@ PLUGIN_ITEM = "."
 def _item_error(where: str, pkg_key: str, exec_type: str, item: object) -> ValueError:
     return ValueError(
         f"apm.yml {where}.{pkg_key}.{exec_type}.{item}: expected 'sha256:<64 hex>'. "
-        f"Run 'apm approve {pkg_key}' to record it."
+        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
     )
 
 
@@ -1376,7 +1468,8 @@ def _parse_grant_block(
                 if not where.endswith(".allow") or not is_fingerprint(value):
                     raise ValueError(
                         f"apm.yml {where}.{pkg_key}.plugin: expected 'sha256:<64 hex>' under "
-                        f"executables.allow. Run 'apm approve {pkg_key}' to record it."
+                        "executables.allow. "
+                        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
                     )
                 parsed[exec_type_str] = value
                 continue

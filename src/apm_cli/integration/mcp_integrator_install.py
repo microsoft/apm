@@ -24,6 +24,7 @@ from apm_cli.core.apm_yml import (
     UnknownTargetError,
 )
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.remediation import MCP_REGISTRY_ALTERNATIVE
 from apm_cli.core.target_catalog import accepted_target_values
 from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
@@ -106,8 +107,7 @@ def _emit_registry_choice_hint(
             search = f"{search} (with MCP_REGISTRY_URL set to {registry_url})"
         logger.info(f"Search this registry: {search}", soft_wrap=True)
         logger.info(
-            "Use another registry (replace <URL>): "
-            f'apm install --mcp "{server_name}" --registry <URL>{suffix}',
+            MCP_REGISTRY_ALTERNATIVE.bind(server=server_name, retry=suffix).sentence(),
             soft_wrap=True,
         )
     if registry_source == "env":
@@ -228,10 +228,7 @@ class _TargetSelectionSource(str, Enum):
 
 @dataclass(frozen=True)
 class ResolvedMcpTargets:
-    """MCP target runtimes resolved once for an install run.
-
-    ``runtimes`` is ``None`` when no runtime can accept MCP configuration.
-    """
+    """MCP target runtimes resolved once per install run (``None``: none can accept)."""
 
     runtimes: tuple[str, ...] | None
 
@@ -241,11 +238,9 @@ class ResolvedMcpTargets:
 
 
 def resolve_mcp_targets(**kwargs: Any) -> ResolvedMcpTargets:
-    """Resolve (and announce) the MCP target runtimes once for this run.
+    """Resolve and announce MCP targets once; ``run_mcp_install`` reuses them (#4089).
 
-    Takes the keyword arguments of :func:`_resolve_target_runtimes`. Pass the
-    result to :func:`run_mcp_install` as ``resolved_targets`` so the install
-    neither re-resolves nor re-announces the target set (#4089).
+    Takes the keyword arguments of :func:`_resolve_target_runtimes`.
     """
     runtimes = _resolve_target_runtimes(**kwargs)
     return ResolvedMcpTargets(None if runtimes is None else tuple(runtimes))

@@ -22,6 +22,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -52,7 +53,7 @@ _LEGACY_USER_TARGET_PREFIXES = {
 }
 _LOCAL_BUNDLE_OWNER = "local-bundle"
 UNATTRIBUTED_TARGET = "legacy"
-DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
+DEPLOYMENT_OWNER_REMEDIATION = DEPLOYMENT_OWNERS_INVALID.sentence()
 LOCAL_STATE_DIR = ".apm-local"
 """Per-deployment-root directory for local, never-shared APM state."""
 _SHA256_PREFIX = "sha256:"
@@ -281,6 +282,14 @@ class DeploymentMaterializationSession:
         """Return the ownership key receipts record for one deployed package."""
         dependency_ref = getattr(package_info, "dependency_ref", None)
         return dependency_ref.get_unique_key() if dependency_ref is not None else "."
+
+    def receipt_hashes(self) -> dict[str, str]:
+        """Map each receipted physical path to the hash APM wrote there (#3701)."""
+        return {
+            physical: content_hash
+            for physical, key in self._physical_keys.items()
+            if (content_hash := self._records[key].content_hash) is not None
+        }
 
     def has_receipt(self, path: Path) -> bool:
         """Return whether any receipt, trusted or not, exists for this physical path."""

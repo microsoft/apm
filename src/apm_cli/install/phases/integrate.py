@@ -536,10 +536,10 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         save_user_executables(updated, deny_exec)
         if ctx.logger:
             from apm_cli import config
+            from apm_cli.core.remediation import EXECUTABLES_APPROVED
 
             ctx.logger.info(
-                f"Updated {config.CONFIG_FILE}. "
-                "Run 'apm install' again to deploy approved executables.",
+                f"Updated {config.CONFIG_FILE}. {EXECUTABLES_APPROVED.sentence()}",
                 symbol="info",
             )
 
@@ -557,8 +557,10 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             f"{len(parked)} package(s) left parked. Their executables will not run until trusted.",
             symbol="info",
         )
+        from apm_cli.core.remediation import EXECUTABLES_PARKED
+
         logger.info(
-            f"Deploy later: apm approve {first} (then re-run apm install)  |  "
+            f"Deploy later: {EXECUTABLES_PARKED.bind(package=first).clause()}  |  "
             f"Why parked?: apm policy explain {first}",
             symbol="info",
         )
@@ -720,9 +722,10 @@ def run(ctx: InstallContext) -> None:
             _announce_held_headers(prepared_integrations)
             return
 
-        if ctx.frozen and ctx.existing_lockfile is not None:
+        from apm_cli.install.service import InstallService
+
+        if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:
             from apm_cli.core.scope import is_user_scope
-            from apm_cli.install.service import InstallService
             from apm_cli.install.template import effective_allow_map
             from apm_cli.security.trust import McpAdmission
 

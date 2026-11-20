@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence, cast  # noqa: UP035
 
+from ..core import remediation
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
 from ..core.remediation import DEPLOYED_FILES_MISSING, LOCKFILE_MISSING, ORPHANED_PACKAGES
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
@@ -900,7 +901,7 @@ def _check_content_integrity(
         remedies.append(
             "review structured prompt fields manually"
             if scan.protected_files.intersection(critical_files)
-            else "run 'apm audit --strip' to clean Unicode"
+            else remediation.HIDDEN_CHARACTERS_FLAGGED.clause()
         )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
@@ -922,13 +923,13 @@ def _check_content_integrity(
         remedies.extend(item.clause() for item in remediations)
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
-        remedies.append("run 'apm install <bundle> --force' to restage drifted files")
+        remedies.append(remediation.STAGED_BUNDLE_DRIFT.clause())
     if missing_ownership:
         parts.append(f"{len(missing_ownership)} file(s) without deployment ownership")
-        remedies.append("run 'apm install' to repair ownership metadata")
+        remedies.append(remediation.DEPLOYMENT_OWNERSHIP_MISSING.clause())
     if unresolved_hash_paths:
         parts.append(f"{len(unresolved_hash_paths)} unsafe or unresolved deployed path(s)")
-        remedies.append("run 'apm install' to restore managed paths")
+        remedies.append(remediation.MANAGED_PATHS_UNRESOLVED.clause())
     summary = "; ".join(parts)
     remedy = "; ".join(remedies)
     return CheckResult(
@@ -1067,7 +1068,8 @@ def _check_drift(
                     passed=False,
                     message=(
                         f"drift replay failed: corrupt local dependency graph in the "
-                        f"lockfile ({exc}). Fix the resolved_by chain or re-run 'apm install'."
+                        f"lockfile ({exc}). Fix the resolved_by chain, or "
+                        f"{remediation.LOCAL_DEPENDENCY_GRAPH_CORRUPT.clause()}."
                     ),
                 ),
                 [],
@@ -1079,7 +1081,7 @@ def _check_drift(
                     passed=True,
                     message=(
                         f"{DRIFT_SKIP_PREFIX}: install cache not populated "
-                        "(run 'apm install' first or pass --no-drift)"
+                        f"({remediation.DRIFT_CACHE_UNPOPULATED.clause()}, or pass --no-drift)"
                     ),
                 ),
                 [],
@@ -1201,8 +1203,8 @@ def _check_local_bundle_hooks(
         passed=False,
         message=(
             f"{len(unadmitted)} local bundle(s) have hooks the current executables "
-            "trust does not admit; run 'apm install' to retire them, or approve the "
-            "bundle and rerun 'apm install <bundle>'"
+            f"trust does not admit; {remediation.BUNDLE_HOOKS_UNADMITTED.clause()}, "
+            f"or {remediation.BUNDLE_HOOKS_APPROVED.clause()}"
         ),
         details=[f"{item.slug}: {item.reason}" for item in unadmitted],
     )

@@ -28,6 +28,7 @@ import click
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..bundle.formats import BundleFormat
+from ..core.remediation import BUNDLE_INSTRUCTIONS_STAGED
 
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -176,8 +177,10 @@ def install_local_bundle(
             if bundle_info.source_dir is not None
             else []
         )
+        from ..security.executables import exec_map_authorizes_all
+
         bundle_approval_key = None
-        if allow_executables is not None:
+        if not exec_map_authorizes_all(allow_executables):
             from ..security.executables import local_bundle_approval_key
 
             bundle_approval_key = local_bundle_approval_key(
@@ -352,7 +355,18 @@ def install_local_bundle(
             lockfile_path = get_lockfile_path(_bundle_lock_root(global_))
             lockfile = LockFile.read(lockfile_path) or LockFile()
             from ..core.deployment_ledger import DeploymentLedgerCodec
+            from ..integration.cleanup import DeploymentEvidence
+            from ..utils.diagnostics import DiagnosticCollector
 
+            # Evidence for migration deletes is bound to the pre-install lock (#3701).
+            migration_diagnostics = DiagnosticCollector()
+            migration_evidence = DeploymentEvidence.collect(
+                project_root,
+                user_scope=global_,
+                lockfile=lockfile,
+                lockfile_root=lockfile_path.parent,
+                diagnostics=migration_diagnostics,
+            )
             DeploymentLedgerCodec.record_local_bundle_files(
                 lockfile,
                 deployed,
@@ -409,7 +423,10 @@ def install_local_bundle(
                                     break
                         _rich_info(COLLISION_HINT, symbol="info")
                     else:
-                        _mig_result = _exec_mig(_plans, lockfile, project_root)
+                        _mig_result = _exec_mig(
+                            _plans, lockfile, project_root, evidence=migration_evidence
+                        )
+                        migration_diagnostics.render_summary()
                         _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
                         if _total:
                             _rich_info(
@@ -432,8 +449,8 @@ def install_local_bundle(
             target_names = ", ".join(sorted({t.name for t in targets}))
             logger.warning(
                 f"Bundle staged {len(staged_instructions)} instruction(s) "
-                f"for compile (target: {target_names}). Run 'apm compile' "
-                "to merge them into AGENTS.md / GEMINI.md / equivalent. "
+                f"for compile (target: {target_names}). "
+                f"{BUNDLE_INSTRUCTIONS_STAGED.sentence()} "
                 "Reference: https://microsoft.github.io/apm/consumer/choose-harnesses/#compiled-outputs"
             )
 
@@ -527,7 +544,7 @@ def effective_bundle_allow_map(
     migrate_user_legacy: bool = True,
     dry_run: bool = False,
     policy_fetch_result=None,
-) -> dict[str, dict[str, bool]] | None:
+) -> dict[str, dict[str, bool]]:
     """Resolve local-bundle trust through the canonical trust owner.
 
     Org policy resolves from *project_root* as for a package install; the
@@ -574,13 +591,17 @@ def _filter_bundle_executables(
     user_scope: bool,
 ) -> list[Any]:
     """Apply executable trust to the exact bundle artifact, never its claimed name."""
-    if not dependencies or allow_executables is None:
-        return dependencies
-    from ..security.executables import is_package_approved, local_bundle_approval_hint
+    from ..security.executables import (
+        exec_map_authorizes_all,
+        local_bundle_approval_hint,
+        package_type_approved,
+    )
 
+    if not dependencies or exec_map_authorizes_all(allow_executables):
+        return dependencies
     if approval_key is None:
         raise ValueError("Local bundle executable approval requires an artifact digest")
-    if is_package_approved(allow_executables, approval_key, exec_type):
+    if package_type_approved(allow_executables, (approval_key,), exec_type):
         return dependencies
     noun = "executable" if len(dependencies) == 1 else "executables"
     logger.warning(

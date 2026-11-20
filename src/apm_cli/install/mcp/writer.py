@@ -16,6 +16,7 @@ import click
 
 from ...constants import APM_YML_FILENAME
 from ...core.null_logger import NullCommandLogger
+from ...core.remediation import PROJECT_MANIFEST_MISSING
 
 MCPEntry = Union[str, dict[str, Any]]  # noqa: UP007
 
@@ -69,7 +70,9 @@ def add_mcp_to_apm_yml(
     log = logger if logger is not None else NullCommandLogger()
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
     if not apm_yml_path.exists():
-        raise click.UsageError(f"{apm_yml_path}: no apm.yml found. Run 'apm init' first.")
+        raise click.UsageError(
+            f"{apm_yml_path}: no apm.yml found. {PROJECT_MANIFEST_MISSING.sentence()}"
+        )
     # Round-trip keeps the user's comments and layout (#2000, #2012).
     data = load_manifest_roundtrip(apm_yml_path) or {}
 

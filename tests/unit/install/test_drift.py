@@ -531,8 +531,9 @@ def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
     assert "[x] Drift detected: 1 file(s)" in out
     assert "unrecorded (1):" in out
     assert ".claude/skills/x/SKILL.md" in out
-    assert "Run 'apm install' to re-sync deployed files" in out
-    assert "Commit the regenerated apm.lock.yaml" in out
+    from apm_cli.core.remediation import RESYNC_UNRECORDED
+
+    assert RESYNC_UNRECORDED.sentence() in out
 
 
 def test_diff_engine_100kb_inline_cap(tmp_path):

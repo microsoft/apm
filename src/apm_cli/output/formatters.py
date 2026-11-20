@@ -12,7 +12,10 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
 
+from ..core.remediation import COMPILE_DRY_RUN
 from .models import CompilationResults, OptimizationDecision, PlacementStrategy
+
+_DRY_RUN_FOOTER = f"[DRY RUN] No files written. {COMPILE_DRY_RUN.sentence()}"
 
 
 class CompilationFormatter:
@@ -492,13 +495,9 @@ class CompilationFormatter:
 
         # Call to action
         if self.use_color:
-            lines.append(
-                self._styled(
-                    "[DRY RUN] No files written. Run 'apm compile' to apply changes.", "yellow"
-                )
-            )
+            lines.append(self._styled(_DRY_RUN_FOOTER, "yellow"))
         else:
-            lines.append("[DRY RUN] No files written. Run 'apm compile' to apply changes.")
+            lines.append(_DRY_RUN_FOOTER)
 
         return lines
 

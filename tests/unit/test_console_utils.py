@@ -434,10 +434,30 @@ def _reimport_console_without(blocked_modules: list[str]):
                 del sys.modules[key]
         # Restore originals.
         sys.modules.update(saved)
+        # Importing a submodule also binds it on its parent package, so
+        # ``from apm_cli.utils import console`` would keep returning the
+        # discarded copy while ``sys.modules`` holds the original.
+        for key, module in saved.items():
+            parent, _, child = key.rpartition(".")
+            if parent in sys.modules and sys.modules[parent] is not None:
+                setattr(sys.modules[parent], child, module)
 
 
 class TestImportFallbacks:
     """Cover the except-ImportError branches at module level (lines 18-23, 31-34)."""
+
+    def test_reimport_leaves_package_attribute_on_the_original_module(self):
+        """A later ``from apm_cli.utils import console`` must reach the live module.
+
+        Otherwise a monkeypatch through the package attribute misses callers that
+        import from ``sys.modules``, which made order-dependent failures elsewhere.
+        """
+        import apm_cli.utils
+
+        original = sys.modules["apm_cli.utils.console"]
+        _reimport_console_without(["rich"])
+        assert sys.modules["apm_cli.utils.console"] is original
+        assert apm_cli.utils.console is original
 
     def test_rich_unavailable_sets_constants(self):
         """Lines 18-23: RICH_AVAILABLE=False and sentinel Any assignments."""

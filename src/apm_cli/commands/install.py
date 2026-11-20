@@ -15,6 +15,16 @@ from apm_cli.agent_plugins.errors import (
     enforce_agent_plugin_deployment_boundary,
 )
 from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+from apm_cli.core.remediation import (
+    BUNDLE_REPACK_PLUGIN,
+    FROZEN_UPDATE_CONFLICT,
+    LEGACY_BUNDLE_UNPACK,
+    PROJECT_MANIFEST_BOOTSTRAP,
+    PROJECT_MANIFEST_MISSING,
+    REGISTRY_PACKAGE_INSTALL,
+    USER_MANIFEST_MISSING,
+    either_sentence,
+)
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
@@ -1190,8 +1200,7 @@ def install(  # noqa: PLR0913
         raise click.ClickException(str(exc)) from exc
     if frozen and update:
         raise click.UsageError(
-            "--frozen and --update are mutually exclusive. "
-            "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
+            f"--frozen and --update are mutually exclusive. {FROZEN_UPDATE_CONFLICT.sentence()}"
         )
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
@@ -1315,14 +1324,12 @@ def install(  # noqa: PLR0913
                     raise click.UsageError(
                         f"'{packages[0]}' was packed with '--format apm' (legacy format). "
                         "'apm install <bundle>' requires the plugin format. "
-                        "Repack with 'apm pack --claude-plugin --archive', "
-                        "or use 'apm unpack' to deploy the legacy bundle."
+                        f"{either_sentence(BUNDLE_REPACK_PLUGIN, LEGACY_BUNDLE_UNPACK)}"
                     )
                 raise click.UsageError(
                     f"'{packages[0]}' is not a valid APM bundle archive "
                     "(no plugin.json found at the bundle root). "
-                    "Use 'apm install org/package' for registry installs, "
-                    "or repack the source with 'apm pack'."
+                    f"{either_sentence(REGISTRY_PACKAGE_INSTALL, BUNDLE_REPACK_PLUGIN)}"
                 )
         # IM8: --as is only meaningful for local-bundle installs.  If we get
         # here, no local bundle was detected, so reject --as instead of
@@ -1498,10 +1505,11 @@ def install(  # noqa: PLR0913
         if not apm_yml_exists and not packages:
             logger.error(f"No {manifest_display} found")
             if scope is InstallScope.USER:
-                logger.progress("Run 'apm install -g <org/repo>' to auto-create + install")
+                logger.progress(USER_MANIFEST_MISSING.sentence())
             else:
-                logger.progress("Run 'apm init' to create one, or:")
-                logger.progress("  apm install <org/repo> to auto-create + install")
+                logger.progress(
+                    either_sentence(PROJECT_MANIFEST_MISSING, PROJECT_MANIFEST_BOOTSTRAP)
+                )
             sys.exit(1)
 
         reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
@@ -1747,9 +1755,11 @@ def _install_apm_packages(ctx, outcome):
 
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
 
-    if ctx.frozen is True:
+    from apm_cli.install.service import InstallService
+
+    frozen_disposition = InstallService.frozen_disposition(ctx)
+    if frozen_disposition.replay:
         from apm_cli.install.request import InstallRequest
-        from apm_cli.install.service import InstallService
 
         InstallService.enforce_frozen(
             InstallRequest(
@@ -1909,7 +1919,7 @@ def _install_apm_packages(ctx, outcome):
                 audit_override=ctx.audit_override,
                 legacy_skill_paths=ctx.legacy_skill_paths,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
-                frozen=ctx.frozen,
+                frozen=frozen_disposition.replay,
                 plan_callback=ctx.plan_callback,
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
@@ -2006,6 +2016,7 @@ def _install_apm_packages(ctx, outcome):
             claude_native_keys=(
                 install_result.claude_native_keys if install_result is not None else frozenset()
             ),
+            frozen_disposition=frozen_disposition,
         )
     except PolicyBlockError:
         logger.refusal(

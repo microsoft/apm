@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
+from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import format_target_collapse as _format_target_collapse
@@ -30,6 +31,7 @@ from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_
 from .project_package import build_project_local_package_info
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
+from .target_warnings import warn_unsupported_primitives
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -153,7 +155,7 @@ def _check_native_claude_transition(
         failed = ", ".join(reconcile_stats.get("failed_paths", []))
         recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
         if not reconcile_stats.get("errors"):
-            recovery = f"Run: apm uninstall --global {package} && apm install --global {package}"
+            recovery = CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS.bind(package=package).sentence()
         raise ClaudeNativePluginError(
             f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
         )
@@ -198,10 +200,11 @@ def integrate_package_primitives(  # noqa: PLR0913
     (Amendment 6) is emitted once per install run for packages that
     contain non-skill primitives when the cowork target is active.
 
-    When *allow_executables* is provided, executable primitives (hooks,
-    bin/, MCP servers, canvas extensions) are only deployed for packages
-    whose key appears in the dict with the matching type set to ``True``.
-    Local project content (``package_name == "_local"``) is always trusted.
+    Executable primitives (hooks, bin/, MCP servers, canvas extensions) are
+    only deployed for packages the trust owner approves in
+    *allow_executables*; an omitted (``None``) map approves nothing, and only
+    an explicit ``authorized_exec_map`` approves everything. Local project
+    content (``package_name == "_local"``) is always trusted.
 
     When *trust_bin* is ``False`` (``--no-trust-bin``), bin/ deployment
     is skipped with reason ``"not_trusted"`` only when ``allowExecutables``
@@ -349,8 +352,6 @@ def integrate_package_primitives(  # noqa: PLR0913
             logger=logger,
         )
 
-    from apm_cli.install.target_warnings import warn_unsupported_primitives
-
     warn_unsupported_primitives(
         package_info,
         package_name,
@@ -469,15 +470,18 @@ def integrate_package_primitives(  # noqa: PLR0913
         # gate when is_first_party=False (defence-in-depth: a malicious dep
         # named _local must not bypass canvas trust via the name alone).
         if _prim_name == "canvas" and not is_first_party:
-            if allow_executables is None:
-                _dep_canvas_ok = True
-            else:
-                from apm_cli.install.exec_gate import resolve_package_key as _rpk
-                from apm_cli.security.executables import EXEC_TYPE_CANVAS, is_package_approved
+            from apm_cli.install.exec_gate import resolve_package_key as _rpk
+            from apm_cli.security.executables import (
+                EXEC_TYPE_CANVAS,
+                exec_map_authorizes_all,
+                package_type_approved,
+            )
 
-                _dep_canvas_ok = is_package_approved(
-                    allow_executables, _rpk(package_info, package_name), EXEC_TYPE_CANVAS
-                ) or is_package_approved(allow_executables, package_name, EXEC_TYPE_CANVAS)
+            _dep_canvas_ok = exec_map_authorizes_all(allow_executables) or package_type_approved(
+                allow_executables,
+                (_rpk(package_info, package_name), package_name),
+                EXEC_TYPE_CANVAS,
+            )
             if not _dep_canvas_ok:
                 _log_canvas_skip(package_name, package_info, logger)
                 continue
@@ -649,8 +653,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     # One tree line per package, whatever mix of root and promoted skills (#4089).
     from apm_cli.integration.skill_support import skills_integrated
 
-    _skill_count = skills_integrated(skill_result)
-    if _skill_count > 0:
+    if (_skill_count := skills_integrated(skill_result)) > 0:
         _skill_label = (
             "Skill integrated"
             if _skill_count == 1 and not skill_result.sub_skills_promoted
@@ -744,6 +747,7 @@ def integrate_local_content(  # noqa: PLR0913
     same shape as ``integrate_package_primitives()``.
     """
     from ..integration.canvas_integrator import CanvasIntegrator
+    from ..security.executables import AUTHORIZED_FIRST_PARTY, authorized_exec_map
     from .package_resolution import effective_dependency_selection
 
     if source_root is None:
@@ -775,6 +779,7 @@ def integrate_local_content(  # noqa: PLR0913
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,
+        allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),
     )
 
 
@@ -834,7 +839,7 @@ def integrate_local_bundle(
         logger: Install-flow logger.
         scope: ``InstallScope`` (project vs user) for downstream consumers.
         alias: Slug override from ``--as``.
-        allow_executables: Effective executable approvals, or ``None`` when disabled.
+        allow_executables: Effective executable approvals; ``None`` approves nothing.
         approval_key: Exact local-bundle content identity for executable approval.
         create_config: Whether config reads may create the user config file.
 
@@ -927,30 +932,19 @@ def integrate_local_bundle(
     # verbatim WITHOUT routing through ``CanvasIntegrator``, so the
     # experimental feature flag and the allowExecutables gate must be
     # checked explicitly here.  When the canvas feature flag is OFF, drop
-    # paths silently (no-op; canvas type does not exist yet).  When ON,
-    # check allowExecutables: if no enforcement block is present (None)
-    # canvas deploys freely; otherwise the bundle slug must be approved for
-    # the ``canvas`` exec type.
+    # paths silently (no-op; canvas type does not exist yet).  When ON, the
+    # trust owner approves canvas for the exact bundle content (an explicit
+    # gate-disabled map approves it; a missing map approves nothing).
     from ..core.experimental import is_enabled
     from ..integration.canvas_integrator import is_canvas_bundle_path
+    from ..security.executables import EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS, package_type_approved
 
+    _bundle_keys = () if approval_key is None else (approval_key,)
     _canvas_enabled = is_enabled("canvas", create_config=create_config)
-    if _canvas_enabled:
-        from ..security.executables import EXEC_TYPE_CANVAS, is_package_approved
-
-        _canvas_approved_bundle = allow_executables is None or (
-            approval_key is not None
-            and is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)
-        )
-    else:
-        _canvas_approved_bundle = False
-
-    from ..security.executables import EXEC_TYPE_HOOKS
-    from ..security.executables import is_package_approved as _is_approved
-
-    _hooks_approved_bundle = allow_executables is None or (
-        approval_key is not None and _is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)
+    _canvas_approved_bundle = _canvas_enabled and package_type_approved(
+        allow_executables, _bundle_keys, EXEC_TYPE_CANVAS
     )
+    _hooks_approved_bundle = package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)
 
     if not (_canvas_enabled and _canvas_approved_bundle):
         _blocked = sorted(r for r in pack_files if is_canvas_bundle_path(r))

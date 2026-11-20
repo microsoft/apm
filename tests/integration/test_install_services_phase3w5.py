@@ -10,6 +10,7 @@ from apm_cli.install import services
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.skill_support import SkillIntegrationResult
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 
 def make_package_info(install_path: Path) -> MagicMock:
@@ -201,6 +202,7 @@ def invoke_integrate(
                 command=integrators["command_integrator"],
                 hook=integrators["hook_integrator"],
             ),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
     return result, integrators, diagnostics, logger
 
@@ -377,6 +379,7 @@ class TestIntegratePackagePrimitives:
                 package_name="warning-pkg",
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert ctx.cowork_nonsupported_warned is True
@@ -874,6 +877,7 @@ class TestIntegratePackagePrimitives:
                 package_name="override-name",
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert "override-name" in diagnostics.warn.call_args.args[0]
@@ -910,6 +914,7 @@ class TestIntegratePackagePrimitives:
                 package_name="",
                 logger=MagicMock(),
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert "pkg-info-name" in diagnostics.warn.call_args.args[0]

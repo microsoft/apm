@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.core.remediation import (
+    RESYNC_AFTER_UNMANAGED_CONFLICT,
+    RESYNC_DEPLOYED,
+    RESYNC_UNRECORDED,
+)
 from apm_cli.deps.file_provenance import LOCAL_BUNDLE_OWNER
 from apm_cli.install.local_edits import (
     count_exportable_findings,
@@ -137,16 +142,9 @@ def render_drift_text(
             "overwrites a skipped non-skill file."
         )
         if any(finding.kind != "unmanaged-conflict" for finding in findings):
-            lines.append(
-                f"  {STATUS_SYMBOLS['info']} After resolving ownership conflicts, "
-                "run 'apm install' to re-sync the other findings."
-            )
+            lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_AFTER_UNMANAGED_CONFLICT.sentence()}")
     elif by_kind.get("unrecorded"):
-        lines.append(f"  {STATUS_SYMBOLS['info']} 1. Run 'apm install' to re-sync deployed files.")
-        lines.append(
-            f"  {STATUS_SYMBOLS['info']} 2. Commit the regenerated apm.lock.yaml "
-            "to restore content-integrity coverage."
-        )
+        lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_UNRECORDED.sentence()}")
     else:
         edited = [
             finding for finding in by_kind.get("modified", []) if finding.path not in unedited
@@ -161,10 +159,7 @@ def render_drift_text(
             for remediation in edited_file_remediations(paths, bundle=bundle):
                 lines.append(f"  {STATUS_SYMBOLS['info']} {remediation.sentence()}")
         if len(edited) < len(findings):
-            lines.append(
-                f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
-                "with the lockfile."
-            )
+            lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_DEPLOYED.sentence()}")
     return "\n".join(lines).rstrip() + "\n"
 
 

@@ -877,6 +877,7 @@ def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation
     for name, owner in (
         ("resolve_audit_targets", profile_owner),
         ("resolve_audit_target_decision", _EFFECTIVE_TARGET_OWNER),
+        ("resolve_deployment_target_decision", _EFFECTIVE_TARGET_OWNER),
     ):
         definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
         findings.extend(failures)

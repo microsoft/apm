@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core import remediation as _advice
 from apm_cli.core.target_detection import (
     read_manifest_target as _read_apm_yml_target,  # noqa: F401 -- compatibility re-export
 )
@@ -108,6 +109,8 @@ class ReplayConfig:
     user_scope: bool = False
     # Returns the audit's already-fetched org policy for the replayed gate.
     policy_provider: Callable[[], Any] | None = None
+    # Cleanup evidence (#3701) also renders targets the lock recorded.
+    include_recorded_targets: bool = False
 
 
 @dataclass(frozen=True)
@@ -215,14 +218,13 @@ def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) 
     ):
         raise CacheMissError(
             f"cannot replay {lock_dep.repo_url}: lockfile entry has no resolved_commit "
-            "(cache freshness unverifiable). Re-run 'apm install' with a pinned ref "
-            "(commit, tag, or specific branch HEAD) before audit."
+            f"(cache freshness unverifiable). {_advice.REMOTE_DEPENDENCY_UNPINNED.sentence()}"
         )
     if not candidate.exists():
         _ref_label = lock_dep.resolved_commit or lock_dep.version or "unknown"
         raise CacheMissError(
             f"cache miss for {lock_dep.repo_url}@{_ref_label}: "
-            f"expected {candidate}; run 'apm install' to populate the cache"
+            f"expected {candidate}; {_advice.REPLAY_CACHE_MISSING.clause()}"
         )
     if lock_dep.resolved_commit:
         from apm_cli.drift import locked_copy_holds_commit
@@ -231,7 +233,7 @@ def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) 
         if not locked_copy_holds_commit(lock_dep, candidate):
             raise CacheMissError(
                 f"{candidate} does not hold the locked commit {lock_dep.resolved_commit}; "
-                "run 'apm install' to refresh apm_modules cache"
+                f"{_advice.REPLAY_CACHE_STALE.clause()}"
             )
 
 
@@ -550,7 +552,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     if not config.lockfile_path.exists():
         raise CacheMissError(
-            f"lockfile not found at {config.lockfile_path}; run 'apm install' to generate it"
+            f"lockfile not found at {config.lockfile_path}; {_advice.LOCKFILE_MISSING.clause()}"
         )
 
     lock = LockFile.read(config.lockfile_path)
@@ -589,6 +591,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         project_root,
         user_scope=config.user_scope,
         lockfile=lock,
+        include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
     registries: dict[str, str] | None = None

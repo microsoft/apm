@@ -6,11 +6,13 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import AGENT_PLUGIN_BUNDLE_ROUTE, AGENT_PLUGIN_LEGACY_REPACK
+
 if TYPE_CHECKING:
     from apm_cli.models.apm_package import DependencyReference, PackageInfo
 
 AGENT_PLUGIN_RECOVERY = (
-    "Use 'apm pack --claude-plugin' or ask the publisher for a legacy-compatible package."
+    f"{AGENT_PLUGIN_LEGACY_REPACK.sentence()} Otherwise, ask the publisher for one."
 )
 AGENT_PLUGIN_DEPLOYMENT_BLOCKED = (
     "Agent Plugins v1.0.0 deployment is blocked because this install's "
@@ -20,9 +22,7 @@ AGENT_PLUGIN_DEPLOYMENT_BLOCKED = (
 AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED = (
     "Agent Plugins v1.0.0 packages cannot be installed through the imperative "
     "local-bundle route, which deploys loose primitives and owns no lockfile "
-    "row. Declare the plugin as a dependency in apm.yml (a local path works) "
-    "and run 'apm install --target copilot' so APM materializes it under "
-    "apm_modules and registers it natively with GitHub Copilot."
+    "row. " + AGENT_PLUGIN_BUNDLE_ROUTE.sentence()
 )
 AGENT_PLUGIN_IR_MISSING = (
     "Native Agent Plugin canonical IR is missing, so deployment was blocked. "

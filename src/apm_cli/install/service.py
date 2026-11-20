@@ -24,9 +24,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core import remediation
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
@@ -45,6 +47,27 @@ if TYPE_CHECKING:
 
 class InstallNotAvailableError(RuntimeError):
     """Raised when the APM dependency subsystem failed to import."""
+
+
+@dataclass(frozen=True)
+class FrozenDisposition:
+    """What a ``--frozen`` replay withholds from install phases (req-lk-006).
+
+    Built only by :meth:`InstallService.frozen_disposition`, the single reader
+    of the ``frozen`` flag. Phases consume this answer instead of the flag.
+    """
+
+    replay: bool
+
+    @property
+    def retain_package_orphans(self) -> bool:
+        """Undeclared packages keep files, checkout and lock claims (#3662)."""
+        return self.replay
+
+    @property
+    def withhold_lockfile_writes(self) -> bool:
+        """apm.lock.yaml is never rewritten, so nothing new may be recorded."""
+        return self.replay
 
 
 def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
@@ -75,6 +98,17 @@ class InstallService:
     extension point for collaborator injection (downloader, scanner,
     integrator factory) when programmatic callers need to swap them.
     """
+
+    @staticmethod
+    def frozen_disposition(source: Any) -> FrozenDisposition:
+        """The single reader of an install context's ``frozen`` flag."""
+        return FrozenDisposition(replay=source.frozen is True)
+
+    @staticmethod
+    def frozen_replay_lockfile(source: Any) -> LockFile | None:
+        """The recorded lockfile a frozen replay deploys against; None otherwise."""
+        frozen = InstallService.frozen_disposition(source)
+        return source.existing_lockfile if frozen.replay else None
 
     @staticmethod
     def frozen_writes(frozen: bool) -> AbstractContextManager[list[str] | None]:
@@ -345,10 +379,7 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: dependency selections differ from apm.lock.yaml.",
                 reasons=[f"  - {reason}" for reason in changes],
-                tip=(
-                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                    "or --global if specified, then commit apm.lock.yaml."
-                ),
+                tip=f"Tip: {remediation.FROZEN_SELECTIONS_CHANGED.sentence()}",
             )
 
     @staticmethod
@@ -360,8 +391,7 @@ class InstallService:
 
         raise FrozenInstallError(
             f"--frozen cannot be combined with {operation}. "
-            "Update apm.yml first, run 'apm install' without --frozen to refresh "
-            "apm.lock.yaml, then retry the frozen install."
+            f"{remediation.FROZEN_OPERATION_REJECTED.sentence()}"
         )
 
     @staticmethod
@@ -618,8 +648,8 @@ class InstallService:
                 "--frozen: local dependency content does not match apm.lock.yaml.",
                 reasons=reasons,
                 tip=(
-                    "Restore the locked local content, or run 'apm install' without "
-                    "--frozen to explicitly accept and record the change."
+                    "Restore the locked local content, or "
+                    f"{remediation.FROZEN_LOCAL_CONTENT_CHANGED.clause()}."
                 ),
             )
 
@@ -770,10 +800,7 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: dependency selections differ from apm.lock.yaml.",
                 reasons=[f"  - {reason}" for _key, reason in sorted(changed_selections.items())],
-                tip=(
-                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                    "or --global if specified, then commit apm.lock.yaml."
-                ),
+                tip=f"Tip: {remediation.FROZEN_SELECTIONS_CHANGED.sentence()}",
             )
         if unclaimed:
             raise FrozenInstallError(
@@ -821,8 +848,8 @@ class InstallService:
             return
         if deployed:
             tip = (
-                _FROZEN_REPAIR_TIP
-                + " To keep local edits, run 'apm export-patch' or move them aside first."
+                f"{_FROZEN_REPAIR_TIP} To keep local edits, first "
+                f"{remediation.LOCAL_EDITS_EXPORT.clause()}, or move them aside."
             )
         else:
             # True per primitive kind (RA-009): see install/local_edits.py.
@@ -830,7 +857,12 @@ class InstallService:
                 item.sentence()
                 for item in edited_file_remediations(drift.path for drift in drifted)
             )
-            tip = f"Tip: nothing was deployed. {advice}"
+            from apm_cli.core.remediation import LOCAL_EDITS_EXPORT
+
+            tip = (
+                f"Tip: nothing was deployed. {advice} To keep the edits, "
+                f"{LOCAL_EDITS_EXPORT.clause()} first."
+            )
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
             reasons=[
@@ -845,9 +877,8 @@ class InstallService:
 
 
 _FROZEN_REPAIR_TIP = (
-    "Tip: the files were still deployed; only the lockfile write was "
-    "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
-    "or --global if specified, then commit the deployed files and apm.lock.yaml."
+    "Tip: the files were still deployed; only the lockfile write was withheld. "
+    f"{remediation.FROZEN_LOCKFILE_WITHHELD.sentence()}"
 )
 
 
@@ -875,8 +906,8 @@ def frozen_selection_changes(deps_to_install: Iterable[Any], committed: LockFile
         if recorded != dependency_pairing(dep_ref):
             reasons[key] = (
                 f"selection for {key} changed: the skills and targets its declaring "
-                "manifests request differ from apm.lock.yaml; run 'apm install' and "
-                "commit apm.lock.yaml"
+                "manifests request differ from apm.lock.yaml; "
+                f"{remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
             )
     return [reasons[key] for key in sorted(reasons)]
 
@@ -895,8 +926,8 @@ def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, s
             if before != after:
                 changed[key] = (
                     f"selection for {key} changed: locked {label} {before or 'all'}, "
-                    f"resolved {label} {after or 'all'}; run 'apm install' and commit "
-                    "apm.lock.yaml"
+                    f"resolved {label} {after or 'all'}; "
+                    f"{remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
                 )
                 break
         else:
@@ -908,7 +939,7 @@ def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, s
             if not same:
                 changed[key] = (
                     f"selection for {key} changed: the skills paired with each target "
-                    "differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml"
+                    f"differ from apm.lock.yaml; {remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
                 )
     return changed
 

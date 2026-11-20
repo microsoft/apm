@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import REPLACEMENT_RULES_PARTIAL_INSTALL
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -763,6 +764,7 @@ def _resolve_dependencies(
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
     from apm_cli.install.legacy_plugin_compat import validate_cached_legacy_plugin
+    from apm_cli.install.service import InstallService
 
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
@@ -781,7 +783,7 @@ def _resolve_dependencies(
         update_keys=update_keys,
         existing_lockfile=existing_lockfile,
         reference_resolver=downloader,
-        frozen=ctx.frozen,
+        frozen=InstallService.frozen_disposition(ctx).replay,
         cache_validation_callback=partial(
             validate_cached_legacy_plugin,
             lockfile=existing_lockfile,
@@ -982,10 +984,8 @@ def run(ctx: InstallContext) -> None:
             ctx.existing_lockfile, getattr(ctx.apm_package, "replace_rules", None)
         )
         if not unchanged:
-            raise RuntimeError(
-                "Replacement rules changed during a partial install. Run 'apm install' "
-                "without package selectors to apply the complete replacement table."
-            )
+            advice = REPLACEMENT_RULES_PARTIAL_INSTALL.sentence()
+            raise RuntimeError(f"Replacement rules changed during a partial install. {advice}")
     _ensure_modules_dir(ctx)
     staging_session = resolution_for_context(ctx)
     materialization_reader = _materialization.CachedMaterializationPathReader()

@@ -13,6 +13,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from apm_cli.core.remediation import (
+    CODEX_AGENT_CLAUDE_MODEL,
+    CODEX_AGENT_FIELD_NOT_STRING,
+    CODEX_AGENT_FRONTMATTER_INVALID,
+    CODEX_AGENT_FRONTMATTER_NOT_MAPPING,
+)
 from apm_cli.install.primitive_classification import (
     AgentSourceClassification,
     PrimitiveKind,
@@ -28,6 +34,7 @@ from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
 
 if TYPE_CHECKING:
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.skill_adoption import ResolveLinks
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -332,6 +339,7 @@ class AgentIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set = None,  # noqa: RUF013
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed agent files for a single *target*."""
         mapping = target.primitives.get("agents")
@@ -349,6 +357,7 @@ class AgentIntegrator(BaseIntegrator):
             legacy_glob_dir=legacy_dir,
             legacy_glob_pattern=legacy_pattern,
             targets=[target],
+            evidence=evidence,
         )
 
     # ------------------------------------------------------------------
@@ -656,10 +665,7 @@ class AgentIntegrator(BaseIntegrator):
                 "not recognize Claude models."
             ),
             package=printable_ascii_text(package_name),
-            detail=(
-                "Fix: use a Codex model in a Codex-specific agent source, or remove 'model' "
-                "so Codex uses its default; then rerun 'apm install'."
-            ),
+            detail=f"Fix: {CODEX_AGENT_CLAUDE_MODEL.clause()}.",
         )
 
     @staticmethod
@@ -721,8 +727,8 @@ class AgentIntegrator(BaseIntegrator):
                                 ),
                                 package=printable_ascii_text(package_name),
                                 detail=(
-                                    f"Fix: set '{field}' to a string in the source agent, "
-                                    "then rerun 'apm install'."
+                                    "Fix: "
+                                    f"{CODEX_AGENT_FIELD_NOT_STRING.bind(field=field).clause()}."
                                 ),
                             )
                     # Collect only the raw dropped keys here (no formatting)
@@ -766,8 +772,7 @@ class AgentIntegrator(BaseIntegrator):
                         source,
                         package_name,
                         "YAML frontmatter must be a mapping and was ignored",
-                        "fix the source agent frontmatter to a YAML mapping, "
-                        "then rerun 'apm install'",
+                        CODEX_AGENT_FRONTMATTER_NOT_MAPPING.clause(),
                     )
                 if isinstance(fm, dict) and "tools" in fm:
                     AgentIntegrator._warn_codex_tools_dropped(
@@ -784,7 +789,7 @@ class AgentIntegrator(BaseIntegrator):
                     source,
                     package_name,
                     "invalid YAML frontmatter was ignored",
-                    "repair the frontmatter, then rerun 'apm install'",
+                    CODEX_AGENT_FRONTMATTER_INVALID.clause(),
                 )
 
         links_resolved = 0

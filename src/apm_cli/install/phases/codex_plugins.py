@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.codex_plugins.registrar import synchronize_codex_plugins
 from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
+from apm_cli.core.remediation import CODEX_ADMISSION_STALE, CODEX_NATIVE_LOOSE_FILES
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
 if TYPE_CHECKING:
@@ -23,16 +24,15 @@ def run(ctx: InstallContext) -> None:
     if not set(ctx.codex_native_plugins).issubset(retained):
         raise CodexNativeError(
             "Codex admission no longer matches the saved executable/ownership state. "
-            "Review approval and rerun apm install."
+            + CODEX_ADMISSION_STALE.sentence()
         )
     for key in sorted(ctx.codex_native_plugins):
         retained_files = ctx.package_deployed_files.get(key)
         if retained_files:
             raise CodexNativeError(
                 f"Codex native migration for {key} has retained loose deployment files: "
-                f"{', '.join(sorted(retained_files))}. "
-                "Preserve or relocate your edits, resolve cleanup conflicts, and rerun "
-                "'apm install -g --target codex'; native registration was not changed."
+                f"{', '.join(sorted(retained_files))}. Native registration was not changed. "
+                + CODEX_NATIVE_LOOSE_FILES.sentence()
             )
     retained.difference_update(set(ctx.package_deployed_files) - set(ctx.codex_native_plugins))
     changed = synchronize_codex_plugins(
