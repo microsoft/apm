@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Policy and registry-only refusals name the fix for their cause instead of a bypass, and a refused new package is no longer told to leave apm.yml. (#4535)
 - Updating `.mcp.json`, `.github/mcp.json`, `~/.claude.json` or the IntelliJ MCP config keeps its indentation, final newline, line endings and non-ASCII text; other layout is normalized. (#4530)
 - `apm install -g --target copilot-cowork` names the configured Cowork skills directory in its summary instead of a placeholder path. (#4503)
 - A refused `apm update` leaves the marketplace catalog cache unchanged, and update restores a missing marketplace digest from the registered catalog. (#4532)
