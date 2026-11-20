@@ -33,6 +33,10 @@ from scripts.architecture_linter.checks.install_bundle_compile_staging import (
 from scripts.architecture_linter.checks.install_bundle_compile_staging import (
     check_bundle_compile_staging,
 )
+from scripts.architecture_linter.checks.install_cleanup_target_roots import (
+    GUARD_CLEANUP_TARGET_ROOTS,
+    check_cleanup_target_roots,
+)
 from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
     check_codex_agent_link_resolution,
@@ -165,6 +169,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_CLEANUP_TARGET_ROOTS,
+        "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
+        check_cleanup_target_roots,
+    ),
     _rule(
         _GUARD_BUNDLE_STAGING,
         "Local bundle compile staging is lockfile-proven input, never a deployment claim.",

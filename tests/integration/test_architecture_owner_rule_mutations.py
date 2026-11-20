@@ -1642,6 +1642,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A skill directory left only for user content pins its removed owner again.",
     ),
     MutationCase(
+        guard_id="install-deployment-cleanup-target-roots",
+        rule_id="install-deployment-cleanup-target-roots",
+        path="src/apm_cli/integration/base_integrator.py",
+        old="        target_roots = _target_root_dirs(stop_resolved)\n",
+        new="        target_roots = frozenset()\n",
+        intent="Empty-parent cleanup stops protecting target roots, so retiring a file removes .github/.",
+    ),
+    MutationCase(
         guard_id="install-deployment-codex-agent-link-resolution",
         rule_id="install-deployment-codex-agent-link-resolution",
         path="src/apm_cli/integration/agent_integrator.py",
