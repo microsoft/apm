@@ -21,6 +21,7 @@
     "tests/unit/deps/test_versioned_directory_probe.py",
     "tests/unit/export/test_lazy_import.py",
     "tests/unit/install/test_cache_pin.py",
+    "tests/unit/install/test_cached_codex_source_pin.py",
     "tests/unit/install/test_install_safety.py",
     "tests/unit/install/test_install_target_copilot_app_e2e.py",
     "tests/unit/install/test_partial_subtree_reconciliation.py",
