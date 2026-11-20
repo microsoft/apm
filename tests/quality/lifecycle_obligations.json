@@ -23681,7 +23681,7 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:859"
+    "src/apm_cli/core/deployment_ledger.py:864"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
@@ -23706,15 +23706,15 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:949"
+    "src/apm_cli/commands/install.py:962"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1229",
-    "src/apm_cli/commands/install.py:993",
-    "src/apm_cli/commands/install.py:967",
+    "src/apm_cli/commands/install.py:1242",
+    "src/apm_cli/commands/install.py:1006",
+    "src/apm_cli/commands/install.py:980",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:749",
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "51f4451544fd140e95a7c4f040a44d570b048bc56e4e8cf1b8be4a786eba15a8"
+ "sha256": "ed55f7a10a1c738772f1ba993b869c8430dab97e8bd3a43d6af160c905c74625"
 }

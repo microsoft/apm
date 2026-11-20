@@ -68,13 +68,13 @@ ACCEPTS: Mapping[str, frozenset[str]] = {
 }
 ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "install": (
-        Ev(_INSTALL, 839, '"--only"'),
-        Ev(_INSTALL, 844, '"--update"'),
-        Ev(_INSTALL, 848, '"--dry-run"'),
-        Ev(_INSTALL, 850, '"--force"'),
-        Ev(_INSTALL, 855, '"--frozen/--no-frozen"'),
-        Ev(_INSTALL, 881, '"--target"'),
-        Ev(_INSTALL, 1013, '"--no-policy"'),
+        Ev(_INSTALL, 852, '"--only"'),
+        Ev(_INSTALL, 857, '"--update"'),
+        Ev(_INSTALL, 861, '"--dry-run"'),
+        Ev(_INSTALL, 863, '"--force"'),
+        Ev(_INSTALL, 868, '"--frozen/--no-frozen"'),
+        Ev(_INSTALL, 894, '"--target"'),
+        Ev(_INSTALL, 1026, '"--no-policy"'),
     ),
     "update": (
         Ev("src/apm_cli/commands/update.py", 576, 'argument("packages"'),
@@ -101,8 +101,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_PACK, 234, '"--dry-run"'),
         Ev(_PACK, 237, '"--force"'),
     ),
-    "bundle-install": (Ev(_INSTALL, 1229, "detect_local_bundle"),),
-    "mcp-install": (Ev(_INSTALL, 949, '"--mcp"'), Ev(_INSTALL, 881, '"--target"')),
+    "bundle-install": (Ev(_INSTALL, 1242, "detect_local_bundle"),),
+    "mcp-install": (Ev(_INSTALL, 962, '"--mcp"'), Ev(_INSTALL, 894, '"--target"')),
     "approve-deny": (
         Ev(_APPROVE, 224, 'argument("packages"'),
         Ev(_APPROVE, 328, 'argument("packages"'),
@@ -123,13 +123,13 @@ REFUSAL_EXIT: Mapping[tuple[str, ...], int] = {
     ("bundle-install", "FROZEN"): 1,
 }
 REFUSAL_EVIDENCE: Mapping[tuple[str, ...], Ev] = {
-    ("mcp-install", "FROZEN"): Ev(_INSTALL, 1183, 'reject_frozen_mutation(frozen, "--mcp")'),
-    ("bundle-install", "FROZEN"): Ev(_INSTALL, 1185, '"positional packages"'),
+    ("mcp-install", "FROZEN"): Ev(_INSTALL, 1196, 'reject_frozen_mutation(frozen, "--mcp")'),
+    ("bundle-install", "FROZEN"): Ev(_INSTALL, 1198, '"positional packages"'),
     ("mcp-install", "UPDATE"): Ev(
         "src/apm_cli/install/mcp/conflicts.py", 91, "--update does not apply to --mcp"
     ),
     # Verified on the real CLI: exit 2 at project and user scope, lock unchanged.
-    ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1190, "--frozen and --update are mutually"),
+    ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1203, "--frozen and --update are mutually"),
 }
 # Commands with a user-scope form; any other command refuses -g (U5 for pack).
 USER_SCOPE_OPS = frozenset(
@@ -145,7 +145,7 @@ USER_SCOPE_OPS = frozenset(
     }
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
-    "install": Ev(_INSTALL, 913, '"--global"'),
+    "install": Ev(_INSTALL, 926, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 599, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 769, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 859, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 864, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -192,7 +192,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U7": (
         "mcp-install acts on the requested server; other primitives keep no-collateral-write",
-        (Ev(_INSTALL, 949, '"--mcp"'),),
+        (Ev(_INSTALL, 962, '"--mcp"'),),
     ),
     "U8": (
         "the source decides the command: bundle-install is install of a local bundle (install "
@@ -205,9 +205,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "local bundle, which writes no manifest entry (uninstall refuses it; update and "
         "prune leave it untouched). A native plugin carries no canvas primitive",
         (
-            Ev(_INSTALL, 1229, "detect_local_bundle"),
-            Ev(_INSTALL, 993, '"--registry"'),
-            Ev(_INSTALL, 967, '"--url"'),
+            Ev(_INSTALL, 1242, "detect_local_bundle"),
+            Ev(_INSTALL, 1006, '"--registry"'),
+            Ev(_INSTALL, 980, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 749, "is an MCP server, not a package"),
