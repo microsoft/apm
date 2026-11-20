@@ -959,6 +959,13 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "        fetch_result = discover_trust_policy(root)\n",
             "        fetch_result = discover_policy_with_chain(root)\n",
         ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/commands/audit.py",
+            "        return resolve_trust_policy(cfg.project_root, announce=False, "
+            "fetch_result=fetch_policy())\n",
+            '        return getattr(fetch_policy(), "policy", None)\n',
+        ),
     ],
 )
 def test_trust_and_integrity_owners_reject_bypasses(
@@ -1294,6 +1301,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="authorizes_implementation: false",
         new="authorizes_implementation: true",
         intent="Advisory evidence starts claiming implementation authority.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-lifecycle-policy-errors",
+        rule_id="contracts-tooling-lifecycle-policy-errors",
+        path="src/apm_cli/core/lifecycle_scripts.py",
+        old=(
+            '        _logger.debug("Lifecycle org-policy check failed", exc_info=True)\n'
+            '        suppressed_reason = "org policy could not be enforced"\n'
+        ),
+        new='        _logger.debug("Lifecycle org-policy check failed", exc_info=True)\n',
+        intent="An org-policy read error lets lifecycle scripts fire with the org ceiling unread.",
     ),
     MutationCase(
         guard_id="contracts-tooling-lifecycle-script-gate",

@@ -529,6 +529,17 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4079,
+      "fixed_in": "0.37.0",
+      "summary": "Policy outcome routing consistency: the apm audit --ci drift replay and the lifecycle script policy gate now route every org policy discovery outcome as install does, so an outcome that stops install also stops the audit replay and lifecycle scripts.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_audit_ci_replay_routes_policy_outcome_like_install",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_lifecycle_scripts_are_suppressed_when_org_policy_cannot_be_resolved"
+      ]
     }
   ],
   "lifecycle_contracts": [
