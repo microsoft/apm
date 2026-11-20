@@ -72,4 +72,4 @@ known_cells:
     law: I5
     tracking: "#0"
     step: 3
-    match: 'marketplace wrote home:\[.*\.apm/marketplaces\.json'
+    match: 'marketplace wrote home:\[.*\.apm/marketplaces\.(json|lock)'

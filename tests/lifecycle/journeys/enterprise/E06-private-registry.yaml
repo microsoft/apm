@@ -53,24 +53,6 @@ steps:
       - {advice: apm experimental enable registries}
     rerun: [apm install --frozen]
 known_cells:
-  # RUNNER GAP, not a CLI defect: 'apm experimental' and 'apm config set' write
-  # $APM_HOME/config.json by design, but the runner gives project-scope
-  # commands an empty HOME write set.
-  - id: e06-runner-gap-config-home-writes-step1
-    law: I5
-    tracking: "#0"
-    step: 1
-    match: 'wrote home:\[.\.apm/config\.json.\]'
-  - id: e06-runner-gap-config-home-writes-step2
-    law: I5
-    tracking: "#0"
-    step: 2
-    match: 'wrote home:\[.\.apm/config\.json.\]'
-  - id: e06-runner-gap-config-home-writes-step5
-    law: I5
-    tracking: "#0"
-    step: 5
-    match: 'wrote home:\[.\.apm/config\.json.\]'
   # Credential values shown in config output. S-12 (pending neutral issue).
   - id: e06-config-get-credential-value-shown
     law: FORBID

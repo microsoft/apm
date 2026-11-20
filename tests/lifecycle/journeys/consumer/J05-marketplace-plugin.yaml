@@ -87,7 +87,7 @@ known_cells:
     law: I5
     tracking: "#0"
     step: 1
-    match: "marketplace wrote home:.*\\.apm/marketplaces\\.json"
+    match: "marketplace wrote home:.*\\.apm/marketplaces\\.(json|lock)"
   - id: runner-gap-marketplace-home-writes-browse
     law: I5
     tracking: "#0"

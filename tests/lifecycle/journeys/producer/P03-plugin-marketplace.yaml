@@ -115,7 +115,7 @@ known_cells:
     law: I5
     tracking: "#0"
     step: 8
-    match: "marketplace wrote home:\\['.apm/marketplaces.json'"
+    match: "marketplace wrote home:\\[.*\\.apm/marketplaces\\.(json|lock)"
   # Runner gap, not a CLI defect: "chdir" applies after the step runs and the
   # runner diffs the directory the step ends in against the one it started in,
   # so a step that moves to the consumer sees the two trees' difference. Remove
