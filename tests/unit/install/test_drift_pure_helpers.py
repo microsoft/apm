@@ -74,8 +74,9 @@ def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
     assert "[x] Drift detected: 1 file(s)" in out
     assert "unrecorded (1):" in out
     assert ".claude/skills/x/SKILL.md" in out
-    assert "Run 'apm install' to re-sync deployed files" in out
-    assert "Commit the regenerated apm.lock.yaml" in out
+    from apm_cli.core.remediation import RESYNC_UNRECORDED
+
+    assert RESYNC_UNRECORDED.sentence() in out
 
 
 # ---------------------------------------------------------------------------
@@ -168,3 +169,12 @@ def test_check_logger_phases_to_stderr(capsys):
 # ---------------------------------------------------------------------------
 # Defense-in-depth: _ReadOnlyProjectGuard wired into run_replay
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["modified", "unrecorded", "unmanaged-conflict", "orphaned"])
+def test_render_text_advisory_drift_never_prints_error_header(kind):
+    """Advisory drift does not fail the run, so it never renders [x] (#4191)."""
+    finding = DriftFinding(path=".claude/skills/x/SKILL.md", kind=kind)
+    out = render_drift_text([finding], advisory=True)
+    assert out.splitlines()[0] == "[!] Drift detected: 1 file(s)"
+    assert "[x]" not in out

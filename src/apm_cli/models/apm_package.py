@@ -250,12 +250,13 @@ def _parse_registries_block(
             )
         # Token trap: tokens must never appear in repo-tracked YAML files.
         if "token" in body:
+            from ..core.remediation import REGISTRY_TOKEN_IN_MANIFEST
             from ..deps.registry.auth import registry_token_env_var
 
             raise ValueError(
                 f"Registry {name!r}: 'token' must not appear in apm.yml. "
-                f"Use the {registry_token_env_var(name)} "
-                f"environment variable or 'apm config set registry.{name}.token <value>'."
+                f"Use the {registry_token_env_var(name)} environment variable, or "
+                f"{REGISTRY_TOKEN_IN_MANIFEST.bind(name=name).clause()}."
             )
         # Reject any unknown keys to catch typos early.
         _reject_unknown_registry_keys(name, body, _REGISTRY_KEYS)
@@ -739,8 +740,12 @@ class APMPackage:
                 bind_plugin_roots((parsed_group or {}).get(kind), package_path)
 
         # Merge user/policy registry URLs and config.json default routing.
-        from ..deps.registry.config_loader import resolve_effective_registries
+        from ..deps.registry.config_loader import (
+            resolve_effective_registries,
+            user_registry_config_path,
+        )
 
+        project_registries = registries
         registries, default_registry = resolve_effective_registries(
             registries,
             default_registry,
@@ -749,9 +754,13 @@ class APMPackage:
         if registries or default_registry:
             from ..deps.registry.feature_gate import require_package_registry_enabled
 
+            user_source = None
+            if not project_registries:
+                user_source = user_registry_config_path(create_config=create_config)
             require_package_registry_enabled(
                 "Registry configuration",
                 create_config=create_config,
+                config_source=str(user_source) if user_source else None,
             )
 
         # Route unscoped deps to the effective default registry when configured.

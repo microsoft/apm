@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 import textwrap
 from dataclasses import fields
 
 import pytest
 
+from apm_cli.core.remediation import ADO_COORDINATES_MISMATCHED
 from apm_cli.deps.carried_license import CarriedLicense
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
@@ -270,7 +272,7 @@ def test_validate_provider_coordinates_rejects_mismatched_ado_fields() -> None:
 
     with pytest.raises(
         ValueError,
-        match=r"Run `apm install <original-ado-url>`",
+        match=re.escape(ADO_COORDINATES_MISMATCHED.sentence()),
     ):
         reference.validate_provider_coordinates()
 

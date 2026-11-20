@@ -39,9 +39,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ...core.command_logger import library_logger
 from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
 from ...models.dependency.mcp import opencode_enabled_matches as _enabled_matches
-from ...utils.console import _rich_warning
 from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
 
@@ -173,7 +173,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             }
         except ValueError as exc:
             names = ", ".join(f"'{name}'" for name in config_updates)
-            _rich_warning(
+            library_logger().warning(
                 f"Skipping OpenCode server {names} in {config_path}: {exc}; "
                 "set 'enabled: true' or 'enabled: false' in apm.yml, or remove "
                 "'mcp.servers' to keep the OpenCode 1 layout",
@@ -188,7 +188,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
                 if legacy == written and _enabled_matches(legacy, written):
                     del mcp[name]
                 else:
-                    _rich_warning(
+                    library_logger().warning(
                         f"Kept the edited OpenCode 1 entry 'mcp.{name}' in {config_path}; "
                         f"OpenCode 2 uses 'mcp.servers.{name}' instead; "
                         "remove the OpenCode 1 entry when you no longer need it",
@@ -280,7 +280,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         OpenCode schema before writing.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         opencode_dir = self.project_root / ".opencode"
@@ -303,7 +303,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             return written is not False
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            library_logger().error(f"Error configuring MCP server: {e}")
             return False
 
     @staticmethod

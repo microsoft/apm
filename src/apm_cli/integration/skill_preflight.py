@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from apm_cli.core.remediation import SKILL_CONFLICT_UNMANAGED
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration.base_integrator import BaseIntegrator, untrusted_baseline_message
 from apm_cli.integration.skill_adoption import (
@@ -148,8 +149,7 @@ def format_skill_conflicts(conflicts: Sequence[SkillConflict]) -> str:
     return "\n".join(
         [
             *(conflict.message() for conflict in conflicts),
-            "Rename the local skill or use a valid existing skills: or targets: selection "
-            "in apm.yml that excludes these conflicts, then run 'apm install'.",
+            SKILL_CONFLICT_UNMANAGED.sentence(),
         ]
     )
 

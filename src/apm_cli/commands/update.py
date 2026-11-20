@@ -62,6 +62,10 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core.remediation import (
+    CLI_BINARY_OUTDATED,
+    USER_MANIFEST_MISSING,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..core.auth import AuthResolver
@@ -572,8 +576,7 @@ def update(
         manifest_path = get_manifest_path(scope)
         if not manifest_path.is_file():
             _rich_error(
-                f"No apm.yml found in {manifest_path.parent}. "
-                "Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         if check_only:
@@ -595,12 +598,12 @@ def update(
             if target is not None:
                 _rich_warning(
                     "--target is ignored when forwarding to 'apm self-update' "
-                    "(no apm.yml found). Use 'apm self-update' directly.",
+                    f"(no apm.yml found). {CLI_BINARY_OUTDATED.sentence()}",
                     symbol="warning",
                 )
             _rich_warning(
-                "'apm update' refreshes APM dependencies. To update the CLI binary, "
-                "use 'apm self-update'. Forwarding for back-compat (deprecated).",
+                "'apm update' refreshes APM dependencies. "
+                f"{CLI_BINARY_OUTDATED.sentence()} Forwarding for back-compat (deprecated).",
                 symbol="warning",
             )
             ctx.invoke(_self_update_cmd, check=check_only)
@@ -722,8 +725,7 @@ def _run_dep_update_locked(
     # the CLI binary.
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         _rich_info(
-            "'apm update' refreshes APM dependencies. "
-            "Use 'apm self-update' to update the CLI binary.",
+            f"'apm update' refreshes APM dependencies. {CLI_BINARY_OUTDATED.sentence()}",
             symbol="info",
         )
 
@@ -837,8 +839,10 @@ def _run_dep_update_locked(
             _rich_echo(revision_plan)
             _rich_echo("")
 
-        if plan.has_changes:
-            rendered = render_plan_text(plan, verbose=verbose)
+        # A moved revision pin is already listed above; list each package once (#4208).
+        unpinned_plan = plan.excluding(update.dep_key for update in revision_pin_updates)
+        if unpinned_plan.has_changes:
+            rendered = render_plan_text(unpinned_plan, verbose=verbose)
             if rendered:
                 _rich_echo(rendered)
                 _rich_echo("")
@@ -864,9 +868,9 @@ def _run_dep_update_locked(
                 return False
             plan_state.cache_rehydration_requested = True
 
-        if revision_pin_updates and plan.has_changes:
+        if revision_pin_updates and unpinned_plan.has_changes:
             pin_count = len(revision_pin_updates)
-            dep_count = len(plan.entries)
+            dep_count = len(unpinned_plan.changed_entries)
             pin_noun = "pin rewrite" if pin_count == 1 else "pin rewrites"
             dep_noun = "dependency change" if dep_count == 1 else "dependency changes"
             logger.info(f"Total: {pin_count} revision {pin_noun} + {dep_count} {dep_noun}.")

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.remediation import CODEX_PLUGIN_USER_SCOPE
 from apm_cli.core.scope import InstallScope
 
 MINIMUM_CODEX_VERSION = "0.163.0"
@@ -181,8 +182,8 @@ class CodexNativeClient:
         """Refuse unsupported scopes before inspecting any user-native state."""
         if scope is not InstallScope.USER:
             raise CodexNativeError(
-                "Codex compatibility plugins are qualified only at user scope. "
-                "Use 'apm install -g --target codex'; no project plugin was registered."
+                "Codex compatibility plugins are qualified only at user scope; no project "
+                "plugin was registered. " + CODEX_PLUGIN_USER_SCOPE.sentence()
             )
 
     @classmethod

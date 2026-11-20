@@ -45,28 +45,19 @@ def ensure_config_exists():
             os.chmod(CONFIG_FILE, 0o600)
 
 
-def get_config(*, create: bool = True):
-    """Get the current configuration.
+def get_config(*, create: bool | None = None):
+    """Get the current configuration. A pure read: it never writes.
 
-    Results are cached for the lifetime of the process.
-
-    Args:
-        create: When false, missing user config returns defaults without
-            creating ``~/.apm/config.json``.
+    Results are cached for the lifetime of the process. A missing
+    ``~/.apm/config.json`` reads as ``{}``; only :func:`update_config` (and so
+    ``apm config set`` and ``apm experimental enable|disable|reset``) creates
+    it. ``create`` is accepted for call compatibility and has no effect.
 
     Returns:
         dict: Current configuration.
     """
-    global _config_cache
-    if _config_cache is not None:
-        return _config_cache
-    if create:
-        ensure_config_exists()
-    elif not os.path.exists(CONFIG_FILE):
-        return {}
-    with open(CONFIG_FILE, encoding="utf-8") as f:
-        _config_cache = json.load(f)
-    return _config_cache
+    del create
+    return get_config_if_exists()
 
 
 def get_config_if_exists() -> dict:
@@ -107,6 +98,7 @@ def update_config(updates):
         updates (dict): Dictionary of configuration values to update.
     """
     _invalidate_config_cache()
+    ensure_config_exists()
     config = get_config()
     config.update(updates)
 

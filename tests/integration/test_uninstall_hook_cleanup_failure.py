@@ -16,6 +16,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.remediation import INTEGRATIONS_UNSYNCED
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml
@@ -200,7 +201,7 @@ def test_uninstall_reports_integration_cleanup_exception_nonzero(
 
     assert result.exit_code == 1
     assert "Integration cleanup did not finish" in result.output
-    assert "Run 'apm install' to resync remaining integrations" in result.output
+    assert INTEGRATIONS_UNSYNCED.sentence() in result.output
     assert "sensitive internal detail" not in result.output
     assert "Uninstall complete" not in result.output
 

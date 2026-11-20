@@ -2313,6 +2313,55 @@
       ]
     },
     {
+      "issue": 4089,
+      "fixed_in": "0.37.0",
+      "summary": "Install and init output repeated or misreported events: install --frozen resolved and announced MCP targets twice, a skills/ bundle printed two skill lines, the Codex, Gemini and Kiro adapters echoed a second success line outside CommandLogger, default init printed a third-party tip, and install --mcp printed the absolute manifest path.",
+      "failure_modes": ["observation", "outcome", "portability", "routing"],
+      "properties": ["outcome.status_matches_state", "portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_error_stream_lifecycle.py::test_error_lines_go_to_stderr",
+        "tests/integration/test_error_stream_lifecycle.py::test_piped_output_is_not_hard_wrapped",
+        "tests/integration/test_init_next_steps_lifecycle.py::test_every_init_next_step_hint_succeeds",
+        "tests/integration/test_init_next_steps_lifecycle.py::test_declined_plugin_scaffold_overwrite_reports_why",
+        "tests/integration/test_command_output_owner_e2e.py::test_frozen_install_announces_mcp_targets_once",
+        "tests/integration/test_command_output_owner_e2e.py::test_skill_bundle_reports_one_line_per_package",
+        "tests/integration/test_command_output_owner_e2e.py::test_mcp_adapter_success_is_reported_once",
+        "tests/integration/test_command_output_owner_e2e.py::test_default_init_prints_no_third_party_tip",
+        "tests/integration/test_command_output_owner_e2e.py::test_install_mcp_names_the_manifest_relatively",
+        "tests/integration/test_architecture_owner_rule_mutations.py::test_output_owner_guards_catch_bypasses",
+        "tests/unit/core/test_experimental.py::test_flag_read_is_a_pure_read"
+      ]
+    },
+    {
+      "issue": 4090,
+      "fixed_in": "0.37.0",
+      "summary": "apm audit --ci and apm install --frozen advised that a plain apm install keeps local edits, but install overwrites edited instructions, agents, prompts, commands and rules behind an info line and refuses edited skills; the advice now states what install does per kind and the overwrite notice is a warning naming the files.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_local_edit_advice_lifecycle.py::test_local_edit_advice_is_true_and_restores_each_kind",
+        "tests/integration/test_remediation_advice_lifecycle.py::test_audit_remediation_clears_the_reported_check",
+        "tests/quality/test_cli_command_literals.py::test_every_apm_command_literal_resolves",
+        "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin"
+      ]
+    },
+    {
+      "issue": 4091,
+      "fixed_in": "0.37.0",
+      "summary": "apm lifecycle trust and untrust write the script trust store inside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer keeps every recorded trust and revocation.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_trust_keeps_every_trust_record",
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_untrust_keeps_the_revocation"
+      ]
+    },
+    {
       "issue": 4116,
       "fixed_in": "Unreleased",
       "summary": "PERF-H1, PERF-H9: the declared merge_group gate (full integration, binary build, release validation, global coverage floor) gated no merge after 2026-09-09 while merge-gate.yml and the workflow comments still described it as live; regressions outside lifecycle smoke surfaced only in the nightly.",
@@ -2388,6 +2437,117 @@
       ]
     },
     {
+      "issue": 4172,
+      "fixed_in": "0.37.0",
+      "summary": "A lockfile written through the registry proxy records the proxy route and archive content hash but no commit, so install --frozen refused it as having no verifiable commit for any non-semver tag or branch ref.",
+      "failure_modes": [
+        "reference",
+        "outcome"
+      ],
+      "properties": [
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_frozen_replays_lock_written_through_proxy",
+        "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_frozen_refuses_proxy_archive_that_changed",
+        "tests/unit/deps/test_immutable_requirement_conflicts.py::test_frozen_proxy_archive_row_is_verifiable_only_on_its_route"
+      ]
+    },
+    {
+      "issue": 4173,
+      "fixed_in": "0.37.0",
+      "summary": "After apm deny, install deleted the package's hook files without naming them and warned that the deleted paths were retained historical dependency claims.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_executables_deny_retires_hooks_lifecycle.py::test_deny_names_each_retired_hook_file_and_never_reports_it_retained"
+      ]
+    },
+    {
+      "issue": 4174,
+      "fixed_in": "0.37.0",
+      "summary": "An install of an inaccessible repository on a configured host did not name the credential source tried, and its advice ('run with --verbose') was not a runnable command and its verbose form named no source.",
+      "failure_modes": [
+        "auth",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "auth.credentials_isolated",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_repository_not_found_lifecycle.py::test_inaccessible_repository_names_host_and_credential_source",
+        "tests/unit/core/test_auth_validation.py::TestDescribeCredentialTried::test_names_the_resolved_source_not_the_value",
+        "tests/unit/test_install_command.py::TestValidationFailureReasonMessages::test_validation_failure_without_verbose_includes_verbose_hint"
+      ]
+    },
+    {
+      "issue": 4175,
+      "fixed_in": "0.37.0",
+      "summary": "With a registry configured in $APM_HOME/config.json and the registries feature disabled, install --frozen reported 'Failed to parse apm.yml' and printed its fix as 'Enable with: ...' instead of naming the user configuration and a runnable 'apm ...' command.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_names_user_registry_config_when_registries_disabled"
+      ]
+    },
+    {
+      "issue": 4179,
+      "fixed_in": "0.37.0",
+      "summary": "A policy-blocked apm install --mcp (denied server, or policy.fetch_failure_default: block with no reachable policy) exits 1 with the refusal reason on stderr, never a bare Error installing dependencies: 1.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_blocked_mcp_install_prints_the_reason",
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_unfetchable_policy_block_prints_the_reason"
+      ]
+    },
+    {
+      "issue": 4182,
+      "fixed_in": "0.37.0",
+      "summary": "A command frontmatter key the target format cannot carry (for example mode: for Claude commands) is a verbose note on install and install --frozen, never a [!] warning.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_command_frontmatter_note_lifecycle.py::test_dropped_command_key_is_a_verbose_note"
+      ]
+    },
+    {
+      "issue": 4183,
+      "fixed_in": "0.37.0",
+      "summary": "apm install warns about unpinned dependencies the user's apm.yml declares, with the exact pin; a transitive one is a verbose note naming the declaring package, and a converged run repeats no notice.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_transitive_unpinned_is_verbose_only_and_names_its_parent",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_converged_run_repeats_no_unpinned_notice"
+      ]
+    },
+    {
+      "issue": 4184,
+      "fixed_in": "0.37.0",
+      "summary": "A converged apm install changes no bytes, reports no integrated item, warning or installed count, and ends with 'No changes -- install state already up to date'; local packages and the project's own .apm content count only when they change; uninstall counts each package once with its manifest spelling and a relative apm.yml path.",
+      "failure_modes": ["idempotency", "observation", "outcome"],
+      "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_converged_install_lifecycle.py::test_converged_install_reports_no_change",
+        "tests/integration/test_uninstall_summary_lifecycle.py::test_local_uninstall_summary_counts_once_with_manifest_spelling"
+      ]
+    },
+    {
       "issue": 4187,
       "fixed_in": "Unreleased",
       "summary": "audit --ci and install --frozen reach one verdict on locked package content hashes.",
@@ -2432,6 +2592,372 @@
         "tests/integration/test_approval_identity_lifecycle.py::test_unresolvable_install_spec_exits_1_without_writing",
         "tests/integration/test_approval_identity_lifecycle.py::test_deny_by_install_spec_stays_retired_through_update_and_frozen",
         "tests/integration/test_approval_identity_lifecycle.py::test_install_spec_keyed_store_entry_applies_to_the_package_identity"
+      ]
+    },
+    {
+      "issue": 4190,
+      "fixed_in": "0.37.0",
+      "summary": "apm install --mcp and apm uninstall printed the absolute apm.yml path while every other command printed project-relative paths.",
+      "failure_modes": [
+        "observation",
+        "portability"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "portability.byte_deterministic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_manifest_rewrite_preservation_lifecycle.py::test_manifest_rewrites_name_the_manifest_by_relative_path"
+      ]
+    },
+    {
+      "issue": 4191,
+      "fixed_in": "0.37.0",
+      "summary": "Plain apm audit printed an [x] Drift detected error line for advisory drift while exiting 0, so the line severity contradicted the documented exit contract.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_audit_drift_exit_contract_lifecycle.py::test_plain_audit_drift_line_severity_matches_exit_code",
+        "tests/unit/install/test_drift_pure_helpers.py::test_render_text_advisory_drift_never_prints_error_header"
+      ]
+    },
+    {
+      "issue": 4192,
+      "fixed_in": "0.37.0",
+      "summary": "Local bundle install printed only 'Installed N file(s) from local bundle' and never named the folders it wrote to.",
+      "failure_modes": [
+        "outcome",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_summary_destinations_lifecycle.py::test_local_bundle_install_names_destination_folders"
+      ]
+    },
+    {
+      "issue": 4193,
+      "fixed_in": "0.37.0",
+      "summary": "Uninstall, prune and target-removal cleanup deleted deployed files without naming them, and the reported count also counted skill directories alongside their members.",
+      "failure_modes": [
+        "observation",
+        "cleanup"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_stale_cleanup_diagnostics.py::test_removal_commands_name_each_deleted_path",
+        "tests/integration/test_stale_cleanup_diagnostics.py::test_cleanup_output_names_dependency",
+        "tests/unit/test_command_logger.py::TestCommandLogger::test_stale_cleanup_names_each_removed_path"
+      ]
+    },
+    {
+      "issue": 4194,
+      "fixed_in": "0.37.0",
+      "summary": "A marketplace install that failed and reported no committed transaction changes still wrote the plugin ref pin to APM_HOME cache/marketplace/version-pins.json, because the resolver recorded pins before the install committed.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_failed_marketplace_install_writes_no_ref_pin",
+        "tests/integration/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+      ]
+    },
+    {
+      "issue": 4195,
+      "fixed_in": "0.37.0",
+      "summary": "A cold lockfile replay printed the package header with the locked full commit as the ref, so a frozen install showed '<name>#main #<SHA40> @<SHA8>' instead of the install shape '<name> #main @<SHA8>'.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_frozen_replay_output_lifecycle.py::test_cold_frozen_replay_header_matches_install_shape"
+      ]
+    },
+    {
+      "issue": 4196,
+      "fixed_in": "0.37.0",
+      "summary": "install --frozen resolves MCP targets once, so the targeting line prints once per run.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_command_output_owner_e2e.py::test_frozen_install_announces_mcp_targets_once"
+      ]
+    },
+    {
+      "issue": 4198,
+      "fixed_in": "0.37.0",
+      "summary": "apm install <pkg> after apm init --discover --apply left the declared local dependency out of apm.lock.yaml and reported an identical pre-existing skill as integrated instead of adopted.",
+      "failure_modes": [
+        "ownership",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "idempotency.byte_stable"
+      ],
+      "regression_tests": [
+        "tests/integration/test_brownfield_lifecycle.py::test_install_package_locks_declared_local_dependency_and_reports_adoption",
+        "tests/unit/install/test_package_selection.py::test_unlocked_local_dependencies_complete_a_partial_install"
+      ]
+    },
+    {
+      "issue": 4199,
+      "fixed_in": "0.37.0",
+      "summary": "A declared dependency whose repository returned 404 was reported as a network error (or an auth failure) with protocol-fallback advice, printed twice under --verbose, and with no runnable next step.",
+      "failure_modes": [
+        "observation",
+        "outcome",
+        "auth"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_repository_not_found_lifecycle.py::test_missing_declared_repository_is_not_found_with_runnable_next_step",
+        "tests/unit/core/test_auth_outcome.py::test_repository_not_found_is_neither_network_nor_auth",
+        "tests/unit/core/test_auth_outcome.py::test_public_github_anonymous_git_404_may_hide_a_private_repository"
+      ]
+    },
+    {
+      "issue": 4200,
+      "fixed_in": "0.37.0",
+      "summary": "apm marketplace add OWNER/REPO#ref kept the #ref inside the stored repository URL, tracked main, failed the fetch, and printed an unpinned warning suggesting OWNER/REPO#ref#v1.0.0.",
+      "failure_modes": [
+        "reference",
+        "outcome"
+      ],
+      "properties": [
+        "source.ref_cache_coherent",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref",
+        "tests/unit/marketplace/test_registration_fragment_ref.py::test_registration_source_honors_shorthand_fragment_ref",
+        "tests/unit/marketplace/test_registration_fragment_ref.py::test_registration_source_keeps_hash_in_local_paths"
+      ]
+    },
+    {
+      "issue": 4201,
+      "fixed_in": "0.37.0",
+      "summary": "apm marketplace outdated ran git ls-remote for a local source: ./ entry, printed a [x] ls-remote failure row and then reported that all packages were up to date, while apm marketplace check treated the entry as OK.",
+      "failure_modes": [
+        "routing",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_authoring_lifecycle.py::test_outdated_skips_local_source_entry_without_ls_remote"
+      ]
+    },
+    {
+      "issue": 4202,
+      "fixed_in": "0.37.0",
+      "summary": "apm pack --format apm filtered deployed files by the target root only, so skills a copilot project deployed under .agents/skills/ were dropped and the bundle was empty.",
+      "failure_modes": [
+        "routing",
+        "outcome"
+      ],
+      "properties": [
+        "routing.authorized_targets_only",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_apm_format_pack_carries_skills_deployed_under_agents"
+      ]
+    },
+    {
+      "issue": 4203,
+      "fixed_in": "0.37.0",
+      "summary": "apm pack --json dropped the missing-license authoring warning: the report carried an empty warnings array and stderr did not show it.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_pack_deprecation_warning_lifecycle.py::test_pack_json_keeps_the_missing_license_warning"
+      ]
+    },
+    {
+      "issue": 4204,
+      "fixed_in": "0.37.0",
+      "summary": "apm prune announced merged hook reconciliation for packages that deployed no hooks, so the output described a hook change that never happened.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_prune_deployment_ledger_e2e.py::test_prune_reports_hook_reconciliation_only_when_hooks_change"
+      ]
+    },
+    {
+      "issue": 4205,
+      "fixed_in": "0.37.0",
+      "summary": "apm run with an unknown script listed the scripts but ended with a placeholder 'apm install <owner>/<repo>/...' line instead of a runnable next step.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_failure_next_step_lifecycle.py::test_run_unknown_script_lists_scripts_and_prints_runnable_next_step"
+      ]
+    },
+    {
+      "issue": 4206,
+      "fixed_in": "0.37.0",
+      "summary": "install --skill with no matching skill listed the available skills but printed free-text advice instead of a runnable apm install command.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_failure_next_step_lifecycle.py::test_install_skill_miss_lists_skills_and_prints_runnable_next_step",
+        "tests/integration/test_architecture_outcome_guards.py::test_requested_component_miss_names_one_runnable_install"
+      ]
+    },
+    {
+      "issue": 4207,
+      "fixed_in": "0.37.0",
+      "summary": "A skills/ bundle install reported the same promoted skill twice, as 'Skill integrated' and '1 skill(s) integrated', on install and install --frozen.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "idempotency.byte_stable"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_summary_destinations_lifecycle.py::test_skill_bundle_install_prints_one_skill_line"
+      ]
+    },
+    {
+      "issue": 4208,
+      "fixed_in": "0.37.0",
+      "summary": "apm update listed a moved SHA-pinned package under both Revision pin updates and Update plan, and the Total line counted unchanged dependencies as changes.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_revision_pin_update_lifecycle.py::test_update_plan_lists_each_package_once_with_exact_count"
+      ]
+    },
+    {
+      "issue": 4209,
+      "fixed_in": "0.37.0",
+      "summary": "apm compile warned that compilation produced no output files and to check target directories after it had intentionally skipped AGENTS.md because .github/instructions/ already covered Copilot.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_compile_copilot_dedup_e2e.py::test_compile_after_full_dedup_does_not_warn_about_zero_output"
+      ]
+    },
+    {
+      "issue": 4210,
+      "fixed_in": "0.37.0",
+      "summary": "apm targets reported a blank or folder-signal source for targets declared in apm.yml although resolution took them from the manifest.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_init_reinit_targets_lifecycle.py::test_targets_reports_apm_yml_as_source_of_declared_targets"
+      ]
+    },
+    {
+      "issue": 4211,
+      "fixed_in": "0.37.0",
+      "summary": "With three or more targets the per-primitive install line collapsed its destinations to 'N targets', hiding where files were written.",
+      "failure_modes": [
+        "outcome",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "idempotency.byte_stable"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_summary_destinations_lifecycle.py::test_widened_install_names_every_destination_folder"
+      ]
+    },
+    {
+      "issue": 4212,
+      "fixed_in": "0.37.0",
+      "summary": "The marketplace resolver recorded the plugin ref in APM_HOME cache/marketplace/version-pins.json on every resolution, so install --dry-run (and read-only apm view) wrote user-scope state.",
+      "failure_modes": [
+        "transaction",
+        "cache"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin",
+        "tests/integration/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+      ]
+    },
+    {
+      "issue": 4213,
+      "fixed_in": "0.37.0",
+      "summary": "apm lock dropped exec_status: gated_pending_approval from rows whose executables were parked, so lock and install kept rewriting the lockfile of a converged project.",
+      "failure_modes": [
+        "idempotency",
+        "outcome"
+      ],
+      "properties": [
+        "idempotency.byte_stable",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lock_parked_exec_status_lifecycle.py::test_lock_keeps_parked_exec_status_and_converges",
+        "tests/integration/test_executables_gate_integration.py::TestLockfileExecStatusIntegration::test_lock_only_carries_recorded_exec_status_forward"
       ]
     },
     {

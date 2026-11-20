@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from click import ClickException
 
+from apm_cli.core.remediation import AUDIT_TARGET_FLAG_DISABLED
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
@@ -508,10 +509,19 @@ class TargetProfile:
     def effective_pack_prefixes(self) -> tuple[str, ...]:
         """Return the path prefixes used by pack-time file filtering.
 
-        Falls back to ``(self.prefix,)`` when :attr:`pack_prefixes` is empty,
-        so most targets need not override the field explicitly.
+        Falls back to ``(self.prefix,)`` plus every primitive ``deploy_root``
+        directory (e.g. ``.agents/skills/``) when :attr:`pack_prefixes` is
+        empty, so most targets need not override the field explicitly (#4202).
         """
-        return self.pack_prefixes if self.pack_prefixes else (self.prefix,)
+        if self.pack_prefixes:
+            return self.pack_prefixes
+        prefixes = [self.prefix]
+        for mapping in self.primitives.values():
+            if mapping.deploy_root:
+                prefix = f"{mapping.deploy_root}/{mapping.subdir}/"
+                if prefix not in prefixes:
+                    prefixes.append(prefix)
+        return tuple(prefixes)
 
     def supports(self, primitive: str) -> bool:
         """Return ``True`` if this target accepts *primitive*."""
@@ -1870,8 +1880,8 @@ def resolve_audit_targets(
             flag = profile.requires_flag.replace("_", "-")
             raise AuditTargetDisabledError(
                 f"Cannot audit target '{name}': experimental feature "
-                f"'{flag}' is disabled. Run "
-                f"'apm experimental enable {flag}' to audit this installation."
+                f"'{flag}' is disabled. "
+                f"{AUDIT_TARGET_FLAG_DISABLED.bind(flag=flag).sentence()}"
             )
     from apm_cli.integration.skill_layout import (
         recorded_deployed_paths,

@@ -15,6 +15,16 @@ from apm_cli.agent_plugins.errors import (
     enforce_agent_plugin_deployment_boundary,
 )
 from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+from apm_cli.core.remediation import (
+    BUNDLE_REPACK_PLUGIN,
+    FROZEN_UPDATE_CONFLICT,
+    LEGACY_BUNDLE_UNPACK,
+    PROJECT_MANIFEST_BOOTSTRAP,
+    PROJECT_MANIFEST_MISSING,
+    REGISTRY_PACKAGE_INSTALL,
+    USER_MANIFEST_MISSING,
+    either_sentence,
+)
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
@@ -29,6 +39,7 @@ from apm_cli.deps.lockfile_generator import (
     check_current_cli,
     refusal_exit,
 )
+from apm_cli.deps.registry.feature_gate import UserRegistryConfigDisabledError
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -110,6 +121,7 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
+from apm_cli.install.repository_access import inaccessible_package_reason
 
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
@@ -506,9 +518,7 @@ def _resolve_package_references(
                     if not verbose:
                         reason += " (run with --verbose for the git output)"
                 else:
-                    reason = "not accessible or doesn't exist"
-                    if not verbose:
-                        reason += " -- run with --verbose for auth details"
+                    reason = inaccessible_package_reason(dep_ref, package, auth_resolver, verbose)
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
@@ -1193,8 +1203,7 @@ def install(  # noqa: PLR0913
         raise click.ClickException(str(exc)) from exc
     if frozen and update:
         raise click.UsageError(
-            "--frozen and --update are mutually exclusive. "
-            "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
+            f"--frozen and --update are mutually exclusive. {FROZEN_UPDATE_CONFLICT.sentence()}"
         )
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
@@ -1320,14 +1329,12 @@ def install(  # noqa: PLR0913
                     raise click.UsageError(
                         f"'{packages[0]}' was packed with '--format apm' (legacy format). "
                         "'apm install <bundle>' requires the plugin format. "
-                        "Repack with 'apm pack --claude-plugin --archive', "
-                        "or use 'apm unpack' to deploy the legacy bundle."
+                        f"{either_sentence(BUNDLE_REPACK_PLUGIN, LEGACY_BUNDLE_UNPACK)}"
                     )
                 raise click.UsageError(
                     f"'{packages[0]}' is not a valid APM bundle archive "
                     "(no plugin.json found at the bundle root). "
-                    "Use 'apm install org/package' for registry installs, "
-                    "or repack the source with 'apm pack'."
+                    f"{either_sentence(REGISTRY_PACKAGE_INSTALL, BUNDLE_REPACK_PLUGIN)}"
                 )
         # IM8: --as is only meaningful for local-bundle installs.  If we get
         # here, no local bundle was detected, so reject --as instead of
@@ -1503,10 +1510,11 @@ def install(  # noqa: PLR0913
         if not apm_yml_exists and not packages:
             logger.error(f"No {manifest_display} found")
             if scope is InstallScope.USER:
-                logger.progress("Run 'apm install -g <org/repo>' to auto-create + install")
+                logger.progress(USER_MANIFEST_MISSING.sentence())
             else:
-                logger.progress("Run 'apm init' to create one, or:")
-                logger.progress("  apm install <org/repo> to auto-create + install")
+                logger.progress(
+                    either_sentence(PROJECT_MANIFEST_MISSING, PROJECT_MANIFEST_BOOTSTRAP)
+                )
             sys.exit(1)
 
         reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
@@ -1608,8 +1616,13 @@ def install(  # noqa: PLR0913
             )
             summary_rendered = True
 
-            if frozen and apm_count > 0:
-                # --frozen verified lockfile structure and deployed hashes (req-lk-017).
+            if (
+                frozen
+                and command_result.exit_code == 0
+                and getattr(_scoped_lockfile(scope), "dependencies", None)
+            ):
+                # --frozen verified lockfile structure and deployed hashes (req-lk-017),
+                # also on a converged run that installs nothing (#4184).
                 logger.info(
                     "Deployed files verified against apm.lock.yaml.",
                     symbol="info",
@@ -1730,6 +1743,9 @@ def _install_apm_packages(ctx, outcome):
             apm_package = outcome.prospective_package
     except click.UsageError:
         raise
+    except UserRegistryConfigDisabledError as e:
+        logger.error(str(e))
+        raise InstallFailureAlreadyRendered("Registry configuration needs registries") from e
     except Exception as e:
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         raise InstallFailureAlreadyRendered("Failed to parse install manifest") from e

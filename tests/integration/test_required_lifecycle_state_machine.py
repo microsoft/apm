@@ -18,6 +18,7 @@ import tomlkit
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import DeploymentLedger
+from apm_cli.core.remediation import DEPENDENCY_ALIAS_INVALID
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
@@ -605,7 +606,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
             scenario_id="codex-legacy-header-unchanged-conflict",
         )
         assert result.returncode != 0, _result_evidence(result)
-        assert "conflicts with the existing codex" in result.stdout
+        assert "conflicts with the existing codex" in result.stdout + result.stderr
         assert _codex_header_snapshot(manifest_path, config_path) == before
     unchanged = _codex_header_snapshot(manifest_path, config_path)
     assert unchanged.files == before.files
@@ -624,7 +625,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
             scenario_id="codex-legacy-header-declaration-conflict",
         )
         assert result.returncode != 0, _result_evidence(result)
-        assert "conflicts with the existing codex" in result.stdout
+        assert "conflicts with the existing codex" in result.stdout + result.stderr
         assert _codex_header_snapshot(manifest_path, config_path) == changed
         assert opposite_path.read_bytes() == opposite_bytes
         assert unrelated_file.read_bytes() == unrelated_bytes
@@ -2598,7 +2599,7 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
     if invalid_cache == "package-root-symlink":
         assert "unsafe destination" in output
         assert "without removing its target" in output
-        assert "rerun apm install" in output
+        assert DEPENDENCY_ALIAS_INVALID.bind(fix="").option() in output
         assert "apm deps clean --yes" not in output
     elif invalid_cache == "plugin-path":
         assert "is invalid" in output
@@ -4412,7 +4413,9 @@ def test_required_deleting_all_local_content_cleans_its_deployments(
         scenario_id="tree-deleted-install",
     )
 
-    assert "Cleaned 4 stale files" in result.stdout
+    # Each removed skill directory is named once; its SKILL.md is folded in (#4193).
+    assert "  - .agents/skills/only/\n  - .claude/skills/only/\n" in result.stdout
+    assert "Cleaned 2 stale files" in result.stdout
     assert _local_skill_rows(root, "only") == {}
     assert not _skill_on_disk(root, ".agents", "only")
     assert not _skill_on_disk(root, ".claude", "only")

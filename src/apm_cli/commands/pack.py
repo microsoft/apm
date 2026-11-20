@@ -7,6 +7,12 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    AGENT_PLUGIN_BUNDLE_CONSUMER,
+    BUNDLE_TARGET_MISMATCH,
+    DEPLOYMENT_RECORDS_STALE,
+    LEGACY_BUNDLE_FORMAT,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..bundle.formats import BundleFormat, cli_format_choices, resolve_bundle_format
@@ -74,14 +80,18 @@ Exit codes:
 """
 
 
-def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
+def _emit_json_error_or_raise(
+    ctx, json_output: bool, code: str, message: str, warnings: "list[str] | None" = None
+):
     """Emit a JSON error envelope to stdout or raise ClickException."""
     if json_output:
         from ..marketplace.builder import BuildReport
 
         click.echo(
             json_mod.dumps(
-                BuildReport.failure_to_json_dict(errors=[{"code": code, "message": message}])
+                BuildReport.failure_to_json_dict(
+                    errors=[{"code": code, "message": message}], warnings=warnings
+                )
             )
         )
         ctx.exit(1)
@@ -380,11 +390,14 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             raise refusal_exit(exc) from exc
         _emit_json_error_or_raise(ctx, json_output, "lockfile_generator", str(exc))
     # Authoring-path nudge (#1777): warn when the author's own package declares
-    # no license. Suppressed under --json (machine output). Never blocks pack.
-    if not json_output:
-        from ..export.authoring import warn_if_license_undeclared
+    # no license. Under --json it goes to the report's warnings (#4203). Never blocks pack.
+    from ..export.authoring import warn_if_license_undeclared
 
-        warn_if_license_undeclared(manifest_file(project_root), logger.warning)
+    authoring_warnings: list[str] = []
+    warn_if_license_undeclared(
+        manifest_file(project_root),
+        authoring_warnings.append if json_output else logger.warning,
+    )
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
     # tested rather than a hardcoded "copilot".  ``pack.target`` is now
@@ -435,7 +448,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 json_mod.dumps(
                     BuildReport.failure_to_json_dict(
                         errors=[{"code": "metadata_incomplete", "message": str(exc)}],
-                        warnings=list(exc.metadata_enrichment.warnings),
+                        warnings=[*authoring_warnings, *exc.metadata_enrichment.warnings],
                         dry_run=effective_dry_run,
                         metadata_enrichment=exc.metadata_enrichment,
                     )
@@ -445,7 +458,9 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             logger.error(str(exc))
         ctx.exit(5)
     except BuildError as exc:
-        _emit_json_error_or_raise(ctx, json_output, "build_error", str(exc))
+        _emit_json_error_or_raise(
+            ctx, json_output, "build_error", str(exc), warnings=authoring_warnings
+        )
         return
 
     # -- Release gates (--check-versions / --check-clean) --
@@ -484,7 +499,9 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
 
                 gate_config = load_marketplace_config(project_root)
         except MarketplaceYmlError as exc:
-            _emit_json_error_or_raise(ctx, json_output, "build_error", str(exc))
+            _emit_json_error_or_raise(
+                ctx, json_output, "build_error", str(exc), warnings=authoring_warnings
+            )
             return
 
         if gate_config is None:
@@ -623,7 +640,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         envelope = {
             "ok": True,
             "dry_run": effective_dry_run,
-            "warnings": list(result.warnings),
+            "warnings": [*authoring_warnings, *result.warnings],
             "errors": [],
             "metadata_enrichment": {"certifiable": True, "outcomes": []},
             "marketplace": {"outputs": []},
@@ -837,10 +854,7 @@ def _render_bundle_result(
             if fmt == BundleFormat.CLAUDE_PLUGIN:
                 logger.info(f"Share with: apm install {share_arg}")
             elif fmt == BundleFormat.AGENT_PLUGIN:
-                logger.info(
-                    "Share: consumers add the bundle path under dependencies.apm in their "
-                    "apm.yml, then run 'apm install --target copilot'."
-                )
+                logger.info(f"Share: consumers {AGENT_PLUGIN_BUNDLE_CONSUMER.clause()}.")
             else:
                 logger.info(
                     f"Share with: apm unpack {share_arg} (deprecated legacy layout; "
@@ -959,7 +973,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
     logger.warning(
         "'apm unpack' is deprecated and will be removed in a future release. "
-        "Repack with the default plugin format and use 'apm install <bundle-path>'.",
+        f"{LEGACY_BUNDLE_FORMAT.sentence()}",
     )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
@@ -1062,7 +1076,8 @@ def _warn_empty(logger, target, result):
         else:
             logger.warning(f"No files to pack for target '{target}'")
             logger.verbose_detail(
-                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
+                "    Hint: check that apm.lock.yaml has deployed_files entries "
+                f"({DEPLOYMENT_RECORDS_STALE.clause()})"
             )
     else:
         logger.warning("No deployed files found -- empty bundle created")
@@ -1107,6 +1122,5 @@ def _log_bundle_meta(result, output_dir, logger):
             f"Bundle target '{display_bundle}' differs from project target '{display_project}'"
         )
         logger.verbose_detail(
-            f"    To get a {display_project}-targeted bundle, "
-            f"ask the publisher to declare targets: [{display_project}] in apm.yml and run apm pack"
+            f"    {BUNDLE_TARGET_MISMATCH.bind(target=display_project).sentence()}"
         )

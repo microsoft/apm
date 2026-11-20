@@ -105,6 +105,21 @@ def load_merged_registries(
     return merged
 
 
+def user_registry_config_path(*, create_config: bool = False) -> Path | None:
+    """Return the $APM_HOME file that configures registries, or ``None``."""
+    from ...config import CONFIG_FILE, get_config_json_default_registry
+    from ...core.scope import InstallScope, get_manifest_path
+
+    if _load_config_json_registries(
+        create_config=create_config
+    ) or get_config_json_default_registry(create_config=create_config):
+        return Path(CONFIG_FILE)
+    workspace_yml = get_manifest_path(InstallScope.USER)
+    if workspace_yml.exists() and _load_yaml_registries(workspace_yml):
+        return workspace_yml
+    return None
+
+
 def resolve_effective_registries(
     project_registries: dict[str, str] | None,
     project_default: str | None,

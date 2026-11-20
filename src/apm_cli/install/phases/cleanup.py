@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+from apm_cli.core.remediation import ORPHANED_PACKAGES_PRUNE
 from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -159,7 +160,7 @@ def _run_cleanup(
         # deployed files even though it is still in apm.yml. A partial install
         # passes only the selected packages' dropped descendants as candidates.
         decision = _orphan_decision(ctx, desired_owners, surviving_files, orphan_cleanup_retained)
-        _orphan_total_deleted = 0
+        _orphan_results: list = []
         _orphan_deleted_targets: list = []
         for _orphan_key in sorted(decision.candidate_keys):
             _orphan_dep = existing_lockfile.dependencies[_orphan_key]
@@ -194,7 +195,7 @@ def _run_cleanup(
                 user_scope=user_scope,
                 receipt_retirements=receipt_retirements,
             )
-            _orphan_total_deleted += len(_orphan_result.deleted)
+            _orphan_results.append(_orphan_result)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
             if _orphan_result.retained:
                 orphan_cleanup_retained[_orphan_key] = {
@@ -207,7 +208,7 @@ def _run_cleanup(
         if _orphan_deleted_targets:
             BaseIntegrator.cleanup_empty_parents(_orphan_deleted_targets, project_root)
         if logger:
-            logger.orphan_cleanup(_orphan_total_deleted)
+            logger.orphan_cleanup(_orphan_results)
             if frozen_disposition.retain_package_orphans and orphan_cleanup_retained:
                 logger.frozen_orphans_kept(sorted(orphan_cleanup_retained))
         # Re-decide with the files cleanup could not delete: their packages
@@ -296,7 +297,7 @@ def _run_cleanup(
                     logger.verbose_detail(
                         f"Renamed {_aliased} to the new letter case from {dep_key}"
                     )
-                logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
+                logger.stale_cleanup(dep_key, cleanup_result)
 
 
 def _orphan_decision(
@@ -361,7 +362,7 @@ def _remove_dropped_package_dirs(ctx: InstallContext, decision) -> None:
         except (OSError, PathTraversalError) as exc:
             ctx.diagnostics.warn(
                 f"Could not remove dropped dependency copy apm_modules/{relative}: {exc}",
-                detail="Run 'apm prune' to retry.",
+                detail=ORPHANED_PACKAGES_PRUNE.sentence(),
             )
             continue
         deleted.append(package_dir)
@@ -398,7 +399,7 @@ def _trim_superseded_package_roots(ctx: InstallContext, decision) -> None:
                     display = entry.relative_to(apm_modules_dir).as_posix()
                     ctx.diagnostics.warn(
                         f"Could not remove superseded content apm_modules/{display}: {exc}",
-                        detail="Run 'apm prune' to remove leftover orphaned packages.",
+                        detail=ORPHANED_PACKAGES_PRUNE.sentence(),
                     )
 
 

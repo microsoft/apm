@@ -278,6 +278,17 @@ class EffectiveDependencySelection(NamedTuple):
     skill_pairing: SkillTargetSelection | None = None
 
 
+def is_implicit_local(dep_ref: Any, ctx: Any | None) -> bool:
+    """Return True for a local dep a partial install adds only for lock coverage."""
+    implicit = getattr(ctx, "implicit_local_keys", None)
+    if not implicit:
+        return False
+    try:
+        return dep_ref.get_unique_key() in implicit
+    except (AttributeError, TypeError):
+        return False
+
+
 def effective_dependency_selection(
     dep_ref: Any | None,
     ctx: Any | None = None,
@@ -296,6 +307,8 @@ def effective_dependency_selection(
     """
     if dep_ref is None:
         return EffectiveDependencySelection(None, None)
+    if is_implicit_local(dep_ref, ctx):
+        ctx = None  # #4198: the CLI --skill overlay targets the named packages only
     skill_subset = effective_deploy_skill_subset(
         skill_subset_from_cli=bool(getattr(ctx, "skill_subset_from_cli", False)),
         cli_subset=getattr(ctx, "skill_subset", None),

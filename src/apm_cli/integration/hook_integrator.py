@@ -29,6 +29,7 @@ from apm_cli.core.deployment_state import (
     MaterializationStatus,
     NativePayloadValidation,
 )
+from apm_cli.core.remediation import HOOK_PATH_ESCAPES_PACKAGE
 from apm_cli.core.scope import InstallScope, manifest_file
 from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
 from apm_cli.hook_contract import walk_hook_commands
@@ -83,7 +84,7 @@ from apm_cli.integration.hook_source_selection import (
     resolve_relative_hook_script,
     select_hook_sources,
 )
-from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
+from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
@@ -676,7 +677,7 @@ class HookIntegrator(BaseIntegrator):
                 _rich_warning(
                     f"Hook path escapes package '{package_label}': "
                     f"{printable_ascii_text(residual)}. "
-                    "Keep the path inside the package, then run apm install again."
+                    f"{HOOK_PATH_ESCAPES_PACKAGE.sentence()}"
                 )
                 continue
             warn_unresolved_plugin_root(new_command, residual, package_label)
@@ -1118,11 +1119,12 @@ class HookIntegrator(BaseIntegrator):
                 )
                 continue
 
-            # Write rewritten JSON
-            write_text_lf(target_path, json.dumps(rewritten, indent=2) + "\n")
-            self.note_rendered_write(target_path)
-
-            hooks_integrated += 1
+            # Write rewritten JSON; byte-identical output is unchanged (#4184).
+            if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
+                self.note_rendered_write(target_path)
+                hooks_integrated += 1
+            else:
+                scripts_adopted += 1
             target_paths.append(target_path)
             from apm_cli.integration.targets import KNOWN_TARGETS
             from apm_cli.utils.content_hash import compute_file_hash
@@ -1446,8 +1448,6 @@ class HookIntegrator(BaseIntegrator):
                 # Deduplicate same-package entries by content.
                 # Safety net for edge cases where multiple source files
                 # produce semantically identical entries.
-                import json as _json
-
                 seen_keys: set[str] = set()
                 deduped: list = []
                 for entry in json_config[container][event_name]:
@@ -1456,7 +1456,7 @@ class HookIntegrator(BaseIntegrator):
                         continue
                     cmp = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
                     source = entry.get("_apm_source")
-                    dedup_key = _json.dumps({"s": source, "c": cmp}, sort_keys=True)
+                    dedup_key = json.dumps({"s": source, "c": cmp}, sort_keys=True)
                     if dedup_key not in seen_keys:
                         seen_keys.add(dedup_key)
                         deduped.append(entry)
@@ -1537,15 +1537,16 @@ class HookIntegrator(BaseIntegrator):
             )
 
         # Cursor's strict config must not be observable half-written by its watcher.
-        atomic_write_text(json_path, json.dumps(json_config, indent=2) + "\n")
+        rendered = json.dumps(json_config, indent=2) + "\n"
+        changed = self.write_text_if_changed(json_path, rendered, atomic_write_text)
 
         return HookIntegrationResult(
-            files_integrated=hooks_integrated,
+            files_integrated=hooks_integrated if changed else 0,
             files_updated=0,
             files_skipped=0,
             target_paths=target_paths,
             scripts_copied=scripts_copied,
-            files_adopted=scripts_adopted,
+            files_adopted=scripts_adopted + (0 if changed else hooks_integrated),
             display_payloads=display_payloads,
         )
 
@@ -1952,6 +1953,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.install.target_filter import resolve_effective_package_targets
         from apm_cli.integration.hook_reintegration import (
             build_hook_reintegration_source_plan,
+            merged_hook_state,
         )
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
@@ -2005,6 +2007,7 @@ class HookIntegrator(BaseIntegrator):
         # Empty managed_files (not None) skips file-level deletion while
         # still triggering the merged-hook JSON wipe, scoped to the same
         # resolved `targets` the rebuild loop below uses (#2250).
+        merged_before = merged_hook_state(project_root, targets)
         stats = self.sync_integration(
             apm_package, project_root, managed_files=set(), targets=targets
         )
@@ -2026,6 +2029,7 @@ class HookIntegrator(BaseIntegrator):
                 )
                 _log.warning("Best-effort hook re-integration skipped for %s: %s", pkg_id, e)
 
+        stats["merged_hooks_changed"] = merged_hook_state(project_root, targets) != merged_before
         return stats
 
     def reconcile_dropped_targets(
