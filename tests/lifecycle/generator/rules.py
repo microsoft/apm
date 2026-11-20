@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1026, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 640, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 650, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 671, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 698, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 642, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 652, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 673, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 700, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 789, 'argument("packages"'),
@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 926, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 663, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 665, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 797, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 868, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 872, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -180,7 +180,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         (
             Ev(
                 "src/apm_cli/install/manifest_reconcile.py",
-                749,
+                757,
                 "canonical target-contraction owner",
             ),
         ),

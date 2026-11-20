@@ -23681,13 +23681,13 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:868"
+    "src/apm_cli/core/deployment_ledger.py:872"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:749"
+    "src/apm_cli/install/manifest_reconcile.py:757"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "bedcff960cd47ce07f4aea8d8b8566c452b86e54ec27741e154c1755bc72376c"
+ "sha256": "7144eb8d753c74567e209191704a5617b58c34e65e1e82581313f21b428a8db7"
 }
