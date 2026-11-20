@@ -35,21 +35,22 @@ def registry_url_error(name: str, url: object, *, insecure: object = False) -> s
     """Return why registry *name* may not use *url*, or ``None`` when accepted.
 
     *insecure* is the entry's ``insecure`` value; only the boolean ``True``
-    opts a non-local ``http://`` URL in.
+    opts a non-local ``http://`` URL in. A diagnostic never echoes the URL,
+    which can carry credentials; it names the registry and, at most, the host.
     """
     if insecure is not None and not isinstance(insecure, bool):
-        return f"Registry {name!r}: 'insecure' must be a boolean (got {insecure!r})"
+        return f"Registry {name!r}: 'insecure' must be a boolean (got {type(insecure).__name__})"
     if not isinstance(url, str) or not url.strip():
         return f"Registry {name!r} is missing required field 'url:'"
     if not url.strip().lower().startswith(("https://", "http://")):
-        return f"Registry {name!r} URL must start with https:// or http:// (got {url!r})"
+        return f"Registry {name!r} URL must start with https:// or http://"
     try:
         parts = urlsplit(url.strip())
         host = parts.hostname
     except ValueError:
-        return f"Registry {name!r} URL is not a valid URL (got {url!r})"
+        return f"Registry {name!r} URL is not a valid URL"
     if not host:
-        return f"Registry {name!r} URL has no host (got {url!r})"
+        return f"Registry {name!r} URL has no host"
     if parts.scheme == "https" or insecure is True or _is_local_host(host):
         return None
     return (

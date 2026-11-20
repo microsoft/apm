@@ -270,6 +270,21 @@ class TestRegistryUrlScheme:
         with pytest.raises(ValueError, match="Registry 'corp'"):
             APMPackage.from_apm_yml(p)
 
+    @_CONTRACTS
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://user:FAKE_SECRET_123@[invalid/apm",
+            "ftp://user:FAKE_SECRET_123@corp.example.com",
+            "http://user:FAKE_SECRET_123@registry.example.com/apm",
+        ],
+    )
+    def test_diagnostic_never_echoes_url_credentials(self, write_yml, schema_line, url):
+        p = write_yml(_registry_manifest(schema_line, f"url: '{url}'"))
+        with pytest.raises(ValueError, match="Registry 'corp'") as excinfo:
+            APMPackage.from_apm_yml(p)
+        assert "FAKE_SECRET_123" not in str(excinfo.value)
+
     def test_workspace_manifest_http_registry_is_not_merged(self, tmp_path, monkeypatch):
         from apm_cli.deps.registry.config_loader import _load_yaml_registries
 
