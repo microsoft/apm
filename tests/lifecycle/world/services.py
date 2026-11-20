@@ -63,6 +63,8 @@ HOST_ALIASES: Mapping[str, tuple[str, str]] = {
     "ghes": ("ghes.lifecycle.test", ORG),
     "ado": ("dev.azure.com", f"{ORG}/{ORG}/_git"),
     "gitlab": ("gitlab.com", f"{ORG}/group"),
+    # A generic (Gitea-style) git host: /api/v1 with an /api/v3 fallback.
+    "generic": ("git.lifecycle.test", ORG),
 }
 ADO_HOST = HOST_ALIASES["ado"][0]
 # Azure DevOps credentials of the world: a PAT (ADO_APM_PAT) and the bearer
@@ -80,6 +82,9 @@ _GHES_API_PREFIX = "/api/v3"
 # contents and commits APM reads there (deps/download_strategies.py,
 # policy/discovery.py).
 _V3_API_HOSTS = frozenset({HOST_ALIASES["ghes"][0], HOST_ALIASES["ghe"][0]})
+_GITLAB_HOST = HOST_ALIASES["gitlab"][0]
+_GITLAB_API_PREFIX = "/api/v4/projects/"
+_GENERIC_HOST = HOST_ALIASES["generic"][0]
 _GIT_SERVICES = ("/info/refs", "/git-upload-pack", "/HEAD")
 
 # Policy documents per variant (schema: src/apm_cli/policy/schema.py).
@@ -352,10 +357,9 @@ class WorldServices:
         refusal = self._ado_refusal(request)
         if refusal is not None:
             return refusal
-        if request.host == ADO_HOST and _ADO_ITEMS in path:
-            return self._ado_items(request, path)
-        if request.host in _V3_API_HOSTS and path.startswith(_GHES_API_PREFIX + "/"):
-            return self._api(request, path[len(_GHES_API_PREFIX) :])
+        api = self._repository_api(request, path)
+        if api is not None:
+            return api
         service = next((s for s in _GIT_SERVICES if path.endswith(s)), None)
         if service is None:
             return _not_found()
@@ -367,21 +371,73 @@ class WorldServices:
             return _not_found()
         return git_smart_http(repository, request, service)
 
-    def _ado_items(self, request: ScriptedRequest, path: str) -> ScriptedResponse:
-        """Azure DevOps Items API: ``/{org}/{project}/_apis/git/repositories/{repo}/items``."""
+    def _repository_api(self, request: ScriptedRequest, path: str) -> ScriptedResponse | None:
+        """Repository-file REST routes on git hosts; None when *path* is a git route."""
+        if request.host in _V3_API_HOSTS and path.startswith(_GHES_API_PREFIX + "/"):
+            return self._api(request, path[len(_GHES_API_PREFIX) :])
+        if request.host == _GENERIC_HOST:
+            for prefix in ("/api/v1", _GHES_API_PREFIX):
+                if path.startswith(prefix + "/"):
+                    return self._api(request, path[len(prefix) :])
+        if request.host == _GITLAB_HOST and path.startswith(_GITLAB_API_PREFIX):
+            return self._gitlab_api(request, path[len(_GITLAB_API_PREFIX) :])
+        if request.host == ADO_HOST and _ADO_ITEMS in path:
+            return self._ado_api(request, path)
+        return None
+
+    def _gitlab_api(self, request: ScriptedRequest, tail: str) -> ScriptedResponse:
+        """GitLab v4: ``{project}/repository/files/{path}[/raw]`` and ``.../commits/{ref}``."""
+        project, _, rest = tail.partition("/repository/")
+        segments = [s for s in project.split("/") if s]
+        repository = self._slug_repository(segments[0], segments[-1]) if segments else None
+        if repository is None:
+            return _json(404, {"message": "404 Project Not Found"})
+        ref = (parse_qs(request.query).get("ref") or ["HEAD"])[0]
+        if rest.startswith("commits/"):
+            sha = self._rev_parse(repository, rest[len("commits/") :])
+            return (
+                _json(200, {"id": sha}) if sha else _json(404, {"message": "404 Commit Not Found"})
+            )
+        if not rest.startswith("files/"):
+            return _not_found()
+        file_path, raw = rest[len("files/") :], False
+        if file_path.endswith("/raw"):
+            file_path, raw = file_path[: -len("/raw")], True
+        content = self._blob(repository, ref, file_path)
+        if content is None:
+            return _json(404, {"message": "404 File Not Found"})
+        if raw:
+            return ScriptedResponse(200, {"Content-Type": "text/plain"}, content)
+        encoded = base64.b64encode(content).decode("ascii")
+        return _json(200, {"file_path": file_path, "encoding": "base64", "content": encoded})
+
+    def _ado_api(self, request: ScriptedRequest, path: str) -> ScriptedResponse:
+        """Azure DevOps ``/{org}/{project}/_apis/git/repositories/{repo}/{items|commits}``."""
         head, _, tail = path.partition(_ADO_ITEMS)
         org, _, project = head.strip("/").partition("/")
         repo, _, endpoint = tail.partition("/")
-        query = parse_qs(request.query)
-        file_path = (query.get("path") or [""])[0].lstrip("/")
-        if endpoint != "items" or not file_path:
-            return _not_found()
         if org == policy_org("unreachable"):
             return _json(503, {"message": "Service Unavailable"})
         slug_repo = POLICY_REPO if (project, repo) in _ADO_POLICY_REPOS else repo
         repository = self._slug_repository(org, slug_repo)
+        query = parse_qs(request.query)
+        if repository is None:
+            return _json(404, {"message": f"TF401019: The Git repository {repo} does not exist."})
+        if endpoint == "commits" or endpoint.startswith("commits/"):
+            ref = (
+                endpoint.partition("/")[2]
+                or (query.get("searchCriteria.itemVersion.version") or ["HEAD"])[0]
+            )
+            sha = self._rev_parse(repository, ref)
+            if sha is None:
+                return _json(404, {"message": f"TF401175: The version '{ref}' does not exist."})
+            commit = {"commitId": sha}
+            return _json(200, commit if "/" in endpoint else {"count": 1, "value": [commit]})
+        file_path = (query.get("path") or [""])[0].lstrip("/")
+        if endpoint != "items" or not file_path:
+            return _not_found()
         ref = (query.get("versionDescriptor.version") or ["HEAD"])[0]
-        content = None if repository is None else self._blob(repository, ref, file_path)
+        content = self._blob(repository, ref, file_path)
         if content is None:
             return _json(404, {"message": f"TF401174: The item '{file_path}' could not be found."})
         return ScriptedResponse(200, {"Content-Type": "application/octet-stream"}, content)

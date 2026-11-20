@@ -16,6 +16,7 @@ import subprocess
 import time
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 import requests
@@ -597,6 +598,48 @@ def test_ghe_cloud_serves_contents_and_commits_under_api_v3(lifecycle_world: Wor
     sha = _get(world, f"{base}/commits/v1.0.0", accept="application/vnd.github.sha")
     assert sha.text == commit.json()["sha"]
     assert _get(world, f"{base}/contents/missing.md").status_code == 404
+
+
+def _repo_api_urls(shape: str) -> tuple[str, str]:
+    """(apm.yml contents URL, commit-of-v1.0.0 URL) of world repo p-skill on *shape*."""
+    host = HOST_ALIASES[shape][0]
+    if shape == "gitlab":
+        project = quote(f"{HOST_ALIASES[shape][1]}/p-skill", safe="")
+        base = f"https://{host}/api/v4/projects/{project}/repository"
+        return f"{base}/files/apm.yml/raw?ref=v1.0.0", f"{base}/commits/v1.0.0"
+    if shape == "ado":
+        base = f"https://{host}/{ORG}/{ORG}/_apis/git/repositories/p-skill"
+        items = f"{base}/items?path=apm.yml&versionDescriptor.version=v1.0.0&api-version=7.0"
+        return items, f"{base}/commits?searchCriteria.itemVersion.version=v1.0.0"
+    prefix = "/api/v1" if shape == "generic" else "/api/v3"
+    base = f"https://{host}{prefix}/repos/{ORG}/p-skill"
+    return f"{base}/contents/apm.yml?ref=v1.0.0", f"{base}/commits/v1.0.0"
+
+
+def _commit_sha(response: requests.Response) -> str:
+    payload = response.json()
+    if "value" in payload:
+        return payload["value"][0]["commitId"]
+    return payload.get("sha") or payload["id"]
+
+
+@pytest.mark.parametrize("shape", sorted(HOST_ALIASES))
+def test_every_git_host_serves_repository_contents_and_commits(
+    lifecycle_world: World, shape: str
+) -> None:
+    world = lifecycle_world
+    expected = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/v1.0.0").json()["sha"]
+    contents_url, commit_url = _repo_api_urls(shape)
+    contents = _get(world, contents_url)
+    assert contents.status_code == 200, contents.text
+    body = contents.content
+    if contents.headers.get("Content-Type", "").startswith("application/json"):
+        body = base64.b64decode(contents.json()["content"])
+    assert b"name: p-skill" in body
+    commit = _get(world, commit_url)
+    assert commit.status_code == 200 and _commit_sha(commit) == expected, commit.text
+    missing = _get(world, contents_url.replace("apm.yml", "missing.md"))
+    assert missing.status_code == 404
 
 
 def test_ghe_cloud_policy_is_read_through_api_v3(lifecycle_world: World) -> None:
