@@ -301,8 +301,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 12,
+      "test_count": 14,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[1-False]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[4-True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-bare64-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-fresh]",
