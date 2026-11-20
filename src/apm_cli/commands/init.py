@@ -528,7 +528,7 @@ def _perform_init(
             install_step = "apm install <owner>/<repo>"
             # No targets written and none detectable: install would stop at
             # "No harness detected" unless it names one (#3994).
-            if not config.get("targets") and not _has_install_target(project_root):
+            if not resolved_targets and not _has_install_target(project_root):
                 install_step += " -t <harness>"
             next_steps = [
                 f"Install a package:               {install_step}",

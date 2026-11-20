@@ -13,6 +13,13 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
+def _execution_label(runtime: str) -> str:
+    """Name the executor; commands without a detected runtime run as shell scripts."""
+    if not runtime or runtime == "unknown":
+        return "Shell script"
+    return runtime.title()
+
+
 class ScriptExecutionFormatter:
     """Professional formatter for script execution output following CLI UX design plan."""
 
@@ -229,7 +236,7 @@ class ScriptExecutionFormatter:
         """
         lines = []
 
-        success_msg = f"[+] {runtime.title()} execution completed successfully"
+        success_msg = f"[+] {_execution_label(runtime)} execution completed successfully"
         if execution_time is not None:
             success_msg += f" ({execution_time:.2f}s)"
 
@@ -255,7 +262,7 @@ class ScriptExecutionFormatter:
         """
         lines = []
 
-        error_header = f"x {runtime.title()} execution failed (exit code: {error_code})"
+        error_header = f"x {_execution_label(runtime)} execution failed (exit code: {error_code})"
         if self.use_color:
             lines.append(self._styled(error_header, "red bold"))
         else:
