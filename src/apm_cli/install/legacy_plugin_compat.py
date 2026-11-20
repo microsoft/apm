@@ -45,8 +45,10 @@ def preserve_normalized_marketplace_plugin_type(
         return PackageType.MARKETPLACE_PLUGIN
     # The parser's generated apm.yml/.apm must not masquerade as an
     # independently authored APM layout on the subsequent cached-source pass.
-    # This also repairs older locks that recorded that second-pass type.
-    if detected_type in {PackageType.APM_PACKAGE, PackageType.SKILL_BUNDLE}:
+    # This also repairs older locks that recorded that second-pass type. A root
+    # skills/ bundle keeps its skill_bundle classification (and its --skill
+    # subset selection): that precedence is the package's, not the parser's.
+    if detected_type is PackageType.APM_PACKAGE:
         evidence = gather_detection_evidence(package_path)
         if evidence.has_plugin_manifest:
             return PackageType.MARKETPLACE_PLUGIN

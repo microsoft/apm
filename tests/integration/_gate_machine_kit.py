@@ -162,16 +162,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         scopes=("project",),
     ),
     KnownCell(
-        "gate-cell-d",
-        "R",
-        "#4044",
-        _hook_parked_with_wrong_reason,
-        match=r"^a denied hook is reported as merely unapproved$",
-        # At user scope only org policy reached this cell, and user scope is
-        # not governed by org policy (#4087).
-        scopes=("project",),
-    ),
-    KnownCell(
         "gate-cell-g",
         "I3",
         "#4050",

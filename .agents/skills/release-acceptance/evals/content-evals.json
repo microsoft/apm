@@ -1,0 +1,58 @@
+{
+  "description": "Content evals for release-acceptance. Run each with and without the skill; the with-skill transcript must meet every expect_with_skill item, judged against tool output in the transcript, not prose claims.",
+  "scenarios": [
+    {
+      "id": "C1",
+      "name": "seeded hint regression",
+      "setup": "Build the candidate from a commit that reverts one known 0.37 hint fix (update's --no-policy remediation hint). Catalogue: program journeys E01 and J07.",
+      "prompt": "Run release acceptance in full mode on <sha>, journeys E01 and J07 only.",
+      "expect_with_skill": [
+        "the binary version is checked against the SHA before any journey runs",
+        "every step runs through scripts/capture.py in a world from scripts/world.py",
+        "the printed `--no-policy` hint is executed and its failure recorded",
+        "a finding with severity should-fix, a repro script, the SHA and an owner file:line",
+        "an independent verifier reproduces it with its own repro",
+        "a failing-before test brief for apm-lifecycle-tests",
+        "a release-gate row computed by scripts/findings.py gate-row"
+      ],
+      "expect_without_skill_gap": "no hint execution, no independent verification, no gate row"
+    },
+    {
+      "id": "C2",
+      "name": "clean candidate, no false blocker",
+      "setup": "Current release-train tip with no known open blocker.",
+      "prompt": "Is <sha> ready to tag? Run the acceptance pass.",
+      "expect_with_skill": [
+        "verdict GO, or NO-GO only with a blocker confirmed by the verifier",
+        "at most 1 blocker left unverified after P4",
+        "coverage summary with a probed ratio per journey",
+        "a human checkpoint before the row is published"
+      ],
+      "expect_without_skill_gap": "unverified blocker claims, no coverage accounting"
+    },
+    {
+      "id": "C3",
+      "name": "recheck on a moved head",
+      "setup": "A findings.json with 10 findings recorded at an older SHA; a newer head where 6 are fixed, 3 still open, 1 changed. Hand-built oracle of the expected verdicts.",
+      "prompt": "The release PR moved to <new sha>. Re-check the open findings.",
+      "expect_with_skill": [
+        "only the open findings are re-run, at the new SHA",
+        "verdicts applied with scripts/findings.py recheck",
+        "the verdict table matches the oracle for all 10 findings",
+        "a new gate row at the new SHA"
+      ],
+      "expect_without_skill_gap": "re-runs everything or nothing, verdicts not pinned to the SHA"
+    },
+    {
+      "id": "C4",
+      "name": "catalogue unavailable",
+      "setup": "A checkout without tests/lifecycle/journeys/index.yaml and no --catalog.",
+      "prompt": "Run release acceptance on <sha>.",
+      "expect_with_skill": [
+        "scripts/journeys.py exits 3 with 'catalogue unavailable'",
+        "the pass stops and reports it; no embedded or invented journey list is used"
+      ],
+      "expect_without_skill_gap": "invents journeys from memory"
+    }
+  ]
+}
