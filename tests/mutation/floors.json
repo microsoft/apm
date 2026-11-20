@@ -385,7 +385,38 @@
     },
     "frontmatter-bom-bounded-yaml": {
       "architecture_owner": "frontmatter-bom-bounded-yaml",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.yaml_io.load_frontmatter__mutmut_2",
+          "reason": "Python codec names are case-insensitive, so 'UTF-8-SIG' selects the same BOM-stripping codec as 'utf-8-sig'."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.yaml_io.load_frontmatter__mutmut_3",
+          "reason": "Every branch of the following if/elif/else assigns text before it is read, so the initial placeholder value is never observed."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.yaml_io.load_frontmatter__mutmut_4",
+          "reason": "Every branch of the following if/elif/else assigns text before it is read, so the initial placeholder value is never observed."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.yaml_io.loads_frontmatter__mutmut_20",
+          "reason": "text already had its leading BOM removed at the top of the function, so this second removeprefix is a no-op; removing a different, never-present prefix is also a no-op."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.yaml_io.loads_frontmatter__mutmut_21",
+          "reason": "'\\uFEFF' and '\\ufeff' are the same one-character string literal (escape case only), so the mutant source is identical at runtime."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.yaml_io.loads_frontmatter__mutmut_6",
+          "reason": "'\\uFEFF' and '\\ufeff' are the same one-character string literal (escape case only), so the mutant source is identical at runtime."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,
