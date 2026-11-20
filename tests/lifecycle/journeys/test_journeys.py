@@ -19,7 +19,7 @@ Journey YAML schema (``schema: 1``)
       project: empty             # keep (default) | empty: drop the world's apm.yml
       git: init                  # none (default) | init: git init the project
       policy: allow              # org policy variant (world.scopes.use_policy)
-      setup: [<line>]            # command lines run unchecked before step 1
+      setup: [<line>]            # command lines run before step 1; each must exit 0
       env: {K: V}                # added to the world env for the whole journey
     allow_repeat: []             # O4: lines allowed to print twice within one command
     steps:                       # exactly the index's steps, numbered 1..N
@@ -424,7 +424,11 @@ class JourneyRun:
         if world.get("policy"):
             use_policy(self.world, world["policy"])
         for line in world.get("setup") or ():
-            self._execute(line)
+            # A failing setup line is a world fault; never let it surface later as a product step.
+            cmd = self._execute(line)
+            assert cmd.result.returncode == 0, (
+                f"setup {line!r} -> {cmd.result.returncode}\n{cmd.stdout}\n{cmd.stderr}"
+            )
 
     def replay(self, other: dict) -> None:
         """Run another journey's steps as setup: exit codes only, no oracles."""
