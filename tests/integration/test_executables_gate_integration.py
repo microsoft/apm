@@ -972,7 +972,7 @@ class TestApproveDenyCommandsIntegration:
         runner = CliRunner()
         result = runner.invoke(approve_cmd, [])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2  # click usage error (#4262)
 
     def test_deny_package(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner

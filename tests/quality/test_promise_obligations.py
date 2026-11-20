@@ -398,9 +398,20 @@ def test_i9_reports_one_violation_per_duplicated_cause(tmp_path: Path) -> None:
 
 
 def test_i9_leaves_a_duplicate_owned_by_a_known_output_cell_to_the_global_hook(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    warning = "[!] Org policy not applied (outcome=empty, source=org:x/.github)"
+    from tests.utils import lifecycle_evidence
+
+    # A synthetic cell keeps this law independent of the live known-cell inventory.
+    cell = lifecycle_evidence.KnownOutputCell(
+        "synthetic-repeated-warning",
+        "I9",
+        "#0",
+        lambda args, _scenario: lifecycle_evidence._command_name(args) == "approve",
+        r"\[!\] Synthetic repeated warning",
+    )
+    monkeypatch.setattr(lifecycle_evidence, "KNOWN_OUTPUT_CELLS", (cell,))
+    warning = "[!] Synthetic repeated warning"
     stdout = f"[i] p declares:\n{warning}\n{warning}\n[i] a\n[i] a\n[+] Approved p\n"
     result = CommandResult(("apm", "approve", "p"), 0, stdout, "", tmp_path)
     found = [v.message for v in oracles._i9_no_noise(None, None, result, None, None)]
