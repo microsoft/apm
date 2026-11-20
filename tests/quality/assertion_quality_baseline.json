@@ -166,6 +166,7 @@
       "tests/unit/test_github_mcp_auth_policy.py": 4,
       "tests/unit/test_governance_consumers.py": 3,
       "tests/unit/test_native_bundle_hash.py": 4,
+      "tests/unit/test_opencode_mcp_v2.py": 24,
       "tests/unit/test_opencode_runtime_references.py": 5,
       "tests/unit/test_performance_scan_regressions.py": 6,
       "tests/unit/test_prune_casing.py": 3,

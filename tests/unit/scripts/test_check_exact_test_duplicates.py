@@ -382,3 +382,45 @@ def test_equal_copy_report_lists_only_d5_equal_copies(tmp_path: Path) -> None:
         "[i] equal copies of tests/unit/test_a.py::test_value: tests/unit/test_b.py::test_value",
         "[i] equal-copy report (D5): 1 group(s), 1 deletable copy(ies); report only",
     ]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param(
+            "class TestX:\n    def _make(self):\n        return 1\n\n"
+            "    def test_value(self):\n        assert self._make() == 1\n",
+            "class TestX:\n    def _make(self):\n        return 2\n\n"
+            "    def test_value(self):\n        assert self._make() == 1\n",
+            id="class-helper",
+        ),
+        pytest.param(
+            "import pytest\n\n@pytest.fixture\ndef env():\n    return 1\n\n"
+            "@pytest.mark.usefixtures('env')\ndef test_value():\n    assert True\n",
+            "import pytest\n\n@pytest.fixture\ndef env():\n    return 2\n\n"
+            "@pytest.mark.usefixtures('env')\ndef test_value():\n    assert True\n",
+            id="usefixtures",
+        ),
+        pytest.param(
+            "from pathlib import Path\n\nHERE = Path(__file__).parent\n\n"
+            "def test_value():\n    assert HERE.exists()\n",
+            "from pathlib import Path\n\nHERE = Path(__file__).parent\n\n"
+            "def test_value():\n    assert HERE.exists()\n",
+            id="file-location",
+        ),
+    ],
+)
+def test_equal_copy_report_rejects_context_differences(
+    tmp_path: Path, first: str, second: str
+) -> None:
+    root = tmp_path / "repo"
+    _write(root, "unit/test_a.py", first)
+    _write(root, "unit/test_b.py", second)
+    _track_tests(root)
+
+    result = _run(root, root / "unused.json", "--report-equal-copies")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "[i] equal-copy report (D5): 0 group(s), 0 deletable copy(ies); report only"
+    ]

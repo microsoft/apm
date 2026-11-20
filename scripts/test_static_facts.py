@@ -105,6 +105,17 @@ def _observes(node: ast.AST, observable: set[str]) -> bool:
     return False
 
 
+def _is_unittest_assertion(node: ast.Call) -> bool:
+    """Return whether a call is ``self.assert*`` (judged like a bare assert)."""
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "self"
+        and func.attr.startswith("assert")
+    )
+
+
 def _assigned_names(node: ast.AST) -> set[str]:
     return {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
 
@@ -132,7 +143,10 @@ def asserts_observable_outcome(function: ast.FunctionDef | ast.AsyncFunctionDef)
             return True
         if isinstance(node, ast.Call):
             name = _call_name(node)
-            if name == "raises" or (
+            if _is_unittest_assertion(node):
+                if any(_observes(arg, observable) for arg in (*node.args, *node.keywords)):
+                    return True
+            elif name == "raises" or (
                 HELPER_ASSERTION.match(name) and not MOCK_ASSERTIONS.match(name)
             ):
                 return True

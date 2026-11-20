@@ -174,6 +174,10 @@ def test_aq003_component_test_without_observable_assertion_fails(tmp_path: Path)
         "    client.run()\n"
         "    client.run.assert_called_once_with()\n"
         "\n"
+        "class TestUnittestStyle:\n"
+        "    def test_return_value_only(self):\n"
+        "        self.assertEqual(run(), 1)\n"
+        "\n"
         "def test_observes_output(capsys, tmp_path):\n"
         "    out = capsys.readouterr().out\n"
         "    assert 'done' in out\n"
@@ -186,10 +190,11 @@ def test_aq003_component_test_without_observable_assertion_fails(tmp_path: Path)
 
     assert result.returncode == 1
     assert (
-        f"[x] tests/test_sample.py:5: {RULE_AQ003}: component/e2e test asserts no "
-        "user-visible output, exit code or durable state (observed 1, allowed 0). Fix:"
+        f"{RULE_AQ003}: component/e2e test asserts no "
+        "user-visible output, exit code or durable state (observed 2, allowed 0). Fix:"
     ) in result.stderr
-    assert "tests/test_sample.py:10" not in result.stderr
+    assert f"tests/test_sample.py:5, tests/test_sample.py:11: {RULE_AQ003}" in result.stderr
+    assert "tests/test_sample.py:14" not in result.stderr
 
 
 def test_aq004_patching_a_symbol_defined_in_the_imported_owner_fails(tmp_path: Path) -> None:

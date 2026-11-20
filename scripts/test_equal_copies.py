@@ -8,11 +8,14 @@ A test T is an equal copy of a kept twin K only when all of these hold:
 3. identical signature, with every fixture parameter resolving (class,
    module, then ``conftest.py`` chain) to an identical definition and
    scope, recursively;
-4. identical class context: bases, class decorators, setup/teardown
-   methods and fixtures defined on every enclosing class;
-5. identical module ``pytestmark``, module and ``conftest.py`` autouse
-   fixtures and setup/teardown functions, and identical bindings for every
-   module-level name the body or its fixtures reference (transitively);
+4. identical class context: bases (resolved when defined in the module),
+   class decorators and every non-test member of each enclosing class;
+5. identical module ``pytestmark``, ``usefixtures`` and autouse fixtures
+   (class, module and ``conftest.py``, resolved recursively), module
+   setup/teardown, and identical bindings for every module-level name the
+   body, its class or its fixtures reference (transitively). Code that
+   depends on its file location (``__file__``, relative or star imports)
+   never matches across files;
 6. the same CI lane (same top-level test directory; markers are covered
    by 2, 4 and 5).
 
@@ -49,6 +52,7 @@ _SETUP_NAMES = frozenset(
     }
 )
 _IMPLICIT_PARAMS = frozenset({"self", "cls"})
+_LOCATION_NAMES = frozenset({"__file__", "__name__", "__package__", "__spec__"})
 
 
 def _dump(node: ast.AST | Iterable[ast.AST] | None) -> str:
@@ -132,8 +136,14 @@ class _Module:
     tree: ast.Module
     bindings: dict[str, list[ast.stmt]] = field(default_factory=dict)
     fixtures: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = field(default_factory=dict)
+    star_import: bool = False
 
     def __post_init__(self) -> None:
+        self.star_import = any(
+            isinstance(statement, ast.ImportFrom)
+            and any(alias.name == "*" for alias in statement.names)
+            for statement in self.tree.body
+        )
         for statement in self.tree.body:
             for name in _bound_names(statement):
                 self.bindings.setdefault(name, []).append(statement)
@@ -141,10 +151,16 @@ class _Module:
                 self.fixtures[_fixture_name(statement)] = statement  # type: ignore[arg-type]
 
     def binding_closure(self, roots: Iterable[ast.AST]) -> str:
-        """Dump every module-level binding the roots reference, transitively."""
+        """Dump every module-level binding the roots reference, transitively.
+
+        Code that depends on where the file lives (``__file__``, ``__name__``,
+        relative or star imports) is tied to the file path, so it never
+        compares equal across files.
+        """
         pending = set().union(*(_loaded_names(root) for root in roots))
         seen: set[str] = set()
         dumps: list[str] = []
+        located = bool(pending & _LOCATION_NAMES)
         while pending:
             name = pending.pop()
             if name in seen or name not in self.bindings:
@@ -152,8 +168,13 @@ class _Module:
             seen.add(name)
             for statement in self.bindings[name]:
                 dumps.append(f"{name}={_dump(statement)}")
-                if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    pending |= _loaded_names(statement) - seen
+                loaded = _loaded_names(statement)
+                located |= bool(loaded & _LOCATION_NAMES) or (
+                    isinstance(statement, ast.ImportFrom) and statement.level > 0
+                )
+                pending |= loaded - seen
+        if located or self.star_import:
+            dumps.append(f"<located:{self.path}>")
         return "\n".join(sorted(dumps))
 
     def context(self) -> str:
@@ -230,16 +251,31 @@ class CorpusIndex:
         parts += [self._fixture_identity(param, function, seen) for param in _params(node)]
         return "\n".join(parts)
 
+    def _autouse_identities(self, function: TestFunction) -> list[str]:
+        module = self.module(function.path)
+        sources: list[tuple[ast.stmt, _Module | None]] = [
+            (statement, module) for cls in function.classes for statement in cls.body
+        ]
+        if module is not None:
+            sources += [(statement, module) for statement in module.tree.body]
+        for conftest in self._conftests(function.path):
+            sources += [(statement, conftest) for statement in conftest.tree.body]
+        return [
+            self._definition(statement, owner, function, frozenset())  # type: ignore[arg-type]
+            for statement, owner in sources
+            if _is_autouse(statement)
+        ]
+
     def equal_copy_key(self, function: TestFunction) -> str:
         """Return a digest that is equal only for D5-equal tests."""
         module = self.module(function.path)
         node = function.node
-        local_fixtures: list[ast.AST] = []
-        fixture_ids = []
-        for param in _params(node):
-            fixture_ids.append(self._fixture_identity(param, function, frozenset()))
+        marks: list[ast.AST] = [*node.decorator_list]
         for cls in function.classes:
-            local_fixtures += [statement for statement in cls.body if _is_fixture(statement)]
+            marks += cls.decorator_list
+        if module is not None:
+            marks += module.bindings.get("pytestmark", [])
+        used = sorted(set(_params(node)) | _usefixtures(marks))
         class_context = [
             "\n".join(
                 [
@@ -249,38 +285,60 @@ class CorpusIndex:
                     *(
                         _dump(statement)
                         for statement in cls.body
-                        if _is_fixture(statement)
-                        or (
+                        if not (
                             isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
-                            and statement.name in _SETUP_NAMES
+                            and statement.name.startswith("test")
+                        )
+                        and not (
+                            isinstance(statement, ast.ClassDef)
+                            and statement.name.startswith("Test")
                         )
                     ),
                 ]
             )
             for cls in function.classes
         ]
+        closure_roots: list[ast.AST] = [node, *marks]
+        for cls in function.classes:
+            closure_roots += [*cls.bases, *cls.keywords]
+            closure_roots += [
+                statement
+                for statement in cls.body
+                if not (
+                    isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and statement.name.startswith("test")
+                )
+            ]
         parts = [
             body_digest(function),
             _dump(node.decorator_list),
             _dump(node.args),
             type(node).__name__,
-            *fixture_ids,
+            *(self._fixture_identity(name, function, frozenset()) for name in used),
             *class_context,
+            *self._autouse_identities(function),
             module.context() if module is not None else "",
-            *(
-                "\n".join(
-                    _dump(statement) + conftest.binding_closure([statement])
-                    for statement in conftest.tree.body
-                    if _is_autouse(statement)
-                )
-                for conftest in self._conftests(function.path)
-            ),
-            module.binding_closure([node, *node.decorator_list, *local_fixtures])
-            if module is not None
-            else "",
+            module.binding_closure(closure_roots) if module is not None else "",
             _lane(function.path),
         ]
         return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+
+
+def _usefixtures(marks: Iterable[ast.AST]) -> set[str]:
+    names: set[str] = set()
+    for mark in marks:
+        for node in ast.walk(mark):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "usefixtures"
+            ):
+                names |= {
+                    arg.value
+                    for arg in node.args
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                }
+    return names
 
 
 def _lane(path: str) -> str:
