@@ -46,6 +46,8 @@ _XFAIL = {
         for path in ("install", "frozen", "update", "uninstall-prune-rebuild", "audit-ci")
         for change in _ALL
         if change != "org-enables-gate"
+        # audit --ci names changed local content as install --frozen does (#4447).
+        and (path, change) != ("audit-ci", "definition-changed")
     },
     "G|uninstall-prune-rebuild|org-enables-gate|native": _UNINSTALL_SIBLING,
     **{f"G|native-plugin|{change}|native": _PLUGIN_UNLOCKED for change in _PLUGIN_CHANGES},

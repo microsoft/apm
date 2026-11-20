@@ -2923,6 +2923,22 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4447,
+      "fixed_in": "Unreleased",
+      "summary": "audit --ci names a local dependency whose content differs from its locked snapshot, through the same verdict install --frozen applies.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_local_dependency_content_parity_lifecycle.py::test_audit_ci_and_frozen_refuse_alike_a_changed_local_dependency",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
     }
   ],
   "lifecycle_contracts": [
