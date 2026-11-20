@@ -23651,7 +23651,7 @@
   "E3": {
    "evidence": [
     "src/apm_cli/install/services.py:850",
-    "src/apm_cli/install/services.py:1050"
+    "src/apm_cli/install/services.py:1052"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23669,73 +23669,73 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:684",
-    "src/apm_cli/commands/compile/cli.py:716"
+    "src/apm_cli/commands/compile/cli.py:687",
+    "src/apm_cli/commands/compile/cli.py:721"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },
   "U2": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:154",
-    "src/apm_cli/policy/install_preflight.py:220"
+    "src/apm_cli/commands/approve.py:155",
+    "src/apm_cli/policy/install_preflight.py:218"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:596"
+    "src/apm_cli/core/deployment_ledger.py:672"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:756"
+    "src/apm_cli/install/manifest_reconcile.py:764"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:162"
+    "src/apm_cli/commands/pack.py:166"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:32",
-    "src/apm_cli/commands/pack.py:33"
+    "src/apm_cli/commands/pack.py:36",
+    "src/apm_cli/commands/pack.py:37"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:953"
+    "src/apm_cli/commands/install.py:959"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1233",
-    "src/apm_cli/commands/install.py:997",
-    "src/apm_cli/commands/install.py:971",
+    "src/apm_cli/commands/install.py:1239",
+    "src/apm_cli/commands/install.py:1003",
+    "src/apm_cli/commands/install.py:977",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:698",
     "src/apm_cli/commands/uninstall/engine.py:857",
     "src/apm_cli/commands/uninstall/engine.py:690",
-    "src/apm_cli/commands/update.py:448",
-    "src/apm_cli/commands/prune.py:199",
+    "src/apm_cli/commands/update.py:450",
+    "src/apm_cli/commands/prune.py:210",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
    "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
   },
   "U9": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:174",
-    "src/apm_cli/commands/approve.py:178"
+    "src/apm_cli/commands/approve.py:175",
+    "src/apm_cli/commands/approve.py:179"
    ],
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
  "schema_version": 1,
- "sha256": "1dbec0fa89c1a5b2bf57598f8cfa8828f40ccd0d96c325c8379c4af0a2e85793"
+ "sha256": "f009410878f782958982c67a8004cfe525c002e622a3142e6e7067448c43552e"
 }
