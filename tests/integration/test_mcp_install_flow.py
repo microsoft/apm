@@ -60,7 +60,7 @@ def test_uninstall_cleanup_preserves_same_named_server_in_other_runtime(
         mcp_servers=["shared-name"],
         mcp_target_servers={"hermes": ["shared-name"]},
     )
-    view = SimpleNamespace(dependencies=[], configs={}, provenance={})
+    view = SimpleNamespace(dependencies=[], configs={}, provenance={}, bundle_owned=frozenset())
 
     with patch(
         "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
