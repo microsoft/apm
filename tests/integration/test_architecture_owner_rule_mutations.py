@@ -1602,9 +1602,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-orphan-selection",
         rule_id="install-deployment-orphan-selection",
         path="src/apm_cli/commands/prune.py",
-        old="_find_orphaned_packages(",
-        new="_find_orphaned_packages_disabled(",
-        intent="Prune bypasses the shared declaration-aware orphan selector.",
+        old="        orphaned_packages = list(decision.removed_paths)\n",
+        new="        orphaned_packages = [k for k in lockfile.dependencies if k not in expected_lock_keys]\n",
+        intent="Prune grows a second removal predicate beside the orphan owner.",
     ),
     MutationCase(
         guard_id="install-deployment-outcome",
@@ -1788,10 +1788,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="install-deployment-uninstall-reachability",
         rule_id="install-deployment-uninstall-reachability",
-        path="src/apm_cli/commands/uninstall/engine.py",
-        old="    if not candidate_orphans:",
-        new="    get_apm_dependencies = None\n    if not candidate_orphans:",
-        intent="Uninstall engine grows a parallel manifest walk outside deps/reachability.py.",
+        path="src/apm_cli/install/orphans.py",
+        old="    walk = compute_forward_reachable_keys(",
+        new="    walk = _parallel_manifest_walk(",
+        intent="The orphan owner stops consuming deps/reachability.py's forward walk.",
     ),
     MutationCase(
         guard_id="install-deployment-uninstall-selection",
@@ -2968,60 +2968,87 @@ def test_claude_cleanup_guard_preserves_unresolved_path_check() -> None:
     )
 
 
-def test_orphan_selection_guard_rejects_warning_bypass() -> None:
-    """The shared-selector rule protects warnings as well as destructive pruning."""
-    path = "src/apm_cli/commands/_helpers.py"
+_ORPHAN_RULE = "install-deployment-orphan-selection"
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new", "message"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = [\n"
+            "            key for key in lockfile.dependencies if key not in expected_lock_keys\n"
+            "        ]\n",
+            "Membership in expected_lock_keys is an orphan removal predicate",
+            id="second-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "        reachability=None,\n        deployment_claims=None,\n    )\n    orphaned",
+            "        reachability=None,\n    )\n    orphaned",
+            "call omits required input(s): deployment_claims",
+            id="omitted-input",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "    decision = decide_orphan_removal(\n",
+            "    decision = decide_orphan_removal(\n        OrphanOperation.AUDIT,\n",
+            "takes keyword-only inputs",
+            id="positional-input",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "    decision = decide_orphan_removal(\n",
+            "    decide = decide_orphan_removal\n    decision = decide_orphan_removal(\n",
+            "never pass or rebind it",
+            id="rebound-entry",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "from ._helpers import _scan_installed_packages\n",
+            "from ._helpers import _scan_installed_packages\n"
+            "from ..install.orphans import _find_orphaned_packages as _select\n",
+            "_find_orphaned_packages is private to install/orphans.py",
+            id="private-alias-import",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "from ._helpers import _scan_installed_packages\n",
+            "from ._helpers import _scan_installed_packages\n"
+            "from ..install import orphans as _owner\n"
+            "_select = getattr(_owner, '_find_orphaned_packages')\n",
+            "Dynamic read of orphan owner name",
+            id="getattr-read",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "def _preflight_prune_survivors(",
+            "def _find_orphan_keys():\n    return []\n\n\ndef _preflight_prune_survivors(",
+            "is a second orphan removal selector",
+            id="second-selector",
+        ),
+        pytest.param(
+            "src/apm_cli/install/orphans.py",
+            "    deployment_claims: DeploymentClaims | None,\n) -> OrphanRemovalDecision:",
+            "    deployment_claims: DeploymentClaims | None = None,\n) -> OrphanRemovalDecision:",
+            "must take keyword-only inputs with no defaults",
+            id="defaulted-owner-input",
+        ),
+    ],
+)
+def test_orphan_owner_guard_is_closed_world(path: str, old: str, new: str, message: str) -> None:
+    """Any module, under any alias, must call the orphan owner with every input (#4011)."""
     source = _source(path)
-    old = "return _find_orphaned_packages(installed, expected)"
     assert source.count(old) == 1
-    mutated = source.replace(old, "return sorted(set(installed) - expected)", 1)
+    mutated = source.replace(old, new, 1)
     ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
-    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    report = run_selected_rules(ROOT, (_ORPHAN_RULE,), source_overrides={path: mutated})
     assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
-
-
-def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
-    """Targeted-install module removal cannot bypass the shared selector (#3502)."""
-    path = "src/apm_cli/install/phases/cleanup.py"
-    source = _source(path)
-    old = "for relative in _find_orphaned_packages("
-    assert source.count(old) == 1
-    mutated = source.replace(old, "for relative in sorted(", 1)
-    ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
-    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
-    assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
-
-
-def test_orphan_selection_guard_rejects_superseded_root_trim_bypass() -> None:
-    """Trimming a superseded whole-repo checkout cannot bypass the shared selector (#2926)."""
-    path = "src/apm_cli/install/phases/cleanup.py"
-    source = _source(path)
-    old = "for orphan in _find_orphaned_packages(entries, retained):"
-    assert source.count(old) == 1
-    mutated = source.replace(old, "for orphan in sorted(set(entries) - retained):", 1)
-    ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
-    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
-    assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
-
-
-def test_orphan_selection_guard_rejects_deps_list_bypass() -> None:
-    """deps list cannot classify bundled content apart from prune's selector (#2926)."""
-    path = "src/apm_cli/commands/deps/cli.py"
-    source = _source(path)
-    old = "_find_orphaned_packages(\n"
-    assert source.count(old) == 1
-    mutated = source.replace(old, "sorted(\n", 1)
-    ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
-    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
-    assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
+    assert any(
+        violation.rule_id == _ORPHAN_RULE and message in violation.message
+        for violation in report.violations
+    )
 
 
 _GIT_CHILD_ENV_RULE = "transport-platform-git-child-environment"
