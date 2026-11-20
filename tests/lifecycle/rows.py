@@ -10,8 +10,8 @@ A row is YAML::
     when: [apm deny p-exec, apm install, {pair: [apm audit --ci, apm install --frozen]}]
     then: {exit: 0, deployed: expected, announce: denied}
 
-Promise ids must resolve: ``P-INV-I1``..``P-INV-I9`` or ``P-LAW-<property>``
-for a ``property_catalog`` id of the lifecycle bug ledger. Package names in a command line are replaced by their ``PackageRef.spec``. A
+Promise ids must resolve in ``tests/quality/promise-catalog.json``. Package
+names in a command line are replaced by their ``PackageRef.spec``. A
 step is a command line, ``{run: <line>, exit: <code>}`` to pin its exit code,
 or ``{pair: [<audit line>, <install --frozen line>]}`` for the I3 probe.
 Every step runs ``check_cross_cutting``; every exit code must fall in the
@@ -27,7 +27,6 @@ unexpected pass that fails the row.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -39,8 +38,8 @@ from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
 from tests.lifecycle.model.expected import expected_deployed, expected_exit
 from tests.lifecycle.model.state import ModelState
+from tests.lifecycle.obligations import promise_ids
 from tests.lifecycle.oracles import (
-    LEDGER_PATH,
     ORACLE_LAWS,
     ExpectedCell,
     Observation,
@@ -78,18 +77,11 @@ class Row:
     known_cells: tuple[Mapping[str, str], ...] = ()
 
 
-def promise_catalog() -> frozenset[str]:
-    """Promise ids a row may name."""
-    ledger = json.loads(LEDGER_PATH.read_text(encoding="ascii"))
-    laws = {f"P-INV-{law}" for law in ORACLE_LAWS if law.startswith("I")}
-    return frozenset(laws | {f"P-LAW-{row['id']}" for row in ledger["property_catalog"]})
-
-
 def load_row(path: Path) -> Row:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     world = data["world"]
     assert data.get("promises"), f"{path}: every row names its promise ids"
-    unknown = set(data["promises"]) - promise_catalog()
+    unknown = set(data["promises"]) - promise_ids()
     assert not unknown, f"{path}: unknown promise ids {sorted(unknown)}"
     return Row(
         data["id"],

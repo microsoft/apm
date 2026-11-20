@@ -772,7 +772,7 @@ Promotion integration tests run on:
 
 ### Lifecycle family: add a row or a machine rule
 
-1. Name the promise ids (`P-INV-I1` to `P-INV-I9`, or `P-LAW-<property>` for a bug-ledger property). The row loader rejects any other id.
+1. Name the promise ids, for example `P-INV-I4` or `P-LAW-<property>`. Every id must resolve in `tests/quality/promise-catalog.json`; the row loader rejects any other id.
 2. For a fixed command sequence, add a row to `tests/lifecycle/replay/rows/` (copy `core_gate_row.yaml`) with `promises`, `world`, `given`, `when` and `then` (`exit`, `deployed: expected`, `announce`). `RowReplay` (`tests/lifecycle/rows.py`) runs every step through the driver and `check_cross_cutting`, and compares the final world with `expected_deployed`.
 3. For a transition that must hold from many states, add a rule to the matching state machine. Each rule builds an `Operation` (`oracles.operation_for(args)`) and calls `check_cross_cutting`; never write receipts yourself.
 4. If a step fails on `main`, open a neutral tracking issue and add a `known_cells` entry (law, tracking issue, step, `match`). It is a strict expected failure; never skip the step.

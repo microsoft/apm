@@ -24,6 +24,7 @@ from tests.lifecycle.obligations import (
     PROMISE_PREFIX,
     Obligation,
     load_catalog,
+    promise_ids,
     uncovered,
     witness_failure,
 )
@@ -110,10 +111,12 @@ def test_universe_is_the_approved_apply_table_plus_the_gate_cells() -> None:
     assert list(catalog.baseline) == sorted(catalog.baseline)
 
 
-def test_promise_ids_name_oracle_laws() -> None:
+def test_promise_ids_resolve_in_the_promise_catalog() -> None:
+    catalog = promise_ids()
     for obligation in load_catalog().obligations.values():
         if obligation.law is not None:
             assert obligation.law in oracles.ORACLE_LAWS, obligation
+            assert obligation.promise in catalog, obligation
 
 
 def test_baseline_rows_name_a_real_lane() -> None:

@@ -29,6 +29,8 @@ from tests.lifecycle import receipts
 QUALITY_DIR = Path(__file__).parents[1] / "quality"
 OBLIGATIONS_PATH = QUALITY_DIR / "promise_obligations.json"
 GATE_CELLS_PATH = QUALITY_DIR / "gate_cell_obligations.json"
+# The single promise catalog; every promise id resolves here and nowhere else.
+PROMISE_CATALOG_PATH = QUALITY_DIR / "promise-catalog.json"
 PROMISE_PREFIX = "P-INV-"
 # The I7 promise is about failed commands, so only a refusal witnesses it.
 _REFUSAL_LAWS = frozenset({"I7"})
@@ -44,6 +46,11 @@ class Obligation:
     law: str | None = None
     op: str | None = None
     cell: str | None = None
+
+    @property
+    def promise(self) -> str | None:
+        """The catalog promise id this obligation discharges (None for a GATE cell)."""
+        return f"{PROMISE_PREFIX}{self.law}" if self.law else None
 
     @property
     def outcome(self) -> str:
@@ -82,6 +89,11 @@ class Catalog:
 
     def witnessed_by(self, node: str) -> tuple[Obligation, ...]:
         return self._by_witness.get(receipts.normalize_node(node), ())
+
+
+def promise_ids(path: Path = PROMISE_CATALOG_PATH) -> frozenset[str]:
+    """Every promise id of the catalog."""
+    return frozenset(json.loads(path.read_text(encoding="ascii"))["promises"])
 
 
 def invariant_op_id(law: str, op: str) -> str:
