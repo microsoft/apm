@@ -553,6 +553,8 @@
       "regression_tests": [
         "tests/integration/test_error_stream_lifecycle.py::test_error_lines_go_to_stderr",
         "tests/integration/test_error_stream_lifecycle.py::test_piped_output_is_not_hard_wrapped",
+        "tests/integration/test_init_next_steps_lifecycle.py::test_every_init_next_step_hint_succeeds",
+        "tests/integration/test_init_next_steps_lifecycle.py::test_declined_plugin_scaffold_overwrite_reports_why",
         "tests/integration/test_command_output_owner_e2e.py::test_frozen_install_announces_mcp_targets_once",
         "tests/integration/test_command_output_owner_e2e.py::test_skill_bundle_reports_one_line_per_package",
         "tests/integration/test_command_output_owner_e2e.py::test_mcp_adapter_success_is_reported_once",
@@ -571,7 +573,8 @@
       "regression_tests": [
         "tests/integration/test_local_edit_advice_lifecycle.py::test_local_edit_advice_is_true_and_restores_each_kind",
         "tests/integration/test_remediation_advice_lifecycle.py::test_audit_remediation_clears_the_reported_check",
-        "tests/quality/test_cli_command_literals.py::test_every_apm_command_literal_resolves"
+        "tests/quality/test_cli_command_literals.py::test_every_apm_command_literal_resolves",
+        "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin"
       ]
     },
     {

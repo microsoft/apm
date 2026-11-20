@@ -37,8 +37,10 @@ _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
 # what 'apm update' moves to. A literal tag pins it; only a semver range
 # tracks releases (#3994).
 UNPINNED_HINT = (
-    "apm.lock.yaml pins the resolved commit; to track releases on update, "
-    "add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)"
+    "apm.lock.yaml pins the resolved commit; to pin it in apm.yml, declare the "
+    "dependency at that commit as shown, or, when it publishes release tags, use a "
+    "semver range such as #^1.0.0 to track releases on update "
+    "(a tag like #v1.0.0 stays put)"
 )
 
 
@@ -304,12 +306,17 @@ def run(ctx: InstallContext) -> InstallResult:
         # Enumerate names of unpinned deps so the user knows which to pin.
         # Cap at 5 names then "and M more"; fall back to count-only if names
         # cannot be derived.
+        # Each name is the exact apm.yml entry that pins the locked commit, so
+        # the remedy works for transitive and untagged dependencies alike.
         _unpinned_names: list[str] = []
         for _ip in ctx.installed_packages:
             _ref = getattr(_ip, "dep_ref", None)
-            if _ref is None or _ref.reference:
+            if _ref is None or _ref.reference or getattr(_ref, "is_local", False):
                 continue
-            _name = getattr(_ref, "repo_url", None) or getattr(_ref, "local_path", None) or ""
+            _name = getattr(_ref, "repo_url", None) or ""
+            _commit = getattr(_ip, "resolved_commit", None)
+            if _name and _commit:
+                _name = f"{_ref.to_display_reference()}#{_commit}"
             if _name:
                 _unpinned_names.append(str(_name))
         # De-dupe while preserving order.
