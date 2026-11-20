@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -29,6 +30,7 @@ capture = _load("capture")
 findings = _load("findings")
 journeys = _load("journeys")
 brief_lint = _load("brief_lint")
+world = _load("world")
 
 
 def _finding(**overrides: object) -> dict:
@@ -63,12 +65,35 @@ class TestLineLint:
     def test_separator_lines_are_not_duplicates(self) -> None:
         assert capture.lint_lines("-" * 40 + "\n" + "-" * 40 + "\n", "", 0) == []
 
+    def test_help_screens_skip_the_duplicate_check(self) -> None:
+        out = "  --ssh   Prefer SSH transport for git\n  --ssh   Prefer SSH transport for git\n"
+        assert capture.lint_lines(out, "", 0, help_output=True) == []
+
 
 class TestHints:
     def test_extracts_quoted_commands_and_skips_placeholders(self) -> None:
         text = "[i] Run 'apm install --force' to restore.\nTry `apm approve <package>` next.\n"
         values = [hint["value"] for hint in capture.extract_hints(text, None)]
         assert values == ["apm install --force"]
+
+    def test_extracts_verb_hints_and_ignores_help_tables(self) -> None:
+        text = (
+            "[i] Run apm compile to refresh AGENTS.md.\n"
+            "| apm install   | Install dependencies |\n"
+            "Share with: apm install ./build/project-1.0.0\n"
+        )
+        values = [hint["value"] for hint in capture.extract_hints(text, None)]
+        assert values == ["apm compile", "apm install ./build/project-1.0.0"]
+
+    def test_joins_hard_wrapped_hints(self) -> None:
+        first = "[!] Kept 1 local edit in .github/instructions/kit.instructions.md; run"
+        text = f"{first.ljust(72)}\n'apm install --force' to overwrite it.\n"
+        assert [hint["value"] for hint in capture.extract_hints(text, None)] == ["apm install --force"]
+
+    def test_resolves_the_bare_docs_root(self, tmp_path: Path) -> None:
+        (tmp_path / "index.mdx").write_text("# APM\n", encoding="utf-8")
+        hints = capture.extract_hints("Docs: https://microsoft.github.io/apm\n", tmp_path)
+        assert [(hint["value"], hint["resolves"]) for hint in hints] == [("https://microsoft.github.io/apm", True)]
 
     def test_resolves_docs_urls_and_anchors(self, tmp_path: Path) -> None:
         page = tmp_path / "consumer" / "installing-from-marketplaces.md"
@@ -245,6 +270,35 @@ class TestLedger:
     def test_coverage_rejects_unknown_statuses(self) -> None:
         with pytest.raises(findings.LedgerError, match="coverage status"):
             findings.coverage([{"step": "J01.1", "status": "maybe"}])
+
+
+class TestWorld:
+    def test_world_scrubs_host_git_and_credentials(self, tmp_path: Path) -> None:
+        built = world.build_world(tmp_path, "w", None, "git.example.invalid")
+        host = {
+            "GITHUB_TOKEN": "x",
+            "GIT_ASKPASS": "/bin/askpass",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "commit.gpgsign",
+            "GIT_CONFIG_VALUE_0": "true",
+            "GIT_AUTHOR_NAME": "Host",
+            "PATH": "/usr/bin",
+            "LANG": "C.UTF-8",
+        }
+        env = world.scrub_env(host, built)
+        assert not {"GITHUB_TOKEN", "GIT_ASKPASS", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_AUTHOR_NAME"} & set(env)
+        assert (env["GIT_CONFIG_COUNT"], env["LANG"], env["HOME"]) == ("0", "C.UTF-8", built["env"]["HOME"])
+        gitconfig = Path(built["env"]["GIT_CONFIG_GLOBAL"]).read_text(encoding="ascii")
+        assert "gpgsign = false" in gitconfig
+        assert "insteadOf = https://git.example.invalid/" in gitconfig
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+    def test_world_puts_the_candidate_binary_first_on_path(self, tmp_path: Path) -> None:
+        binary = tmp_path / "apm-candidate"
+        binary.write_text("#!/bin/sh\n", encoding="ascii")
+        built = world.build_world(tmp_path / "worlds", "w", str(binary), "git.example.invalid")
+        assert (Path(built["bin"]) / "apm").resolve() == binary.resolve()
+        assert built["env"]["PATH"].split(os.pathsep)[0] == built["bin"]
 
 
 class TestBriefLint:

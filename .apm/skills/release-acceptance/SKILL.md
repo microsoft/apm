@@ -87,7 +87,10 @@ State lives in `run.json` (inputs, phase, queue, per-slot status),
 1. Resolve the SHA: `git rev-parse <sha>`, or
    `gh pr view <N> --json headRefOid`. Record it in `run.json`.
 2. Build or locate the candidate binary from that SHA and check
-   `<apm> --version` prints the SHA prefix. Stop on mismatch.
+   `<apm> --version` prints the SHA prefix. If it prints another commit
+   (an in-tree build on a branch), accept it only when
+   `git diff --quiet <candidate> <printed> -- src/` succeeds, and record
+   both SHAs. Otherwise stop.
 3. Load the catalogue:
    `python3 scripts/journeys.py --repo-root <checkout> [--catalog PATH]`.
    Exit 3 means "catalogue unavailable": stop and report it. Never use
@@ -140,14 +143,17 @@ verifier with the finding record only, preferably on a different model
 family. Apply its verdict: CONFIRMED sets status `verified` and may
 change severity; FALSE-POSITIVE closes it; CHANGED records the new
 observation. A finding the verifier cannot reproduce in 2 attempts is a
-false positive.
+false positive. Apply verdicts with
+`python3 scripts/findings.py verify --ledger findings.json --verdicts <file>`.
 
 ### P5 -- synthesize, convert, checkpoint
 
 Read `references/rubric.md` now.
 
-1. Severity and routing per the rubric. Pre-existing bugs are known
-   issues, not cut blockers.
+1. Severity and routing per the rubric. Record them with
+   `scripts/findings.py set --id RA-NNN route=<lane> pre_existing=<true|false>`.
+   A pre-existing non-security finding becomes `status=known-issue`;
+   a security finding never does.
 2. For every verified finding, write a failing-before test brief for
    `apm-lifecycle-tests` (template below). The finding keeps status
    `verified` and `lifecycle_test: null` until a test node exists that
@@ -186,10 +192,10 @@ stderr, and support `--help`.
 | Script | Use |
 |---|---|
 | `scripts/load_gate.py` | host load check before each spawn (exit 75 = wait) |
-| `scripts/world.py` | create a hermetic world; prints its env |
+| `scripts/world.py` | create a hermetic world (host git config and credentials scrubbed); `--apm-bin` puts the candidate first on PATH; `--git-host` maps a fake host to local bare repos |
 | `scripts/capture.py` | run one step in a world; stdout, stderr and exit code saved separately; line lint; hints and docs links extracted |
 | `scripts/journeys.py` | load the program catalogue through one schema check; refuses when unavailable |
-| `scripts/findings.py` | ledger: `add` (dedupe), `coverage`, `gate-row`, `recheck` |
+| `scripts/findings.py` | ledger: `add` (dedupe across journeys), `verify` (P4 verdicts), `set` (route, pre_existing, lifecycle_test, known-issue), `coverage`, `gate-row` (GO, NO-GO, PENDING-VERIFICATION), `recheck` |
 | `scripts/brief_lint.py` | neutral-wording check for every brief |
 
 ## Output
