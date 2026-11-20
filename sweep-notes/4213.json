@@ -1,0 +1,18 @@
+{
+  "changelog": "`apm lock` keeps the recorded `exec_status` of packages whose executables await approval, so `apm lock` and `apm install` no longer rewrite each other's lockfile (#4217)",
+  "ledger_row": {
+    "issue": 4213,
+    "fixed_in": "Unreleased",
+    "summary": "apm lock dropped exec_status: gated_pending_approval from rows whose executables were parked, so lock and install kept rewriting the lockfile of a converged project.",
+    "failure_modes": ["idempotency", "outcome"],
+    "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_lock_parked_exec_status_lifecycle.py::test_lock_keeps_parked_exec_status_and_converges",
+      "tests/integration/test_executables_gate_integration.py::TestLockfileExecStatusIntegration::test_lock_only_carries_recorded_exec_status_forward"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_lock_parked_exec_status_lifecycle.py -n 0 -p no:cacheprovider -q -> 3 failed (hook, lsp, mcp) at test_lock_parked_exec_status_lifecycle.py:134: assert {None} == {'gated_pending_approval'} (exec_status after apm lock)",
+  "green": "same command -> 3 passed (lock and the following install leave apm.lock.yaml and the LifecycleStateSnapshot byte-identical); neighbours: 628 passed (lockfile phase unit tests, lock command, exec gate, approval/deny lifecycle modules, test_lock_e2e)",
+  "owner": "src/apm_cli/install/phases/lockfile.py (LockfileBuilder._attach_exec_status)",
+  "notes": "apm lock runs the pipeline with no targets, so the executable gate (exec_gate.check_executable_approval via deployment_plan) never runs and ctx.package_exec_status is empty. In lockfile_only mode the builder now carries exec_status and exec_allowed_types forward from the existing lock row, matching how lock already carries deployed_files: the recorded trust state describes what is deployed, and lock deploys nothing. If a re-resolved package no longer declares executables, exec_gate.lock_exec_decisions_stale flags the carried status as stale and the next install re-gates it (fails toward re-running the gate). PR #4138 rewrites commands/lock.py and lockfile write authority but does not touch install/phases/lockfile.py; low conflict risk. M-SOURCE machine cells (T3|lock|*, T5|real|lock|*) are not on main. Docs: reference/cli/lock.md notes exec_status is kept."
+}
