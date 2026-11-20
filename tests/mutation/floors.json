@@ -375,7 +375,18 @@
     },
     "host-credential-resolution": {
       "architecture_owner": "host-credential-resolution",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.auth_outcome._transport_kind__mutmut_1",
+          "reason": "For None or a str error, _cause_chain yields nothing (it only walks BaseException instances), so the loop returns None exactly like the early return."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.auth_outcome.is_ado_signin_location__mutmut_8",
+          "reason": "A location without a hostname becomes 'xxxx', which is neither an ADO sign-in host nor ends with the sign-in suffix, exactly like the empty string; the path check still decides."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,
@@ -398,6 +409,7 @@
         }
       ],
       "test_seams": [
+        "tests/unit/core/test_auth_outcome_owner.py",
         "tests/unit/core/test_auth_outcome.py"
       ]
     },

@@ -216,6 +216,7 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/integration/test_cleanup_skill_dirs.py",
     "tests/unit/test_yaml_io.py",
     "tests/unit/utils/test_frontmatter_horizontal_rules.py",
+    "tests/unit/core/test_auth_outcome_owner.py",
     "tests/unit/core/test_auth_outcome.py",
     "tests/unit/install/test_install_outcome.py",
     "tests/unit/compilation/test_link_resolver.py",
