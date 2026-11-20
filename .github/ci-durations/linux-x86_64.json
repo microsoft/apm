@@ -2762,5 +2762,7 @@
 "tests/integration/test_wave8_diagnostics_validation_coverage.py": 0.05,
 "tests/integration/test_windows_installer_launchers.py": 0.0,
 "tests/integration/test_windows_native_symlink.py": 0.0,
-"tests/integration/test_yml_schema_validation.py": 0.15
+"tests/integration/test_yml_schema_validation.py": 0.15,
+"tests/lifecycle/test_core_example.py::test_core_gate_row_keeps_every_invariant": 12.0,
+"tests/lifecycle/test_core_example.py::test_core_gate_row_kills_the_recorded_approval_mutant": 6.0
 }
