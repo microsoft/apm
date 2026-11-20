@@ -27,6 +27,9 @@ from scripts.architecture_linter.checks.transport_credential_value_rendering imp
 from scripts.architecture_linter.checks.transport_egress_route import (
     RULES as _EGRESS_ROUTE_RULES,
 )
+from scripts.architecture_linter.checks.transport_github_credential_class import (
+    RULES as _GITHUB_CREDENTIAL_CLASS_RULES,
+)
 from scripts.architecture_linter.checks.transport_gitlab_sparse import (
     RULES as _GITLAB_SPARSE_RULES,
 )
@@ -73,6 +76,7 @@ RULES = (
     + _REDIRECT_RULES
     + _CREDENTIAL_RENDERING_RULES
     + _ARCHIVE_LIMIT_RULES
+    + _GITHUB_CREDENTIAL_CLASS_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS

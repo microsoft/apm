@@ -18,6 +18,7 @@ from typing import Any
 from ...mcp_transport import canonical_remote_transport
 from ...utils.console import _rich_error, _rich_success
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
+from .base import warn_unreadable_config_once
 from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class KiroClientAdapter(CopilotClientAdapter):
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Could not read %s: %s", config_path, exc)
+            warn_unreadable_config_once(logger, config_path, exc)
             return {}
 
     def update_config(self, config_updates: dict[str, dict[str, Any]]) -> bool | None:

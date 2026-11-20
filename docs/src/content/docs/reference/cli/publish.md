@@ -15,7 +15,7 @@ apm publish [OPTIONS]
 
 `apm publish` uploads a package version to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`.
 
-By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.zip`) containing `apm.yml`, `.apm/`, and standard root-level documentation files (`README.md`, `CHANGELOG.md`, `LICENSE` / `LICENCE`, matched case-insensitively) at the archive root. Symlinks are excluded. This is **not** the plugin bundle layout from [`apm pack`](../pack/) (`{name}-{version}/plugin.json`).
+By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.zip`) containing `apm.yml`, `.apm/`, and standard root-level documentation files (`README.md`, `CHANGELOG.md`, `LICENSE` / `LICENCE`, matched case-insensitively) at the archive root. Symlinks are excluded. Publish refuses to build the archive when `.apm/` contains a credential file (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa`, `id_ed25519`) and names each one. This is **not** the plugin bundle layout from [`apm pack`](../pack/) (`{name}-{version}/plugin.json`).
 
 Requires the experimental `registries` feature:
 
@@ -113,6 +113,7 @@ With `--verbose`, auto-pack also prints:
 | `requires the experimental registries feature` | Run `apm experimental enable registries`. |
 | `apm.yml not found` | Run from the package root. |
 | `requires a flat APM package (.apm/ directory)` | Add `.apm/` or pass `--zip`. |
+| `Refusing to pack N credential file(s)` | Remove the named files from `.apm/`, then publish again. |
 | `Multiple registries configured` | Pass `--registry NAME`. |
 | `Version '...' already exists ... immutable` | HTTP 409 -- bump `version:` in `apm.yml`. |
 | `Registry rejected the package (validation failed)` | HTTP 422 -- archive layout invalid for the server. |

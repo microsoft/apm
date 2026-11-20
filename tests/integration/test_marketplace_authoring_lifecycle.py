@@ -262,3 +262,55 @@ def test_existing_catalog_sources_still_register_without_authoring_resolution(
     )
     assert "legacy-tool" in results[1].stdout
     assert_unchanged(before, ArtifactSnapshot.capture(catalog_root))
+
+
+def test_outdated_skips_local_source_entry_without_ls_remote(tmp_path, apm_binary_path):
+    """#4201: a ``source: ./`` entry is reported as local, never git ls-remote'd."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    environment = isolated.subprocess_env(overrides={"COLUMNS": "240"})
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    plugin_root = isolated.work_root / "my-plugin"
+    runner.run_sequence(
+        (("plugin", "init", "my-plugin", "--yes"),),
+        expected_returncodes=(0,),
+        scenario_id="outdated-local-source-init",
+        cwd=isolated.work_root,
+        env=environment,
+    )
+    runner.run_sequence(
+        (
+            ("marketplace", "init", "--owner", "acme-org"),
+            ("marketplace", "package", "remove", "example-package", "--yes"),
+            (
+                "marketplace",
+                "package",
+                "add",
+                "./",
+                "--name",
+                "my-plugin",
+                "--version",
+                "0.1.0",
+                "--no-verify",
+            ),
+        ),
+        expected_returncodes=(0, 0, 0),
+        scenario_id="outdated-local-source-author",
+        cwd=plugin_root,
+        env=environment,
+    )
+    project_before = ArtifactSnapshot.capture(plugin_root)
+    home_before = ArtifactSnapshot.capture(isolated.home)
+
+    result = runner.run(("marketplace", "outdated"), cwd=plugin_root, env=environment)
+
+    evidence = f"exit={result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+    assert result.returncode == 0, evidence
+    assert result.stdout.isascii() and result.stderr.isascii(), evidence
+    output = result.stdout + result.stderr
+    assert "ls-remote" not in output, evidence
+    assert "[x]" not in output, evidence
+    (row,) = [line for line in result.stdout.splitlines() if "my-plugin" in line]
+    assert "[i]" in row and "Local path; skipped" in row, evidence
+    assert output.count("All packages are up to date") == 1, evidence
+    assert_unchanged(project_before, ArtifactSnapshot.capture(plugin_root))
+    assert_unchanged(home_before, ArtifactSnapshot.capture(isolated.home))

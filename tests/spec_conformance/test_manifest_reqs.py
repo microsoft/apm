@@ -621,6 +621,9 @@ def test_host_class_collapse_constrained_to_psl_or_aliases():
     assert_spec_contains(
         "Public Suffix List",
         "explicit `aliases:` entry",
+        "the built-in **GitHub-operated host class**: `github.com` and every\n`*.ghe.com` host",
+        "operator names it through the `GITHUB_HOST` setting, never through a\nmanifest.",
+        "Basis (c) covers only those hosts; it does\nnot widen (a) or (b) for any other host.",
         "MUST NOT collapse two",
         "configuration signal exercised",
         "under [req-sc-013](#req-sc-013) is not subject to this prohibition",

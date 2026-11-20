@@ -52,8 +52,20 @@ OBSERVABLE_FIXTURES = frozenset(
 )
 MOCK_ASSERTIONS = re.compile(r"^assert_(not_)?(any_)?(called|awaited|has_calls|has_awaits)")
 HELPER_ASSERTION = re.compile(r"^_?(assert|expect|verify|check)")
+# Names that drive the installed CLI. ``lifecycle_world`` and ``lifecycle_template``
+# are the lifecycle family's world fixtures: every command a test runs in them goes
+# through tests/lifecycle/driver.py, so a module taking them drives the installed CLI
+# even when its oracles read the lockfile or the model in process.
 DRIVER_NAMES = frozenset(
-    {"apm_binary", "apm_binary_path", "apm_engine_command", "ApmLifecycleRunner", "driver"}
+    {
+        "apm_binary",
+        "apm_binary_path",
+        "apm_engine_command",
+        "ApmLifecycleRunner",
+        "driver",
+        "lifecycle_template",
+        "lifecycle_world",
+    }
 )
 DRIVER_STRINGS = frozenset({"APM_BINARY_PATH", "APM_LIFECYCLE_DRIVER"})
 

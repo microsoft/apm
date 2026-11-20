@@ -148,9 +148,11 @@ Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
 Codex agents and hooks, and Copilot CLI homes selected by `COPILOT_HOME` (or
 `~/.copilot`) for Copilot instructions, agents and hooks.
 
-`Cleaned N stale deployed files for DEPENDENCY` identifies the affected
-dependency, not the deletion location. An absolute local path in that message
-names the source package; cleanup removes its deployed files, not source files.
+`Cleaned N stale deployed files for DEPENDENCY:` identifies the affected
+dependency, not the deletion location, and lists each removed path below it (a
+removed skill directory is listed once, with a trailing `/`). An absolute local
+path in the header names the source package; cleanup removes its deployed
+files, not source files.
 
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No

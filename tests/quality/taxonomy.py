@@ -31,6 +31,14 @@ PROMISE_CATALOG = REPO_ROOT / "tests" / "quality" / "promise-catalog.json"
 TAXONOMY_BASELINE = REPO_ROOT / "tests" / "quality" / "test_taxonomy_baseline.json"
 CATALOG_NAME = "tests/quality/promise-catalog.json"
 BASELINE_LISTS = ("misplaced_modules", "promise_exempt_modules", "unclassified_modules")
+# Directories whose location fully determines the behavioral marker: every module
+# there drives the installed CLI through tests/lifecycle/driver.py. A module there
+# needs only its promise; the marker is applied at collection
+# (tests/lifecycle/conftest.py) and a contradicting declaration fails.
+DIRECTORY_MARKERS: Mapping[str, str] = {
+    f"tests/lifecycle/{name}/": "e2e"
+    for name in ("journeys", "machines", "replay", "scenarios", "security", "world")
+}
 CANDIDATES = 3
 _TOKEN = re.compile(r"[a-z0-9]+")
 _REQUIREMENT = re.compile(r"\breq-[a-z]{2,3}-[0-9]{3}\b")
@@ -40,6 +48,19 @@ _STOP_WORDS = frozenset({"a", "and", "apm", "for", "in", "of", "on", "py", "test
 def load_promises(path: Path = PROMISE_CATALOG) -> dict[str, str]:
     """Promise id -> description, from the promise catalog."""
     return dict(json.loads(path.read_text(encoding="utf-8"))["promises"])
+
+
+def directory_marker(module: str) -> str | None:
+    """The behavioral marker *module*'s directory determines, or None."""
+    return next((m for prefix, m in DIRECTORY_MARKERS.items() if module.startswith(prefix)), None)
+
+
+def directory_conflict_message(module: str, declared: Sequence[str], implied: str) -> str:
+    return (
+        f"{module}: declares {sorted(declared)} but its directory determines '{implied}'. "
+        f"Fix: drop the behavioral marker (the directory applies '{implied}'), or move the "
+        "module out of the directory."
+    )
 
 
 def infer_behavioral(module: str, tree: ast.Module) -> str:
@@ -78,9 +99,11 @@ def suggested_pytestmark(
     module: str, source: str, promises: Mapping[str, str]
 ) -> tuple[str, list[str]]:
     """(the ``pytestmark`` line to add, its candidate promise ids)."""
-    behavioral = infer_behavioral(module, ast.parse(source))
     ids = candidate_promises(module, source, promises)
     promise = ids[0] if ids else "<catalog id>"
+    if directory_marker(module):
+        return f'pytestmark = [pytest.mark.promise("{promise}")]', ids
+    behavioral = infer_behavioral(module, ast.parse(source))
     return f'pytestmark = [pytest.mark.{behavioral}, pytest.mark.promise("{promise}")]', ids
 
 
@@ -193,6 +216,10 @@ def module_findings(
     tree = ast.parse(source)
     behavioral = sorted(module_markers(tree) & BEHAVIORAL_MARKERS)
     found: list[str] = []
+    implied = directory_marker(module)
+    if implied and behavioral and behavioral != [implied]:
+        found.append(directory_conflict_message(module, behavioral, implied))
+    behavioral = behavioral or ([implied] if implied else [])
     if len(behavioral) != 1 and module not in baseline["unclassified_modules"]:
         found.append(unclassified_message(module, root, promises))
     misplaced = baseline["misplaced_modules"]

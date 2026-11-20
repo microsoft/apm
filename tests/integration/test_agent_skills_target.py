@@ -728,7 +728,10 @@ def test_auto_migration_removes_legacy_skill_paths(
     monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
     r1 = _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
     assert r1.exit_code == 0, f"legacy install failed: {r1.output!r}"
-    assert (project / ".github/skills" / SKILL_NAME / "SKILL.md").is_file()
+    legacy = project / ".github/skills" / SKILL_NAME / "SKILL.md"
+    assert legacy.is_file()
+    # The installing machine's receipt is the migration's deletion evidence (#4049).
+    seed_receipts(project, [legacy], target="copilot", owner="local-bundle")
 
     # --- Second install: converged mode (no legacy flag) ---
     monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
@@ -751,6 +754,9 @@ def test_auto_migration_updates_lockfile_paths(
     # Legacy install:
     monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
     _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+    # The installing machine's receipt is the migration's deletion evidence (#4049).
+    legacy = project / ".github/skills" / SKILL_NAME / "SKILL.md"
+    seed_receipts(project, [legacy], target="copilot", owner="local-bundle")
 
     # Converged install:
     monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
