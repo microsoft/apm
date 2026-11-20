@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import is_user_scope
+
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
 from .target_filter import log_package_target_restriction, resolve_effective_package_targets
 
@@ -63,7 +65,12 @@ def _warn_parked_plugin(package_name, package_info, allow_executables, diagnosti
     from apm_cli.security.trust import parked_plugin_message
 
     package = _strip_version(resolve_package_key(package_info, package_name))
-    message = parked_plugin_message(package, str(verdict.reason), verdict.detail)
+    message = parked_plugin_message(
+        package,
+        str(verdict.reason),
+        verdict.detail,
+        user_scope=is_user_scope(getattr(ctx, "scope", None)),
+    )
     if diagnostics is not None:
         diagnostics.warn(message)
     elif logger is not None:
@@ -110,7 +117,15 @@ def prepare_package_deployment(  # noqa: PLR0913
     from .exec_gate import bin_deploy_denial, hook_file_admission, native_plugin_verdict
 
     hook_filter = hook_file_admission(package_name, package_info, allow_executables)
-    _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx)
+    verdict = _warn_parked_plugin(
+        package_name, package_info, allow_executables, diagnostics, logger, ctx
+    )
+    # The trust owner already named a deny, change or missing grant (#4154).
+    parked_reported = bool(
+        verdict is not None
+        and not verdict.allowed
+        and (verdict.reason != "unapproved-executables" or verdict.detail)
+    )
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
     )
@@ -133,6 +148,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         },
         ctx=ctx,
         read_only=read_only,
+        parked_reported=parked_reported,
     )
     # The org policy the install gate fetched; callers that pass none
     # (preflight) defer to it, as effective_allow_map does for trust.
@@ -202,7 +218,9 @@ def prepare_package_deployment(  # noqa: PLR0913
         for item, parked_reason in hook_filter.parked:
             if not hooks and parked_reason == REASON_DENIED:
                 continue
-            message = parked_hook_message(package, item, parked_reason)
+            message = parked_hook_message(
+                package, item, parked_reason, user_scope=is_user_scope(scope)
+            )
             if diagnostics is not None:
                 diagnostics.warn(message)
             elif logger is not None:
