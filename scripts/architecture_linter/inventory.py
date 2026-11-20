@@ -27,6 +27,7 @@ EXCLUDED_ROOTS: tuple[str, ...] = (
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
+    ".hypothesis",
     ".tox",
     "build",
     "dist",
@@ -49,6 +50,8 @@ _EXCLUDED_ANYWHERE: frozenset[str] = frozenset(
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
+        # Hypothesis creates and removes .hypothesis/tmp while tests run.
+        ".hypothesis",
         ".tox",
     }
 )
