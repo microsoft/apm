@@ -108,7 +108,7 @@ def run(ctx: InstallContext) -> None:
             return
         for skipped in cleanup.skipped_user_edit:
             logger.cleanup_skipped_user_edit(skipped, "<local .apm/>")
-        logger.stale_cleanup("<local .apm/>", len(cleanup.deleted))
+        logger.stale_cleanup("<local .apm/>", cleanup)
 
     _files, _hashes, _ledger = reconcile_deployed_block(
         project_root=ctx.project_root,

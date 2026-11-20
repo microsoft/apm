@@ -200,17 +200,22 @@ class TestMultiTargetCollapseRule:
         assert prompt_lines[0].count(",") == 1
         assert " targets" not in prompt_lines[0]
 
-    def test_three_or_more_targets_collapses_to_count(self, tmp_path: Path) -> None:
+    def test_three_targets_names_every_folder(self, tmp_path: Path) -> None:
         lines = self._run(tmp_path, n_targets=3, files_per_target=[1, 2, 4])
         prompt_lines = [ln for ln in lines if "agents integrated" in ln]
         assert len(prompt_lines) == 1
-        assert prompt_lines[0] == "  |-- 7 agents integrated -> 3 targets"
+        assert prompt_lines[0] == (
+            "  |-- 7 agents integrated -> .github/agents/, .claude/agents/, .cursor/agents/"
+        )
 
-    def test_four_targets_collapses_to_count(self, tmp_path: Path) -> None:
+    def test_four_targets_names_every_folder(self, tmp_path: Path) -> None:
         lines = self._run(tmp_path, n_targets=4, files_per_target=[1, 1, 1, 1])
         prompt_lines = [ln for ln in lines if "agents integrated" in ln]
         assert len(prompt_lines) == 1
-        assert prompt_lines[0] == "  |-- 4 agents integrated -> 4 targets"
+        assert prompt_lines[0] == (
+            "  |-- 4 agents integrated -> "
+            ".github/agents/, .claude/agents/, .cursor/agents/, .codex/agents/"
+        )
 
     def test_verbose_expands_full_target_list(self, tmp_path: Path) -> None:
         lines = self._run(tmp_path, n_targets=3, files_per_target=[1, 2, 4], verbose=True)

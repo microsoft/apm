@@ -226,6 +226,9 @@ def test_clone_is_fast_private_and_moves_every_path(
 def test_each_world_starts_with_an_empty_egress_log(lifecycle_world: World) -> None:
     assert lifecycle_world.services.egress_log() == []
     assert set(lifecycle_world.packages) >= set(PACKAGE_NAMES)
+    # Nothing is installed yet: no lockfile and no materialized dependencies.
+    assert not (lifecycle_world.project / "apm.lock.yaml").exists()
+    assert not (lifecycle_world.project / "apm_modules").exists()
 
 
 # -- packages at project and user scope --------------------------------------
@@ -233,8 +236,9 @@ def test_each_world_starts_with_an_empty_egress_log(lifecycle_world: World) -> N
 
 # The Codex native plugin's post-approval install at user scope runs the real
 # Codex CLI. The world traps codex (exit 91), so this one cell puts the host's
-# QUALIFIED codex ahead of the trap; without one it is skipped locally and fails
-# under CI or APM_REQUIRE_CODEX, so CI never silently loses the cell (#4154).
+# QUALIFIED codex ahead of the trap. Without one the cell is skipped with the
+# named reason, except under APM_REQUIRE_CODEX: the one CI job that provisions
+# Codex sets it, so that job fails loudly instead of losing the cell (#4154).
 _CODEX_CELL = ("p-native-codex", "user")
 
 
@@ -263,7 +267,7 @@ def _use_qualified_codex(world: World) -> None:
     """Put the host's qualified codex ahead of the world trap for this cell only."""
     codex, reason = qualified_codex(os.environ.get("PATH"))
     if codex is None:
-        if os.environ.get("CI") or os.environ.get("APM_REQUIRE_CODEX"):
+        if os.environ.get("APM_REQUIRE_CODEX"):
             pytest.fail(reason)
         pytest.skip(reason)
     qualified = world.root / "qualified-codex"
@@ -600,8 +604,13 @@ def test_ado_auth_mode_is_reset_for_the_next_world(
 ) -> None:
     lifecycle_template.services.require_ado_auth()
     world = clone(lifecycle_template, tmp_path / "next")
+    items, _commit = _repo_api_urls("ado")
+    refused = _get(world, items)
+    assert refused.status_code == 401, refused.text
     world.services.reset()
     assert world.services.ado_auth_required is False
+    served = _get(world, items)
+    assert served.status_code == 200 and "name: p-skill" in served.text, served.text
 
 
 def test_ado_policy_is_read_through_the_items_api(lifecycle_world: World) -> None:
@@ -679,10 +688,10 @@ def test_every_git_host_serves_repository_contents_and_commits(
     contents_url, commit_url = _repo_api_urls(shape)
     contents = _get(world, contents_url)
     assert contents.status_code == 200, contents.text
-    body = contents.content
+    text = contents.text
     if contents.headers.get("Content-Type", "").startswith("application/json"):
-        body = base64.b64decode(contents.json()["content"])
-    assert b"name: p-skill" in body
+        text = base64.b64decode(contents.json()["content"]).decode("utf-8")
+    assert "name: p-skill" in text
     commit = _get(world, commit_url)
     assert commit.status_code == 200 and _commit_sha(commit) == expected, commit.text
     missing = _get(world, contents_url.replace("apm.yml", "missing.md"))
@@ -1017,16 +1026,21 @@ def test_qualified_codex_matches_production_qualification(
     """The guard admits exactly what native registration admits; a failed probe is absent."""
     codex, reason = qualified_codex(_fake_codex(tmp_path, script))
     assert (codex is not None) is qualified, reason
+    if qualified:
+        assert codex is not None and Path(codex).is_file() and reason == ""
+    else:
+        # The reason is the skip or failure message the cell prints.
+        assert "reports 'codex-cli" in reason or "exited 3" in reason, reason
 
 
-def test_missing_codex_fails_the_cell_under_ci(tmp_path: Path, monkeypatch) -> None:
-    """Under CI a runner without a qualified codex fails the cell instead of skipping."""
+def test_missing_codex_fails_the_cell_only_when_required(tmp_path: Path, monkeypatch) -> None:
+    """APM_REQUIRE_CODEX fails a runner without a qualified codex; elsewhere it skips."""
     monkeypatch.setenv("PATH", str(tmp_path))
-    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("APM_REQUIRE_CODEX", "1")
     world = MagicMock(root=tmp_path, env={"PATH": str(tmp_path)})
     with pytest.raises(pytest.fail.Exception, match=r"none found"):
         _use_qualified_codex(world)
-    monkeypatch.delenv("CI")
-    monkeypatch.delenv("APM_REQUIRE_CODEX", raising=False)
+    monkeypatch.delenv("APM_REQUIRE_CODEX")
+    monkeypatch.setenv("CI", "true")
     with pytest.raises(pytest.skip.Exception, match=r"none found"):
         _use_qualified_codex(world)
