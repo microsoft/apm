@@ -4,7 +4,8 @@
   1,
   2,
   3,
-  4
+  4,
+  5
  ],
  "folds": {
   "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_case_insensitive": "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_canonical_signals_match",
@@ -34,7 +35,10 @@
   "step5: security/test_executables.py is now unit; its filesystem classes (TestLocalBundleApprovalKey, TestScanPackageExecutables, TestWriteAllowExecutables, TestSaveUserExecutablesAtomic) moved into test_exec_vocab_unification.py",
   "step5: models/test_dependency_uninstall_selection.py is now unit (its one filesystem dry-run test moved to regressions/test_issue_2549_global_dry_run.py with its lock helper); resolve_user_invocable direct cases moved to primitives/test_primitives.py; TestParseProjectExecutables moved to security/test_executables.py",
   "step5: models/test_manifest_targets.py is now unit; its six on-disk tests moved to models/test_manifest_io.py with the _declaration helper and the warning re-arm fixture",
-  "step5: security/test_trust_fingerprint.py is now unit; its on-disk hook/plugin cases moved to test_trust_admission.py (helper renamed _scripted_hook_package to avoid shadowing that module's _hook_package)"
+  "step5: security/test_trust_fingerprint.py is now unit; its on-disk hook/plugin cases moved to test_trust_admission.py (helper renamed _scripted_hook_package to avoid shadowing that module's _hook_package)",
+  "step2 follow-up: c1/unit-root-small (760c61842) parametrized its tests/unit/test_portable_relpath.py copies and removed its test_reference_registry_shorthand identity twin, keeping ours; after integration the 4 cross-partition groups disappear and in-scope same_body_groups drops to 2 (both among protected tests/unit/scripts/test_architecture_*.py)",
+  "step5: residual weak_tests are AQ003 only (AQ001=0, AQ002=0 in scope): component tests whose system under test reads files and returns a model (discovery, loaders, detectors, path helpers), network-bound credential tests, env-construction tests inside cache/test_git_env.py, and protected modules (test_architecture_*, *_lifecycle*, open-PR files); they assert the returned value, which is the observable outcome of a reader, and padding them with no-op file checks was rejected",
+  "sandbox note: git commit inside tests fails here (gpg signing service requires a co-author trailer); affected failures in test_git_env.py, test_check_complexity_ratchet.py, test_git_output_decoding.py and test_architecture_registry_conflicts.py are identical on base"
  ],
  "counts_left": {
   "same_body_groups": 6,
