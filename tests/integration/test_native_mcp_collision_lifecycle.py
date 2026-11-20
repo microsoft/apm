@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -227,6 +228,16 @@ class _Scenario:
 
 def _http(url: str = "http://127.0.0.1:8000/company") -> dict[str, Any]:
     return {"name": "notes", "registry": False, "transport": "http", "url": url}
+
+
+def _apm_state(isolated: IsolatedApmEnvironment) -> list[tuple[str, bytes | None]]:
+    """Every path (directories included) under APM home and the APM cache."""
+    state: list[tuple[str, bytes | None]] = []
+    for base in (isolated.config_root, isolated.cache_root):
+        for path in sorted(base.rglob("*")) if base.exists() else ():
+            data = path.read_bytes() if path.is_file() else None
+            state.append((path.relative_to(isolated.root).as_posix(), data))
+    return state
 
 
 def _success(result: CommandResult) -> None:
@@ -748,8 +759,14 @@ def test_user_disabled_matching_codex_connection_installs_and_replays_frozen(
         refused = scenario.install(*flags, targets="codex")
         assert refused.returncode == 1, refused.stdout + refused.stderr
         assert path.read_bytes() == edited
-    # The CI audit reaches the frozen verdict for the same entry and names it (#4477).
+    # The CI audit reaches the frozen verdict for the same entry and names it (#4477),
+    # and comparing it writes nothing under APM home or the APM cache, even on a
+    # CI runner whose APM cache starts empty.
+    shutil.rmtree(scenario.isolated.cache_root)
+    scenario.isolated.cache_root.mkdir()
+    apm_state = _apm_state(scenario.isolated)
     audited = scenario.audit()
     assert audited.returncode == 1, audited.stdout + audited.stderr
     assert "MCP server 'notes' target 'codex'" in audited.stdout + audited.stderr
     assert path.read_bytes() == edited
+    assert _apm_state(scenario.isolated) == apm_state
