@@ -43,7 +43,7 @@ from apm_cli.models.apm_package import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 _DEP_REPO_URL = "acme/cursor-gate"

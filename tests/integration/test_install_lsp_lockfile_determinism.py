@@ -3,11 +3,14 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+pytestmark = pytest.mark.component
 
 
 def _write_lsp_manifest(project_root: Path) -> None:

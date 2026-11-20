@@ -27,6 +27,8 @@ import pytest
 
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 
+pytestmark = pytest.mark.component
+
 
 def _security_plan(root: Path) -> DeployableSourcePlan:
     """Return a minimal plan for mocked pre-deployment gate tests."""

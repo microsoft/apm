@@ -27,6 +27,9 @@ import pytest
 
 from apm_cli.compilation.constitution import clear_constitution_cache
 
+pytestmark = pytest.mark.e2e
+
+
 # ---------------------------------------------------------------------------
 # Module-level cache isolation
 # ---------------------------------------------------------------------------

@@ -52,7 +52,7 @@ from apm_cli.integration.skill_integrator import (
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 # ---------------------------------------------------------------------------
 # Helpers shared across test classes

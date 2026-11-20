@@ -30,6 +30,9 @@ from apm_cli.policy.schema import ApmPolicy, AuditPolicy, SecurityPolicy
 from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.external.base import ExternalScanError
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

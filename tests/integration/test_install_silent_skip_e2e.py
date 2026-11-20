@@ -40,6 +40,9 @@ from click.testing import CliRunner
 
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
+
 # Mock targets -- bypass network/registry but let policy discovery run real.
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 _PATCH_VALIDATE_PKG = "apm_cli.commands.install._validate_package_exists"

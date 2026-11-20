@@ -15,6 +15,9 @@ from click.testing import CliRunner
 
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
+
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 
 

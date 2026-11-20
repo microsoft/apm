@@ -21,6 +21,9 @@ from apm_cli.models.apm_package import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
+
 GHOST = ".windsurf/rules/demo.md"
 PACKAGE_REF = "acme/fixture-package"
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"

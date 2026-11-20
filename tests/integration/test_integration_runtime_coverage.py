@@ -28,6 +28,9 @@ import pytest
 
 from apm_cli.integration.hook_source_selection import HookSourceSelection
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # kiro_hook_integrator -- pure helpers
 # ---------------------------------------------------------------------------

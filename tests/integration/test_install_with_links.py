@@ -9,6 +9,8 @@ from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def mock_package_with_contexts(tmp_path):

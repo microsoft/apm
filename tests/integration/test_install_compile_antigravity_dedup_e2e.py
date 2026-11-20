@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
+
 APM_YML = """name: test-antigravity-dedup
 version: 1.0.0
 description: Install->compile dedup regression trap for Antigravity/AGENTS.md

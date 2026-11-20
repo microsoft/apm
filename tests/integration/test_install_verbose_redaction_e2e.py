@@ -18,7 +18,7 @@ import subprocess
 import pytest
 import yaml
 
-pytestmark = pytest.mark.requires_apm_binary
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
 CANARY = "github_pat_BOGUS_REDACTION_CANARY_DO_NOT_LEAK"
 CANARY_CORE = "BOGUS_REDACTION_CANARY_DO_NOT_LEAK"

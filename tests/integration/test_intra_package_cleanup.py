@@ -13,7 +13,7 @@ import subprocess
 import pytest
 import yaml
 
-pytestmark = pytest.mark.requires_apm_binary
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
 
 @pytest.fixture

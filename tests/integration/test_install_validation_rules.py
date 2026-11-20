@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from apm_cli.install.validation import (
@@ -35,6 +36,9 @@ from apm_cli.install.validation import (
     _log_tls_failure,
     _validate_package_exists,
 )
+
+pytestmark = pytest.mark.component
+
 
 # ---------------------------------------------------------------------------
 # _is_tls_failure

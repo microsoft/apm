@@ -39,6 +39,9 @@ from apm_cli.install.sources import (
     _format_package_type_label,
 )
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # _format_package_type_label
 # ---------------------------------------------------------------------------

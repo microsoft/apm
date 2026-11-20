@@ -16,6 +16,9 @@ from tests.utils.isolated_apm_environment import (
     IsolatedApmEnvironment,
 )
 
+pytestmark = pytest.mark.component
+
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SUBPROCESS_TIMEOUT_SECONDS = 10.0
 _ROOT_ATTRIBUTES = (
