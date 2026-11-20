@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import stat
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -130,6 +131,9 @@ def deploy_plugin(
             target = staging / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_root / relative, target)
+            # Owner-only, no special bits (#1620): the fingerprint records only
+            # the owner-execute bit, which this keeps.
+            target.chmod(stat.S_IMODE(target.stat().st_mode) & 0o700)
         if fingerprint_of(staging) != fingerprint:
             raise NativeLayoutError(
                 f"The copy of {name} does not match its approved fingerprint. Its source in "
