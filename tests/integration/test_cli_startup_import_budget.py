@@ -91,8 +91,19 @@ def _forbidden(modules: set[str]) -> list[str]:
 
 @pytest.fixture
 def startup_env(tmp_path: Path) -> dict[str, str]:
+    home = tmp_path / "home"
+    apm_home = tmp_path / "apm-home"
+    home.mkdir()
+    apm_home.mkdir()
     env = dict(os.environ)
-    env.update({"HOME": str(tmp_path), "USERPROFILE": str(tmp_path), "COLUMNS": "80"})
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "APM_HOME": str(apm_home),
+            "COLUMNS": "80",
+        }
+    )
     env.pop("PYTHONPROFILEIMPORTTIME", None)
     return env
 
@@ -102,18 +113,43 @@ def test_installed_cli_startup_stays_within_import_budget(
     apm_binary_path: Path, startup_env: dict[str, str], args: tuple[str, ...]
 ) -> None:
     python = _console_script_python(apm_binary_path)
-    home = Path(startup_env["HOME"])
-    before = _tree(home)
     modules = _imported_modules(python, apm_binary_path, args, startup_env)
 
-    if args == ("--help",):
-        # I5: root help writes nothing. ``--version`` is excluded: it seeds
-        # ~/.apm/config.json through the experimental-flag read (pre-existing).
-        assert _tree(home) == before
     assert _forbidden(modules) == [], f"apm {' '.join(args)} imported forbidden modules"
     assert len(modules) <= MODULE_BUDGET, (
         f"apm {' '.join(args)} imported {len(modules)} modules (budget {MODULE_BUDGET})"
     )
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(
+            ("--version",),
+            marks=pytest.mark.xfail(
+                strict=True, reason="I5: fixed by H3 experimental-flag pure read"
+            ),
+        ),
+        ("--help",),
+    ],
+    ids=lambda a: " ".join(a),
+)
+def test_installed_cli_startup_writes_nothing(
+    apm_binary_path: Path, startup_env: dict[str, str], args: tuple[str, ...]
+) -> None:
+    """I5: read-only startup commands leave HOME and APM_HOME byte-identical."""
+    roots = (Path(startup_env["HOME"]), Path(startup_env["APM_HOME"]))
+    before = [_tree(root) for root in roots]
+    result = subprocess.run(
+        [str(apm_binary_path), *args],
+        capture_output=True,
+        env=startup_env,
+        cwd=startup_env["HOME"],
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert [_tree(root) for root in roots] == before
 
 
 def test_installed_cli_startup_ratio_is_recorded(
