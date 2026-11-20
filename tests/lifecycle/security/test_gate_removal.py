@@ -7,35 +7,26 @@ docs/src/content/docs/enterprise/control-executables.mdx.
 
 Shared machinery for the G obligations ``G|<path>|<change>|<kind>``:
 
-- ``PATHS``: how each deploy or execute path arranges the package and which
-  steps must then remove it;
-- ``CHANGES``: how each gate change is applied (local deny, revoke, a
-  definition change, org deny, org turning the gate on, policy denying the
-  dependency);
-- ``gate_slices/<kind>.py``: per-KIND data tables (id, state facts,
-  announcement); one parametrized test replays every registered row.
+- ``gate_paths/<path>.py``: one ``PathSpec`` per G path (arrange + act
+  steps, scope, announcement and per-change step overrides);
+- ``gate_slices/<kind>.py``: one ``GateSlice`` per KIND (package, target and
+  rows: exact id, surface files, strict expected failure);
+- ``CHANGES`` here: how each gate change is applied by default (local deny,
+  revoke, a definition change, org deny, org turning the gate on, policy
+  denying the dependency).
 
-Every row replays through ``tests/lifecycle/rows.py`` (``check_cross_cutting``
-I1-I9 after every CLI step). ``GateReplay`` adds input edits, user scope,
-bundle and marketplace keys and the surfaces the core table does not observe,
-and checks as state facts: the gated surface was deployed before the change;
-after it no CLI step deploys a gated surface that was not already deployed;
-the final world equals the reference model and the surface is gone. Then
-``check_obligation`` credits the row's G id with e2e evidence: the removing
-step's result, its announcement and the row's snapshot facts.
-
-G ids with no registered row (count per path in the lane report):
-
-| ids | why |
-|---|---|
-| G|*|*|bin | bin/ deploys only for marketplace plugins to Claude at user scope |
-|           | (integration/skill_integrator.py _deploy_plugin_bin); no world    |
-|           | package ships a bin/ the gate could deploy                         |
-| G|unpack|* | deprecated command that reads only --format apm bundles; the world has none |
-| G|mcp-install|* | not registered yet                                                 |
-| G|native-plugin|* | native at user scope: approve cannot find the plugin (#4154)    |
-| lsp/native in bundle-install, marketplace-install | the world packs and lists p-exec only |
-| definition-changed in bundle/marketplace | a packed bundle or a published tag cannot change in place |
+Both directories are discovered; one parametrized test replays every row
+through ``tests/lifecycle/rows.py`` (``check_cross_cutting`` I1-I9 after
+every CLI step). ``GateReplay`` adds input edits, user scope, package key
+variants and surfaces the core table does not observe, and checks as state
+facts: the gated surface was deployed before the change; after it no CLI
+step deploys a gated surface that was not already deployed; the final world
+equals the reference model and the surface is gone. ``check_obligation``
+then credits the row's G id with the first removing step's result, its
+announcement and the row's snapshot facts. G ids without a row stay in the
+ratchet baseline; ``bin`` has no world package that deploys it
+(integration/skill_integrator.py _deploy_plugin_bin deploys bin/ only for
+marketplace plugins to Claude at user scope).
 """
 
 from __future__ import annotations
@@ -63,6 +54,7 @@ from tests.lifecycle.oracles import (
     operation_for,
 )
 from tests.lifecycle.rows import Row, RowReplay, _RowModel
+from tests.lifecycle.security.gate_paths import Step, paths
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice, slices
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
 from tests.lifecycle.world import use_policy
@@ -120,7 +112,8 @@ class GateReplay(RowReplay):
         self.ceiling: frozenset[str] | None = None
         self.witness: tuple[str, ...] = ()
         self.at_change: Observation | None = None
-        self.removal: CommandResult | None = None
+        # (before, result, after) of the first removing step after the change.
+        self.removal: tuple[Observation, CommandResult, Observation] | None = None
         self.bundle_key = ""
 
     # -- steps -----------------------------------------------------------
@@ -347,7 +340,7 @@ class GateReplay(RowReplay):
             grown = {s for s in after.deployed if s.split("/")[1] in GATED_KINDS} - self.ceiling
             assert not grown, f"I4: {line!r} deployed {sorted(grown)} after the gate change"
             if self.removal is None and args[0] in _GATE_REMOVING:
-                self.removal = result
+                self.removal = (before, result, after)
         self._advance_model(op, requested, result)
         self.last = result
         return result
@@ -399,67 +392,16 @@ def _redefine(root: Path, kind: str) -> None:
         manifest.write_text(yaml.safe_dump(data), "utf-8")
 
 
-# -- path registry ----------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class PathSpec:
-    """How one deploy or execute path arranges a package and removes it."""
-
-    scope: str = "project"
-    key_suffix: str = ""
-    sibling: bool = False  # a second, ungated package the act steps operate on
-    arrange: Callable[[str], list[object]] | None = None
-    act: tuple[str | Mapping[str, object], ...] = ("apm install",)
-
-
-def _default_arrange(key: str) -> list[object]:
-    return [f"apm install {key}", f"apm approve {key}", "apm install"]
-
-
-def _bundle_arrange(key: str) -> list[object]:
-    return [f"apm install {key}", {"edit": "bundle-approve", "pkg": key}, f"apm install {key}"]
-
-
-def _marketplace_arrange(key: str) -> list[object]:
-    return ["apm marketplace add MARKETPLACE_URL", *_default_arrange(key)]
-
-
-def _script_arrange(key: str) -> list[object]:
-    return [{"edit": "lifecycle"}, "apm lifecycle trust", f"apm install {key}"]
-
-
-_FROZEN_THEN_INSTALL = ("apm install --frozen", "apm install")
-PATHS: Mapping[str, PathSpec] = {
-    "install": PathSpec(),
-    # A gate change leaves the lock out of date: --frozen refuses and keeps the
-    # world; the plain install that follows removes.
-    "frozen": PathSpec(act=_FROZEN_THEN_INSTALL),
-    "update": PathSpec(act=("apm update --yes",)),
-    "uninstall-prune-rebuild": PathSpec(sibling=True, act=("apm uninstall p-skill", "apm prune")),
-    "audit-ci": PathSpec(act=({"pair": ["apm audit --ci", "apm install --frozen"]}, "apm install")),
-    "dry-run": PathSpec(act=("apm install --dry-run", "apm install")),
-    "install-g": PathSpec(scope="user"),
-    "frozen-g": PathSpec(scope="user", act=_FROZEN_THEN_INSTALL),
-    "bundle-install": PathSpec(
-        key_suffix=":bundle", arrange=_bundle_arrange, act=("apm install {key}",)
-    ),
-    "marketplace-install": PathSpec(key_suffix=":marketplace", arrange=_marketplace_arrange),
-    "lifecycle-scripts": PathSpec(arrange=_script_arrange),
-}
-
-
 # -- change registry --------------------------------------------------------
 
 _REMOVAL = r"(Cleaned|Removed) (\d+ )?stale|Parked|skipped|Filtered"
-_FROZEN_REFUSAL = r"out of sync|does not match"
 
 
 @dataclass(frozen=True)
 class ChangeSpec:
     """How one gate change is applied, and what the removing step must say."""
 
-    apply: Callable[[str, str, str], list[object]]
+    apply: Callable[[str, str], list[Step]]  # (package key, kind) -> steps
     announce: str
     gate_off_first: bool = False
     # The policy refuses the package itself: resolving steps exit 1 and keep
@@ -467,27 +409,18 @@ class ChangeSpec:
     refuses_package: bool = False
 
 
-def _local_deny(key: str, kind: str, path: str) -> list[object]:
-    if path == "bundle-install":
-        return [{"edit": "bundle-deny", "pkg": key}]
-    return [f"apm deny {key}"]
+def _org(variant: str) -> Callable[[str, str], list[Step]]:
+    return lambda key, kind: [{"edit": "policy", "variant": variant}]
 
 
-def _revoke(key: str, kind: str, path: str) -> list[object]:
-    if kind == "script":
-        return ["apm lifecycle untrust"]
-    return [{"edit": "revoke", "pkg": key}]
-
-
-def _org(variant: str) -> Callable[[str, str, str], list[object]]:
-    return lambda key, kind, path: [{"edit": "policy", "variant": variant}]
-
-
+# Shared defaults; a path module may replace one via ``PathSpec.change_steps``.
 CHANGES: Mapping[str, ChangeSpec] = {
-    "local-deny": ChangeSpec(_local_deny, rf"denied|{_REMOVAL}"),
-    "revoke-approval": ChangeSpec(_revoke, rf"not approved|{_REMOVAL}"),
+    "local-deny": ChangeSpec(lambda key, kind: [f"apm deny {key}"], rf"denied|{_REMOVAL}"),
+    "revoke-approval": ChangeSpec(
+        lambda key, kind: [{"edit": "revoke", "pkg": key}], rf"not approved|{_REMOVAL}"
+    ),
     "definition-changed": ChangeSpec(
-        lambda key, kind, path: [{"edit": "redefine", "pkg": key, "kind": kind}],
+        lambda key, kind: [{"edit": "redefine", "pkg": key, "kind": kind}],
         r"definition changed since approval",
     ),
     "org-deny": ChangeSpec(_org("exec-deny-all"), rf"deny_all|denied|{_REMOVAL}"),
@@ -501,6 +434,9 @@ CHANGES: Mapping[str, ChangeSpec] = {
 # -- rows -------------------------------------------------------------------
 
 
+PATHS = paths()
+
+
 def registered() -> list[tuple[GateSlice, GateRow]]:
     return [(gate_slice, row) for gate_slice in slices() for row in gate_slice.rows]
 
@@ -510,9 +446,9 @@ def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
     path, change, kind = gate_row.parts
     spec, how = PATHS[path], CHANGES[change]
     key = gate_slice.package + spec.key_suffix
-    witness = [] if kind == "script" else [f"{key}/{kind}/{gate_slice.target}"]
-    arrange = (spec.arrange or _default_arrange)(key)
-    given: list[object] = []
+    witness = [] if kind not in GATED_KINDS else [f"{key}/{kind}/{gate_slice.target}"]
+    arrange = spec.arrange(key)
+    given: list[Step] = []
     if how.gate_off_first:
         given.append({"edit": "gate-off"})
         arrange = [step for step in arrange if not str(step).startswith("apm approve")]
@@ -520,14 +456,12 @@ def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
     if spec.sibling:
         given.append("apm install p-skill")
     given += arrange[1:]
-    when: list[object] = [{"edit": "mark", "witness": witness}]
-    when += how.apply(key, kind, path)
+    apply = spec.change_steps.get(change, how.apply)
+    when: list[Step] = [{"edit": "mark", "witness": witness}, *apply(key, kind)]
     when += [step.format(key=key) if isinstance(step, str) else step for step in spec.act]
     if how.refuses_package:
         when.append(f"apm uninstall {key}")
-    announce = gate_row.announce
-    if announce is None:
-        announce = _FROZEN_REFUSAL if "frozen" in path or path == "audit-ci" else how.announce
+    announce = gate_row.announce or spec.announce or how.announce
     row = Row(
         id=gate_row.id,
         promises=PROMISES,
@@ -570,16 +504,22 @@ def test_gate_change_removes_on_the_next_mutating_command(
     replay = GateReplay(lifecycle_world, row, scope=scope)
     replay.replay()
     assert replay.removal is not None, "no removing step ran after the gate change"
+    before, result, after = replay.removal
+    # A removing step that succeeds deletes the surface files (or edits shared
+    # ones); one that refuses or only plans keeps them byte for byte.
+    removed = result.returncode == 0 and "--dry-run" not in result.command
+    unchanged = dict(gate_row.unchanged)
+    absent: dict[str, tuple[str, ...]] = {}
+    if removed and not gate_row.shared:
+        absent = dict(gate_row.surface)
+    elif not removed:
+        unchanged = {**unchanged, **gate_row.surface}
     check_obligation(
         gate_row.id,
         strength=STRENGTH,
-        before=replay.at_change,
-        after=replay.observe(),
-        result=replay.removal,
-        evidence=Evidence(
-            absent=gate_row.absent,
-            unchanged=gate_row.unchanged,
-            output_matches=(announce,),
-        ),
+        before=before,
+        after=after,
+        result=result,
+        evidence=Evidence(absent=absent, unchanged=unchanged, output_matches=(announce,)),
         scope=scope,
     )

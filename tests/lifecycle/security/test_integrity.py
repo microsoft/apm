@@ -194,8 +194,8 @@ def _package_copies(world: World, name: str) -> list[Path]:
 
 
 @contextlib.contextmanager
-def _moved_upstream(world: World, slug: str, file_name: str, text: str):
-    """Serve *slug* from a private copy whose tag moved to a commit changing *file_name*.
+def _moved_upstream(world: World, slug: str, file_name: str, edit: Callable[[str], str]):
+    """Serve *slug* from a private copy whose tag moved to a commit that edits *file_name*.
 
     Core gap: WorldServices has no public repository override; the shared
     per-worker map is swapped for this test only and restored after.
@@ -210,7 +210,7 @@ def _moved_upstream(world: World, slug: str, file_name: str, text: str):
     changed = [path for path in work.rglob(file_name) if ".git" not in path.parts]
     assert changed, f"{slug} has no {file_name}"
     for path in changed:
-        _append(path, text)
+        path.write_text(edit(path.read_text(encoding="utf-8")), encoding="utf-8")
     branch = subprocess.run(
         ("git", "--git-dir", str(copy), "symbolic-ref", "HEAD"),
         env=world.env,
@@ -223,12 +223,19 @@ def _moved_upstream(world: World, slug: str, file_name: str, text: str):
         ("tag", "-f", TAG),
         ("push", "-qf", "origin", f"HEAD:{branch}", f"refs/tags/{TAG}"),
     ):
-        subprocess.run((*git, "-C", str(work), *args), env=world.env, check=True, capture_output=True)
+        subprocess.run(
+            (*git, "-C", str(work), *args), env=world.env, check=True, capture_output=True
+        )
     services._repositories[slug] = copy
     try:
         yield
     finally:
         services._repositories[slug] = original
+
+
+def _pending(phrase: str) -> str:
+    """Reason of a strict expected failure whose tracking issue is maintainer-routed."""
+    return f"S-pending (neutral issue to follow): {phrase}"
 
 
 @dataclass(frozen=True)
@@ -252,7 +259,7 @@ class Expect:
     present: tuple[str, ...] = ()
     # Extra state fact on the world after the op (raises AssertionError).
     check: Callable[[World], None] | None = None
-    xfail: str | None = None  # "#<issue> <neutral text>" -> strict expected failure
+    xfail: str | None = None  # _pending(<phrase>) -> strict expected failure
     smoke: bool = False
 
 
@@ -296,7 +303,9 @@ def _drop_recorded_skill_hash(world: World, stack: contextlib.ExitStack) -> None
 
 
 def _move_skill_upstream(world: World, stack: contextlib.ExitStack) -> None:
-    stack.enter_context(_moved_upstream(world, "lifecycle/p-skill", "SKILL.md", "\nMoved.\n"))
+    stack.enter_context(
+        _moved_upstream(world, "lifecycle/p-skill", "SKILL.md", lambda text: text + "\nMoved.\n")
+    )
 
 
 def _skill_hash_matches_disk(world: World) -> None:
@@ -325,7 +334,9 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
     },
     cells={
         ("audit-ci", "disk-or-cache"): Expect(
-            1, (_DRIFT, r"modified: \.agents/skills/p-skill/SKILL\.md"), unchanged=_SKILL_STATE,
+            1,
+            (_DRIFT, r"modified: \.agents/skills/p-skill/SKILL\.md"),
+            unchanged=_SKILL_STATE,
             smoke=True,
         ),
         ("audit-ci", "lock-edited"): Expect(1, (_DRIFT,), unchanged=_SKILL_STATE),
@@ -342,7 +353,8 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
         # Plain install keeps a hand-edited file and warns (drift-detection.md).
         ("install", "disk-or-cache"): Expect(
-            0, (r"Kept user-edited file \.agents/skills/p-skill/SKILL\.md",),
+            0,
+            (r"Kept user-edited file \.agents/skills/p-skill/SKILL\.md",),
             unchanged=_SKILL_STATE,
         ),
         # Install re-records the hash of the bytes it deployed.
@@ -431,8 +443,7 @@ GIT_CONTENT_HASH = ArtifactSlice(
         ("audit-ci", "lock-edited"): Expect(
             1,
             unchanged=_SKILL_STATE,
-            xfail="#0 audit --ci passes a lockfile whose package content_hash was edited "
-            "while install --frozen refuses it",
+            xfail=_pending("audit and frozen agree on content hash"),
         ),
         ("audit-ci", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
@@ -491,9 +502,10 @@ def _edit_hook_pin(world: World, stack: contextlib.ExitStack) -> None:
 
 
 def _move_hook_upstream(world: World, stack: contextlib.ExitStack) -> None:
-    stack.enter_context(
-        _moved_upstream(world, "lifecycle/p-exec", "session.json", "\n")
-    )
+    def edit(text: str) -> str:
+        return text.replace("echo p-exec", "echo moved")
+
+    stack.enter_context(_moved_upstream(world, "lifecycle/p-exec", "session.json", edit))
 
 
 _HOOK_STATE = (LOCK, MANIFEST, ".github/hooks")
@@ -522,8 +534,7 @@ APPROVAL_PINS = ArtifactSlice(
         ("frozen", "lock-edited"): Expect(
             1,
             unchanged=_HOOK_STATE,
-            xfail="#0 install --frozen exits 0 after a hook pin stops matching; it removes "
-            "the hook while apm.lock.yaml still records it, and audit --ci exits 1",
+            xfail=_pending("frozen and approval pin agreement"),
         ),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
         ("install", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
@@ -540,7 +551,8 @@ APPROVAL_PINS = ArtifactSlice(
         ),
         # A moved tag with a changed hook is accepted as content, never as approved.
         ("update", "upstream-or-proxy"): Expect(
-            0, (r"New locked content for 1 dependency", r"parked pending approval"),
+            0,
+            (r"New locked content for 1 dependency", r"parked pending approval"),
             absent=(HOOK,),
         ),
     },

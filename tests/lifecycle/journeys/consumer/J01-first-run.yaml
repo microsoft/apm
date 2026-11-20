@@ -89,26 +89,26 @@ steps:
 known_cells:
   - id: j01-init-third-party-tip
     law: FORBID
-    tracking: "#0"
+    tracking: "#4181"
     step: 3
     match: "forbidden 'agentrc' printed"
   - id: j01-sample-claude-command-mode-key
     law: FORBID
-    tracking: "#0"
+    tracking: "#4182"
     step: 4
     match: "forbidden '\\[!\\]' printed: .*frontmatter keys not supported for claude commands"
   - id: j01-transitive-unpinned-notice
     law: FORBID
-    tracking: "#0"
+    tracking: "#4183"
     step: 4
     match: "forbidden 'dependency unpinned' printed"
   - id: j01-converged-install-reports-integrated
     law: FORBID
-    tracking: "#0"
+    tracking: "#4184"
     step: 6
     match: "forbidden 'integrated' printed"
   - id: j01-converged-install-repeats-warnings
     law: FORBID
-    tracking: "#0"
+    tracking: "#4184"
     step: 6
     match: "forbidden '\\[!\\]' printed"
