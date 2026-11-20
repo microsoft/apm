@@ -21,6 +21,7 @@ Focuses on:
 from __future__ import annotations
 
 import os
+import subprocess
 from threading import Thread
 from unittest.mock import MagicMock, patch
 
@@ -28,12 +29,17 @@ import pytest
 
 from apm_cli.core import azure_cli as _azure_cli_mod
 from apm_cli.core.auth import (
+    AdoAuthChainExhaustedError,
     AuthContext,
     AuthResolver,
     HostInfo,
     _org_to_env_suffix,
 )
-from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.core.token_manager import GitHelperCredential, GitHubTokenManager
+from apm_cli.models.dependency.host_virtual import UnsupportedHostQualifiedVirtualPackageError
+from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Autouse fixtures
@@ -65,39 +71,36 @@ def _disable_git_credential():
 
 
 class TestHostInfoDisplayName:
-    def test_no_port_returns_bare_host(self) -> None:
-        hi = HostInfo(host="example.com", kind="generic", has_public_repos=True, api_base="x")
-        assert hi.display_name == "example.com"
-
-    def test_non_standard_port_appends_port(self) -> None:
-        hi = HostInfo(
-            host="bb.corp.com", kind="generic", has_public_repos=True, api_base="x", port=7990
-        )
-        assert hi.display_name == "bb.corp.com:7990"
-
-    def test_well_known_port_443_suppressed(self) -> None:
-        hi = HostInfo(
-            host="github.com", kind="github", has_public_repos=True, api_base="x", port=443
-        )
-        assert hi.display_name == "github.com"
-
-    def test_well_known_port_80_suppressed(self) -> None:
-        hi = HostInfo(
-            host="github.com", kind="github", has_public_repos=True, api_base="x", port=80
-        )
-        assert hi.display_name == "github.com"
-
-    def test_well_known_port_22_suppressed(self) -> None:
-        hi = HostInfo(
-            host="github.com", kind="github", has_public_repos=True, api_base="x", port=22
-        )
-        assert hi.display_name == "github.com"
-
-    def test_port_7999_included(self) -> None:
-        hi = HostInfo(
-            host="git.corp.com", kind="generic", has_public_repos=True, api_base="x", port=7999
-        )
-        assert hi.display_name == "git.corp.com:7999"
+    @pytest.mark.parametrize(
+        ("host", "kind", "port", "expected"),
+        [
+            ("example.com", "generic", None, "example.com"),
+            ("github.com", "github", None, "github.com"),
+            ("bb.corp.com", "generic", 7990, "bb.corp.com:7990"),
+            ("git.corp.com", "generic", 7999, "git.corp.com:7999"),
+            ("bitbucket.corp.com", "generic", 7999, "bitbucket.corp.com:7999"),
+            ("github.com", "github", 443, "github.com"),
+            ("github.com", "github", 80, "github.com"),
+            ("github.com", "github", 22, "github.com"),
+            ("gitlab.com", "generic", 22, "gitlab.com"),
+            ("internal.git", "generic", 80, "internal.git"),
+        ],
+        ids=[
+            "no-port-generic",
+            "no-port-github",
+            "port-7990",
+            "port-7999",
+            "port-7999-bitbucket",
+            "port-443-suppressed",
+            "port-80-suppressed",
+            "port-22-suppressed",
+            "port-22-suppressed-generic",
+            "port-80-suppressed-generic",
+        ],
+    )
+    def test_display_name(self, host, kind, port, expected) -> None:
+        hi = HostInfo(host=host, kind=kind, has_public_repos=True, api_base="x", port=port)
+        assert hi.display_name == expected
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +154,14 @@ class TestDetectTokenType:
             ("ghr_refreshtoken", "github-app"),
             ("some_random_token", "unknown"),
             ("", "unknown"),
+            ("github_pat_abc123", "fine-grained"),
+            ("ghp_abc123", "classic"),
+            ("ghu_abc123", "oauth"),
+            ("gho_abc123", "oauth"),
+            ("ghs_abc123", "github-app"),
+            ("ghr_abc123", "github-app"),
+            ("some-random-token", "unknown"),
+            ("Bearer eyJxxx", "unknown"),
         ],
     )
     def test_token_prefixes(self, token: str, expected: str) -> None:
@@ -163,17 +174,23 @@ class TestDetectTokenType:
 
 
 class TestGitlabRestHeaders:
-    def test_returns_empty_dict_when_no_token(self) -> None:
-        assert AuthResolver.gitlab_rest_headers(None) == {}
-        assert AuthResolver.gitlab_rest_headers("") == {}
-
-    def test_returns_private_token_header_by_default(self) -> None:
-        headers = AuthResolver.gitlab_rest_headers("mytoken")
-        assert headers == {"PRIVATE-TOKEN": "mytoken"}
-
-    def test_returns_bearer_header_when_oauth_bearer(self) -> None:
-        headers = AuthResolver.gitlab_rest_headers("mytoken", oauth_bearer=True)
-        assert headers == {"Authorization": "Bearer mytoken"}
+    @pytest.mark.parametrize(
+        ("token", "oauth_bearer", "expected"),
+        [
+            (None, False, {}),
+            ("", False, {}),
+            ("mytoken", False, {"PRIVATE-TOKEN": "mytoken"}),
+            ("glpat-secret", False, {"PRIVATE-TOKEN": "glpat-secret"}),
+            ("mytoken", True, {"Authorization": "Bearer mytoken"}),
+            ("oauth-access-token", True, {"Authorization": "Bearer oauth-access-token"}),
+        ],
+        ids=["none", "empty", "pat", "glpat", "oauth-bearer", "oauth-access-token"],
+    )
+    def test_headers(self, token, oauth_bearer, expected) -> None:
+        if oauth_bearer:
+            assert AuthResolver.gitlab_rest_headers(token, oauth_bearer=True) == expected
+        else:
+            assert AuthResolver.gitlab_rest_headers(token) == expected
 
 
 @pytest.mark.parametrize(
@@ -197,17 +214,13 @@ def test_rest_credential_header_builders(builder, token, expected) -> None:
 
 
 class TestOrgToEnvSuffix:
-    def test_simple_org(self) -> None:
-        assert _org_to_env_suffix("myorg") == "MYORG"
-
-    def test_hyphen_becomes_underscore(self) -> None:
-        assert _org_to_env_suffix("my-org") == "MY_ORG"
-
-    def test_mixed_case(self) -> None:
-        assert _org_to_env_suffix("AcmeCorp") == "ACMECORP"
-
-    def test_multiple_hyphens(self) -> None:
-        assert _org_to_env_suffix("a-b-c") == "A_B_C"
+    @pytest.mark.parametrize(
+        ("org", "expected"),
+        [("myorg", "MYORG"), ("my-org", "MY_ORG"), ("AcmeCorp", "ACMECORP"), ("a-b-c", "A_B_C")],
+        ids=["simple", "hyphen", "mixed-case", "multiple-hyphens"],
+    )
+    def test_suffix(self, org, expected) -> None:
+        assert _org_to_env_suffix(org) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +324,110 @@ class TestResolveForDep:
             dep = self._make_dep_ref("git.corp.com", None, port=7990)
             ctx = resolver.resolve_for_dep(dep)
             assert ctx.host_info.port == 7990
+
+    def test_resolve_for_dep_threads_host_type(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            dep = self._make_dep_ref("code.acme.com", "group/repo")
+            dep.host_type = "gitlab"
+            ctx = resolver.resolve_for_dep(dep)
+            assert ctx.host_info.kind == "gitlab"
+            assert ctx.host_info.api_base == "https://code.acme.com/api/v4"
+
+    @pytest.mark.parametrize(
+        ("reference", "env", "expected_source"),
+        [
+            (
+                "github.com/acme/repo",
+                {"GITHUB_APM_PAT_ACME": "ghp_org", "GITHUB_APM_PAT": "ghp_global"},
+                "GITHUB_APM_PAT_ACME",
+            ),
+            (
+                "github.corp.example.com/acme/repo",
+                {"GITHUB_HOST": "github.corp.example.com", "GITHUB_APM_PAT_ACME": "ghp_ghes"},
+                "GITHUB_APM_PAT_ACME",
+            ),
+            (
+                "dev.azure.com/acme/project/repo",
+                {"ADO_APM_PAT": "ado_pat"},
+                "ADO_APM_PAT",
+            ),
+            (
+                "dev.azure.com/acme/My%20Project/_git/repo",
+                {"ADO_APM_PAT": "ado_pat"},
+                "ADO_APM_PAT",
+            ),
+            (
+                "acme.visualstudio.com/project/_git/repo",
+                {"ADO_APM_PAT": "ado_pat"},
+                "ADO_APM_PAT",
+            ),
+            (
+                "gitlab.corp.example.com/group/subgroup/repo",
+                {
+                    "GITLAB_HOST": "gitlab.corp.example.com",
+                    "GITLAB_APM_PAT": "glpat_token",
+                    "GITHUB_APM_PAT_GROUP": "ghp_wrong",
+                    "GITHUB_APM_PAT": "ghp_wrong_global",
+                },
+                "GITLAB_APM_PAT",
+            ),
+            (
+                "bitbucket.org/team/repo",
+                {},
+                "git-credential-fill",
+            ),
+        ],
+    )
+    def test_resolve_for_dep_preserves_credential_source_by_host_shape(
+        self,
+        reference: str,
+        env: dict[str, str],
+        expected_source: str,
+    ) -> None:
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="helper-token",
+            ),
+        ):
+            resolver = AuthResolver()
+            dep = DependencyReference.parse(reference)
+            ctx = resolver.resolve_for_dep(dep)
+
+        assert ctx.source == expected_source
+
+    def test_unknown_platform_package_host_resolves_no_credential_source(self) -> None:
+        reference = "github.corp.example.com/acme/internal-skills/.agents/skills/jdk-installer"
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_must_not_use"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="helper-token",
+            ) as fill,
+        ):
+            with pytest.raises(UnsupportedHostQualifiedVirtualPackageError) as exc:
+                DependencyReference.parse(reference)
+
+        assert exc.value.host == "github.corp.example.com"
+        fill.assert_not_called()
+
+    def test_nested_host_in_virtual_path_does_not_reroute_credentials(self) -> None:
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT_USER": "ghp_must_not_use"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="helper-token",
+            ) as fill,
+        ):
+            with pytest.raises(ValueError):
+                DependencyReference.parse("evil.com/github.com/user/repo/prompts/file.prompt.md")
+
+        fill.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +629,14 @@ class TestNotifyAuthSource:
         resolver = AuthResolver()
         # ctx=None → source check does getattr(None, "source", "none") == "none" → return
         resolver.notify_auth_source("github.com", None)
+
+    def test_empty_host_with_verbose_logger_emits_nothing(self) -> None:
+        resolver = AuthResolver()
+        resolver.set_logger(MagicMock(verbose=True))
+        ctx = MagicMock(source="env", auth_scheme=None)
+        with patch("apm_cli.utils.console._rich_echo") as echo:
+            resolver.notify_auth_source("", ctx)
+        echo.assert_not_called()
         # No exception expected
 
 
@@ -642,6 +767,244 @@ class TestTryWithFallbackCredentialChain:
 
                 with pytest.raises(RuntimeError, match="fail"):
                     resolver.try_with_fallback("github.com", _op)
+
+    def test_ado_rejected_bearer_falls_back_to_repository_credential(self) -> None:
+        provider = MagicMock()
+        provider.is_available.return_value = True
+        provider.get_bearer_token.return_value = "eyJ" + "x" * 120
+        attempts: list[tuple[str | None, dict[str, str]]] = []
+
+        def _op(token, env):
+            attempts.append((token, env))
+            if token == "gcm-token":
+                return "ok"
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+            result = resolver.try_with_fallback(
+                "dev.azure.com",
+                _op,
+                org="contoso",
+                path="contoso/platform/tools",
+            )
+
+        assert result == "ok"
+        assert [token for token, _env in attempts] == [
+            provider.get_bearer_token.return_value,
+            "gcm-token",
+        ]
+        credential_fill.assert_called_once_with(
+            "dev.azure.com",
+            port=None,
+            path="contoso/platform/_git/tools",
+        )
+        gcm_env = attempts[-1][1]
+        count = int(gcm_env.get("GIT_CONFIG_COUNT", "0"))
+        pairs = [
+            (gcm_env[f"GIT_CONFIG_KEY_{i}"], gcm_env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(count)
+        ]
+        assert any(
+            key == "http.extraheader" and value.startswith("Authorization: Basic ")
+            for key, value in pairs
+        )
+
+    def test_ado_wrapped_git_stderr_falls_back_to_repository_credential(self) -> None:
+        inner = subprocess.CalledProcessError(
+            128,
+            ["git", "clone"],
+            stderr=b"fatal: unable to access: The requested URL returned error: 401",
+        )
+        wrapped = RuntimeError("git clone failed")
+        wrapped.__cause__ = inner
+        attempts: list[str | None] = []
+
+        def _op(token, _env):
+            attempts.append(token)
+            if token == "gcm-token":
+                return "ok"
+            raise wrapped
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+            result = resolver.try_with_fallback("dev.azure.com", _op, path="org/proj/_git/repo")
+
+        assert result == "ok"
+        assert attempts[-1] == "gcm-token"
+        credential_fill.assert_called_once()
+
+    def test_ado_tf401_does_not_probe_credential_helper(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+
+            def _op(_token, _env):
+                raise RuntimeError("TF401019: The Git repository does not exist")
+
+            with pytest.raises(RuntimeError, match="TF401019"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        credential_fill.assert_not_called()
+
+    def test_ado_empty_fill_logs_and_wraps_terminal_error(self) -> None:
+        logs: list[str] = []
+
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=None,
+            ),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError, match="git credential fill"):
+                resolver.try_with_fallback(
+                    "dev.azure.com",
+                    _op,
+                    verbose_callback=logs.append,
+                )
+
+        assert any("git credential fill returned no credential" in line for line in logs)
+
+    def test_ado_server_exhausted_omits_az_login(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {"ADO_HOST": "ado.example.com"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=None,
+            ),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError) as raised:
+                resolver.try_with_fallback("ado.example.com", _op)
+
+        message = str(raised.value)
+        assert "git credential fill" in message
+        assert "ADO_APM_PAT" in message
+        assert "az login" not in message
+        assert "ADO_APM_PAT was" not in message
+
+    def test_ado_services_exhausted_names_only_attempted_steps(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=None,
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError) as raised:
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        message = str(raised.value)
+        steps = [
+            message.find("ADO_APM_PAT was rejected"),
+            message.find("az CLI bearer was not available"),
+            message.find("git credential fill returned no credential"),
+        ]
+        assert all(position >= 0 for position in steps), message
+        assert steps == sorted(steps), message
+        assert "az login" in message
+
+    def test_ado_fill_non_auth_failure_is_not_wrapped(self) -> None:
+        def _op(token, _env):
+            if token == "gcm-token":
+                raise RuntimeError("network timeout")
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(RuntimeError, match="network timeout") as raised:
+                resolver.try_with_fallback("dev.azure.com", _op)
+        assert type(raised.value) is RuntimeError
+        assert not isinstance(raised.value, AdoAuthChainExhaustedError)
+
+    def test_ado_fill_auth_failure_is_wrapped(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError, match="git credential fill"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+    def test_ado_network_failure_does_not_probe_credential_helper(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_git_helper_credential",
+                return_value=_helper_credential("gcm-token"),
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+
+            def _op(_token, _env):
+                raise RuntimeError("network timeout")
+
+            with pytest.raises(RuntimeError, match="network timeout"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        credential_fill.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -781,3 +1144,40 @@ class TestResolveThreadSafety:
             assert len(results) == 20
             # All should be the same cached object
             assert all(r is results[0] for r in results)
+
+
+def _helper_credential(password: str) -> GitHelperCredential:
+    return GitHelperCredential(host="dev.azure.com", password=password, username="helper-user")
+
+
+class TestDescribeCredentialTried:
+    """Diagnostics name the credential source tried, never its value (#4174)."""
+
+    def test_names_the_resolved_source_not_the_value(self) -> None:
+        with patch.dict(os.environ, {"GITHUB_APM_PAT_ACME": "sentinel-acme-value"}, clear=True):
+            resolver = AuthResolver()
+            resolver.resolve("acme.ghe.com", org="acme")
+            text = resolver.describe_credential_tried("acme.ghe.com", "acme")
+        assert text == "credential tried: GITHUB_APM_PAT_ACME"
+
+    def test_never_resolves_to_render(self) -> None:
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "sentinel"}, clear=True):
+            resolver = AuthResolver()
+            with patch.object(resolver, "_resolve_token") as resolve_token:
+                text = resolver.describe_credential_tried("github.com", "acme")
+        resolve_token.assert_not_called()
+        assert text == "no credential sent"
+
+    def test_lists_sources_checked_when_none_held_a_credential(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None),
+            patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None),
+        ):
+            resolver = AuthResolver()
+            resolver.resolve("github.com", org="acme")
+            text = resolver.describe_credential_tried("github.com", "acme")
+        assert text == (
+            "no credential found in GITHUB_APM_PAT_ACME, GITHUB_APM_PAT, GITHUB_TOKEN, "
+            "GH_TOKEN, gh auth token, git credential helper"
+        )

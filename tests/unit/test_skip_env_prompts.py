@@ -4,7 +4,11 @@ import os
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.adapters.client.base import MCPClientAdapter
+
+pytestmark = pytest.mark.unit
 
 
 class TestShouldSkipEnvPrompts(unittest.TestCase):

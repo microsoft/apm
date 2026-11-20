@@ -385,6 +385,12 @@ def test_ratchet_rejects_unlisted_and_fixed_entries() -> None:
     ]
 
 
+def test_group_option_before_a_subcommand_resolves_the_subcommand() -> None:
+    assert resolve(["--verbose", "install", "--frozen"]).ok
+    missing = resolve(["--verbose", "missing-command"])
+    assert missing.unknown_command == "missing-command"
+
+
 def _command(path: str) -> click.Command:
     result = resolve(path.split())
     assert result.ok and result.command is not None

@@ -1,0 +1,25 @@
+# apm journey golden v1: J01 step 4
+$ apm install microsoft/apm-sample-package#v1.0.0
+[exit 0]
+--- stdout
+[*] Validating 1 package...
+[+] microsoft/apm-sample-package#v1.0.0
+[*] Updated apm.yml with 1 new package(s)
+[>] Installing 1 new package...
+[>] Resolving microsoft/apm-sample-package...
+[>] Resolving awesome-copilot-review-and-refactor...
+[i] Targets: claude, copilot  (source: apm.yml)
+  [+] github.com/github/awesome-copilot/skills/review-and-refactor #default @<SHA8>
+  |-- Skill integrated -> .agents/skills/, .claude/skills/
+  [+] microsoft/apm-sample-package #v1.0.0 @<SHA8>
+  |-- 2 prompts integrated -> .github/prompts/
+  |-- 2 agents integrated -> .claude/agents/, .github/agents/
+  |-- 2 commands integrated -> .claude/commands/
+  |-- 2 instruction(s) integrated -> .claude/rules/, .github/instructions/
+  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
+[i] Added apm_modules/ to .gitignore
+  [!] [apm-sample-package] Claude command accessibility-audit: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] [apm-sample-package] Claude command design-review: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] 1 dependency unpinned: github/awesome-copilot -- apm.lock.yaml pins the resolved commit; to track releases on update, add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)
+[*] Installed 2 APM dependencies in <DUR>.
+--- stderr

@@ -1,0 +1,74 @@
+# J12 Local edit, drift and recovery: hand-edit a deployed skill, see the drift,
+# export the edit as a patch, restore the locked content the way the advice
+# says, then plant hidden Unicode and strip it before the CI gate (#4110).
+# Schema: test_journeys.py. The deployed skill is the world's p-skill.
+schema: 1
+id: J12
+persona: consumer
+title: Local edit, drift and recovery
+docs: [enterprise/drift-detection.md, reference/cli/export-patch.md, enterprise/security.md]
+world:
+  git: init
+  setup:
+    - apm install lifecycle/p-skill#v1.0.0
+steps:
+  - n: 1
+    edit:
+      - {append: .agents/skills/p-skill/SKILL.md, text: "\nA local note.\n"}
+    run: [apm audit, apm audit --ci]
+    exit: [0, 1]
+    drift: true
+    files: []
+    docs:
+      page: enterprise/drift-detection.md
+      commands: [apm audit --ci]
+    key_lines:
+      - "[x] Drift detected: 1 file(s)"
+      - "- .agents/skills/p-skill/SKILL.md  [lifecycle/p-skill]"
+      - "hash-drift: .agents/skills/p-skill/SKILL.md (dep=lifecycle/p-skill"
+      - "run 'apm export-patch' to export them as upstream patches"
+    forbidden_lines: [Run 'apm install' to re-sync deployed files]
+    remediate:
+      - {delete: 'hash-drift: (\S+) \(dep='}
+      - {advice: apm install}
+  - n: 2
+    run: [apm export-patch]
+    exit: 0
+    drift: true
+    files: [patches/lifecycle__p-skill@v1.0.0.patch]
+    docs:
+      page: reference/cli/export-patch.md
+      commands: [apm export-patch]
+    key_lines:
+      - "[i] .agents/skills/p-skill/SKILL.md -> lifecycle/p-skill:skills/p-skill/SKILL.md"
+      - "[*] Exported 1 edit(s) into 1 patch file(s)"
+  - n: 3
+    remediate_from: 1
+    run: [apm install]
+    exit: 0
+    note: the step-1 advice (delete the listed file, rerun 'apm install') runs first, in place
+  - n: 4
+    run: [apm audit]
+    exit: 0
+    key_lines: ["[+] No drift detected"]
+    forbidden_lines: ["[x]", "[!]"]
+  - n: 5
+    edit:
+      - {replace: .agents/skills/p-skill/SKILL.md, old: "Use p-skill.", new: "Use p-skill.\u202e"}
+    run: [apm audit --strip --dry-run, apm audit --strip, apm audit --ci --no-drift]
+    exit: 0
+    drift: true
+    files: [.agents/skills/p-skill/SKILL.md]
+    docs:
+      page: reference/cli/audit.md
+      commands: [apm audit --strip --dry-run, apm audit --strip, apm audit --ci --no-drift]
+    key_lines:
+      - "[i] 1 file(s) would be modified"
+      - "[+]   Cleaned: .agents/skills/p-skill/SKILL.md"
+      - "check(s) passed"
+known_cells:
+  - id: J12-plain-audit-drift-error-line-exits-0
+    law: O5
+    tracking: "#4191"
+    step: 1
+    match: "'apm audit' printed '\\[x\\] Drift detected: 1 file\\(s\\)' but exited 0"

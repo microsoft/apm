@@ -8,6 +8,8 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import manifest_file
+
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
@@ -287,7 +289,7 @@ def _watch_mode(
             observer.schedule(event_handler, ".github/agents", recursive=True)
             watch_paths.append(".github/agents/")
 
-        if Path(APM_YML_FILENAME).exists():
+        if manifest_file(Path(".")).exists():
             observer.schedule(event_handler, ".", recursive=False)
             watch_paths.append(APM_YML_FILENAME)
 

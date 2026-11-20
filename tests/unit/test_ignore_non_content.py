@@ -15,6 +15,8 @@ import pytest
 
 from apm_cli.security.gate import ignore_non_content
 
+pytestmark = pytest.mark.component
+
 
 class TestIgnoreNonContent:
     def test_filters_apm_pin_at_root(self, tmp_path: Path):

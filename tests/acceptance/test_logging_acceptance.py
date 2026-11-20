@@ -14,13 +14,15 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.results import InstallResult
 from apm_cli.utils.console import STATUS_SYMBOLS
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

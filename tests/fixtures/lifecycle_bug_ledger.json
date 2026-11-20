@@ -71,6 +71,60 @@
   ],
   "bugs": [
     {
+      "issue": 1662,
+      "summary": "Traps user-authored same-name rules, hooks and MCP configs being overwritten or deleted (#1662); needs many targets, global scope and JSONC.",
+      "failure_modes": ["cleanup", "idempotency", "ownership"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_user_authored_name_collision_lifecycle.py::test_identical_user_hook_and_root_context_survive_uninstall_and_compile_clean",
+        "tests/integration/test_user_authored_name_collision_lifecycle.py::test_identity_and_case_only_collisions_survive_full_chain",
+        "tests/integration/test_user_authored_name_collision_lifecycle.py::test_jsonc_mcp_configs_are_never_rewritten_from_scratch",
+        "tests/integration/test_user_authored_name_collision_lifecycle.py::test_project_instruction_edit_still_refreshes_native_rule",
+        "tests/integration/test_user_authored_name_collision_lifecycle.py::test_same_name_user_rule_survives_global_install_and_uninstall",
+        "tests/integration/test_user_authored_name_collision_lifecycle.py::test_same_name_user_rules_survive_install_update_uninstall",
+        "tests/integration/test_user_authored_name_collision_lifecycle.py::test_uninstall_without_lockfile_keeps_user_instruction_files"
+      ]
+    },
+    {
+      "issue": 1918,
+      "summary": "Registered marketplace refs and branch-selected artifacts are explicitly excluded.",
+      "failure_modes": ["reference"],
+      "properties": ["source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_github_registered_branch_installs_pilot_artifacts",
+        "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_gitlab_registered_branch_installs_pilot_artifacts"
+      ]
+    },
+    {
+      "issue": 2000,
+      "summary": "Asserts manifest comments and authoring bytes, beyond replay-row assertions.",
+      "failure_modes": ["ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_manifest_rewrite_preservation_lifecycle.py::test_manifest_rewrites_preserve_comments_and_layout"
+      ]
+    },
+    {
+      "issue": 2089,
+      "summary": "Traps Kiro agent frontmatter filtering, nested paths and fail-closed tools; needs kiro target and deployed byte content.",
+      "failure_modes": ["cleanup", "idempotency", "routing", "transaction"],
+      "properties": [
+        "idempotency.byte_stable",
+        "ownership.preserve_unowned",
+        "routing.authorized_targets_only",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_kiro_agent_lifecycle.py::test_kiro_agent_coexistence_with_steering_and_hooks",
+        "tests/integration/test_kiro_agent_lifecycle.py::test_kiro_agent_compatible_deploy_and_reinstall",
+        "tests/integration/test_kiro_agent_lifecycle.py::test_kiro_agent_incompatible_tools_fail_closed",
+        "tests/integration/test_kiro_agent_lifecycle.py::test_kiro_agent_nested_path_identity",
+        "tests/integration/test_kiro_agent_lifecycle.py::test_kiro_agent_stale_removal",
+        "tests/integration/test_kiro_agent_lifecycle.py::test_kiro_agent_update_replacement",
+        "tests/integration/test_kiro_agent_lifecycle.py::test_kiro_target_autodetection"
+      ]
+    },
+    {
       "issue": 2306,
       "fixed_in": "0.27.0",
       "summary": "Repeated install rewrote unchanged ownership and lockfile timestamps.",
@@ -101,6 +155,84 @@
       ]
     },
     {
+      "issue": 2334,
+      "summary": "Traps older CLI refusing newer-generator lockfiles before writes; needs apm_version lockfile edits, bundles and user scope.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_bundle_from_newer_apm_installs_with_a_warning",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_dependency_failure_is_not_a_version_refusal",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_equal_or_older_generators_continue",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_every_lockfile_writer_stamps_the_running_cli",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_flow_style_and_legacy_lockfiles_are_guarded",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_fresh_bundle_install_stamps_the_running_cli",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_older_cli_refuses_every_lockfile_command_without_mutation",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_unverifiable_generator_metadata_fails_closed",
+        "tests/integration/test_lockfile_generator_gate_lifecycle.py::test_user_scope_lockfile_is_guarded"
+      ]
+    },
+    {
+      "issue": 2345,
+      "summary": "Broad MCP/LSP configuration contract across targets and scopes (#2345); needs MCP registry, LSP plugins, user scope and native config bytes.",
+      "failure_modes": [
+        "idempotency",
+        "outcome",
+        "ownership",
+        "portability",
+        "routing",
+        "transaction"
+      ],
+      "properties": [
+        "idempotency.byte_stable",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "portability.byte_deterministic",
+        "routing.authorized_targets_only",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_ambient_http_mcp_registry_requires_opt_in_before_project_writes",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_ambient_registry_credentials_never_reach_manifest_or_output",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_ambient_registry_source_is_pinned_for_replay",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_claude_lsp_approved_declaring_package_is_discoverable",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_claude_lsp_collision_requires_force_and_force_reconciles",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_claude_lsp_install_writes_discoverable_skills_directory_plugin",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_claude_lsp_unapproved_package_is_not_discoverable",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_configured_mcp_registry_drives_global_direct_install",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_conflicting_manifest_targets_fail_before_installed_binary_writes",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_direct_mcp_requires_resolved_target_before_manifest_write",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_explicit_runtime_alias_overrides_saved_target_for_all_phases",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_frozen_failure_writes_no_package_or_service_state",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_global_direct_mcp_dry_run_creates_no_user_state",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_global_direct_mcp_uses_user_manifest_and_runtime_config",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_lsp_reinstall_and_update_keep_copilot_state_deterministic",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_lsp_target_contraction_revokes_dropped_claude_plugin_entry",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_lsp_uninstall_cleanup_failure_is_nonzero_and_actionable",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_lsp_write_failure_is_nonzero",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_malformed_saved_target_falls_back_to_strict_detection_without_writes",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_manifest_and_explicit_target_precedence_for_mcp_and_lsp",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_mcp_only_target_rejects_required_lsp_without_copilot_write",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_mcp_target_contraction_removes_only_apm_owned_native_config",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_multi_target_exclusion_applies_to_mcp_and_lsp",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_only_mcp_does_not_materialize_root_lsp",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_project_mcp_reinstall_repairs_canonical_ownership",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_saved_copilot_target_projects_to_copilot_for_direct_mcp",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_saved_target_drives_declared_mcp_and_lsp_without_package",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_saved_target_drives_direct_mcp_without_target_flag",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_saved_target_drives_user_scope_package_mcp_and_lsp",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_service_write_failure_is_nonzero",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_uninstalling_one_shared_root_retains_shared_dependency_ownership",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_unknown_global_registry_server_changes_no_user_state",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_unreachable_global_registry_changes_no_user_state",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_unresolved_package_services_fail_before_package_deployment",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_unset_target_keeps_normal_detection_for_package_without_services",
+        "tests/integration/test_config_surface_lifecycle_contract.py::test_user_scope_mcp_reinstall_keeps_global_copilot_state_isolated"
+      ]
+    },
+    {
       "issue": 2362,
       "fixed_in": "0.27.0",
       "summary": "Package target restrictions leaked hooks into sibling harnesses.",
@@ -128,7 +260,8 @@
       "failure_modes": ["observation", "outcome"],
       "properties": ["filesystem.open_world_observation", "outcome.status_matches_state"],
       "regression_tests": [
-        "tests/integration/test_unrecorded_drift_lifecycle_e2e.py::test_unrecorded_claim_fails_without_writes_and_install_repairs_idempotently"
+        "tests/integration/test_unrecorded_drift_lifecycle_e2e.py::test_unrecorded_claim_fails_without_writes_and_install_repairs_idempotently",
+        "tests/integration/test_unrecorded_drift_lifecycle_e2e.py::test_unrecorded_hidden_unicode_payload_cannot_pass_ci_audit"
       ]
     },
     {
@@ -152,6 +285,24 @@
       ]
     },
     {
+      "issue": 2506,
+      "summary": "Cursor user-scope behavior is outside the project-Copilot replay cell.",
+      "failure_modes": ["ownership", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_cursor_user_scope_chain_lifecycle.py::test_cursor_user_scope_rules_lifecycle"
+      ]
+    },
+    {
+      "issue": 2524,
+      "summary": "Traps pack certifying degraded marketplace metadata during outages (#2524); needs network marketplace and pack --check-clean.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_remote_marketplace_metadata_outage_lifecycle.py::test_remote_metadata_outage_never_certifies_degraded_marketplace"
+      ]
+    },
+    {
       "issue": 2558,
       "fixed_in": "Unreleased",
       "summary": "Global uninstall left managed Copilot hook files behind.",
@@ -159,6 +310,33 @@
       "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
       "regression_tests": [
         "tests/integration/test_ownership_invariant_lifecycle.py::test_apm_only_touches_owned_state_across_lifecycle"
+      ]
+    },
+    {
+      "issue": 2602,
+      "summary": "Traps TLS failure hints naming the wrong trust mode and non-atomic failed installs (#2602); needs HTTPS proxy and CA trust configuration.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_tls_trust_hint_lifecycle.py::test_tls_hint_matches_trust_mode_and_install_is_atomic"
+      ]
+    },
+    {
+      "issue": 2606,
+      "summary": "Traps per-dependency MCP targets scoping and per-target pruning; needs several targets, user scope, MCP config contents.",
+      "failure_modes": ["outcome", "ownership", "routing"],
+      "properties": [
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "routing.authorized_targets_only"
+      ],
+      "regression_tests": [
+        "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_global_target_scoped_install_keeps_servers_declared_for_other_targets",
+        "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_dependency_targets_scope_servers_per_target",
+        "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_exclude_reads_like_target",
+        "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_exclude_unknown_value_warns_and_alias_keeps_exit_code",
+        "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_retained_claims_survive_exclude_retarget_and_pending_updates",
+        "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_removing_the_last_mcp_server_is_reported_as_a_change"
       ]
     },
     {
@@ -172,6 +350,15 @@
       ]
     },
     {
+      "issue": 2637,
+      "summary": "Traps marketplace package --category round-trip into pack outputs; marketplace and pack are outside replay vocabulary.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_package_category_lifecycle.py::test_marketplace_package_category_round_trip"
+      ]
+    },
+    {
       "issue": 2744,
       "fixed_in": "Unreleased",
       "summary": "Legacy cached plugin upgrade deleted valid prior deployments.",
@@ -179,6 +366,23 @@
       "properties": ["source.ref_cache_coherent", "ownership.preserve_unowned"],
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_legacy_content_hash_upgrade_preserves_skills_and_converges"
+      ]
+    },
+    {
+      "issue": 2753,
+      "summary": "Traps GitLab namespace-ancestry policy composition and fail-closed partial chains; needs HTTPS policy proxy and policy cache.",
+      "failure_modes": ["auth", "cache", "outcome"],
+      "properties": [
+        "auth.credentials_isolated",
+        "cache.successful_reads_refresh_recency",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_ancestor_failure_never_applies_a_weaker_partial_chain",
+        "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_cached_composition_enforces_offline",
+        "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_install_and_audit_enforce_the_composed_ancestry",
+        "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_no_policy_in_any_namespace_is_clean_absence",
+        "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_pin_follows_the_nearest_policy_and_never_silently_repins"
       ]
     },
     {
@@ -199,6 +403,27 @@
       "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
+      ]
+    },
+    {
+      "issue": 2816,
+      "summary": "Tests target identity for Grok, not the replay model's Copilot target.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_grok_audit_target_lifecycle.py::test_audit_checks_retained_claims_without_replaying_dropped_targets",
+        "tests/integration/test_grok_audit_target_lifecycle.py::test_audit_preserves_current_intent_and_experimental_boundary",
+        "tests/integration/test_grok_audit_target_lifecycle.py::test_installed_legacy_mixed_targets_preserve_audit_discovery",
+        "tests/integration/test_grok_audit_target_lifecycle.py::test_installed_target_survives_audit_and_reinstall"
+      ]
+    },
+    {
+      "issue": 2821,
+      "summary": "User-scope hook home reference is outside project-only Copilot replay rows.",
+      "failure_modes": ["routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_user_hook_home_reference_lifecycle.py::test_user_scope_hook_home_reference_lifecycle"
       ]
     },
     {
@@ -317,7 +542,44 @@
       "regression_tests": [
         "tests/integration/test_package_shape_lifecycle_contract.py::test_manifestless_skill_bundle_subset_lifecycle",
         "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_valid_bundle_activates_and_reloads",
-        "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_invalid_bundle_preserves_state"
+        "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_invalid_bundle_preserves_state",
+        "tests/integration/test_package_shape_lifecycle_contract.py::test_package_shape_lifecycle_contract",
+        "tests/integration/test_package_shape_lifecycle_contract.py::test_tampered_local_bundle_fails_before_consumer_state_writes"
+      ]
+    },
+    {
+      "issue": 2926,
+      "summary": "Traps prune of manifestless skills and released roots hosting nested dependencies (#2926, #3699); needs prune, aliases and git subdirectory packages.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_prune_skill_lifecycle.py::test_install_remove_install_prune_skill",
+        "tests/integration/test_prune_skill_lifecycle.py::test_install_trims_released_root_to_nested_dependency_it_hosts",
+        "tests/integration/test_prune_skill_lifecycle.py::test_prune_preserves_declared_skill_bundle"
+      ]
+    },
+    {
+      "issue": 2944,
+      "summary": "Traps user-scope hook $HOME path migration keeping user hooks; needs user scope, claude settings bytes, baseline binary.",
+      "failure_modes": ["idempotency", "ownership", "portability"],
+      "properties": [
+        "idempotency.byte_stable",
+        "ownership.preserve_unowned",
+        "portability.byte_deterministic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_user_hook_home_migration_lifecycle.py::test_user_hook_home_migration_chain"
+      ]
+    },
+    {
+      "issue": 3035,
+      "summary": "Dry-run and transitive preview assertions are outside supported replay steps.",
+      "failure_modes": ["observation", "transaction"],
+      "properties": ["transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_install_dry_run_transitive_lifecycle.py::test_cached_remote_preview_preserves_resolution_intent",
+        "tests/integration/test_install_dry_run_transitive_lifecycle.py::test_cold_transitive_native_preview_does_not_create_configuration",
+        "tests/integration/test_install_dry_run_transitive_lifecycle.py::test_transitive_preview_matches_install_without_mutation"
       ]
     },
     {
@@ -346,6 +608,833 @@
       ]
     },
     {
+      "issue": 3191,
+      "summary": "Native Claude hook behavior uses a non-Copilot target.",
+      "failure_modes": ["routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_bin_plugin_deploys_inside_its_native_root_once_approved_and_trusted",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_installed_hook_source_reinstall_and_removal",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_native_plugin_deploys_publisher_bytes_not_normalization_output",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_native_plugin_mcp_server_is_loaded_by_claude_not_written_by_apm",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_runtime_plugin_root_hooks_stay_intact_per_plugin",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_transitive_native_plugin_with_mcp_needs_a_pin_or_one_off_trust",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_upgrade_retires_the_loose_claude_mcp_entry_of_a_now_native_plugin"
+      ]
+    },
+    {
+      "issue": 3204,
+      "summary": "Traps unsatisfied persisted skill selection refusing without losing skills; needs skill subsets, claude target, ownership snapshots.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_unmatched_skill_selection_lifecycle.py::test_empty_source_install_requires_a_satisfiable_selection",
+        "tests/integration/test_unmatched_skill_selection_lifecycle.py::test_unmatched_persisted_selection_refuses_without_losing_skills"
+      ]
+    },
+    {
+      "issue": 3214,
+      "summary": "Native Copilot Agent Plugin declarations and drift assertions exceed supported package shapes.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_native_plugin_audit_lifecycle.py::test_audit_strictly_preserves_project_and_lockfile",
+        "tests/integration/test_native_plugin_audit_lifecycle.py::test_missing_managed_content_fails_audit",
+        "tests/integration/test_native_plugin_audit_lifecycle.py::test_modified_managed_content_fails_audit",
+        "tests/integration/test_native_plugin_audit_lifecycle.py::test_native_plugin_with_accompanying_apm_yml_and_skill_audit_lifecycle",
+        "tests/integration/test_native_plugin_audit_lifecycle.py::test_native_plugin_without_apm_yml_and_skill_audit_lifecycle",
+        "tests/integration/test_native_plugin_audit_lifecycle.py::test_native_replay_does_not_bootstrap_registry_config",
+        "tests/integration/test_native_plugin_audit_lifecycle.py::test_tampered_plugin_manifest_fails_audit"
+      ]
+    },
+    {
+      "issue": 3270,
+      "summary": "Asserts exact cross-platform deployed bytes under Git EOL settings.",
+      "failure_modes": ["portability"],
+      "properties": ["portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_git_text_eol_lifecycle.py::test_locked_text_auto_package_replays_across_host_eol"
+      ]
+    },
+    {
+      "issue": 3279,
+      "summary": "Traps --refresh and update trusting stale TTL marketplace caches (#3279, #3961); needs HTTPS catalogs, cache state and codex target.",
+      "failure_modes": ["cache", "outcome", "reference", "transaction"],
+      "properties": [
+        "cache.successful_reads_refresh_recency",
+        "outcome.status_matches_state",
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_deprecated_deps_update_follows_a_repinned_catalog",
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_frozen_replay_needs_no_live_catalog",
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_local_catalog_stays_a_local_read_under_refresh",
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_marketplace_update_reports_partial_failure",
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_mixed_batch_fails_whole_and_skips_unrelated_catalogs",
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_refresh_fails_closed_and_preserves_state",
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_refresh_rejects_removed_entry_that_the_cache_still_lists",
+        "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_update_follows_changed_pins_and_respects_selection"
+      ]
+    },
+    {
+      "issue": 3281,
+      "summary": "Traps retirement of obsolete absent dependency claims within preservation boundaries; needs legacy lock fields, user scope, multiple targets.",
+      "failure_modes": ["cleanup", "idempotency", "ownership"],
+      "properties": [
+        "idempotency.byte_stable",
+        "lockfile.frozen_preserves_bytes",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_dependency_target_narrowing_keeps_cleanup_and_lock_scope_aligned",
+        "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_historical_absence_respects_live_preservation_boundaries",
+        "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_ordinary_install_retires_obsolete_absent_dependency_claims",
+        "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_replacement_table_survives_absent_repair_partial_install_and_narrowing"
+      ]
+    },
+    {
+      "issue": 3283,
+      "summary": "Public GitHub request budgeting and marker validation are excluded network behaviors.",
+      "failure_modes": ["cache", "reference"],
+      "properties": ["cache.successful_reads_refresh_recency"],
+      "regression_tests": [
+        "tests/integration/test_public_marker_request_budget_lifecycle.py::test_marketplace_add_reuses_discovered_catalog_and_installs_without_contents_api",
+        "tests/integration/test_public_marker_request_budget_lifecycle.py::test_marketplace_add_without_catalog_records_nothing",
+        "tests/integration/test_public_marker_request_budget_lifecycle.py::test_missing_public_marker_keeps_diagnostic_and_bounded_api_fallback",
+        "tests/integration/test_public_marker_request_budget_lifecycle.py::test_private_nested_plugin_recovers_through_authenticated_api",
+        "tests/integration/test_public_marker_request_budget_lifecycle.py::test_public_nested_plugins_validate_without_contents_api"
+      ]
+    },
+    {
+      "issue": 3288,
+      "summary": "Tests independently owned assets within a shared skill directory.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_shared_skill_preservation_lifecycle.py::test_native_skill_and_legacy_plugin_share_only_member_ownership",
+        "tests/integration/test_shared_skill_preservation_lifecycle.py::test_reinstall_preserves_other_package_assets",
+        "tests/integration/test_shared_skill_preservation_lifecycle.py::test_shared_skill_partial_failure_does_not_claim_sibling_or_unwritten_assets",
+        "tests/integration/test_shared_skill_preservation_lifecycle.py::test_shared_skill_preserves_user_content_and_reports_real_drift",
+        "tests/integration/test_shared_skill_preservation_lifecycle.py::test_shared_skill_same_run_and_replays",
+        "tests/integration/test_shared_skill_preservation_lifecycle.py::test_shared_skill_source_dependency_and_target_removal",
+        "tests/integration/test_shared_skill_preservation_lifecycle.py::test_target_only_install_preserves_unprocessed_shared_root_claim"
+      ]
+    },
+    {
+      "issue": 3319,
+      "summary": "Traps per-audience marketplace catalogs via add --path; marketplace is outside replay vocabulary.",
+      "failure_modes": ["outcome", "reference"],
+      "properties": ["outcome.status_matches_state", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_catalog_path_lifecycle.py::test_two_catalogs_from_one_repository_register_install_and_refresh"
+      ]
+    },
+    {
+      "issue": 3382,
+      "summary": "Traps semver-range replay of monorepo subdirectory tags with origin removed; needs git semver tags and provenance lock fields.",
+      "failure_modes": ["cache", "reference"],
+      "properties": [
+        "cache.successful_reads_refresh_recency",
+        "lockfile.frozen_preserves_bytes",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_git_semver_subdirectory_frozen_replay_lifecycle.py::test_git_semver_subdirectory_replays_locked_release_across_lifecycle"
+      ]
+    },
+    {
+      "issue": 3386,
+      "summary": "Traps staged activation failures losing prior packages, including Windows handle denials (#3386); needs fault injection and native Windows.",
+      "failure_modes": ["portability", "transaction"],
+      "properties": [
+        "portability.byte_deterministic",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_resolution_failure_lifecycle.py::test_install_preserves_active_unknown_and_legacy_staging",
+        "tests/integration/test_resolution_failure_lifecycle.py::test_invalid_download_never_replaces_prior_validated_package",
+        "tests/integration/test_resolution_failure_lifecycle.py::test_module_first_install_and_pinned_replacement",
+        "tests/integration/test_resolution_failure_lifecycle.py::test_native_activation_failure_reports_original_and_recovery_errors",
+        "tests/integration/test_resolution_failure_lifecycle.py::test_native_locked_destination_preserves_prior_install_and_recovers",
+        "tests/integration/test_resolution_failure_lifecycle.py::test_native_nested_replacement_retry_preserves_original_child_bytes",
+        "tests/integration/test_resolution_failure_lifecycle.py::test_native_transient_activation_hold_is_retried_and_activates",
+        "tests/integration/test_resolution_failure_lifecycle.py::test_parent_obstruction_preserves_state_and_retry_uses_clean_candidate"
+      ]
+    },
+    {
+      "issue": 3391,
+      "summary": "Traps fresh-clone restore deleting committed claude_skill/skill_bundle output (#3391, #3372); needs git clones, receipts and edited-file bytes.",
+      "failure_modes": ["outcome", "ownership", "transaction"],
+      "properties": [
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_cold_restore_skill_adoption_lifecycle.py::test_fresh_clone_adopts_unchanged_committed_skills",
+        "tests/integration/test_cold_restore_skill_adoption_lifecycle.py::test_fresh_clone_with_edited_skill_fails_closed"
+      ]
+    },
+    {
+      "issue": 3408,
+      "summary": "Traps packed plugin.json carrying stale versions and non-deterministic bundles (#3408, #3604); needs pack and bundle bytes.",
+      "failure_modes": ["idempotency", "portability"],
+      "properties": ["idempotency.byte_stable", "portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_pack_bundle_versions_sources_and_determinism",
+        "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_packed_bundle_installs_as_bundle_not_source",
+        "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_source_package_with_plugin_json_installs_as_local_dependency"
+      ]
+    },
+    {
+      "issue": 3423,
+      "summary": "Named Claude profiles and Codex user scope are outside the project-Copilot row cell.",
+      "failure_modes": ["ownership", "routing"],
+      "properties": ["ownership.preserve_unowned", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_claude_profile_cleanup_refuses_unsafe_paths_without_changing_state",
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_claude_user_profile_installation_is_independent_and_idempotent",
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_profile_install_keeps_files_deployed_to_other_profiles",
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_profile_uninstall_does_not_redeploy_retained_package",
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_profile_uninstall_removes_only_the_selected_profile",
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_relative_codex_home_does_not_block_claude_global_lifecycle"
+      ]
+    },
+    {
+      "issue": 3424,
+      "summary": "Traps cross-profile deletion or resurrection across Claude profiles; needs user scope, CLAUDE_CONFIG_DIR profiles, git tags, cache clean.",
+      "failure_modes": ["cleanup", "idempotency", "ownership"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_global_claude_profiles_chain_lifecycle.py::test_global_claude_profiles_chain_with_cache_clean"
+      ]
+    },
+    {
+      "issue": 3433,
+      "summary": "Resolved-tag pin stability is explicitly excluded ref behavior.",
+      "failure_modes": ["reference"],
+      "properties": ["source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_revision_pin_update_lifecycle.py::test_unchanged_install_keeps_revision_pin_tag_lock_bytes",
+        "tests/integration/test_revision_pin_update_lifecycle.py::test_update_malformed_tag_output_exits_before_writes",
+        "tests/integration/test_revision_pin_update_lifecycle.py::test_update_rejects_annotated_noncommit_before_writes",
+        "tests/integration/test_revision_pin_update_lifecycle.py::test_update_retains_unreleased_pin_in_dry_run_and_apply"
+      ]
+    },
+    {
+      "issue": 3441,
+      "summary": "Traps behavior of a pre-existing empty skill directory, a specific filesystem edge case.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_empty_skill_dir_install_lifecycle.py::test_install_deploys_into_empty_nested_skill_directory",
+        "tests/integration/test_empty_skill_dir_install_lifecycle.py::test_install_still_refuses_skill_directory_with_unmanaged_file"
+      ]
+    },
+    {
+      "issue": 3443,
+      "summary": "Traps apm install DIR classifying source packages versus pack bundles; needs pack output, bundles and lock source fields.",
+      "failure_modes": ["outcome", "reference"],
+      "properties": ["outcome.status_matches_state", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_install_dir_source_package_lifecycle.py::test_apm_pack_output_still_installs_as_local_bundle",
+        "tests/integration/test_install_dir_source_package_lifecycle.py::test_legacy_manifestless_bundle_keeps_bundle_install",
+        "tests/integration/test_install_dir_source_package_lifecycle.py::test_single_argument_dir_install_matches_two_argument_dependency_install"
+      ]
+    },
+    {
+      "issue": 3457,
+      "summary": "Git object-link materialization across hosts exceeds simple local package replay.",
+      "failure_modes": ["portability", "reference"],
+      "properties": ["portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_git_object_links_lifecycle.py::test_links_install_as_content_and_frozen_replays_the_cross_platform_hash",
+        "tests/integration/test_git_object_links_lifecycle.py::test_unresolvable_link_fails_before_hashing"
+      ]
+    },
+    {
+      "issue": 3471,
+      "summary": "Traps registry-only proxy exact pins installing idempotently and frozen replay; needs proxy, git shim and cache clean.",
+      "failure_modes": ["cache", "idempotency", "reference"],
+      "properties": [
+        "cache.successful_reads_refresh_recency",
+        "idempotency.byte_stable",
+        "lockfile.frozen_preserves_bytes",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_exact_pin_chain_is_idempotent",
+        "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_frozen_replays_lock_written_through_proxy"
+      ]
+    },
+    {
+      "issue": 3493,
+      "summary": "Traps slashed MCP server removal deleting short-name user entries (#3493); needs custom MCP names across five targets.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_mcp_slashed_server_cleanup_lifecycle.py::test_removing_slashed_server_keeps_user_and_declared_short_name_entries"
+      ]
+    },
+    {
+      "issue": 3498,
+      "summary": "Claude plugin MCP lifecycle uses a non-Copilot target and plugin package shape.",
+      "failure_modes": ["routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_local_claude_plugin_mcp_lifecycle.py::test_local_plugin_mcp_frozen_cold_cache_rejects_changed_source",
+        "tests/integration/test_local_claude_plugin_mcp_lifecycle.py::test_local_plugin_mcp_frozen_replay_restores_cold_cache",
+        "tests/integration/test_local_claude_plugin_mcp_lifecycle.py::test_local_plugin_mcp_is_replayed_audited_and_uninstalled",
+        "tests/integration/test_local_claude_plugin_mcp_lifecycle.py::test_local_plugin_mcp_is_subject_to_policy_preflight",
+        "tests/integration/test_local_claude_plugin_mcp_lifecycle.py::test_local_plugin_mcp_matches_git_sourced_plugin"
+      ]
+    },
+    {
+      "issue": 3499,
+      "summary": "Claude plugin MCP shapes and file-content assertions exceed supported row scope.",
+      "failure_modes": ["reference"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_claude_plugin_flat_mcp_lifecycle.py::test_plugin_mcp_json_shape_reaches_claude_and_codex",
+        "tests/integration/test_claude_plugin_flat_mcp_lifecycle.py::test_plugin_mcp_json_without_usable_servers_warns_by_name"
+      ]
+    },
+    {
+      "issue": 3502,
+      "summary": "Traps targeted install reconciling a dropped transitive dependency; needs claude target, user scope and lock resolved_by fields.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_targeted_install_dropped_dependency_lifecycle.py::test_targeted_install_removes_dependency_dropped_by_selected_package"
+      ]
+    },
+    {
+      "issue": 3532,
+      "summary": "Symlinked lockfile refusal is an explicitly excluded symlink edge case.",
+      "failure_modes": ["observation", "transaction"],
+      "properties": ["transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_target_only_update_with_symlinked_lock_refuses_before_deploying",
+        "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_unchanged_installs_still_read_through_symlinked_lock",
+        "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_uninstall_with_symlinked_lock_refuses_before_deleting",
+        "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_update_with_symlinked_lock_refuses_before_deploying"
+      ]
+    },
+    {
+      "issue": 3534,
+      "summary": "Marketplace producer-consumer, pack, and git-ref behavior exceed row vocabulary.",
+      "failure_modes": ["outcome", "reference"],
+      "properties": ["outcome.status_matches_state", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_pack_consumer_chain_lifecycle.py::test_malformed_marketplace_sha_refused_before_any_write",
+        "tests/integration/test_marketplace_pack_consumer_chain_lifecycle.py::test_marketplace_pack_to_consumer_chain",
+        "tests/integration/test_marketplace_pack_consumer_chain_lifecycle.py::test_producer_bump_repack_then_consumer_update"
+      ]
+    },
+    {
+      "issue": 3556,
+      "summary": "Traps licence files carried, locked, audited and removed with subdirectory packages (#3556); needs LICENSE bytes, carried_licenses lock fields, git subdirectories.",
+      "failure_modes": ["cleanup", "idempotency", "observation", "outcome"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "idempotency.byte_stable",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_carried_license_lifecycle.py::test_licence_is_carried_recorded_audited_and_uninstalled"
+      ]
+    },
+    {
+      "issue": 3571,
+      "summary": "Traps cold update moving/dropping/adding transitives and plugin restamp; needs git tags, clones, cache corruption, baseline binary.",
+      "failure_modes": ["cache", "idempotency", "reference"],
+      "properties": [
+        "cache.successful_reads_refresh_recency",
+        "idempotency.byte_stable",
+        "lockfile.frozen_preserves_bytes",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_cold_update_transitive_plugin_lifecycle.py::test_cold_update_moves_drops_and_adds_transitive_dependencies",
+        "tests/integration/test_cold_update_transitive_plugin_lifecycle.py::test_plugin_redownload_and_update_restamp_verify_on_fresh_clone",
+        "tests/integration/test_cold_update_transitive_plugin_lifecycle.py::test_v0351_deployed_tree_upgrades_without_false_drift",
+        "tests/integration/test_local_dependency_graph_chain_lifecycle.py::test_local_parent_edit_reconciles_graph_and_keeps_shared_dep",
+        "tests/integration/test_local_dependency_graph_chain_lifecycle.py::test_local_source_edited_between_install_and_frozen_fails_closed",
+        "tests/integration/test_targeted_install_unselected_local_edit_lifecycle.py::test_targeted_commands_skip_unselected_local_edit",
+        "tests/integration/test_targeted_install_unselected_local_edit_lifecycle.py::test_targeted_install_rereads_selected_local_package"
+      ]
+    },
+    {
+      "issue": 3596,
+      "summary": "Org-wide lifecycle-script policy is outside the replay world's policy model.",
+      "failure_modes": ["cleanup", "portability", "routing"],
+      "properties": ["portability.byte_deterministic", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_lifecycle_deny_all_chain_lifecycle.py::test_deny_all_suppresses_every_lifecycle_tier_across_chain",
+        "tests/integration/test_pre_compile_chain_lifecycle.py::test_compiled_outputs_follow_umask_and_keep_existing_modes",
+        "tests/integration/test_pre_compile_chain_lifecycle.py::test_pre_compile_trust_generation_and_suppressed_modes",
+        "tests/integration/test_pre_compile_chain_lifecycle.py::test_user_pre_compile_does_not_fire_for_global_compile"
+      ]
+    },
+    {
+      "issue": 3601,
+      "summary": "Traps semver ranges selecting pre-release tags in outdated/update (#3601); needs git tags, semver ranges and resolved_ref lock values.",
+      "failure_modes": ["idempotency", "reference"],
+      "properties": [
+        "idempotency.byte_stable",
+        "lockfile.frozen_preserves_bytes",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_git_semver_prerelease_chain_lifecycle.py::test_stable_range_never_selects_prerelease_across_outdated_and_update"
+      ]
+    },
+    {
+      "issue": 3604,
+      "summary": "Traps audit replaying an apm.yml plus plugin.json source as a legacy plugin (#3604); custom package shape and lock package_type block a row.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_dir_plugin_audit_lifecycle.py::test_apm_source_with_plugin_json_installs_and_audits_clean",
+        "tests/integration/test_install_dir_plugin_audit_lifecycle.py::test_legacy_local_plugin_still_replays_its_agents"
+      ]
+    },
+    {
+      "issue": 3608,
+      "summary": "Traps view -g --file reporting user-scope provenance read-only with unicode HOME; needs user scope and unicode paths.",
+      "failure_modes": ["observation", "outcome", "portability", "reference"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "outcome.status_matches_state",
+        "portability.byte_deterministic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_user_scope_file_provenance_lifecycle.py::test_view_file_global_reports_owner_for_every_user_target",
+        "tests/integration/test_view_file_provenance_symlinked_cwd_lifecycle.py::test_view_file_accepts_logical_absolute_path_through_symlinked_cwd",
+        "tests/integration/test_view_file_provenance_symlinked_cwd_lifecycle.py::test_view_file_matrix_is_read_only_and_exit_codes_hold"
+      ]
+    },
+    {
+      "issue": 3625,
+      "summary": "Receipt-less update behavior asserts local receipt ownership and fresh-clone recovery.",
+      "failure_modes": ["idempotency", "ownership"],
+      "properties": ["idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_update_receipt_less_lifecycle.py::test_receipt_less_update_replaces_unchanged_locked_files",
+        "tests/integration/test_update_receipt_less_lifecycle.py::test_receipt_less_update_with_edited_file_fails_closed"
+      ]
+    },
+    {
+      "issue": 3630,
+      "summary": "Traps auto-bootstrapped apm.yml author handling under org policy and init metadata (#3630, #2231); needs init, pack, policy and manifest fields.",
+      "failure_modes": ["idempotency", "outcome"],
+      "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_init_bootstrap_chain_lifecycle.py::test_bootstrap_without_author_then_init_metadata_chain"
+      ]
+    },
+    {
+      "issue": 3633,
+      "summary": "Policy chains and native MCP config byte comparisons exceed replay rows.",
+      "failure_modes": ["ownership", "reference"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_mcp_install_alias_writes_the_same_files_as_install_mcp",
+        "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_opencode_layout_is_stable_across_reinstall_and_removal",
+        "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_policy_denied_mcp_fails_closed_through_every_entry_point",
+        "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_secret_references_survive_reinstall_across_targets",
+        "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_user_servers_survive_reinstall_removal_and_frozen"
+      ]
+    },
+    {
+      "issue": 3640,
+      "summary": "SSH transport and cache behavior are excluded source semantics.",
+      "failure_modes": ["cache", "reference"],
+      "properties": ["source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_ssh_cache_transport_lifecycle.py::test_ssh_non_github_dependency_never_tries_https"
+      ]
+    },
+    {
+      "issue": 3649,
+      "summary": "Traps mixed-case parent identity in transitive lock edges; needs case-variant git remotes, deps tree/why and lock field values.",
+      "failure_modes": [
+        "auth",
+        "cleanup",
+        "idempotency",
+        "observation",
+        "outcome",
+        "ownership",
+        "reference",
+        "routing",
+        "transaction"
+      ],
+      "properties": [
+        "auth.credentials_isolated",
+        "filesystem.open_world_observation",
+        "idempotency.byte_stable",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "routing.authorized_targets_only",
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_case_insensitive_parent_identity_lifecycle.py::test_mixed_case_parent_records_canonical_parent_identity",
+        "tests/integration/test_dependency_spelling_equivalence_lifecycle.py::test_conflicting_diamond_fails_closed_then_converges",
+        "tests/integration/test_dependency_spelling_equivalence_lifecycle.py::test_spellings_share_one_lock_entry",
+        "tests/integration/test_executables_deny_identity_lifecycle.py::test_org_deny_holds_for_any_allow_spelling",
+        "tests/integration/test_global_scope_agreement_lifecycle.py::test_global_scope_commands_agree_across_chain",
+        "tests/integration/test_install_audit_replay_matrix_lifecycle.py::test_install_and_audit_replay_agree_across_lifecycle",
+        "tests/integration/test_install_audit_replay_matrix_lifecycle.py::test_read_only_replay_never_rewrites_installed_local_packages",
+        "tests/integration/test_lifecycle_trust_upgrade_lifecycle.py::test_failing_and_bad_timeout_scripts_are_nonfatal",
+        "tests/integration/test_lifecycle_trust_upgrade_lifecycle.py::test_legacy_trust_upgrade_chain",
+        "tests/integration/test_local_bundle_manifest_targets_lifecycle.py::test_bundle_install_explicit_target_still_wins",
+        "tests/integration/test_local_bundle_manifest_targets_lifecycle.py::test_bundle_install_lands_only_in_manifest_targets",
+        "tests/integration/test_local_bundle_primitive_paths_lifecycle.py::test_bundle_hook_files_follow_the_executables_gate",
+        "tests/integration/test_local_bundle_primitive_paths_lifecycle.py::test_bundle_install_routes_only_primitive_files",
+        "tests/integration/test_local_link_rejection_lifecycle.py::test_unresolvable_local_link_aborts_with_nothing_written",
+        "tests/integration/test_mcp_credential_scope_lifecycle.py::test_dependency_mcp_url_with_parser_dependent_host_is_refused",
+        "tests/integration/test_mcp_credential_scope_lifecycle.py::test_transitive_registry_overlay_needs_trust",
+        "tests/integration/test_mcp_credential_scope_lifecycle.py::test_untrusted_transitive_mcp_stays_skipped_after_uninstall_and_update",
+        "tests/integration/test_mcp_credential_scope_lifecycle.py::test_user_scope_mcp_config_with_resolved_values_is_owner_only",
+        "tests/integration/test_monorepo_subdirectory_switch_lifecycle.py::test_manifestless_skill_bundle_whole_repo_to_skill_paths_and_back",
+        "tests/integration/test_monorepo_subdirectory_switch_lifecycle.py::test_whole_repo_to_sibling_subdirectories_and_back",
+        "tests/integration/test_multitarget_edit_audit_chain_lifecycle.py::test_multi_target_edit_compile_audit_narrow_uninstall_chain",
+        "tests/integration/test_policy_tighten_chain_lifecycle.py::test_prune_removes_newly_denied_orphan",
+        "tests/integration/test_policy_tighten_chain_lifecycle.py::test_tightened_deny_policy_is_atomic_and_removable",
+        "tests/integration/test_policy_tighten_chain_lifecycle.py::test_update_with_available_upgrade_is_blocked_atomically",
+        "tests/integration/test_registry_credential_origin_lifecycle.py::test_configured_registry_origin_still_receives_registry_token",
+        "tests/integration/test_registry_credential_origin_lifecycle.py::test_dependency_declared_registry_fqdn_on_other_origin_gets_no_registry_token",
+        "tests/integration/test_registry_credential_origin_lifecycle.py::test_gitlab_file_token_stays_on_gitlab_origin_across_redirect",
+        "tests/integration/test_removal_reintegration_executables_lifecycle.py::test_removal_rebuild_follows_executables_gate",
+        "tests/integration/test_targeted_install_shared_transitive_lifecycle.py::test_targeted_install_drops_only_named_package_closure",
+        "tests/integration/test_targeted_install_shared_transitive_lifecycle.py::test_targeted_install_keeps_dep_still_needed_by_untouched_entry",
+        "tests/integration/test_update_transitive_mcp_trust_lifecycle.py::test_update_needs_its_own_transitive_mcp_trust"
+      ]
+    },
+    {
+      "issue": 3654,
+      "summary": "Frozen deployed-hash verification includes scope and content-integrity edge cases.",
+      "failure_modes": ["outcome", "ownership", "portability", "reference", "transaction"],
+      "properties": [
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "portability.byte_deterministic",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_fails_on_edit_of_every_primitive_type",
+        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_fails_when_locked_file_is_replaced_by_a_symlink",
+        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths",
+        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_identical_unmanaged_native_skill_is_adopted_then_owned",
+        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_warm_frozen_with_kept_skill_edit_fails_closed",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_device_only_root_change_is_rebound_by_installed_cli",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_read_only_commands_never_promote_live_receipts",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_receipts_capture_rendered_links_and_preserve_repeat_bytes",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_recreated_checkout_with_retained_outputs_has_no_old_authority",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_unchanged_shared_target_handoff_retains_update_authority",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_uninstall_last_writer_records_actual_survivor_materialization",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_untrusted_receipt_does_not_replace_legacy_deployment",
+        "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_user_edit_equal_to_old_version_remains_protected"
+      ]
+    },
+    {
+      "issue": 3655,
+      "summary": "Compile preservation is explicitly outside supported replay commands.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_compile_nested_context_protection_lifecycle.py::test_compile_retains_hand_authored_nested_context_files"
+      ]
+    },
+    {
+      "issue": 3656,
+      "summary": "Edited managed files and user-owned skill contents trigger refusal paths not represented in rows.",
+      "failure_modes": ["outcome", "ownership", "transaction"],
+      "properties": ["transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_refusal_lockfile_truth_lifecycle.py::test_refused_uninstall_lock_claims_only_files_on_disk"
+      ]
+    },
+    {
+      "issue": 3658,
+      "summary": "Traps install/audit disagreeing on denied transitives and cached policy (#3658, #3659); needs org policy server and policy cache expiry.",
+      "failure_modes": ["cache", "outcome", "transaction"],
+      "properties": [
+        "cache.successful_reads_refresh_recency",
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_cache_transitive_lifecycle.py::test_audit_ci_agrees_with_install_on_denied_transitive",
+        "tests/integration/test_policy_cache_transitive_lifecycle.py::test_audit_no_cache_fetches_fresh_auto_discovered_policy",
+        "tests/integration/test_policy_cache_transitive_lifecycle.py::test_transitive_denial_install_chain_is_atomic"
+      ]
+    },
+    {
+      "issue": 3661,
+      "summary": "Traps selected-profile uninstall touching another runtime default root; needs user scope and Claude/Hermes profiles.",
+      "failure_modes": ["cleanup", "ownership", "routing"],
+      "properties": ["ownership.preserve_unowned", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_profile_uninstall_runtime_scope_lifecycle.py::test_batched_profile_uninstall_scopes_each_package_to_its_own_split",
+        "tests/integration/test_profile_uninstall_runtime_scope_lifecycle.py::test_profile_uninstall_keeps_other_runtime_default_root"
+      ]
+    },
+    {
+      "issue": 3662,
+      "summary": "Retention of undeclared frozen packages tests a distinct lock and ownership rule.",
+      "failure_modes": ["ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_frozen_undeclared_package_retention_lifecycle.py::test_frozen_keeps_undeclared_package_until_normal_install"
+      ]
+    },
+    {
+      "issue": 3663,
+      "summary": "Traps cleanup deleting user files claimed by unhashed lock rows on fresh clones (#3663); needs a forged lockfile and git clone.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_stale_cleanup_hash_authority_lifecycle.py::test_unhashed_lock_claims_never_delete_user_files"
+      ]
+    },
+    {
+      "issue": 3664,
+      "summary": "Traps MCP servers left in configs after their opt-in runtime directory is pruned (#3664); needs claude/opencode MCP and user servers.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_mcp_pruned_runtime_dir_cleanup_lifecycle.py::test_recorded_server_leaves_config_after_opt_in_dir_is_pruned"
+      ]
+    },
+    {
+      "issue": 3665,
+      "summary": "Traps retiring a deleted hook file's merged settings.json events while keeping user hooks; needs claude target and settings bytes.",
+      "failure_modes": ["cleanup", "idempotency", "ownership"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_hook_removed_file_event_retirement_lifecycle.py::test_removed_hook_file_drops_its_merged_event"
+      ]
+    },
+    {
+      "issue": 3667,
+      "summary": "Traps audit flagging contained-link instructions from local packages as orphaned (#3667); requires OS symlinks, so not a row.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_local_link_audit_replay_lifecycle.py::test_contained_link_installs_audits_and_tracks_target_edits"
+      ]
+    },
+    {
+      "issue": 3668,
+      "summary": "Traps prune/install dropping a still-transitive dependency after its direct line is removed (#3668); needs hand-edited apm.yml, prune and lock depth fields.",
+      "failure_modes": ["cleanup", "idempotency", "reference"],
+      "properties": [
+        "idempotency.byte_stable",
+        "lockfile.frozen_preserves_bytes",
+        "ownership.preserve_unowned",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_dropped_direct_dependency_transitive_lifecycle.py::test_install_after_drop_keeps_shared_transitive",
+        "tests/integration/test_dropped_direct_dependency_transitive_lifecycle.py::test_prune_after_drop_keeps_still_reachable_transitive"
+      ]
+    },
+    {
+      "issue": 3669,
+      "summary": "Traps update re-pinning children and dev reachability surviving uninstall; needs branch-tracking git refs and is_dev lock fields.",
+      "failure_modes": ["idempotency", "outcome", "reference"],
+      "properties": [
+        "idempotency.byte_stable",
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_update_dev_reachability_lifecycle.py::test_frozen_install_never_reports_a_withheld_lock_write",
+        "tests/integration/test_update_dev_reachability_lifecycle.py::test_uninstall_writes_the_lock_install_would_write",
+        "tests/integration/test_update_dev_reachability_lifecycle.py::test_uninstalling_prod_parent_keeps_dev_reachable_dep",
+        "tests/integration/test_update_dev_reachability_lifecycle.py::test_update_follows_parent_repin_drop_and_add"
+      ]
+    },
+    {
+      "issue": 3670,
+      "summary": "Traps pack/marketplace producer bugs: phantom --allow-head, missing tags, hook scripts, dropped symlinks (#3670); pack and marketplace block a row.",
+      "failure_modes": ["outcome", "reference", "transaction"],
+      "properties": [
+        "outcome.status_matches_state",
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_branch_ref_pack_failure_names_a_real_recovery",
+        "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_pack_carries_relative_hook_script_like_install",
+        "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_pack_names_each_dropped_source_symlink",
+        "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_package_add_and_set_refuse_a_missing_tag"
+      ]
+    },
+    {
+      "issue": 3671,
+      "summary": "The deps-list to uninstall-key interface is a distinct command contract.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_deps_list_uninstall_key_lifecycle.py::test_listed_key_uninstalls_a_self_hosted_gitlab_dependency"
+      ]
+    },
+    {
+      "issue": 3681,
+      "summary": "Traps same-name user MCP connections reported as already configured on JSON adapters (#3681); needs MCP config bytes, registry and many targets.",
+      "failure_modes": ["idempotency", "outcome", "ownership"],
+      "properties": [
+        "idempotency.byte_stable",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_differing_user_connection_is_preserved_and_reported",
+        "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_identical_user_connection_is_left_unclaimed",
+        "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_managed_connection_repeats_updates_and_retires",
+        "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_registry_connection_receipt_and_user_edit",
+        "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_resolved_env_value_change_keeps_managed_gemini_connection",
+        "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_user_scope_only_adapters_report_conflict_and_keep_managed_entry"
+      ]
+    },
+    {
+      "issue": 3682,
+      "summary": "Traps audit reporting skipped user same-name files as managed edits (#3682); needs user collision files, case-only paths and JSON drift kinds.",
+      "failure_modes": ["observation", "outcome", "ownership"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_audit_user_collision_classification_lifecycle.py::test_edited_managed_file_still_reports_modified",
+        "tests/integration/test_audit_user_collision_classification_lifecycle.py::test_skipped_user_collisions_are_unmanaged_conflicts_until_forced"
+      ]
+    },
+    {
+      "issue": 3688,
+      "summary": "Traps audit root discovery and missing-manifest exit behavior beyond replay-row assertions.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_audit_ci_project_root_lifecycle.py::test_audit_ci_fails_outside_the_project_root"
+      ]
+    },
+    {
+      "issue": 3692,
+      "summary": "YAML scalar quoting and lockfile field representation are excluded.",
+      "failure_modes": ["portability"],
+      "properties": ["portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_unquoted_lockfile_version_lifecycle.py::test_unquoted_lockfile_version_replays_unchanged"
+      ]
+    },
+    {
+      "issue": 3693,
+      "summary": "Traps duplicate dependencies/devDependencies moves and uninstall of every spelling; needs install --dev, is_dev lock fields, git pins.",
+      "failure_modes": ["idempotency", "reference"],
+      "properties": ["idempotency.byte_stable", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_duplicate_declaration_lifecycle.py::test_cross_section_moves_keep_the_declared_pin",
+        "tests/integration/test_duplicate_declaration_lifecycle.py::test_install_dev_moves_and_plain_install_keeps",
+        "tests/integration/test_duplicate_declaration_lifecycle.py::test_uninstall_removes_every_declaration_of_one_package"
+      ]
+    },
+    {
+      "issue": 3696,
+      "summary": "Traps same owner/repo from two hosts or ports colliding in apm_modules (#3696, #3927); needs multiple git hosts and aliases.",
+      "failure_modes": ["outcome", "reference", "transaction"],
+      "properties": [
+        "outcome.status_matches_state",
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_alias_installs_both_packages",
+        "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_same_repo_from_two_hosts_is_rejected_before_fetch",
+        "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_same_repo_on_another_port_is_a_different_package",
+        "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_transitive_declaration_names_its_parent"
+      ]
+    },
+    {
+      "issue": 3699,
+      "summary": "Nested declaration refusal is a manifest validation contract.",
+      "failure_modes": ["auth", "outcome"],
+      "properties": ["auth.credentials_isolated", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_nested_package_declaration_lifecycle.py::test_repository_depending_on_its_own_subdirectory_still_installs",
+        "tests/integration/test_nested_package_declaration_lifecycle.py::test_repository_with_its_subdirectory_package_is_rejected",
+        "tests/integration/test_public_github_anonymous_lifecycle_e2e.py::test_all_public_graph_lifecycle_never_resolves_or_leaks_credentials",
+        "tests/integration/test_public_github_anonymous_lifecycle_e2e.py::test_private_github_fallback_normalizes_locale_and_completes_lifecycle"
+      ]
+    },
+    {
+      "issue": 3700,
+      "summary": "Traps bundle hooks parking behind executables gate then registering like source; needs pack bundles, claude target, user scope.",
+      "failure_modes": ["ownership", "routing"],
+      "properties": ["ownership.preserve_unowned", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hooks_park_then_register_like_a_source_install",
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hooks_register_for_copilot_and_user_scope"
+      ]
+    },
+    {
+      "issue": 3701,
+      "summary": "Tests local deployment receipt contents, which replay rows cannot assert.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_file_primitive_receipt_lifecycle.py::test_adopted_identical_files_get_no_receipt",
+        "tests/integration/test_file_primitive_receipt_lifecycle.py::test_every_deployed_file_of_a_fresh_install_has_a_receipt",
+        "tests/integration/test_file_primitive_receipt_lifecycle.py::test_install_records_a_receipt_for_every_file_primitive_write"
+      ]
+    },
+    {
+      "issue": 3705,
+      "summary": "Traps compile-only bundle staging becoming deployment claims and Markdown agents in Codex TOML (#3705, #3706, #3718); needs pack, compile, other targets.",
+      "failure_modes": ["cleanup", "observation", "outcome", "routing"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "routing.authorized_targets_only"
+      ],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_bundle_reinstall_migrates_pre_3705_staging_claims",
+        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_codex_bundle_install_skips_markdown_agents_with_one_warning_each",
+        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_instructions_only_bundle_upgrade_keeps_install_time_hash",
+        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_prune_retires_staging_records_whose_root_is_gone",
+        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_staged_instruction_edits_are_reported_as_hash_drift",
+        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_staged_instructions_are_compile_input_not_deployment_claims"
+      ]
+    },
+    {
+      "issue": 3710,
+      "summary": "Traps approve granting the original identity instead of the replace: source (#3710); needs replace rules, forks, claude hooks and grant keys.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_executable_approval_replacement_lifecycle.py::test_approve_original_name_unlocks_replacement_hooks"
+      ]
+    },
+    {
       "issue": 3711,
       "fixed_in": "0.36.1",
       "summary": "Antigravity inherited the Gemini remote shape, so APM wrote httpUrl (which Antigravity rejects) and wrote SSE remotes it cannot use.",
@@ -368,6 +1457,24 @@
         "tests/integration/test_git_named_repository_lifecycle.py::test_dot_only_or_bare_suffix_repository_names_stay_rejected_without_writes",
         "tests/integration/test_git_named_repository_lifecycle.py::test_marketplace_build_keeps_the_leading_dot_of_a_hidden_local_source",
         "tests/integration/test_git_named_repository_lifecycle.py::test_policy_deny_pattern_matches_a_git_named_repository"
+      ]
+    },
+    {
+      "issue": 3720,
+      "summary": "Traps audit failing config-consistency on deliberately parked MCP servers (#3720, #3925); needs claude MCP, omission evidence and transitive trust.",
+      "failure_modes": ["observation", "outcome", "transaction"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_executables_gate_parks_server_with_audit_evidence",
+        "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_failed_retirement_keeps_prior_baseline",
+        "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_frozen_install_applies_executables_gate_and_omission_evidence",
+        "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_frozen_no_policy_gate_ignores_org_policy",
+        "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_retiring_trusted_transitive_server_records_audit_evidence"
       ]
     },
     {
@@ -394,7 +1501,11 @@
         "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_lock_replay_follows_same_origin_redirect_without_lock_churn",
         "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_registry_lock_replays_resolved_url_without_churn",
         "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_refuses_lookalike_redirect_targets",
-        "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_follows_case_only_host_difference"
+        "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_follows_case_only_host_difference",
+        "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_refuses_endless_same_origin_redirect_chain",
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_publish_upload_follows_same_origin_307_with_body",
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_publish_upload_is_not_downgraded_by_302",
+        "tests/integration/test_registry_redirect_origin_lifecycle.py::test_publish_upload_never_leaves_registry_origin"
       ]
     },
     {
@@ -405,7 +1516,15 @@
       "properties": ["routing.authorized_targets_only", "transaction.failed_command_preserves_state"],
       "regression_tests": [
         "tests/integration/test_opencode_lsp_lifecycle.py::test_fresh_project_writes_lsp_to_opencode_json",
-        "tests/integration/test_opencode_lsp_lifecycle.py::test_target_without_lsp_support_fails_before_any_write"
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_target_without_lsp_support_fails_before_any_write",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_exclude_that_empties_the_lsp_targets_fails_before_any_write",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_existing_opencode_json_keeps_schema_and_mcp",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_lsp_false_in_opencode_json_is_refused_untouched",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_only_apm_is_not_gated_by_lsp_support",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_uninstall_removes_the_opencode_lsp_entry",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_update_without_lsp_support_fails_before_any_write",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_user_scope_without_lsp_support_fails_before_any_write",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_user_scope_writes_lsp_to_user_opencode_json"
       ]
     },
     {
@@ -422,7 +1541,14 @@
         "tests/integration/test_target_declaration_install_lifecycle.py::test_undeployable_singular_target_is_rejected_before_any_write",
         "tests/integration/test_target_declaration_install_lifecycle.py::test_user_scope_undeployable_singular_target_is_rejected_before_any_write",
         "tests/integration/test_target_declaration_adjacent_commands_lifecycle.py::test_reinit_keeps_the_singular_all_deployment_set",
-        "tests/integration/test_target_manifest_upgrade_lifecycle.py::test_upgraded_project_keeps_targets_and_only_policy_verdicts_change"
+        "tests/integration/test_target_manifest_upgrade_lifecycle.py::test_upgraded_project_keeps_targets_and_only_policy_verdicts_change",
+        "tests/integration/test_target_declaration_adjacent_commands_lifecycle.py::test_adjacent_commands_keep_package_targets_and_dependency_subsets",
+        "tests/integration/test_target_declaration_adjacent_commands_lifecycle.py::test_export_patch_finds_local_edits_for_every_spelling",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_plural_all_still_folds_to_auto_detect_with_warning",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_singular_all_expands_without_claiming_it_was_omitted",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_user_scope_reads_declared_targets_for_every_spelling",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_user_scope_singular_all_expands_without_claiming_it_was_omitted",
+        "tests/integration/test_target_declaration_install_lifecycle.py::test_vscode_alias_mcp_destination_matches_copilot"
       ]
     },
     {
@@ -443,7 +1569,26 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_user_scope_diamond_shrinks_under_copilot_home",
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_pack_ships_the_merged_skill_selection",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_install_rewrites_an_old_diamond_lock_to_the_union_then_uninstall_shrinks",
-        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_frozen_install_on_an_old_first_wins_lock_fails_with_remediation"
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_frozen_install_on_an_old_first_wins_lock_fails_with_remediation",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_user_scope_default_skill_root_never_writes_the_home_copilot_dir",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_dev_declaration_selection_merges_into_the_production_dependency",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_divergent_aliases_keep_the_declaration_order_winner_and_warn",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_divergent_skills_and_targets_pair_per_declaration",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_frozen_install_rejects_a_cross_product_lock_before_deploying",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_frozen_install_replays_a_union_lock_without_rewriting_it",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_prune_dry_run_and_cold_restore_keep_the_merged_selection",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_keeps_non_skill_primitives_and_only_selected_skills_of_a_survivor",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_keeps_the_locked_union_when_a_survivor_manifest_is_missing",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_of_an_unrelated_local_package_keeps_a_local_bundle_skill_pin",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_unknown_skill_named_by_a_transitive_parent_fails_and_preserves_prior_state",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_unrestricted_skills_on_one_harness_do_not_cross_to_the_other",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_update_recomputes_the_union_after_a_parent_changes_its_selection",
+        "tests/integration/test_skill_selection_merge_lifecycle.py::test_user_scope_diamond_merges_then_shrinks_on_uninstall",
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_audit_ci_flags_an_old_first_wins_skill_selection",
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_install_widens_an_old_target_subset_lock_to_both_harnesses",
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_old_alias_lock_keeps_its_winner_replays_frozen_and_warns_on_install",
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
     },
     {
@@ -454,7 +1599,14 @@
       "properties": ["routing.authorized_targets_only", "outcome.status_matches_state", "idempotency.byte_stable"],
       "regression_tests": [
         "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_registry_remote_type_reaches_every_harness_in_its_native_shape",
-        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_mcp_show_reports_the_registry_remote_transport"
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_mcp_show_reports_the_registry_remote_transport",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_frozen_deferred_pair_that_turns_out_supported_is_refused",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_frozen_replay_skips_a_registry_sse_server_its_harness_refuses",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_harnesses_outside_the_changed_rows_keep_their_remote_shape",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_legacy_transport_type_sse_still_renders_as_sse",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_refused_frozen_replay_changes_no_native_config",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_registry_remote_without_transport_defaults_to_streamable_http",
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_self_defined_remotes_render_natively_and_unsupported_sse_is_skipped"
       ]
     },
     {
@@ -465,7 +1617,12 @@
       "properties": ["routing.authorized_targets_only", "filesystem.open_world_observation", "ownership.preserve_unowned"],
       "regression_tests": [
         "tests/integration/test_harness_user_root_lifecycle.py::test_copilot_home_receives_every_copilot_user_primitive",
-        "tests/integration/test_harness_user_root_lifecycle.py::test_relative_user_root_is_rejected_before_any_write"
+        "tests/integration/test_harness_user_root_lifecycle.py::test_relative_user_root_is_rejected_before_any_write",
+        "tests/integration/test_copilot_home_adjacent_lifecycle.py::test_compile_global_writes_into_neither_copilot_home",
+        "tests/integration/test_copilot_home_adjacent_lifecycle.py::test_copilot_app_workflows_stay_in_the_default_copilot_home",
+        "tests/integration/test_copilot_home_profile_lifecycle.py::test_copilot_home_outside_home_owns_every_copilot_user_primitive",
+        "tests/integration/test_copilot_home_profile_lifecycle.py::test_relative_copilot_home_fails_clearly_without_writes",
+        "tests/integration/test_copilot_home_profile_lifecycle.py::test_unsetting_copilot_home_leaves_the_other_profile_in_place"
       ]
     },
     {
@@ -475,7 +1632,9 @@
       "failure_modes": ["routing", "idempotency"],
       "properties": ["routing.authorized_targets_only", "idempotency.byte_stable", "ownership.preserve_unowned"],
       "regression_tests": [
-        "tests/integration/test_hermes_mcp_fidelity_lifecycle.py::test_hermes_keeps_cwd_extra_keys_and_sse_transport_idempotently"
+        "tests/integration/test_hermes_mcp_fidelity_lifecycle.py::test_hermes_keeps_cwd_extra_keys_and_sse_transport_idempotently",
+        "tests/integration/test_hermes_mcp_fidelity_lifecycle.py::test_hermes_package_uninstall_removes_only_its_entries",
+        "tests/integration/test_hermes_mcp_fidelity_lifecycle.py::test_hermes_uninstall_removes_only_apm_entries"
       ]
     },
     {
@@ -489,7 +1648,17 @@
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_manifest_install_frozen_update_outdated_through_credential_helper",
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_user_scope_install_through_credential_helper",
         "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_pat_keeps_precedence_over_credential_helper",
-        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_ado_lock_replays_frozen_and_updates_through_credential_helper"
+        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_ado_lock_replays_frozen_and_updates_through_credential_helper",
+        "tests/integration/test_ado_adjacent_egress_lifecycle.py::test_ado_marketplace_add_browse_update_through_credential_helper",
+        "tests/integration/test_ado_adjacent_egress_lifecycle.py::test_ado_view_versions_through_credential_helper",
+        "tests/integration/test_ado_adjacent_egress_lifecycle.py::test_local_dependency_queries_do_not_egress",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_exhausted_chain_names_every_step_in_order",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_helper_credential_outcome_is_reported_back_to_git",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_lock_records_no_auth_material",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_noninteractive_credential_fill_disables_helper_ui_in_ci",
+        "tests/integration/test_ado_credential_helper_install_lifecycle.py::test_ado_resolved_credential_is_not_replaced_by_ambient_netrc",
+        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_ado_lock_replays_frozen_with_pat",
+        "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_registry_lock_replays_resolved_url_without_churn"
       ]
     },
     {
@@ -513,7 +1682,11 @@
         "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_policy_status_follows_signin_redirect_into_credential_helper",
         "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_compile_lifecycle_runs_when_ado_policy_needs_credential_helper",
         "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_uninstall_lifecycle_runs_when_ado_policy_needs_credential_helper",
-        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block"
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block",
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_ado_hosted_target_policy_is_enforced_on_canonical_targets",
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_warn_names_unreachable_ado_policy",
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_policy_signin_redirect_without_helper_is_reported_as_auth_required",
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_warm_policy_cache_does_not_mask_refresh_through_helper"
       ]
     },
     {
@@ -527,7 +1700,510 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_of_an_unrelated_local_package_keeps_a_local_bundle_skill_pin",
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_keeps_non_skill_primitives_and_only_selected_skills_of_a_survivor",
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
-        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
+        "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged",
+        "tests/integration/test_uninstall_skill_selection_lifecycle.py::test_uninstall_unrelated_package_keeps_legacy_layout_skill_selection",
+        "tests/integration/test_uninstall_skill_selection_lifecycle.py::test_uninstall_unrelated_package_keeps_survivor_target_selection"
+      ]
+    },
+    {
+      "issue": 3764,
+      "summary": "Traps org mcp.transport.allow judging effective transport before writes; needs policy cache and local MCP registry.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_transport_policy_lifecycle.py::test_registry_sse_remote_blocked_before_any_write",
+        "tests/integration/test_mcp_transport_policy_lifecycle.py::test_registry_streamable_http_remote_passes",
+        "tests/integration/test_mcp_transport_policy_lifecycle.py::test_unreachable_registry_blocks_with_remedy"
+      ]
+    },
+    {
+      "issue": 3773,
+      "summary": "Traps audit/uninstall ignoring the recorded legacy skill layout and moved COPILOT_HOME (#3773, #3745); needs legacy flag and user scope.",
+      "failure_modes": ["cleanup", "observation", "routing"],
+      "properties": [
+        "filesystem.open_world_observation",
+        "ownership.preserve_unowned",
+        "routing.authorized_targets_only"
+      ],
+      "regression_tests": [
+        "tests/integration/test_legacy_skill_layout_copilot_home_lifecycle.py::test_legacy_skills_survive_audit_and_uninstall_in_their_recorded_root",
+        "tests/integration/test_legacy_skill_layout_lifecycle.py::test_env_rooted_legacy_skill_layout_survives_audit_and_uninstall",
+        "tests/integration/test_legacy_skill_layout_lifecycle.py::test_legacy_skill_layout_still_reports_real_drift",
+        "tests/integration/test_legacy_skill_layout_lifecycle.py::test_project_skill_layout_survives_audit_and_uninstall",
+        "tests/integration/test_legacy_skill_layout_lifecycle.py::test_uninstall_of_an_unrelated_package_keeps_the_legacy_skill_layout",
+        "tests/integration/test_legacy_skill_layout_lifecycle.py::test_user_skill_layout_survives_audit_and_uninstall"
+      ]
+    },
+    {
+      "issue": 3781,
+      "summary": "Traps audit demanding apm_modules after service-only update -g; needs user scope and released-version lockfiles.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_global_update_audit_materialization_lifecycle.py::test_global_audit_still_reports_missing_package_materialization",
+        "tests/integration/test_global_update_audit_materialization_lifecycle.py::test_global_update_then_audit_passes_for_released_user_lockfiles",
+        "tests/integration/test_global_update_audit_materialization_lifecycle.py::test_project_update_then_audit_is_unchanged"
+      ]
+    },
+    {
+      "issue": 3857,
+      "summary": "Traps apm init re-init mapping singular target: to targets:; init is outside replay vocabulary.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_init_reinit_targets_lifecycle.py::test_reinit_refuses_a_target_with_no_targets_equivalent",
+        "tests/integration/test_init_reinit_targets_lifecycle.py::test_reinit_writes_targets_apm_accepts"
+      ]
+    },
+    {
+      "issue": 3858,
+      "summary": "Traps YAML anchors in apm.yml being accepted or partially applied (#3858, #3871); needs malformed manifests and many reader commands.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_manifest_anchor_rejection_lifecycle.py::test_ci_audit_reports_anchor_on_a_cold_checkout",
+        "tests/integration/test_manifest_anchor_rejection_lifecycle.py::test_dependency_manifest_error_names_the_dependency_before_any_write",
+        "tests/integration/test_manifest_anchor_rejection_lifecycle.py::test_manifest_anchor_is_refused_before_any_write"
+      ]
+    },
+    {
+      "issue": 3866,
+      "summary": "Traps root .mcp.json heal from retired vscode/github files and vscode alias (#3866, #3868); needs MCP JSON bytes, legacy locks and many targets.",
+      "failure_modes": ["cleanup", "outcome", "ownership", "routing", "transaction"],
+      "properties": [
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "routing.authorized_targets_only",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_a_committed_frozen_move_is_adopted_in_a_clone_without_vscode_dir",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_a_lock_rewrite_before_the_mcp_phase_keeps_the_heal_pending",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_claude_and_copilot_share_one_mcp_json_entry",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_copilot_writes_root_mcp_json_and_leaves_user_entries",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_dependency_manifest_vscode_installs_for_copilot_without_warning",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_direct_mcp_retarget_keeps_the_entry_the_new_runtime_owns",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_edited_vscode_entry_is_kept_when_copilot_is_not_selected",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_keeps_an_edited_root_entry_of_a_removed_server",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_keeps_the_root_entry_apm_wrote",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_then_a_changed_declaration_updates_the_root_entry",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_then_removing_the_server_removes_its_root_entry",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_heal_runs_once_and_keeps_an_autodetected_project_installable",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_identical_root_entry_stays_the_users_unless_every_adoption_bound_holds",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_legacy_copilot_claim_never_adopts_a_user_root_entry",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_legacy_vscode_claim_never_adopts_an_identical_user_root_entry",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_manifest_migrate_command_no_longer_exists",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_moved_claim_never_adopts_a_differing_root_entry",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_partial_install_keeps_unhealed_retired_claims_for_the_retry",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_plural_all_is_not_a_replacement_for_singular_all",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_saved_vscode_default_target_deploys_like_copilot",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_target_warning_suggests_a_value_that_deploys_identically",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_upgrade_heals_only_apm_entries_out_of_retired_files",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_user_scope_copilot_keeps_its_global_config",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_vscode_alias_deploys_exactly_like_copilot",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_foreign_entry_in_a_retired_shape_is_never_taken_over",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_frozen_heal_keeps_ownership_of_fingerprinted_registry_entries",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_heal_does_not_slip_past_a_declared_transport_deny",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_heal_under_a_permissive_transport_policy_is_not_blocked",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_healed_entries_are_cleaned_when_their_declaration_is_removed",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_policy_fetch_failure_keeps_its_disposition_during_heal",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_registry_sse_heal_is_blocked_by_effective_transport",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_upgrade_removes_a_stale_codex_sse_entry",
+        "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_upgrade_rewrites_apm_owned_entries_into_the_current_shape"
+      ]
+    },
+    {
+      "issue": 3870,
+      "summary": "User-manifest target bootstrap and write refusal exceed project replay rows.",
+      "failure_modes": ["routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_global_mcp_bootstrap_targets_lifecycle.py::test_bootstrap_records_a_readable_target",
+        "tests/integration/test_global_mcp_bootstrap_targets_lifecycle.py::test_bootstrap_refuses_a_target_with_no_targets_spelling",
+        "tests/integration/test_global_mcp_bootstrap_targets_lifecycle.py::test_refusal_recovery_installs_without_recording_the_target"
+      ]
+    },
+    {
+      "issue": 3871,
+      "summary": "Traps root replace: source selection, fork slots, cache invalidation and failure rollback; needs replacement lock fields, git forks, symlinks.",
+      "failure_modes": ["cache", "outcome", "ownership", "reference", "transaction"],
+      "properties": [
+        "cache.successful_reads_refresh_recency",
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_empty_graph_persists_dormant_replacement_table",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_existing_local_replacement_reloads_changed_child_manifest",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_local_replacement_update_plans_changed_content_without_dry_run_writes",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_partial_update_refuses_changed_replacement_table_before_mutation",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_remote_parent_replacement_local_sibling_frozen_preflight",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_audit_detects_deployed_drift_without_repair",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_explicit_fork_sha_survives_update",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_failure_preserves_previous_owned_bytes_without_fallback",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_frozen_compares_dormant_rules_without_reading_sources",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_frozen_local_content_uses_locked_source_evidence",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_frozen_rejects_original_commit_as_selected_fork_pin",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_hook_consent_stays_with_selected_source",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_http_source_cannot_borrow_original_or_global_consent",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_ignores_unused_original_http_transport",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_local_audit_and_outdated_are_read_only",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_local_file_children_keep_selected_anchor_and_frozen_baseline",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_logical_cycle_fails_before_publishing_candidate",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_monorepo_subpath_preserves_unmatched_siblings",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_mutable_fork_replays_pin_then_updates_selected_source",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_native_plugin_cache_and_changed_output_cleanup",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_only_apm_records_selected_source_omission",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_physical_cycle_across_distinct_identities_preserves_install",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_preserves_alias_subset_targets_and_unmatched_dev_dependency",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_remote_diamond_preserves_original_requests_and_root_anchor",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_rules_in_dependency_manifest_do_not_redirect_consumer",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_same_named_ref_invalidates_upstream_cache_and_pin",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_selected_fork_children_keep_immutable_obligations",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_selected_skill_preflight_preserves_prior_install",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_source_symlink_escape_preserves_previous_install",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_transitive_dry_run_keeps_consumer_anchor_and_outputs_untouched",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_uninstall_preserves_shared_sources_until_the_last_parent",
+        "tests/integration/test_dependency_replacement_lifecycle.py::test_replacement_upstream_local_fork_upstream_owns_one_slot",
+        "tests/integration/test_target_error_rendering_lifecycle.py::test_logger_rendered_target_error_has_one_status_prefix",
+        "tests/integration/test_target_error_rendering_lifecycle.py::test_target_error_has_one_status_prefix"
+      ]
+    },
+    {
+      "issue": 3874,
+      "summary": "Traps a failed multi-package install leaving untracked deployed files (#3874); needs git refs, an invalid package and claude target.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_fail_before_integrate_lifecycle.py::test_failed_direct_dependency_integrates_nothing",
+        "tests/integration/test_fail_before_integrate_lifecycle.py::test_failed_direct_local_dependency_integrates_nothing"
+      ]
+    },
+    {
+      "issue": 3878,
+      "summary": "IDE target refusal is a distinct command and diagnostic contract.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_ide_target_refusal_lifecycle.py::test_existing_manifest_is_not_rewritten_for_an_ide_target",
+        "tests/integration/test_ide_target_refusal_lifecycle.py::test_init_refuses_an_ide_target_before_the_lifecycle_lock",
+        "tests/integration/test_ide_target_refusal_lifecycle.py::test_new_manifest_refuses_an_ide_target",
+        "tests/integration/test_ide_target_refusal_lifecycle.py::test_runtime_flag_bootstrap_never_records_an_ide"
+      ]
+    },
+    {
+      "issue": 3884,
+      "summary": "Traps machine-local state overriding the lock: stale apm_modules, ref bumps, plugin-root paths (#3884, #3883, #3825); needs git, clones, MCP/LSP.",
+      "failure_modes": ["ownership", "portability", "reference", "transaction"],
+      "properties": [
+        "ownership.preserve_unowned",
+        "portability.byte_deterministic",
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_frozen_replay_of_a_pre_3825_lock_keeps_native_state_removable",
+        "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_install_migrates_an_unfingerprinted_pre_3825_entry_per_target",
+        "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_plugin_root_conflict_hint_restores_the_value_apm_writes",
+        "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_plugin_root_mcp_and_lsp_replay_frozen_in_a_moved_clone",
+        "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_ref_bump_on_fresh_clone_adopts_locked_output_and_fails_closed_on_edits",
+        "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_stale_module_copy_keeps_locked_skill_subset_on_first_frozen_install"
+      ]
+    },
+    {
+      "issue": 3901,
+      "summary": "External APM_HOME and global audit exercise user scope.",
+      "failure_modes": ["ownership", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_global_audit_external_apm_home_lifecycle.py::test_global_install_then_audit_passes_with_apm_home_location"
+      ]
+    },
+    {
+      "issue": 3902,
+      "summary": "Traps intentional MCP omission persisting while real drift still fails audit; needs mcp_omissions lock fields and global scope.",
+      "failure_modes": ["cleanup", "idempotency", "outcome", "reference", "routing"],
+      "properties": [
+        "idempotency.byte_stable",
+        "lockfile.frozen_preserves_bytes",
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "portability.byte_deterministic",
+        "routing.authorized_targets_only"
+      ],
+      "regression_tests": [
+        "tests/integration/test_mcp_omission_lifecycle.py::test_direct_mcp_admission_supersedes_prior_omission",
+        "tests/integration/test_mcp_omission_lifecycle.py::test_omitted_mcp_stays_omitted_across_install_audit_and_repeat",
+        "tests/integration/test_mcp_omission_lifecycle.py::test_skills_only_preserves_admitted_baseline_and_real_drift",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_approve_refusal_exits_nonzero_and_writes_nothing",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_changed_definition_is_parked_until_reapproved",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_first_project_approval_warns_about_packages_it_parks",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_frozen_applies_the_executables_gate_like_install",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_legacy_type_approval_warns_with_the_pin_remedy",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_lockfile_depth_edit_cannot_make_a_transitive_server_direct",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_lockfile_only_edit_cannot_grant_trust",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_is_approved_by_one_pin_over_its_whole_root",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_legacy_hook_grant_registers_and_warns",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_per_file_hook_pins_never_register_it",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_reaching_apm_owned_paths_cannot_be_approved",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_one_off_flag_warns_and_does_not_persist",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_org_policy_beats_an_approval",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_pending_reports_a_legacy_mcp_grant_that_install_parks",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_pinned_hook_file_is_parked_when_its_script_changes",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_pinned_server_rewritten_as_a_registry_reference_is_parked",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_two_clones_reproduce_an_approved_transitive_server",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_uninstalling_a_sibling_keeps_a_survivors_pinned_hooks",
+        "tests/integration/test_mcp_portable_approval_lifecycle.py::test_user_approval_admits_locally_but_audit_ignores_it",
+        "tests/integration/test_user_scope_exec_trust_lifecycle.py::test_user_manifest_grants_gate_global_install_and_uninstall"
+      ]
+    },
+    {
+      "issue": 3911,
+      "summary": "Marketplace lock replay and ref-pinning behavior are explicitly excluded.",
+      "failure_modes": ["reference"],
+      "properties": ["source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_catalog_defined_servers_replay_warm_and_reresolve_cold",
+        "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_catalog_repin_of_a_server_owning_package_needs_update",
+        "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_locked_marketplace_entry_replays_without_catalog_until_update",
+        "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_transitive_marketplace_entry_replays_cold_and_frozen_refuses_unlocked"
+      ]
+    },
+    {
+      "issue": 3912,
+      "summary": "Catalog origin evidence and Git marketplace provenance exceed local-path replay sources.",
+      "failure_modes": ["reference"],
+      "properties": ["source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_origin_evidence_lifecycle.py::test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update",
+        "tests/integration/test_marketplace_origin_evidence_lifecycle.py::test_pre_037_lock_without_origin_evidence_still_updates"
+      ]
+    },
+    {
+      "issue": 3913,
+      "summary": "Marketplace dependency-confusion refusal and enterprise Git sources are excluded.",
+      "failure_modes": ["auth", "outcome", "reference"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_apm_update_re_admits_an_entry_locked_before_its_catalog_turned_ambiguous",
+        "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_bare_cross_repo_marketplace_entry_is_refused_before_any_write",
+        "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_bare_entry_is_admitted_when_github_host_is_the_marketplace_host",
+        "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_bare_entry_is_still_refused_when_github_host_is_another_host",
+        "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_host_qualified_or_in_marketplace_entry_still_installs"
+      ]
+    },
+    {
+      "issue": 3924,
+      "summary": "Executable gate semantics and hook retirement are beyond the replay world's supported deny model.",
+      "failure_modes": ["cleanup", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_executables_deny_retires_hooks_lifecycle.py::test_audit_and_update_honor_the_current_executables_decision",
+        "tests/integration/test_executables_deny_retires_hooks_lifecycle.py::test_gating_a_package_retires_its_deployed_hooks"
+      ]
+    },
+    {
+      "issue": 3925,
+      "summary": "Executable gate, organization policy, and frozen behavior exceed simple package approval rows.",
+      "failure_modes": ["routing", "transaction"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_package_mcp_executables_gate_lifecycle.py::test_org_deny_all_keeps_package_mcp_server_out",
+        "tests/integration/test_package_mcp_executables_gate_lifecycle.py::test_package_mcp_server_follows_project_gate",
+        "tests/integration/test_package_mcp_executables_gate_lifecycle.py::test_server_name_is_not_an_approval_key",
+        "tests/integration/test_package_mcp_executables_gate_lifecycle.py::test_user_scope_gate_parks_executables_and_frozen_agrees"
+      ]
+    },
+    {
+      "issue": 3928,
+      "summary": "Traps uninstall of object-form marketplace declaration offline; marketplace is outside replay vocabulary.",
+      "failure_modes": ["cleanup", "reference"],
+      "properties": ["ownership.preserve_unowned", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_marketplace_object_form_lifecycle.py::test_uninstall_selects_object_form_marketplace_declaration_offline"
+      ]
+    },
+    {
+      "issue": 3955,
+      "summary": "Local bundle packaging and authored MCP config assertions exceed row vocabulary.",
+      "failure_modes": ["ownership", "reference"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_mcp_lifecycle.py::test_bundle_mcp_claims_survive_unrelated_mcp_installs",
+        "tests/integration/test_local_bundle_mcp_lifecycle.py::test_bundle_mcp_is_recorded_baseline_and_survives_unrelated_installs",
+        "tests/integration/test_local_bundle_mcp_lifecycle.py::test_forged_bundle_provenance_cannot_hide_a_denied_server_from_audit",
+        "tests/integration/test_local_bundle_mcp_lifecycle.py::test_plain_audit_and_ci_agree_on_an_edited_bundle_file",
+        "tests/integration/test_local_bundle_mcp_lifecycle.py::test_user_scope_bundle_mcp_is_recorded_in_the_user_lock",
+        "tests/integration/test_local_bundle_mcp_lifecycle.py::test_user_scope_bundle_reads_grants_from_the_user_manifest"
+      ]
+    },
+    {
+      "issue": 3956,
+      "summary": "Traps approved local-bundle MCP servers surviving revoke, deny or repack (#3956); needs packed bundles, claude MCP and lock provenance.",
+      "failure_modes": ["cleanup", "routing"],
+      "properties": ["ownership.preserve_unowned", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_mcp_retire_lifecycle.py::test_bundle_mcp_retires_on_revoke_deny_and_repack"
+      ]
+    },
+    {
+      "issue": 3957,
+      "summary": "Traps wrong remediation after deny (#3957): frozen message and layered approve; needs claude MCP, user store and multi-layer denies.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state", "routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_deny_remediation_lifecycle.py::test_approve_exits_1_when_another_layer_still_denies",
+        "tests/integration/test_deny_remediation_lifecycle.py::test_frozen_names_the_gate_and_approve_lifts_a_project_deny",
+        "tests/integration/test_deny_remediation_lifecycle.py::test_user_store_deny_and_approve_work_outside_a_project"
+      ]
+    },
+    {
+      "issue": 3959,
+      "summary": "Traps rebound marketplace alias failing closed on install and outdated; needs marketplace catalogs and global scope.",
+      "failure_modes": ["reference", "transaction"],
+      "properties": ["source.ref_cache_coherent", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_origin_entry_points_lifecycle.py::test_rebound_alias_fails_closed_on_cli_install_and_outdated"
+      ]
+    },
+    {
+      "issue": 3960,
+      "summary": "Marketplace object-form dry-run is outside the supported replay commands.",
+      "failure_modes": ["cleanup", "outcome", "transaction"],
+      "properties": [
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_object_form_dry_run_lifecycle.py::test_install_dry_run_previews_locked_object_form_marketplace_dependency",
+        "tests/integration/test_marketplace_object_form_prune_lifecycle.py::test_prune_keeps_declared_object_form_marketplace_dependency"
+      ]
+    },
+    {
+      "issue": 3965,
+      "summary": "Traps plugin-only pack printing target deprecation exactly once; pack is outside replay vocabulary.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_pack_deprecation_warning_lifecycle.py::test_plugin_only_pack_warns_once_with_exact_replacement"
+      ]
+    },
+    {
+      "issue": 3966,
+      "summary": "Pack output and MCP ownership are outside supported replay commands.",
+      "failure_modes": ["ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_pack_mcp_ownership_lifecycle.py::test_pack_output_is_identical_before_and_after_install"
+      ]
+    },
+    {
+      "issue": 3967,
+      "summary": "Dry-run preview and retired target healing are outside the row command vocabulary.",
+      "failure_modes": ["cleanup", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_mcp_retired_preview_lifecycle.py::test_dry_run_preview_matches_the_retired_heal"
+      ]
+    },
+    {
+      "issue": 3992,
+      "summary": "Traps policy refusals and approve usage errors landing on stderr; needs blocking org policy and stream split.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_refusal_stderr_lifecycle.py::test_policy_refusals_and_approve_usage_error_write_stderr"
+      ]
+    },
+    {
+      "issue": 3993,
+      "summary": "Traps non-default-host require entries failing both presence checks (#3993); needs org policy file, git host rewrites and audit JSON details.",
+      "failure_modes": ["outcome", "reference"],
+      "properties": ["outcome.status_matches_state", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/policy/test_required_packages_host_identity_lifecycle.py::test_matching_require_passes_both_presence_checks",
+        "tests/integration/policy/test_required_packages_host_identity_lifecycle.py::test_unmatched_require_fails_both_presence_checks"
+      ]
+    },
+    {
+      "issue": 3994,
+      "summary": "Cold restore and edited deployment failure checks include byte-specific transactional assertions.",
+      "failure_modes": ["idempotency", "reference", "transaction"],
+      "properties": ["idempotency.byte_stable", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_clone_restore_is_idempotent_across_targets",
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_clone_restores_missing_files_and_refuses_edited_skill",
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_update_replaces_adds_and_removes_then_converges",
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_update_with_edited_skill_is_all_or_nothing",
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_edit_frozen_audit_revert_prune_uninstall_chain",
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_global_cold_install_and_update",
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_lockfile_tamper_fails_closed_without_writes",
+        "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_uninstall_after_apm_home_wipe_keeps_user_files"
+      ]
+    },
+    {
+      "issue": 3995,
+      "summary": "User-scope local-bundle lock rows are excluded from project-only replay.",
+      "failure_modes": ["ownership", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_user_scope_bundle_rows_lifecycle.py::test_project_bundle_rows_keep_project_scope",
+        "tests/integration/test_user_scope_bundle_rows_lifecycle.py::test_user_bundle_rows_keep_user_scope_across_an_unrelated_rebuild"
+      ]
+    },
+    {
+      "issue": 4011,
+      "summary": "Tests shared orphan-removal ownership across unsupported preview/prune command paths.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_orphan_removal_owner_lifecycle.py::test_audit_reports_the_direct_entry_projection",
+        "tests/integration/test_orphan_removal_owner_lifecycle.py::test_install_and_prune_previews_match_real_runs_and_targeted_install_is_isolated",
+        "tests/integration/test_orphan_removal_owner_lifecycle.py::test_install_preview_keeps_files_a_retained_owner_still_claims",
+        "tests/integration/test_orphan_removal_owner_lifecycle.py::test_uninstall_preview_matches_real_run_and_rescues_shared_dependency"
+      ]
+    },
+    {
+      "issue": 4027,
+      "summary": "Traps trust/integrity consistency across bundle, uninstall, update and unpack; needs org policy, bundles, unpack, user scope.",
+      "failure_modes": ["reference", "routing", "transaction"],
+      "properties": [
+        "routing.authorized_targets_only",
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_approved_bundle_hooks_survive_install_and_alias_follows_its_key",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_audit_flags_a_revoked_bundle_hook_before_install_retires_it",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_bundle_hook_without_a_recorded_key_fails_closed",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_copilot_bundle_hook_without_a_record_fails_closed",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_global_bundle_reads_user_scope_from_apm_home_outside_home",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_local_bundle_applies_org_policy_on_a_cold_cache",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_local_bundle_fails_closed_when_policy_is_unavailable_under_block",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_org_deny_all_retires_deployed_bundle_hooks",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_reinstalling_an_approved_bundle_records_a_missing_key",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_revoked_bundle_grant_retires_its_hooks",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_uninstall_survivor_rebuild_fails_closed_on_unverifiable_policy",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_executable_content",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_accepts_new_content_for_a_moved_commit",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_altered_bytes_for_an_unchanged_commit"
+      ]
+    },
+    {
+      "issue": 4038,
+      "summary": "Traps required-package identity under replace: (req-rpl-002); needs org policy over HTTPS proxy, fork hosts and audit check details.",
+      "failure_modes": ["outcome", "reference"],
+      "properties": ["outcome.status_matches_state", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_original_entry_does_not_identify_a_replaced_dependency",
+        "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_selected_entry_identifies_the_replaced_dependency",
+        "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_selected_entry_version_pin_reads_the_locked_ref",
+        "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_without_replacement_the_declared_package_keeps_matching"
       ]
     },
     {
@@ -556,6 +2232,16 @@
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_malformed_recorded_target_config_still_fails_closed",
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_manifest_targets_still_win_over_the_recorded_target",
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_lock_without_recorded_targets_keeps_the_fallback"
+      ]
+    },
+    {
+      "issue": 4073,
+      "summary": "Removed init flags are outside the replay command vocabulary.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["filesystem.open_world_observation", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_init_removed_flags_lifecycle.py::test_plugin_init_writes_the_metadata_the_old_flag_offered",
+        "tests/integration/test_init_removed_flags_lifecycle.py::test_removed_init_flag_exits_2_and_writes_nothing"
       ]
     },
     {
@@ -599,6 +2285,50 @@
       "regression_tests": [
         "tests/integration/test_policy_outcome_routing_lifecycle.py::test_every_policy_reader_routes_the_outcome_like_install",
         "tests/integration/test_policy_outcome_routing_lifecycle.py::test_approve_under_unreachable_policy_follows_fetch_failure_default"
+      ]
+    },
+    {
+      "issue": 4087,
+      "fixed_in": "0.37.0",
+      "summary": "User-scope (-g) commands read policy settings from $HOME/apm.yml instead of the user manifest in $APM_HOME, and derived org policy from a git checkout at HOME, although the docs state user scope has no git remote.",
+      "failure_modes": ["routing", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_user_scope_manifest_lifecycle.py::test_global_fetch_failure_default_comes_from_user_manifest",
+        "tests/integration/test_user_scope_manifest_lifecycle.py::test_global_commands_do_not_discover_policy_from_home_git_remote"
+      ]
+    },
+    {
+      "issue": 4088,
+      "fixed_in": "0.37.0",
+      "summary": "With PROXY_REGISTRY_ONLY set, apm install --update still probed GitLab, Azure DevOps and generic source hosts with git ls-remote before downloading through the registry proxy, because each call site opted in to registry-only routing on its own.",
+      "failure_modes": ["auth", "routing"],
+      "properties": ["auth.credentials_isolated"],
+      "regression_tests": [
+        "tests/integration/test_egress_route_policy_contract.py::test_update_preflight_sends_no_source_host_probe",
+        "tests/integration/test_egress_route_policy_contract.py::test_policy_fetch_goes_direct_in_registry_only_mode",
+        "tests/integration/test_egress_route_policy_contract.py::test_automatic_version_check_is_not_sent_in_registry_only_mode",
+        "tests/integration/test_egress_route_policy_contract.py::test_explicit_self_update_check_goes_direct_in_registry_only_mode",
+        "tests/integration/test_mcp_registry_ambient_credentials_lifecycle.py::test_registry_requests_carry_no_netrc_credentials"
+      ]
+    },
+    {
+      "issue": 4116,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H1, PERF-H9: the declared merge_group gate (full integration, binary build, release validation, global coverage floor) gated no merge after 2026-09-09 while merge-gate.yml and the workflow comments still described it as live; regressions outside lifecycle smoke surfaced only in the nightly.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/quality/test_ci_topology.py::test_merge_group_expected_checks_are_produced_by_merge_group_jobs",
+        "tests/quality/test_ci_topology.py::test_merge_time_integration_uses_the_release_planner",
+        "tests/quality/test_ci_topology.py::test_global_coverage_floor_gates_the_merge",
+        "tests/quality/test_ci_topology.py::test_merge_queue_freshness_alarm_is_scheduled",
+        "tests/unit/scripts/test_merge_queue_freshness.py::test_bypassed_queue_names_last_run_and_commits_since_it"
       ]
     },
     {
@@ -655,7 +2385,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_repository_not_found_lifecycle.py::test_inaccessible_repository_names_host_and_credential_source",
-        "tests/unit/core/test_auth_phase3.py::TestDescribeCredentialTried::test_names_the_resolved_source_not_the_value"
+        "tests/unit/core/test_auth_validation.py::TestDescribeCredentialTried::test_names_the_resolved_source_not_the_value"
       ]
     },
     {

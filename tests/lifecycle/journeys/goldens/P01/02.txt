@@ -1,0 +1,12 @@
+# apm journey golden v1: P01 step 2
+$ apm install --target copilot,claude
+[exit 0]
+--- stdout
+[>] Installing dependencies from apm.yml...
+[i] Targets: claude, copilot  (source: --target flag)
+  [+] <project root> (local)
+  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
+[i] Added apm_modules/ to .gitignore
+
+[*] Installed 1 APM dependency in <DUR>.
+--- stderr

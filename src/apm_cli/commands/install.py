@@ -22,6 +22,8 @@ from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 # working without modification.
 from apm_cli.core.scope import InstallScope as _InstallScope
 from apm_cli.core.scope import get_apm_dir as _get_apm_dir
+from apm_cli.core.scope import manifest_file
+from apm_cli.core.scope import manifest_root as _scope_manifest_root
 from apm_cli.deps.lockfile_generator import (
     LockfileGeneratorError,
     check_current_cli,
@@ -563,7 +565,7 @@ def _validate_and_add_packages_to_apm_yml(
     """
     from pathlib import Path
 
-    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
+    apm_yml_path = manifest_path or manifest_file(Path("."))
 
     data, manifest_host = _load_manifest_for_add(apm_yml_path, logger)
 
@@ -776,6 +778,7 @@ def _handle_mcp_install(  # noqa: PLR0913
             )
         target_decision = EffectiveTargetDecision(supported_runtimes, target_decision.source)
     _run_mcp_policy_preflight(
+        policy_root=_scope_manifest_root(Path.cwd(), user_scope=scope is _InstallScope.USER),
         mcp_name=mcp_name,
         transport=transport,
         url=url,
@@ -1251,8 +1254,8 @@ def install(  # noqa: PLR0913
                 from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
                 _bundle_project_root = _source_root
-                # One policy discovery serves the trust map and, at project
-                # scope (same root), the bundle policy preflight.
+                # One policy discovery, at the scope manifest root, serves the
+                # trust map and the bundle policy preflight.
                 _allow_execs_for_bundle = _effective_bundle_allow_map(
                     _bundle_project_root,
                     user_scope=global_,
@@ -1263,7 +1266,9 @@ def install(  # noqa: PLR0913
                     policy_fetch_result=(
                         _bundle_policy := None
                         if no_policy
-                        else discover_trust_policy(_bundle_project_root)
+                        else discover_trust_policy(
+                            _scope_manifest_root(_bundle_project_root, user_scope=global_)
+                        )
                     ),
                 )
                 _install_lb(

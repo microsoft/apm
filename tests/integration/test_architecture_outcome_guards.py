@@ -636,6 +636,7 @@ def test_explicit_policy_uses_chain_aware_discovery(
     assert result.policy is None
 
 
+@pytest.mark.req("req-pl-010")
 def test_incomplete_policy_chain_always_fails_closed() -> None:
     """A partial ancestor set must never become an enforceable policy."""
     from apm_cli.install.errors import PolicyViolationError

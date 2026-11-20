@@ -21,6 +21,8 @@ from apm_cli.deps.git_semver_resolver import GitSemverResolution
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.install.sources import _rebuild_cached_semver_resolution
 
+pytestmark = pytest.mark.unit
+
 
 def _make_locked(
     *,

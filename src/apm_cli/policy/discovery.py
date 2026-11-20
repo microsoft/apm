@@ -948,6 +948,13 @@ def _auto_discover(
        - Found -> return (first match wins)
     5. All candidates exhausted -> outcome="absent"
     """
+    from apm_cli.core.scope import policy_discovery_uses_git_remote
+
+    if not policy_discovery_uses_git_remote(project_root):
+        return PolicyFetchResult(
+            error="User scope has no git remote",
+            outcome="no_git_remote",
+        )
     # Read the remote once: identity and GitLab ancestry share it.
     try:
         remote_url = _git_remote_origin_url(project_root)

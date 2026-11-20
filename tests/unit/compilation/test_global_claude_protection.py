@@ -35,6 +35,7 @@ def test_absent_native_directory_never_reads_or_renders_sources(
         )
     render.assert_not_called()
     read.assert_not_called()
+    assert not (tmp_path / "claude").exists()
 
 
 def _generated(body: str = "Keep this instruction.") -> str:

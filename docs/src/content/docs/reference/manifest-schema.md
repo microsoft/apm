@@ -361,6 +361,8 @@ policy:
 | `hash` | `string` | unset | `<algo>:<hex-digest>` | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present. MD5 and SHA-1 are rejected at parse time. |
 
+Under `apm install -g`, these keys are read from the user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`), never from `~/apm.yml`. User scope has no git remote, so it discovers no org policy (outcome `no_git_remote`).
+
 Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../policy-schema/).
 
 ### 3.11. `registries`

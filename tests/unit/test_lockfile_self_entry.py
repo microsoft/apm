@@ -11,6 +11,7 @@ Covers:
 - is_semantically_equivalent honors the synthesized entry
 """
 
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import (
@@ -18,6 +19,8 @@ from apm_cli.deps.lockfile import (
     LockedDependency,
     LockFile,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

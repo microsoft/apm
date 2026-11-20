@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_ROOT = _REPO_ROOT / "src" / "apm_cli"
 

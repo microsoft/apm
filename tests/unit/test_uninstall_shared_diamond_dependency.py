@@ -23,11 +23,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.apm_package import clear_apm_yml_cache
+
+pytestmark = pytest.mark.component
 
 
 def _write_local_package(root: Path, name: str, deps: list[str] | None = None) -> None:

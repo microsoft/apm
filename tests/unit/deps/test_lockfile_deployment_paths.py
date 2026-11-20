@@ -1,7 +1,11 @@
 """Tests for lockfile-owned deployment path mutations."""
 
+import pytest
+
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockFile
+
+pytestmark = pytest.mark.unit
 
 
 def test_rename_local_deployed_path_moves_path_and_hash_without_duplicates() -> None:

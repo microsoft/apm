@@ -11,7 +11,10 @@ import pytest
 from click.exceptions import ClickException, UsageError
 
 from apm_cli.commands.publish import _pack_archive, _resolve_package_id
+from apm_cli.core.command_logger import CommandLogger
 from apm_cli.models.apm_package import APMPackage
+
+pytestmark = pytest.mark.component
 
 
 def _list_zip_members(data: bytes) -> list[str]:
@@ -129,7 +132,9 @@ class TestPackRegistryArchive:
         tarball = _pack_archive(tmp_path, tmp_path / "apm.yml", pkg, MagicMock(), verbose=False)
         assert "LICENCE" in _list_zip_members(tarball.read_bytes())
 
-    def test_verbose_logs_each_bundled_doc_file(self, tmp_path: Path) -> None:
+    def test_verbose_logs_each_bundled_doc_file(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """--verbose emits a logger.info line for every doc file added to the archive."""
         (tmp_path / "apm.yml").write_text(
             "name: demo\nversion: 1.0.0\ndescription: x\nauthor: a\n",
@@ -140,13 +145,13 @@ class TestPackRegistryArchive:
         (tmp_path / ".apm" / "skills" / "demo").mkdir(parents=True)
         (tmp_path / ".apm" / "skills" / "demo" / "SKILL.md").write_text("# s\n")
 
-        logger = MagicMock()
+        logger = CommandLogger("publish", verbose=True)
         pkg = APMPackage(name="demo", version="1.0.0")
         _pack_archive(tmp_path, tmp_path / "apm.yml", pkg, logger, verbose=True)
 
-        info_calls = [call.args[0] for call in logger.info.call_args_list]
-        assert any("README.md" in msg for msg in info_calls)
-        assert any("LICENSE" in msg for msg in info_calls)
+        out = "".join(capsys.readouterr())
+        assert "[i]   bundling README.md" in out
+        assert "[i]   bundling LICENSE" in out
 
     def test_symlinked_doc_files_excluded(self, tmp_path: Path) -> None:
         """Symlinks to doc files are not packed (path-traversal guard)."""
