@@ -97,8 +97,7 @@ def _listed(output: str, header: str) -> set[str]:
     return listed
 
 
-@pytest.fixture
-def project(tmp_path: Path, apm_binary_path: Path) -> _Project:
+def _setup(tmp_path: Path, runner: ApmLifecycleRunner) -> _Project:
     """A consumer with parent (-> dropped, shared), sibling (-> shared) and bystander."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "lifecycle", base_env=dict(os.environ))
     environment = isolated.subprocess_env()
@@ -123,7 +122,7 @@ def project(tmp_path: Path, apm_binary_path: Path) -> _Project:
     root.mkdir(parents=True)
     (root / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
     consumer = _Project(
-        ApmLifecycleRunner((str(apm_binary_path),)),
+        runner,
         environment,
         root,
         {"parent": parent, "sibling": sibling, "bystander": bystander},
@@ -136,8 +135,9 @@ def project(tmp_path: Path, apm_binary_path: Path) -> _Project:
 
 
 def test_install_and_prune_previews_match_real_runs_and_targeted_install_is_isolated(
-    project: _Project,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
+    project = _setup(tmp_path, ApmLifecycleRunner((str(apm_binary_path),)))
     bystander_files = set(project.lock()["bystander"]["deployed_files"])
     assert bystander_files
     project.undeclare("bystander")
@@ -176,8 +176,9 @@ def test_install_and_prune_previews_match_real_runs_and_targeted_install_is_isol
 
 
 def test_uninstall_preview_matches_real_run_and_rescues_shared_dependency(
-    project: _Project,
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
+    project = _setup(tmp_path, ApmLifecycleRunner((str(apm_binary_path),)))
     target = str(project.declaration("parent"))
 
     preview = project.run("uninstall", target, "--dry-run")
@@ -196,7 +197,8 @@ def test_uninstall_preview_matches_real_run_and_rescues_shared_dependency(
     assert "leaf-dropped" not in project.skills()
 
 
-def test_audit_reports_the_direct_entry_projection(project: _Project) -> None:
+def test_audit_reports_the_direct_entry_projection(tmp_path: Path, apm_binary_path: Path) -> None:
+    project = _setup(tmp_path, ApmLifecycleRunner((str(apm_binary_path),)))
     project.undeclare("parent")
 
     audit = project.run("audit", "--ci", "--no-policy", "--format", "json", expect=1)
