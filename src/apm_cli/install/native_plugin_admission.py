@@ -128,13 +128,17 @@ def finalize_native_plugin(
     # is treated as unapproved.
     denied = any(not approvals.get(exec_type, False) for exec_type in present_types)
     if denied:
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.security.trust import approve_command
+
         label = package_name or "the plugin"
+        command = approve_command(label, user_scope=is_user_scope(getattr(ctx, "scope", None)))
         # ONE authoritative refusal owned by the DiagnosticCollector, with the
         # actionable fix folded into the message itself (the summary line is not
         # verbose-gated, so the fix must live there, not in a dim detail line).
         diagnostics.warn(
             "Agent Plugin not registered with GitHub Copilot: its executables "
-            f"are not approved. Run 'apm approve {label}' to trust and register it.",
+            f"are not approved. Run '{command}' to trust and register it.",
             package=package_name,
         )
         return result
