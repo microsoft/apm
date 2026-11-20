@@ -285,36 +285,40 @@ def _native_after(
     )
 
 
-def _i1(after: Observation) -> list[str]:
+def _expect_i1(after: Observation, messages: list[str]) -> None:
     from tests.lifecycle.oracles import _i1_lock_deployed
 
-    return [v.message for v in _i1_lock_deployed(after, after, None, None, None) or []]
+    found = [v.message for v in _i1_lock_deployed(after, after, None, None, None) or []]
+    assert found == messages
 
 
 def test_i1_counts_paths_under_a_verified_native_plugin_root_as_recorded(tmp_path: Path) -> None:
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"})
-    assert _i1(after) == []
+    _expect_i1(after, [])
     project = _native_after(tmp_path / "p", {".agents/plugins/tool/bin/tool"}, user_scope=False)
-    assert _i1(project) == ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"]
+    _expect_i1(project, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
 
 
 def test_i1_fails_a_native_plugin_root_that_differs_from_its_record(tmp_path: Path) -> None:
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"})
     (tmp_path / ".agents/plugins/tool/bin/tool").write_text("changed\n", encoding="ascii")
-    assert _i1(after) == [
-        "native plugin root does not match the lock: .agents/plugins/tool",
-        "deployed file is not in the lock: .agents/plugins/tool/bin/tool",
-    ]
+    _expect_i1(
+        after,
+        [
+            "native plugin root does not match the lock: .agents/plugins/tool",
+            "deployed file is not in the lock: .agents/plugins/tool/bin/tool",
+        ],
+    )
 
 
 def test_i1_fails_a_path_outside_every_native_plugin_root(tmp_path: Path) -> None:
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool", ".agents/plugins/other/x"})
     (tmp_path / ".agents/plugins/other").mkdir()
     (tmp_path / ".agents/plugins/other/x").write_text("x\n", encoding="ascii")
-    assert _i1(after) == ["deployed file is not in the lock: .agents/plugins/other/x"]
+    _expect_i1(after, ["deployed file is not in the lock: .agents/plugins/other/x"])
 
 
 def test_i1_fails_a_verified_tree_the_lock_has_no_native_plugin_record_for(tmp_path: Path) -> None:
     # Same bytes and fingerprint, but the lock's only record names another root.
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"}, recorded_name="other")
-    assert _i1(after) == ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"]
+    _expect_i1(after, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
