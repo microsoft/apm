@@ -557,6 +557,17 @@
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_manifest_targets_still_win_over_the_recorded_target",
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_lock_without_recorded_targets_keeps_the_fallback"
       ]
+    },
+    {
+      "issue": 4176,
+      "fixed_in": "0.37.0",
+      "summary": "Per-project deployment receipts under $APM_HOME/deployment-receipts outlived the project roots they described, so they accumulated forever.",
+      "failure_modes": ["cleanup"],
+      "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_deployment_receipt_gc_lifecycle.py::test_orphaned_receipt_is_collected_and_live_receipt_survives",
+        "tests/unit/test_deployment_materialization_receipts.py::test_orphaned_receipt_collection_keeps_every_doubtful_receipt"
+      ]
     }
   ],
   "lifecycle_contracts": [
