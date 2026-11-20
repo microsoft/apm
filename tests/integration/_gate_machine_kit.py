@@ -554,12 +554,13 @@ class GateMachine(RuleBasedStateMachine):
         locked = self._locked(surface)
 
         def reference(before, after, result) -> list[str]:
-            # Approving a package that is not installed approves nothing: exit 1 (#4154).
-            expected = 1 if verdict == "approve" and not locked else 0
+            # A verdict on a package that is not installed matches nothing: exit 1
+            # and no write (#4154, #4189).
+            expected = 1 if not locked else 0
             if result is None or result.returncode != expected:
                 return [f"{verdict} exited {getattr(result, 'returncode', None)}"]
             if expected and before.artifacts != after.artifacts:
-                return ["approve of an uninstalled package changed durable state"]
+                return [f"{verdict} of an uninstalled package changed durable state"]
             if verdict == "approve" and locked and not _store_grants(self.world.store(), path):
                 return [f"approve {surface} recorded no grant for an installed package"]
             return []
@@ -569,6 +570,8 @@ class GateMachine(RuleBasedStateMachine):
             lambda: self.world.run((verdict, *user, path), f"{verdict}-{surface}"),
             reference=reference,
         )
+        if not locked:
+            return None
         if verdict == "deny":
             self.store_state[surface] = "deny"
         elif _store_grants(self.world.store(), path) and not _store_denies(

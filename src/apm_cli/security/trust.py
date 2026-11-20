@@ -460,19 +460,29 @@ def hook_file_filter(
     return HookFileAdmission(ctx, package_keys, package_path)
 
 
-def approve_command(argument: str, *, user_scope: bool = False) -> str:
+def _shell_argument(argument: str) -> str:
+    """One shell word for a package identity; options such as ``--pending`` pass through."""
+    import shlex
+
+    return argument if argument.startswith("-") else shlex.quote(argument)
+
+
+def approve_command(argument: str, *, user_scope: bool = False, user_store: bool = False) -> str:
     """Return the ``apm approve`` command that clears a parked executable.
 
     Remediation catalog ids ``executables-unapproved`` (project) and
     ``executables-unapproved-user-scope`` (``-g``): a package installed with
-    ``apm install -g`` is approved with ``apm approve -g`` (#4154).
+    ``apm install -g`` is approved with ``apm approve -g`` (#4154). ``-g``
+    selects the installation; ``--user`` (*user_store*) only the store.
     """
-    return f"apm approve -g {argument}" if user_scope else f"apm approve {argument}"
+    flags = ("-g " if user_scope else "") + ("--user " if user_store else "")
+    return f"apm approve {flags}{_shell_argument(argument)}"
 
 
 def explain_command(package: str, *, user_scope: bool = False) -> str:
     """Return the ``apm policy explain`` command for a parked package's scope."""
-    return f"apm policy explain -g {package}" if user_scope else f"apm policy explain {package}"
+    flag = "-g " if user_scope else ""
+    return f"apm policy explain {flag}{_shell_argument(package)}"
 
 
 def parked_hook_message(package: str, item: str, reason: str, *, user_scope: bool = False) -> str:

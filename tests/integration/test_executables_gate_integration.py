@@ -992,16 +992,13 @@ class TestApproveDenyCommandsIntegration:
         monkeypatch.chdir(project)
 
         runner = CliRunner()
+        before = manifest.read_bytes()
         result = runner.invoke(deny_cmd, ["missing"])
 
-        assert result.exit_code == 0
-        # deny may target a not-yet-installed package (a pre-emptive block)
-        assert "Denied missing" in result.output
-
-        from apm_cli.utils.yaml_io import load_yaml
-
-        data = load_yaml(manifest)
-        assert "missing" in data["executables"]["deny"]
+        # A deny that matches no installed package is refused, never recorded (#4189).
+        assert result.exit_code == 1
+        assert "not found" in result.output
+        assert manifest.read_bytes() == before
 
     def test_approve_no_manifest_errors(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner

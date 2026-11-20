@@ -120,18 +120,21 @@ def test_approve_and_deny_by_install_spec_reach_the_installed_package(
     assert "To lift it" in explained.stdout, _evidence(explained)
 
 
-@pytest.mark.parametrize("command", ["approve", "deny"])
+@pytest.mark.parametrize("spec", ["absent@loc", "acme/absent"])
+@pytest.mark.parametrize("command", ["approve", "deny", "explain"])
 @pytest.mark.parametrize("scope", ["project", "user"])
 def test_unresolvable_install_spec_exits_1_without_writing(
-    tmp_path: Path, apm_binary_path: Path, scope: str, command: str
+    tmp_path: Path, apm_binary_path: Path, scope: str, command: str, spec: str
 ) -> None:
     world = _installed(tmp_path, apm_binary_path, scope)
     before = world.manifest.read_bytes()
 
-    result = world.apm(command, *world.flags, "absent@loc")
+    argv = ("policy", "explain") if command == "explain" else (command,)
+    result = world.apm(*argv, *world.flags, spec)
 
     assert result.returncode == 1, _evidence(result)
-    assert "absent@loc" in result.stdout + result.stderr
+    assert spec in result.stdout + result.stderr
+    assert "Denied" not in result.stdout, _evidence(result)
     assert world.manifest.read_bytes() == before, "a refused spec wrote the approval store"
 
 

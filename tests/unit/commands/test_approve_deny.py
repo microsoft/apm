@@ -445,8 +445,8 @@ class TestApproveCmd:
             store = load_yaml(Path("apm.yml")).get("executables", {})
             assert "hook-pkg" not in str(store.get("allow", {}))
             assert not any("hook-pkg" in key for key in store.get("deny", {}))
-            # approve of a name matching nothing exits 1 (#4154); deny records it.
-            assert result.exit_code == (1 if command is approve_cmd else 0), result.output
+            # approve and deny of a name matching nothing exit 1 (#4154, #4189).
+            assert result.exit_code == 1, result.output
 
     @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
     def test_name_matching_two_installed_packages_is_refused(self, command) -> None:
@@ -842,24 +842,21 @@ class TestDenyCmd:
         with runner.isolated_filesystem():
             _write_manifest(".")
             Path("apm_modules").mkdir()
+            before = Path("apm.yml").read_bytes()
             result = runner.invoke(deny_cmd, ["owner/repo"])
-            assert result.exit_code == 0
-            assert "Denied" in result.output
-            from apm_cli.security.executables import ALL_EXEC_TYPES
-            from apm_cli.utils.yaml_io import load_yaml
-
-            stored = load_yaml(Path("apm.yml"))["executables"]["deny"]["owner/repo"]
-            assert set(stored) == set(ALL_EXEC_TYPES)
-            assert all(stored.values())
+            # A deny that matches no installed package is refused (#4189).
+            assert result.exit_code == 1
+            assert "not found" in result.output
+            assert Path("apm.yml").read_bytes() == before
 
     def test_deny_user_scope_writes_config(self, tmp_path: Path) -> None:
         p_cfg, p_legacy, cfg = _isolated_config(tmp_path)
         runner = CliRunner()
         with runner.isolated_filesystem(), p_cfg, p_legacy:
             _write_manifest(".")
-            Path("apm_modules").mkdir()
-            result = runner.invoke(deny_cmd, ["--user", "owner/repo"])
-            assert result.exit_code == 0
+            _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+            result = runner.invoke(deny_cmd, ["--user", "hook-pkg"])
+            assert result.exit_code == 0, result.output
             import json
 
             stored = json.loads(cfg.read_text())
@@ -879,7 +876,8 @@ class TestExplainCmd:
             Path("apm_modules").mkdir()
             with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
                 result = runner.invoke(policy_group, ["explain", "nonexistent"])
-            assert result.exit_code == 0
+            # Explaining a package that is not installed exits 1 (#4189).
+            assert result.exit_code == 1
             assert "not found" in result.output
 
     def test_explain_blocked_package_shows_layer_and_remedy(self) -> None:

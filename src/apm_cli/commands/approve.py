@@ -105,6 +105,19 @@ def _canonical_specs(manifest: Path, specs: Sequence[str]) -> tuple[str, ...]:
     return tuple(resolved)
 
 
+def _installed_identities(manifest: Path) -> frozenset[str]:
+    """Store identities of every package ``apm.lock.yaml`` records for *manifest*."""
+    from ..security.executables import _readable_lockfile, canonical_approval_spec
+
+    lockfile = _readable_lockfile(manifest.parent)
+    if lockfile is None:
+        return frozenset()
+    return frozenset(
+        canonical_approval_spec(row.get_unique_key(), lockfile, selected_key=row.get_unique_key())
+        for row in lockfile.get_package_dependencies()
+    )
+
+
 def _load_store(
     manifest: Path, user_scope: bool
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
@@ -309,17 +322,28 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
     allow, deny = _load_store(manifest, user_scope)
 
     declarations = _scan_installed_packages(manifest)
+    installed = _installed_identities(manifest)
+    unmatched = [
+        pkg
+        for pkg in packages
+        if _find_declaration(declarations, pkg) is None and pkg not in installed
+    ]
+    if unmatched:
+        # Never record a deny that matches no installed package (#4189).
+        for pkg in unmatched:
+            _report_not_found(declarations, pkg, manifest)
+        sys.exit(1)
 
     changed = 0
     for pkg in packages:
         decl = _find_declaration(declarations, pkg)
         if decl is None:
-            # Allow denying a package that is not (or no longer) installed.
+            # Installed, but declares no executables yet: block any it adds.
             from ..security.executables import ALL_EXEC_TYPES
 
             deny[pkg] = dict.fromkeys(ALL_EXEC_TYPES, True)
             allow.pop(_find_matching_key(allow, pkg) or pkg, None)
-            _rich_info(f"Denied {pkg} (all executable types; not installed)", symbol="info")
+            _rich_info(f"Denied {pkg} (all executable types)", symbol="info")
             changed += 1
             continue
         deny[decl.package_key] = {t: True for t in decl.exec_types}
@@ -381,6 +405,9 @@ def explain_decision(package: str, *, logger: CommandLogger, global_scope: bool 
     decl = _find_declaration(_scan_installed_packages(manifest), package)
 
     if decl is None:
+        if package not in _installed_identities(manifest):
+            _report_not_found(_scan_installed_packages(manifest), package, manifest)
+            sys.exit(1)
         _rich_warning(f"{package}: not found among installed packages with executables.")
         if not ctx.gate_enabled:
             _rich_info("The executable-trust gate is disabled for this project.", symbol="info")
@@ -437,7 +464,8 @@ def _explain_next_step(manifest: Path, decl: ExecutableDeclaration, verdicts) ->
             return
     _rich_info(
         f"To trust it: `{approve_command(identity, user_scope=user_scope)}` "
-        f"(or `apm approve --user {identity}` for this machine only).",
+        f"(or `{approve_command(identity, user_scope=user_scope, user_store=True)}` "
+        "for this machine only).",
         symbol="info",
     )
 
@@ -911,6 +939,7 @@ def _record_and_save(
     """
     from ..security.trust import PINNED_GRANTS_MIN_APM, has_any_pins
 
+    global_install = _install_command(manifest).endswith("-g")
     had_pins = has_any_pins(allow)
     successes: list[str] = []
     recorded: list[ExecutableDeclaration] = []
@@ -929,7 +958,7 @@ def _record_and_save(
             layer = layer_denied[id(decl)]
             _rich_info(
                 f"Skipped {_identity(decl)}: denied ({layer}). "
-                f"Lift the deny: {_lift_deny_hint(layer, _identity(decl))}",
+                f"Lift the deny: {_lift_deny_hint(layer, _identity(decl), user_scope=global_install)}",
                 symbol="info",
             )
             continue
@@ -962,7 +991,7 @@ def _record_and_save(
         for decl, layer in still_denied:
             _rich_error(
                 f"{_identity(decl)} is still denied ({layer}); the approval has no effect "
-                f"until that deny is lifted: {_lift_deny_hint(layer, _identity(decl))}"
+                f"until that deny is lifted: {_lift_deny_hint(layer, _identity(decl), user_scope=global_install)}"
             )
         still_ids = {id(decl) for decl, _layer in still_denied}
         successes = [
@@ -1034,7 +1063,7 @@ def _lift_deny_hint(layer: str, identity: str, *, user_scope: bool = False) -> s
     from ..security.trust import approve_command
 
     if layer == LAYER_USER_DENY:
-        return f"apm approve --user {identity}"
+        return approve_command(identity, user_scope=user_scope, user_store=True)
     if layer == LAYER_PROJECT_DENY:
         return approve_command(identity, user_scope=user_scope)
     return "the org policy denies it; ask its owner to change apm-policy.yml"

@@ -34,6 +34,8 @@ class CodexNativePlugin:
     source_commit: str | None = None
     # Unapproved executables: nothing deploys or registers until approved (#4154).
     parked: bool = False
+    # The trust owner already reported why (deny, change, missing grant).
+    parked_reported: bool = False
     target_name: ClassVar[str] = "codex"
 
     def source_identity(self) -> dict[str, str | None]:
@@ -63,6 +65,8 @@ def finalize_codex_native(
     scratch_root: Path | None,
 ) -> dict:
     """Queue the admitted source identity only after successful loose cleanup."""
+    if plugin.parked and plugin.parked_reported:
+        return result
     if plugin.parked:
         from apm_cli.core.scope import is_user_scope
         from apm_cli.security.trust import REASON_UNAPPROVED, parked_plugin_message
@@ -102,6 +106,7 @@ def plan_native_codex_plugin(
     approvals: dict[str, bool],
     ctx: InstallContext | None,
     read_only: bool = False,
+    parked_reported: bool = False,
 ) -> CodexNativePlugin | None:
     """Never normalize or partially project a selected Codex compatibility bundle."""
     package = getattr(package_info, "package", None)
@@ -155,4 +160,5 @@ def plan_native_codex_plugin(
         manifest.mcp_server_names,
         source_commit,
         parked=parked,
+        parked_reported=parked and parked_reported,
     )
