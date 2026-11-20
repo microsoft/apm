@@ -1,5 +1,6 @@
 """APM run and preview commands."""
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -197,9 +198,11 @@ def preview(ctx, script_name, param, verbose):
                     logger.progress("APM only compiles files ending with '.prompt.md' extension.")
 
             _rich_blank_line()
-            logger.success(
-                f"Preview complete! Use 'apm run {script_name}' to execute.",
+            # Repeat the params, or 'apm run' leaves ${input:...} unresolved (#3994).
+            run_cmd = shlex.join(
+                ["apm", "run", script_name, *(f for p in param for f in ("--param", p))]
             )
+            logger.success(f"Preview complete! Execute with: {run_cmd}")
 
         except ImportError:
             logger.warning("Script runner not available yet")

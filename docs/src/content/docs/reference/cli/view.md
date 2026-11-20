@@ -157,7 +157,7 @@ Example output:
 Inspect a user-scope skill file:
 
 ```bash
-apm view --file ~/.copilot/skills/code-review/SKILL.md -g
+apm view --file ~/.agents/skills/code-review/SKILL.md -g
 ```
 
 View a marketplace plugin's manifest entry:

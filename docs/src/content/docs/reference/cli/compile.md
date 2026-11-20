@@ -157,7 +157,7 @@ without a valid Build ID, hand-authored files, and symbolic links are retained.
 | `--no-links` | Skip markdown link resolution. |
 | `--with-constitution` / `--no-constitution` | Include or omit the Spec Kit `memory/constitution.md` block at the top. Default: included. When disabled, an existing block is preserved but not regenerated. |
 | `--local-only` | Ignore `apm_modules/`; compile only `.apm/` primitives. |
-| `--force-instructions` (alias: `--no-dedup`) | Include instructions in `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` even when `.claude/rules/`, `.github/instructions/`, or `.agents/rules/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compatible alias for `--force-instructions`. |
+| `--force-instructions` / `--no-force-instructions` (alias: `--no-dedup`) | Include instructions in `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` even when `.claude/rules/`, `.github/instructions/`, or `.agents/rules/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compatible alias for `--force-instructions`. `--no-force-instructions` (the default) keeps deduplication on. |
 | `--legacy-skill-paths` | Accepted for compatibility; skill deployment happens in `apm install` / `apm update`, not `apm compile`. |
 
 ### Modes
