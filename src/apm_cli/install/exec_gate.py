@@ -106,13 +106,20 @@ def check_executable_approval(
             _decl.exec_types,
         )
         unapproved = [t for t in _decl.exec_types if t not in pinned_status and not approved[t]]
-        denied: frozenset[str] = frozenset()
-        from apm_cli.security.executables import TRUST_GATED, ExecTrustContext, denied_exec_types
+        from apm_cli.security.executables import (
+            TRUST_DENIED,
+            TRUST_GATED,
+            ExecTrustContext,
+            denied_exec_types,
+        )
 
+        # A pinned type the item owner denies is reported as denied, like a
+        # type-level deny: approving cannot lift it.
+        denied = frozenset(t for t, status in pinned_status.items() if status == TRUST_DENIED)
         if unapproved and isinstance(ctx.exec_trust_ctx, ExecTrustContext):
-            denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)
-            if denied:
-                ctx.package_denied_exec_types[package_name] = denied
+            denied |= denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)
+        if denied:
+            ctx.package_denied_exec_types[package_name] = denied
         # Only a declared type that stays unapproved and is not hard-denied
         # (approving cannot lift a deny), or a pinned item awaiting
         # re-approval, parks the package for approval.
