@@ -385,55 +385,10 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
 
 
 _FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runtimes?)|Skipped targets without MCP support)"
-_POLICY_PHASE_BANNER = (
-    r"Policy enforcement disabled by --no-policy|Org policy at \S+ is present but empty"
-)
 
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
-    KnownOutputCell(
-        "audit-json-replay-error-has-no-json",
-        "I6",
-        "#4287",
-        _scenario_runs("audit", "root-source-replacement"),
-        r"JSON mode printed invalid JSON",
-        output=r"\A\Z",
-    ),
-    KnownOutputCell(
-        "install-policy-banner-per-phase",
-        "I9",
-        "#4241",
-        _runs("install"),
-        _POLICY_PHASE_BANNER,
-        # The APM and MCP phases each print the policy banner (--no-policy or an empty org policy).
-        output=rf"^\[!\] (?:{_POLICY_PHASE_BANNER}).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
-        "install-org-policy-banner-per-phase",
-        "I9",
-        "#4249",
-        _runs("install"),
-        r"\[!\] Policy: org:",
-        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
-        "install-org-policy-banner-when-mcp-blocked",
-        "I9",
-        "#4267",
-        _runs("install"),
-        r"\[!\] Policy: org:",
-        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
-    ),
-    KnownOutputCell(
-        "approve-org-policy-warning-twice",
-        "I9",
-        "#4178",
-        _runs("approve"),
-        r"\[!\] (Org policy not applied|Using stale cached org policy)",
-        # Only runs that print the same warning line twice (a single warning is correct).
-        output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
-    ),
     KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
