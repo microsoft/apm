@@ -671,7 +671,10 @@ def _route_ci_policy_outcome(cfg: _AuditConfig, fetch_result, *, auto_discovered
             )
             if cfg.verbose and fetch_result.discovery_hint:
                 click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
-        fetch_result = None
+        # A named source that resolved a rule-less (empty) policy is still the
+        # policy this audit evaluated and reports; it has nothing to enforce.
+        if auto_discovered or fetch_result.policy is None:
+            fetch_result = None
     return fetch_result
 
 
