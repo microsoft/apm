@@ -22,6 +22,7 @@ from apm_cli.install.helpers.ref_reuse import (
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
+from apm_cli.install.repository_access import not_found_next_step
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.models.dependency import materialization as _materialization
@@ -120,20 +121,6 @@ def _with_preserved_install_hint(message: str, install_path: Path | None) -> str
     return (
         f"{message}. The existing installation remains active; fix the cause and retry the install."
     )
-
-
-def _reports_repository_not_found(error: BaseException) -> bool:
-    """Whether *error* (or a cause) is the canonical repository-not-found failure."""
-    from apm_cli.core.auth_outcome import RepositoryNotFoundError
-
-    seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        if isinstance(current, RepositoryNotFoundError):
-            return True
-        seen.add(id(current))
-        current = current.__cause__ or current.__context__
-    return False
 
 
 def _prepare_callback_materialization_path(
@@ -345,10 +332,12 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     )
 
 
-def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
-    """Raise when the resolver recorded fatal dependency-resolution errors."""
+def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=()) -> None:
+    """Raise on fatal resolution errors; show the download *failures* behind them once."""
     if not dependency_graph.resolution_errors:
         return
+    for _display, failure in failures if ctx.logger else ():
+        ctx.logger.verbose_detail(f"  {failure}")
     for error in dependency_graph.resolution_errors:
         if ctx.logger and not error.startswith("Marketplace package materialization failed:"):
             ctx.logger.error(error)
@@ -756,14 +745,8 @@ def _resolve_dependencies(
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
             fail_msg = _with_preserved_install_hint(fail_msg, install_path)
-            if is_direct and _reports_repository_not_found(e):
-                fail_msg += (
-                    f" Run 'apm uninstall {dep_ref.get_identity()}' to remove it from apm.yml."
-                )
+            fail_msg += not_found_next_step(e, dep_ref, is_direct=is_direct)
 
-            # The deferred diagnostics summary prints the failure once, in
-            # every mode (#4199). F7 (#1116): one critical section so
-            # concurrent failures don't interleave their records.
             with callback_lock:
                 callback_failures.add(dep_key)
                 transitive_failures.append((dep_display, fail_msg))
@@ -805,7 +788,7 @@ def _resolve_dependencies(
 
     # The graph reads source_root; apm_modules_dir remains the deployment root.
     dependency_graph = _build_dependency_graph(ctx, resolver)
-    _fail_on_resolution_errors(ctx, dependency_graph)
+    _fail_on_resolution_errors(ctx, dependency_graph, transitive_failures)
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so
     # the integrate phase skips them via the same gate used for download

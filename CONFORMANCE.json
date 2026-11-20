@@ -1772,9 +1772,13 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 6,
+      "test_count": 10,
       "tests": [
         "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval",
         "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-install-hooks]",
         "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-mcp-admission]",
@@ -1836,8 +1840,12 @@
       "keyword": "MUST",
       "section": "10.15",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[gate-wins]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[non-tty-default-deny]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[opt-in]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[opt-out]",
         "tests/spec_conformance/test_manifest_reqs.py::test_bin_deployment_defaults_to_deny_in_non_interactive_context"
       ]
     },
