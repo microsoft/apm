@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` writes `apm.lock.yaml` when the project's own `.apm/` hooks only merge into shared harness settings, so `apm audit --ci` checks them for drift. (closes #4033, #PRNUM)
+- `apm install` writes `apm.lock.yaml` when the project's own `.apm/` hooks only merge into shared harness settings, so `apm audit --ci` checks them for drift. (closes #4033, #4489)
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
