@@ -6,7 +6,7 @@ import tempfile  # noqa: F401
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.compilation.constants import (
     CONSTITUTION_MARKER_BEGIN,
@@ -22,6 +22,8 @@ from apm_cli.compilation.constitution_block import (
     render_block,
 )
 from apm_cli.compilation.injector import ConstitutionInjector
+
+pytestmark = pytest.mark.component
 
 _BEGIN = CONSTITUTION_MARKER_BEGIN
 _END = CONSTITUTION_MARKER_END

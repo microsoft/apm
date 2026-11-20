@@ -14,6 +14,10 @@ import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def _make_logger() -> MagicMock:
     logger = MagicMock()

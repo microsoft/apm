@@ -9,6 +9,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 # Token env vars that AuthResolver inspects.  Cleared so the doctor's auth
 # check is deterministic regardless of the host environment.
 _TOKEN_ENV_VARS = ("GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN")

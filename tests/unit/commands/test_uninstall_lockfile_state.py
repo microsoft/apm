@@ -1,5 +1,7 @@
 """Tests for atomic uninstall lockfile reconciliation."""
 
+import pytest
+
 from apm_cli.commands.uninstall.lockfile_state import reconcile_uninstall_deployment_state
 from apm_cli.core.deployment_state import (
     DeploymentLedger,
@@ -8,6 +10,8 @@ from apm_cli.core.deployment_state import (
     LocatorKind,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+pytestmark = pytest.mark.component
 
 
 def test_duplicate_locator_values_update_each_target_record_hash(tmp_path) -> None:

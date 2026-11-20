@@ -3,7 +3,8 @@
  "steps_done": [
   0,
   1,
-  2
+  2,
+  3
  ],
  "folds": {
   "tests/unit/commands/test_pack_phase3.py::TestPackCmdFlags::test_help_text_includes_all_key_flags": "tests/unit/commands/test_pack_cli_surface.py::TestPackCmdFlags::test_help_text_includes_all_key_flags",
@@ -36,9 +37,12 @@
   "step0: the 6 nodes unmapped after 011445baa/08030d1b4 each have a same-named or same-scenario survivor in the kept module whose assertions are a superset (pack: exact share line and extra help flags; distributed: same asserts on a markerless fixture constant, plus suppressed_empty_paths default)",
   "step1: --report-equal-copies lists no copy in tests/unit/compilation or tests/unit/commands; nothing to delete",
   "step2: all 8 same-body groups touching scope paired a pure-logic unit test with a twin under tests/integration (outside scope); folded the unit copies into parametrized tests in the same unit class so behavior stays in the unit lane and the integration twins are left untouched",
-  "step2: TestRenderFindingsTable empty/info cases now assert nothing is echoed or printed instead of only not raising; TestFormatTargetLabel none case now also covers label sources"
+  "step2: TestRenderFindingsTable empty/info cases now assert nothing is echoed or printed instead of only not raising; TestFormatTargetLabel none case now also covers label sources",
+  "step3: 79 modules got one module-level pytestmark: component when the module uses tmp_path, tempfile, CliRunner, chdir, real file reads/writes or repo files; unit for the 3 pure-logic modules (test_build_id, test_find_reverse_index, compile/test_watch_target_forwarding)",
+  "step3: tests/unit/commands/test_approve_deny.py, test_experimental_command.py and test_install_context.py stay unclassified because open pull requests own them"
  ],
  "counts_left": {
-  "same_body_groups": 0
+  "same_body_groups": 0,
+  "unclassified_modules": 3
  }
 }

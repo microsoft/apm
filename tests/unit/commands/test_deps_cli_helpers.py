@@ -13,6 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.commands.deps.cli import (
     _dep_display_name,
     _format_primitive_counts,
@@ -21,6 +23,8 @@ from apm_cli.commands.deps.cli import (
 from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # _format_primitive_counts

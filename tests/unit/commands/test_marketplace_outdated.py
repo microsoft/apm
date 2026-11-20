@@ -19,6 +19,8 @@ from apm_cli.marketplace.errors import (
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------

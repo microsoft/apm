@@ -26,6 +26,8 @@ from apm_cli.compilation.agents_compiler import (
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 
 class TestCompilationConfigTarget:
     """Tests for CompilationConfig.target field."""

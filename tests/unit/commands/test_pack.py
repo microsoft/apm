@@ -18,6 +18,8 @@ from apm_cli.commands.pack import (
 )
 from apm_cli.marketplace.builder import BuildReport, MarketplaceOutputReport
 
+pytestmark = pytest.mark.component
+
 
 class _RecordingLogger:
     def __init__(self) -> None:

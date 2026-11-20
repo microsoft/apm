@@ -20,6 +20,8 @@ import pytest
 
 from apm_cli.commands.compile.watcher import APMFileHandler, _format_target_label
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

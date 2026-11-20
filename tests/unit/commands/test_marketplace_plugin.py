@@ -18,6 +18,8 @@ from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
 from apm_cli.marketplace.migration import load_marketplace_config
 from apm_cli.marketplace.ref_resolver import RemoteRef
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

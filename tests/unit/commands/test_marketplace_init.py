@@ -15,6 +15,8 @@ from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def runner():

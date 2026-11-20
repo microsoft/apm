@@ -29,6 +29,8 @@ from apm_cli.compilation.distributed_compiler import (
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

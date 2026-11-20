@@ -16,6 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.compilation.constants import CONSTITUTION_RELATIVE_PATH
 from apm_cli.compilation.constitution import (
     _constitution_cache,
@@ -23,6 +25,8 @@ from apm_cli.compilation.constitution import (
     find_constitution,
     read_constitution,
 )
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

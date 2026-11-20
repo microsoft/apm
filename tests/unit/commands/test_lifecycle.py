@@ -12,6 +12,8 @@ import yaml
 
 from apm_cli.commands.lifecycle import _validate_script_file, lifecycle
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture()
 def cli_runner():

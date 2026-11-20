@@ -7,7 +7,7 @@ the placeholder line removed (so the hash is not self-referential).
 
 import re
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.compilation.build_id import (
     has_build_id_line,
@@ -15,6 +15,8 @@ from apm_cli.compilation.build_id import (
     stabilize_build_id,
 )
 from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER, BUILD_ID_PLACEHOLDER
+
+pytestmark = pytest.mark.unit
 
 _HASH_LINE_RE = re.compile(r"^<!-- Build ID: [a-f0-9]{12} -->$")
 

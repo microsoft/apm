@@ -24,6 +24,8 @@ from apm_cli.compilation.constitution import clear_constitution_cache
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Module-level cache isolation
 # ---------------------------------------------------------------------------

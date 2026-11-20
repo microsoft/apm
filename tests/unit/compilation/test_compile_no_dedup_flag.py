@@ -21,6 +21,8 @@ from apm_cli.compilation.agents_compiler import (
 from apm_cli.compilation.claude_formatter import ClaudeFormatter
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 
 class TestCompilationConfigNoDedup:
     """CompilationConfig carries the no_dedup field."""

@@ -23,6 +23,8 @@ from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
+pytestmark = pytest.mark.component
+
 
 def _write_manifest(project: Path, dependencies: Sequence[object]) -> None:
     dump_yaml(

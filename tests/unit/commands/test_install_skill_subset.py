@@ -5,6 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def _make_apm_yml(path: Path, deps: list | None = None) -> Path:
     """Write a minimal apm.yml."""

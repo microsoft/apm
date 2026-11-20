@@ -17,6 +17,8 @@ from apm_cli.compilation.link_resolver import (
 )
 from apm_cli.primitives.models import Context, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def base_dir(tmp_path):

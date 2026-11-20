@@ -33,6 +33,8 @@ from apm_cli.commands.audit import (
 from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.file_scanner import FileScanResult
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

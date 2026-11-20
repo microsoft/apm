@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
+import pytest
 import yaml
 
 from apm_cli.compilation.agents_compiler import (
@@ -25,6 +26,8 @@ from apm_cli.compilation.agents_compiler import (
     compile_agents_md,
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

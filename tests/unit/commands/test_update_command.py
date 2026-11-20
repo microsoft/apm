@@ -30,6 +30,8 @@ from apm_cli.deps.revision_pins import RevisionPinResolutionResult
 from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.install.plan import PlanEntry, UpdatePlan
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def runner() -> CliRunner:

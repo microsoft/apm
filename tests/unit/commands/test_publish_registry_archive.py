@@ -13,6 +13,8 @@ from click.exceptions import ClickException, UsageError
 from apm_cli.commands.publish import _pack_archive, _resolve_package_id
 from apm_cli.models.apm_package import APMPackage
 
+pytestmark = pytest.mark.component
+
 
 def _list_zip_members(data: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(data)) as zf:

@@ -19,6 +19,8 @@ from click.testing import CliRunner
 import apm_cli.commands.self_update as update_module
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 
 class TestInstallerUrlAirGap:
     """_get_update_installer_url honours GITHUB_URL and APM_REPO."""

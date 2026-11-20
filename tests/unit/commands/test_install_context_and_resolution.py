@@ -24,6 +24,8 @@ from apm_cli.commands.install import (
     _split_argv_at_double_dash,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

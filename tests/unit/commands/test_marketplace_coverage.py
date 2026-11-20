@@ -30,6 +30,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def runner():

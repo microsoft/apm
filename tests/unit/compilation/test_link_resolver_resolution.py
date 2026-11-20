@@ -34,6 +34,8 @@ from apm_cli.compilation.link_resolver import (
     validate_link_targets,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

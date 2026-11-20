@@ -13,6 +13,8 @@ from apm_cli.compilation.gemini_formatter import (
 from apm_cli.primitives.models import PrimitiveCollection
 from apm_cli.version import get_version
 
+pytestmark = pytest.mark.component
+
 
 class TestGeminiFormatterInit:
     """Tests for GeminiFormatter initialization."""

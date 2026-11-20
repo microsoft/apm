@@ -27,6 +27,8 @@ from apm_cli.commands.deps.cli import (
 )
 from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
