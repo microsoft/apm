@@ -135,6 +135,7 @@ class InstallContext:
     # Targets phase outputs
     # ------------------------------------------------------------------
     targets: list[Any] = field(default_factory=list)  # targets
+    created_target_roots: list[Path] = field(default_factory=list)  # targets
     integrators: dict[str, Any] = field(default_factory=dict)  # targets
 
     # ------------------------------------------------------------------

@@ -626,6 +626,47 @@ def test_preview_cannot_bypass_pipeline_graph_authority(path: str, old: str, new
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            "        transaction.snapshot_deploy_targets(ctx)\n",
+            "",
+            id="commit-order-snapshot-removed",
+        ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            "        transaction.snapshot_deploy_targets(ctx)\n",
+            "        capture_audit_gated_snapshot(ctx)\n",
+            id="commit-order-snapshot-outside-transaction",
+        ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            "        transaction.release_deploy_targets()\n",
+            "",
+            id="commit-order-snapshot-never-released",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "                    self._restore_deploy_targets()\n",
+            "                    pass\n",
+            id="commit-order-rollback-skips-restore",
+        ),
+    ],
+)
+def test_audit_gated_deploy_snapshot_is_owned_by_the_transaction(
+    path: str, old: str, new: str
+) -> None:
+    """Dropping or bypassing the transaction's deploy snapshot fails the guard."""
+    rule_id = "install-deployment-install-commit-order"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
     """Packed marketplace sources stay on DependencyReference, not just entry coordinates.
 

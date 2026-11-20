@@ -121,8 +121,12 @@
     {
       "id": "install-commit-order",
       "decision": "Every install check completes before the lockfile and deployed files are committed; a failing check leaves no committed state (req-pl-002)",
-      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt",
-      "selectors": ["src/apm_cli/install/commit_gate.py", "src/apm_cli/install/transaction.py"],
+      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the audit-gated deploy snapshot: when the install-time content audit can block, InstallTransaction.snapshot_deploy_targets captures every path integration can write (install/deploy_snapshot.py) before the integrate phase, rollback restores it byte for byte, and release_deploy_targets discards it once the audit passed; no snapshot is taken while the audit is off",
+      "selectors": [
+        "src/apm_cli/install/commit_gate.py",
+        "src/apm_cli/install/deploy_snapshot.py",
+        "src/apm_cli/install/transaction.py"
+      ],
       "guards": ["install-deployment-install-commit-order", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
     },
     {

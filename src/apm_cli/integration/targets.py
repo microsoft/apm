@@ -1797,8 +1797,12 @@ def resolve_targets(
 def materialize_project_target_profiles(
     project_root: Path,
     target_names: list[str] | tuple[str, ...],
+    created: list[Path] | None = None,
 ) -> list[TargetProfile]:
-    """Create project target roots and return their canonical profiles."""
+    """Create project target roots and return their canonical profiles.
+
+    Roots created here are appended to *created* when it is given.
+    """
     profiles: list[TargetProfile] = []
     for target_name in target_names:
         profile = KNOWN_TARGETS.get(target_name)
@@ -1813,6 +1817,8 @@ def materialize_project_target_profiles(
         # so an install that deploys nothing leaves no empty directory behind.
         if not deploy_path.is_dir() and not profile.skills_only:
             deploy_path.mkdir(parents=True, exist_ok=True)
+            if created is not None:
+                created.append(deploy_path)
         profiles.append(profile)
     return profiles
 
