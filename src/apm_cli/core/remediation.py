@@ -97,6 +97,11 @@ def _sentence(clause: str) -> str:
     return f"{clause[:1].upper()}{clause[1:]}."
 
 
+def kept_file_message(path: str, reason: str, remedy: Remediation) -> str:
+    """Render the one kept-file shape: ``Kept <path>: <reason>. <Remedy sentence>``."""
+    return f"Kept {path}: {reason}. {remedy.sentence()}"
+
+
 def either(first: Remediation, *alternatives: Remediation) -> str:
     """Render ``run 'a' to x, or 'b' to y`` for interchangeable remediations."""
     return ", or ".join((first.clause(), *(item.option() for item in alternatives)))
