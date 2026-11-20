@@ -1402,8 +1402,13 @@ def test_area_remediation_clears_the_reported_state(
 def test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#4436: a parked bundle hook prints the catalog remedy; running it registers the hook."""
+    """#4436: a parked bundle hook prints the catalog's 'apm approve <key>'; running it works.
+
+    Needs ``apm approve`` for content-bound bundle keys (#4437, #4490): fold #4490 first.
+    """
     from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
+    from apm_cli.security.trust import approve_command
+    from apm_cli.utils.content_hash import compute_file_hash
     from tests.integration._marketplace_pack_kit import MarketplacePackWorld, output
     from tests.integration.test_local_bundle_hooks_lifecycle import _hook_entries, _packed_bundle
 
@@ -1415,18 +1420,21 @@ def test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs(
     dump_yaml(manifest, consumer / "apm.yml")
 
     text = output(world.apm(consumer, "install", str(bundle), "--no-policy"))
-    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED.bind(exec_type="hooks", manifest="apm.yml")
-    assert remedy.sentence() in text, text
+    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED.bind(
+        key=key, exec_type="hooks", install="apm install <bundle-path>"
+    ).with_command(approve_command(key))
+    expected = f"To {remedy.fixes_promise}, run: {remedy.command} then {remedy.then}."
+    assert expected in text, text
     assert not (consumer / ".claude" / "settings.json").exists()
 
-    # Run the printed remedy: add the printed key, then the printed command.
-    printed = re.search(r'allow: "([^"]+)": hooks: true', text)
+    # Run the printed remedy: the printed 'apm approve' command, then the reinstall.
+    printed = re.search(r"run: (apm approve '[^']+') then", text)
     assert printed is not None, text
-    assert re.sub(r"\s+", "", printed.group(1)) == key
-    manifest = load_yaml(consumer / "apm.yml")
-    manifest["executables"] = {"allow": {key: {"hooks": True}}}
-    dump_yaml(manifest, consumer / "apm.yml")
-    command = shlex.split(remedy.command.replace("<bundle-path>", str(bundle)))
-    world.apm(consumer, *command[1:], "--no-policy")
+    world.apm(consumer, *shlex.split(printed.group(1))[1:])
+    world.apm(consumer, "install", str(bundle), "--no-policy")
     assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    lock = load_yaml(consumer / "apm.lock.yaml")
+    recorded = lock.get("local_deployed_file_hashes") or {}
+    assert recorded, lock
+    assert {path: compute_file_hash(consumer / path) for path in recorded} == recorded
     world.apm(consumer, "audit", "--ci", "--no-policy")

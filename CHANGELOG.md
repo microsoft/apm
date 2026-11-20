@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The approval step printed for parked local-bundle executables comes from the remediation catalog: add the printed key, then run `apm install <bundle-path>`. (#4506)
+- A parked local-bundle executable prints one remedy from the remediation catalog: run the printed `apm approve '<key>'`, then rerun the install. (#4506)
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)

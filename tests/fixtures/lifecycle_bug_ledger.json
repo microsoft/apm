@@ -3034,7 +3034,7 @@
     {
       "issue": 4436,
       "fixed_in": "Unreleased",
-      "summary": "The approval next step printed for parked local-bundle executables comes from the remediation catalog (local-bundle-executables-unapproved): add the printed key under executables.allow, then run apm install <bundle-path>.",
+      "summary": "The approval step printed for parked local-bundle executables comes from the remediation catalog (local-bundle-executables-unapproved): run the printed apm approve '<key>', then rerun apm install <bundle-path>; the executables.allow entry follows as the same grant.",
       "failure_modes": [
         "outcome"
       ],

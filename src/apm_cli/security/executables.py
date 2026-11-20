@@ -744,26 +744,32 @@ def local_bundle_approval_key(
 
 
 def local_bundle_approval_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
-    """Name the manifest whose ``executables.allow`` approves *approval_key*.
+    """Name the ``apm approve`` command that grants *approval_key*, then its manifest entry.
 
-    Grants come from the scope's manifest: the project ``apm.yml``, or the
-    user manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads.
+    Grants live in the scope's manifest: the project ``apm.yml``, or the user
+    manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads. The command
+    and its next step come from the remediation catalog (#4436); the entry is
+    the same grant written by hand.
     """
     from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
     from apm_cli.core.scope import InstallScope, get_manifest_path
+    from apm_cli.security.trust import approve_command
 
     target = (
         f"the user manifest {get_manifest_path(InstallScope.USER)}" if user_scope else "apm.yml"
     )
-    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
-    if user_scope:
-        remedy = remedy.with_command("apm install -g <bundle-path>")
+    install = "apm install -g <bundle-path>" if user_scope else "apm install <bundle-path>"
+    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED.bind(
+        key=approval_key, exec_type=exec_type, install=install
+    ).with_command(approve_command(approval_key, user_scope=user_scope))
     return (
-        f"To approve this exact local bundle, add to {target}:\n"
+        f"To {remedy.fixes_promise}, run:\n"
+        f"    {remedy.command}\n"
+        f"then {remedy.then}. The same grant as this entry in {target}:\n"
         "executables:\n"
         "  allow:\n"
         f'    "{approval_key}":\n'
-        f"      {exec_type}: true\n" + remedy.bind(exec_type=exec_type, manifest=target).sentence()
+        f"      {exec_type}: true"
     )
 
 
