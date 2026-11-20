@@ -1608,7 +1608,11 @@ def install(  # noqa: PLR0913
             )
             summary_rendered = True
 
-            if frozen and apm_count > 0:
+            if (
+                frozen
+                and apm_count > 0
+                and getattr(command_result, "disposition", None) is not InstallDisposition.FAILED
+            ):
                 # --frozen verified lockfile structure and deployed hashes (req-lk-017).
                 logger.info(
                     "Deployed files verified against apm.lock.yaml.",

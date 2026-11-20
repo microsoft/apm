@@ -67,7 +67,8 @@ def rendering_change_hint(count: int) -> str:
     """Return the hint for drift whose on-disk bytes still match apm.lock.yaml."""
     return (
         f"{count} file(s) still match apm.lock.yaml but this APM version renders them "
-        "differently; run 'apm install' and commit the result to adopt the new rendering"
+        "differently; move them aside, then run 'apm install' and commit the result to adopt "
+        "the new rendering (a lockfile hash does not prove APM wrote them)"
     )
 
 

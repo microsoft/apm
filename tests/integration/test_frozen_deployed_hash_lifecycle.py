@@ -130,19 +130,21 @@ def test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths(
     text = output(audit)
     assert "render" in text and "apm export-patch" not in text, text
 
-    # Frozen fails closed: every re-rendered path is named with both hashes.
+    # Frozen fails closed and names every re-rendered path. A lockfile hash
+    # never proves APM wrote the committed bytes, so it keeps them (#4360).
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env, expect=1)
     text = output(frozen)
-    assert "do not match the hashes recorded in apm.lock.yaml" in text, text
     for relative, old in _OLD_RENDERINGS.items():
-        observed = compute_file_hash(clone / relative)
-        assert f"{relative}: expected {_sha(old.encode('ascii'))}, observed {observed}" in text
-    assert _REMEDY in text
+        assert f"Kept {relative}: it differs from what APM renders" in text, text
+        assert (clone / relative).read_text(encoding="ascii") == old
     assert "Deployed files verified" not in text
     assert (clone / "apm.lock.yaml").read_bytes() == lock_before
     scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env, expect=1)
 
-    # The documented repair converges: install, then frozen and audit agree.
+    # The documented repair converges: move the files aside, install, then
+    # frozen and audit agree.
+    for relative in _OLD_RENDERINGS:
+        (clone / relative).unlink()
     scenario.run("install", "--no-policy", cwd=clone, env=env)
     assert (clone / "apm.lock.yaml").read_bytes() != lock_before
     verified = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)

@@ -87,6 +87,7 @@ class DeploymentEvidence:
         self._render = render
         self._owners = dict(owners or {})
         self._renders: dict[str | None, Path | None] = {}
+        self._rendered_now: dict[str, str] = {}
 
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
@@ -139,6 +140,26 @@ class DeploymentEvidence:
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
         )
+
+    def add_rendered(self, rendered: Mapping[Path, str]) -> None:
+        """Add hashes this install rendered from the source it holds (#4360).
+
+        A local bundle has no locked source to replay; the bytes this install
+        just deployed from it are its render, so a file equal to them is proven.
+        """
+        self._rendered_now.update(
+            {path.resolve().as_posix(): content_hash for path, content_hash in rendered.items()}
+        )
+
+    def _rendered_now_match(self, physical: Path, candidates: Iterable[str | None]) -> bool:
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        for candidate in candidates:
+            path = self._physical(candidate) if candidate else None
+            rendered = self._rendered_now.get(path.resolve().as_posix()) if path else None
+            if rendered is not None and compute_file_hash(physical) == rendered:
+                return True
+        return False
 
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.
@@ -243,7 +264,7 @@ class DeploymentEvidence:
 
         try:
             receipt = self._receipt_match(physical)
-            if receipt is True:
+            if receipt is True or self._rendered_now_match(physical, (claim, rendered_as)):
                 return AUTHORIZED
             # A stale receipt (the file was later adopted unchanged from a newer
             # render) does not block the render comparison: receipt OR render.

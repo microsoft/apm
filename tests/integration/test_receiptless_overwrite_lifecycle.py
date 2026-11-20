@@ -244,3 +244,78 @@ def test_receiptless_upgrade_replaces_files_equal_to_the_locked_render(
     assert "This install wrote" in output
     for path in paths.values():
         assert _entry(world, path) in output
+
+
+def _write_skill_bundle(root: Path) -> Path:
+    """A plugin-format bundle with one skill, as ``apm pack`` writes it."""
+    import hashlib
+    import json
+
+    body = "---\nname: test-skill\ndescription: Test skill\n---\n# Test skill\n"
+    relative = "skills/test-skill/SKILL.md"
+    (root / relative).parent.mkdir(parents=True)
+    (root / relative).write_text(body, encoding="utf-8")
+    (root / "plugin.json").write_text(json.dumps({"id": "test-plugin", "name": "Test"}))
+    hashes = {relative: hashlib.sha256(body.encode()).hexdigest()}
+    dump_yaml(
+        {
+            "pack": {"format": "plugin", "target": "copilot", "bundle_files": hashes},
+            "dependencies": [
+                {
+                    "repo_url": "owner/test-plugin",
+                    "resolved_commit": "abc123",
+                    "deployed_files": [relative],
+                    "deployed_file_hashes": hashes,
+                }
+            ],
+        },
+        root / "apm.lock.yaml",
+    )
+    return root
+
+
+@pytest.mark.parametrize("legacy", ["unedited", "edited"])
+def test_receiptless_legacy_bundle_skill_migrates_only_when_render_equal(
+    tmp_path: Path, apm_binary_path: Path, legacy: str
+) -> None:
+    """A legacy ``.github/skills`` copy an older APM left without receipts (#4049 residual).
+
+    The converged reinstall deploys the same bundle; legacy bytes equal to
+    that render migrate, edited ones are kept, named and exit 1.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    bundle = _write_skill_bundle(isolated.package_root / "bundle")
+    project = isolated.work_root / "consumer"
+    (project / ".github").mkdir(parents=True)
+    dump_yaml({"name": "consumer", "version": "1.0.0"}, project / "apm.yml")
+    world = _World(
+        project,
+        isolated.home,
+        ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180),
+        isolated.subprocess_env(),
+        (),
+    )
+    command = (str(bundle), "--target", "copilot")
+    world.env["APM_LEGACY_SKILL_PATHS"] = "1"
+    seeded = world.install(*command)
+    assert seeded.returncode == 0, _output(seeded)
+    del world.env["APM_LEGACY_SKILL_PATHS"]
+    legacy_skill = project / ".github/skills/test-skill/SKILL.md"
+    world.forget_receipts()
+    if legacy == "edited":
+        legacy_skill.write_text(legacy_skill.read_text(encoding="utf-8") + _EDIT, encoding="utf-8")
+    before = legacy_skill.read_bytes()
+
+    result = world.install(*command)
+
+    output = _output(result)
+    assert (project / ".agents/skills/test-skill/SKILL.md").is_file()
+    if legacy == "unedited":
+        assert result.returncode == 0, output
+        assert not legacy_skill.exists()
+        assert ".github/skills/" not in world.lock_path.read_text(encoding="utf-8")
+    else:
+        assert result.returncode == 1, output
+        assert legacy_skill.read_bytes() == before
+        assert _kept_line(".github/skills/test-skill/SKILL.md", user_scope=False) in output
+        assert ".github/skills/test-skill/SKILL.md" in world.lock_path.read_text(encoding="utf-8")
