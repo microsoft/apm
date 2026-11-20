@@ -184,7 +184,7 @@ def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) ->
 
 def _report_policy_block(exc: PolicyViolationError) -> None:
     """Announce a blocking policy outcome; nothing was written."""
-    _rich_error(str(exc))
+    _rich_error(str(exc), symbol="error")
     _rich_info(
         "Nothing was written. Run 'apm policy status --no-cache' to diagnose "
         "the org policy source, fix it, then re-run the command.",
