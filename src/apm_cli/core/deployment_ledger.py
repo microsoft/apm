@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -69,6 +70,26 @@ def _receipt_key(root: str, scope: str) -> str:
     return hashlib.sha256(f"{Path(root)}|{scope}".encode()).hexdigest()
 
 
+def _next_receipt_batch(directory: Path, limit: int) -> list[Path]:
+    """The next *limit* receipts after the cursor, wrapping, then advance it.
+
+    Each command resumes where the previous one stopped, so retained receipts
+    never hide one behind them.
+    """
+    receipts = sorted(directory.glob("*.json"))
+    cursor = directory / ".collection-cursor"
+    last = ""
+    with contextlib.suppress(OSError, UnicodeDecodeError):
+        if not cursor.is_symlink():
+            last = cursor.read_text(encoding="ascii").strip()
+    start = next((i for i, path in enumerate(receipts) if path.name > last), 0)
+    batch = (receipts[start:] + receipts[:start])[:limit]
+    if batch and not cursor.is_symlink():
+        with contextlib.suppress(OSError):
+            cursor.write_text(batch[-1].name + "\n", encoding="ascii")
+    return batch
+
+
 def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) -> int:
     """Best effort: delete receipts whose recorded project root is gone (#4176).
 
@@ -87,7 +108,7 @@ def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) 
         directory = get_apm_home() / "deployment-receipts"
         if directory.is_symlink() or not directory.is_dir():
             return 0
-        for path in sorted(directory.glob("*.json"))[:limit]:
+        for path in _next_receipt_batch(directory, limit):
             try:
                 if path.is_symlink() or not path.is_file():
                     continue
