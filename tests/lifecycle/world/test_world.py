@@ -32,8 +32,10 @@ from tests.lifecycle.world import (
     use_ado_pat,
     use_policy,
     use_registry,
+    use_registry_proxy,
 )
 from tests.lifecycle.world.packages import GIT_PUBLISHED, LSP_SERVER, MCP_SERVER, PACKAGE_NAMES
+from tests.lifecycle.world.routes import MIRROR_HOSTS, PROXY_HOST, PROXY_TOKEN
 from tests.lifecycle.world.services import (
     ADO_BEARER,
     ADO_HOST,
@@ -642,6 +644,60 @@ def test_reset_restores_every_unserved_repository(
         world.services.restore(f"{ORG}/p-exec")
     with pytest.raises(KeyError):
         world.services.unserve(f"{ORG}/never-served")
+
+
+# -- scripted routes, registry proxy, proxy-only ---------------------------------
+
+
+def test_scripted_redirect_answers_with_a_3xx_to_another_host(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    mirror = MIRROR_HOSTS[0]
+    world.services.redirect(API_HOST, f"/repos/{ORG}/p-skill", f"https://{mirror}/moved")
+    world.services.script(mirror, "/moved", 200, {"Content-Type": "text/plain"}, b"mirrored")
+    first = requests.get(
+        f"https://{API_HOST}/repos/{ORG}/p-skill",
+        proxies={"https": world.services.proxy_url},
+        verify=str(world.services.ca_path),
+        allow_redirects=False,
+        timeout=30,
+    )
+    assert first.status_code == 307 and first.headers["Location"] == f"https://{mirror}/moved"
+    assert _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill").text == "mirrored"
+    assert {e["host"] for e in world.services.egress_log()} == {API_HOST, mirror}
+
+
+def test_cross_origin_registry_redirect_is_refused(lifecycle_world: World) -> None:
+    """A 3xx off the configured registry origin: no request, no token, reaches the mirror."""
+    world = lifecycle_world
+    use_registry(world)
+    mirror = MIRROR_HOSTS[1]
+    world.services.redirect(registry.HOST, registry.BASE, f"https://{mirror}{registry.BASE}")
+    result = driver.run(world, ["install", world.packages["p-skill:registry"].spec])
+    assert result.returncode != 0, result.stdout
+    assert mirror not in _hosts(world), world.services.egress_log()
+    assert not (world.project / ".agents/skills/p-skill").exists()
+
+
+def test_proxy_only_install_never_goes_direct(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_registry_proxy(world)
+    world.services.forbid_direct()
+    _ok(world, ["install", world.packages["p-skill:git"].spec])
+    _assert_surfaces(world, "p-skill", "project")
+    assert _hosts(world) == {PROXY_HOST}, world.services.egress_log()
+    assert world.services.proxy.hosts_receiving(PROXY_TOKEN) == {PROXY_HOST}
+
+
+def test_forbid_direct_refuses_and_records_direct_content(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    world.services.forbid_direct()
+    result = driver.run(world, ["install", world.packages["p-skill:git"].spec])
+    assert result.returncode != 0, result.stdout
+    statuses = {e["status"] for e in world.services.egress_log() if e["host"] != PROXY_HOST}
+    assert statuses == {403}, world.services.egress_log()
+    world.services.reset()
+    assert world.services.routes.direct_forbidden is False
+    assert world.services.routes.scripted == []
 
 
 _POLICY_EXIT = {

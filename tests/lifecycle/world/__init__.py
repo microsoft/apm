@@ -18,6 +18,7 @@ from tests.lifecycle.world.scopes import (
     use_ado_pat,
     use_policy,
     use_registry,
+    use_registry_proxy,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "use_ado_pat",
     "use_policy",
     "use_registry",
+    "use_registry_proxy",
 ]

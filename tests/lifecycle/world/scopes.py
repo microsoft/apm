@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from tests.lifecycle.world import registry
+from tests.lifecycle.world import registry, routes
 from tests.lifecycle.world.contract import World
 from tests.lifecycle.world.services import ADO_BEARER, ADO_PAT, HOST_ALIASES, policy_org
 from tests.lifecycle.world.shims import AZ_TOKEN_FILE
@@ -89,3 +89,18 @@ def login_azure(world: World) -> None:
         "tokenType": "Bearer",
     }
     (config / AZ_TOKEN_FILE).write_text(json.dumps(token), encoding="ascii")
+
+
+def use_registry_proxy(world: World, *, only: bool = True) -> None:
+    """Route package downloads through the world's enterprise registry proxy.
+
+    Sets ``PROXY_REGISTRY_URL`` and its token, and ``PROXY_REGISTRY_ONLY=1``
+    when *only*. Pair with ``world.services.forbid_direct()`` to prove nothing
+    goes direct.
+    """
+    world.env["PROXY_REGISTRY_URL"] = routes.PROXY_URL
+    world.env["PROXY_REGISTRY_TOKEN"] = routes.PROXY_TOKEN
+    if only:
+        world.env["PROXY_REGISTRY_ONLY"] = "1"
+    else:
+        world.env.pop("PROXY_REGISTRY_ONLY", None)

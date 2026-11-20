@@ -13,7 +13,9 @@ so ``egress_log`` sees all of it. The proxy terminates TLS for these origins:
   policy discovery and marketplace catalogs use it;
 - ``raw.githubusercontent.com``;
 - a local MCP registry (``/v0.1/servers``);
-- a private APM package registry (``registry.py``).
+- a private APM package registry (``registry.py``);
+- scripted routes, the enterprise registry proxy and proxy-only mode
+  (``routes.py``).
 
 Policy variants live in one org per variant: the project's ``origin`` remote
 selects the org, as it does for a real user (``use_policy`` in
@@ -33,6 +35,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from tests.lifecycle.world import registry as package_registry
+from tests.lifecycle.world import routes
 from tests.utils.local_scripted_https_proxy import (
     Handler,
     ScriptedHttpsProxy,
@@ -174,6 +177,8 @@ class WorldServices:
         self.package_registry = package_registry.PackageRegistry()
         self.ado_auth_required = False
         self._unserved: dict[str, Path] = {}
+        self.routes = routes.Routes()
+        self.registry_proxy = routes.RegistryProxy(self._slug_repository)
 
     @property
     def proxy(self) -> ScriptedHttpsProxy:
@@ -219,6 +224,7 @@ class WorldServices:
         """Clear the egress log and every per-test mode (services are shared per worker)."""
         self.proxy.clear()
         self.ado_auth_required = False
+        self.routes.clear()
         for slug in list(self._unserved):
             self.restore(slug)
 
@@ -236,6 +242,26 @@ class WorldServices:
         if not owner or not repo or "/" in repo:
             raise ValueError(f"slug must be owner/repo, got {slug!r}")
         self._repositories[slug] = origin
+
+    def script(
+        self,
+        host: str,
+        path_prefix: str,
+        status: int,
+        headers: Mapping[str, str] | None = None,
+        body: bytes = b"",
+    ) -> None:
+        """Answer requests to *host* under *path_prefix* with a fixed response until ``reset``."""
+        response = ScriptedResponse(status, dict(headers or {}), body)
+        self.routes.scripted.append(routes.ScriptedRoute(host, path_prefix, response))
+
+    def redirect(self, host: str, path_prefix: str, location: str, status: int = 307) -> None:
+        """Answer *host* + *path_prefix* with a 3xx to *location* (another host or path)."""
+        self.script(host, path_prefix, status, {"Location": location})
+
+    def forbid_direct(self, forbidden: bool = True) -> None:
+        """Proxy-only mode: every direct content host answers 403 (still recorded)."""
+        self.routes.direct_forbidden = forbidden
 
     def unserve(self, slug: str) -> None:
         """Stop serving repository *slug*: every host answers 404 for it until ``restore``.
@@ -276,14 +302,32 @@ class WorldServices:
     # -- handlers ------------------------------------------------------------
 
     def handlers(self) -> dict[str, Handler]:
-        handlers: dict[str, Handler] = {GITHUB_HOST: self._git, RAW_HOST: self._raw}
-        handlers[REGISTRY_HOST] = self._registry
-        handlers[package_registry.HOST] = self.package_registry.handle
+        direct: dict[str, Handler] = {GITHUB_HOST: self._git, RAW_HOST: self._raw}
+        direct[REGISTRY_HOST] = self._registry
+        direct[package_registry.HOST] = self.package_registry.handle
         for host in _API_HOSTS:
-            handlers[host] = self._api
+            direct[host] = self._api
         for host, _prefix in HOST_ALIASES.values():
-            handlers[host] = self._git
+            direct[host] = self._git
+        handlers = {host: self._routed(handler, direct=True) for host, handler in direct.items()}
+        handlers[routes.PROXY_HOST] = self._routed(self.registry_proxy.handle, direct=False)
+        for host in routes.MIRROR_HOSTS:
+            handlers[host] = self._routed(lambda _request: _not_found(), direct=False)
         return handlers
+
+    def _routed(self, handler: Handler, *, direct: bool) -> Handler:
+        """Scripted routes first; in proxy-only mode direct hosts refuse package content."""
+
+        def route(request: ScriptedRequest) -> ScriptedResponse:
+            scripted = self.routes.match(request)
+            if scripted is not None:
+                return scripted
+            # Policy fetches stay direct under PROXY_REGISTRY_ONLY (by design).
+            if direct and self.routes.direct_forbidden and "/policy-" not in request.path:
+                return routes.forbidden_direct()
+            return handler(request)
+
+        return route
 
     def _slug_repository(self, owner: str, repo: str) -> Path | None:
         return self._repositories.get(f"{owner}/{repo.removesuffix('.git')}")
