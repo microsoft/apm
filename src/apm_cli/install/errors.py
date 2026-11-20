@@ -179,9 +179,6 @@ class PolicyViolationError(RuntimeError):
         be empty when discovery failed before a source was resolved.
     """
 
-    # A check refusal: the lockfile writer scope commits nothing (#4085).
-    refuses_commit = True
-
     def __init__(
         self,
         message: str,

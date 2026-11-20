@@ -1854,17 +1854,9 @@ def _install_apm_packages(ctx, outcome):
                 apm_package=apm_package,
             )
         if preview is None:
-            # No package pipeline ran: preview policy on the declared services.
-            from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
+            from apm_cli.install.pipeline_entry import preview_declared_policy
 
-            _dr_preflight(
-                project_root=ctx.project_root,
-                apm_deps=list(prospective_plan.selected_apm_dependencies),
-                mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None,
-                no_policy=ctx.no_policy,
-                logger=logger,
-                dry_run=True,
-            )
+            preview_declared_policy(ctx, prospective_plan, logger)
 
         from apm_cli.install.presentation.dry_run import render_and_exit
 

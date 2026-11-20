@@ -18,9 +18,8 @@ A command commits what it staged when it completes, and also when it fails
 after changing state: an install that deployed files and then exits non-zero
 (a later MCP conflict, a native write failure) keeps the lockfile records of
 what reached disk.  Refusals happen before the first write, so nothing is
-staged to commit.  A check refusal raised after staging (an exception class
-with ``refuses_commit = True``, such as an org-policy block), an interrupt
-(Ctrl-C) or a ``sys.exit`` with a non-zero code discards what was staged.  Two explicit commit points
+staged to commit.  Only an interrupt (Ctrl-C, or a ``sys.exit`` with a
+non-zero code) discards what was staged.  Two explicit commit points
 flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
 transaction must agree with the lockfile (native plugin registration, user
 lifecycle scripts, a command's own durable checkpoint).  Removal and rollback
@@ -108,32 +107,15 @@ def _scope(*, open_: bool = False) -> _WriteScope | None:
     return active.scope
 
 
-def _refused(error: BaseException) -> bool:
-    """Whether *error*, or an error it was raised from, is a check refusal.
-
-    A refusal (an exception class with ``refuses_commit = True``, such as an
-    org-policy block) means the command must commit nothing (#4085).
-    """
-    seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        if getattr(type(current), "refuses_commit", False):
-            return True
-        seen.add(id(current))
-        current = current.__cause__ or current.__context__
-    return False
-
-
 def _commits(error: BaseException) -> bool:
     """Whether a command ending in *error* still commits what it staged.
 
-    A failure after a state change records that change; a check refusal, an
-    interrupt or a non-zero ``sys.exit`` abandons the command, and a zero exit
-    completes it.
+    A failure after a state change records that change; an interrupt or a
+    non-zero ``sys.exit`` abandons the command, and a zero exit completes it.
     """
     if isinstance(error, SystemExit | _click_exit()):
         return getattr(error, "exit_code", getattr(error, "code", 1)) in (0, None)
-    return isinstance(error, Exception) and not _refused(error)
+    return isinstance(error, Exception)
 
 
 def _click_exit() -> type[BaseException]:

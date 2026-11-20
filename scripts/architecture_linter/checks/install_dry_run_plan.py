@@ -121,11 +121,8 @@ def check_prospective_dry_run_plan(provider: FactsProvider) -> tuple[Violation, 
             "prospective_plan.selected_apm_dependencies" in line
             for line in getattr(command, "lines", ())
         )
-        >= 3
-        and _present(
-            command,
-            "mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None",
-        )
+        >= 2
+        and _present(command, "preview_declared_policy(ctx, prospective_plan, logger)")
         and _present(command, "prospective_plan.dependency_counts")
         and _present(owner, "plan = plan.with_pipeline_preview(preview, lockfile_dir=ctx.apm_dir)")
         and _present(owner, "resolved_apm_dependencies=preview.resolved_dependencies,")
