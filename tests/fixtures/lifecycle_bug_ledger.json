@@ -3954,6 +3954,21 @@
       ]
     },
     {
+      "issue": 4319,
+      "fixed_in": "Unreleased",
+      "summary": "apm install with a post-install script committed apm.lock.yaml before MCP/LSP reconciliation, so the script saw a lockfile without the final service state and the command wrote it twice; scripts now fire after reconciliation and the lockfile is written once.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_post_install_script_sees_the_final_lockfile_written_once"
+      ]
+    },
+    {
       "issue": 4320,
       "fixed_in": "Unreleased",
       "summary": "A registry MCP install in CI or E2E mode prints no bare 'environment detected' line per server.",

@@ -255,7 +255,7 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
 def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every install check completes before the lockfile and deployed files commit."""
     rule_id = GUARD_COMMIT_ORDER
-    paths = (_INTEGRATE, _PIPELINE, _SERVICE, _COMMIT_GATE, _TRANSACTION, _MCP_COMMAND)
+    paths = (_INTEGRATE, _PIPELINE, _SERVICE, _COMMIT_GATE, _TRANSACTION, _MCP_COMMAND, _COMMAND)
     loaded = {}
     failures: list[Violation] = []
     for path in paths:
@@ -293,6 +293,18 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
     ):
         found.append(
             _summary(rule_id, _SERVICE, "the frozen pre-deploy check must run before the pipeline")
+        )
+    if not _ordered(
+        loaded[_COMMAND],
+        "service_result = run_service_integrations(",
+        "install_result.post_install()",
+    ):
+        found.append(
+            _summary(
+                rule_id,
+                _COMMAND,
+                "post-install scripts fire after MCP/LSP reconciliation (#4319)",
+            )
         )
     found += _deploy_snapshot_violations(provider, loaded)
     gate_text = "\n".join(_lines(loaded[_COMMIT_GATE]))

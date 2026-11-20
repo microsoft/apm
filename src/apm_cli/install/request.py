@@ -57,6 +57,10 @@ class InstallRequest:
     mcp_runtime: str | None = None
     # --dry-run: the pipeline resolves into rollback staging, runs its gates
     # in preview mode, and stops before the first write.
+    # The caller reconciles MCP/LSP services after the pipeline and fires
+    # post-install itself (result.post_install), so scripts see the final
+    # lockfile (#4319).
+    post_install_after_services: bool = False
     dry_run: bool = False
     trust_bin: bool | None = None
     # Set when the caller integrates LSP after the pipeline: declared LSP

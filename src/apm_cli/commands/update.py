@@ -1025,6 +1025,7 @@ def _run_dep_update_locked(
             legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
             trust_transitive_mcp=trust_transitive_mcp,
+            post_install_after_services=True,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -1116,6 +1117,10 @@ def _run_dep_update_locked(
             if not verbose:
                 logger.info("Run with --verbose for detailed diagnostics.")
             sys.exit(1)
+
+    post_install = getattr(result, "post_install", None)
+    if post_install is not None:
+        post_install()
 
     if plan_state.proceeded:
         # Name files cleanup kept (#3701) and other install warnings once.
