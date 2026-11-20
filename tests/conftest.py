@@ -133,6 +133,11 @@ def _restore_executable_caches():
     """
     from apm_cli.utils import git_env
 
+    if git_env._git_executable is None:
+        # Start every test from the real, resolved git, so a test that clears
+        # PATH sees the same warm cache whatever ran before it on the worker.
+        with contextlib.suppress(FileNotFoundError):
+            git_env.get_git_executable()
     saved = (git_env._git_executable, git_env._gh_executable)
     yield
     git_env._git_executable, git_env._gh_executable = saved
