@@ -341,6 +341,7 @@ def validate_apm_package(
     source_path: Path | None = None,
     agent_plugin_detection: AgentPluginDetection | None = None,
     read_only: bool = False,
+    create_config: bool | None = None,
 ) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
@@ -356,10 +357,13 @@ def validate_apm_package(
     Args:
         package_path: Path to the directory to validate
         read_only: Reject formats requiring normalization and avoid config creation.
+        create_config: Whether a missing user config may be created; defaults
+            to ``not read_only``.
 
     Returns:
         ValidationResult: Validation results with any errors/warnings
     """
+    config_writable = (not read_only) if create_config is None else create_config
     result = ValidationResult()
 
     # Check if directory exists
@@ -432,7 +436,7 @@ def validate_apm_package(
             result,
             source_path=source_path,
             detection=native_detection,
-            create_config=not read_only,
+            create_config=config_writable,
         )
 
     # Handle Claude Skills (no apm.yml) - auto-generate minimal apm.yml
@@ -460,7 +464,7 @@ def validate_apm_package(
     # Handle Skill Bundles (nested skills/<name>/SKILL.md)
     if result.package_type == PackageType.SKILL_BUNDLE:
         return _validate_skill_bundle(
-            package_path, result, source_path=source_path, create_config=not read_only
+            package_path, result, source_path=source_path, create_config=config_writable
         )
 
     # Standard APM package or HYBRID validation (has apm.yml)
@@ -475,7 +479,7 @@ def validate_apm_package(
             apm_yml_path,
             result,
             source_path=source_path,
-            create_config=not read_only,
+            create_config=config_writable,
         )
 
     return _validate_apm_package_with_yml(
@@ -483,7 +487,7 @@ def validate_apm_package(
         apm_yml_path,
         result,
         source_path=source_path,
-        create_config=not read_only,
+        create_config=config_writable,
     )
 
 

@@ -37,7 +37,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -290,3 +290,45 @@ def _cleanup_empty_parents(deleted_path: Path, base_dir: Path) -> None:
         except (OSError, PathTraversalError):
             break
         parent = parent.parent
+
+
+def run_skill_path_migration(ctx: Any) -> None:
+    """Migrate legacy skill deployments recorded in the existing lockfile (#737)."""
+    from apm_cli.utils.console import _rich_error, _rich_info, _rich_warning
+
+    if ctx.dry_run:
+        return
+    plans = detect_legacy_skill_deployments(ctx.existing_lockfile, ctx.project_root)
+    if not plans:
+        return
+    collisions = check_collisions(plans, ctx.project_root)
+    if collisions:
+        # H2: collision is an error, not a warning.
+        _rich_error(COLLISION_HEADER_TEMPLATE.format(count=len(collisions)), symbol="error")
+        for collision in collisions:
+            _rich_error(f"  {collision}", symbol="error")
+        # H5: actionable next-step hint.
+        _rich_info(COLLISION_HINT, symbol="info")
+        # H2: surface via DiagnosticCollector.
+        if ctx.diagnostics:
+            for collision in collisions:
+                ctx.diagnostics.error(
+                    f"Skill migration collision: {collision}",
+                    package="skill-path-migration",
+                )
+        return
+    result = execute_migration(plans, ctx.existing_lockfile, ctx.project_root)
+    total = len(result.deleted) + len(result.skipped_no_file)
+    if total > 0:
+        # H3: suppress info when quiet.
+        if not (ctx.logger and getattr(ctx.logger, "_quiet", False)):
+            _rich_info(MIGRATION_SUMMARY_TEMPLATE.format(count=total), symbol="info")
+        # H4: enumerate deleted paths when verbose.
+        if ctx.verbose and result.deleted:
+            for deleted in result.deleted:
+                _rich_info(f"  removed {deleted}", symbol="info")
+    if result.failed:
+        _rich_warning(
+            f"  {len(result.failed)} file(s) could not be deleted (will retry next install)",
+            symbol="warning",
+        )

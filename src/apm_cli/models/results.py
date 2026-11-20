@@ -43,6 +43,8 @@ class InstallResult:
     claude_native_keys: frozenset[str] = frozenset()
     # The commit gate already enforced org policy on the merged MCP set.
     mcp_policy_enforced: bool = False
+    # --dry-run: the pipeline's plan (install/dry_run_plan.PipelinePreview).
+    preview: object = None
 
 
 @dataclass

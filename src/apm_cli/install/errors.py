@@ -44,6 +44,10 @@ class DirectDependencyError(RuntimeError):
     """
 
 
+class PreviewIncomplete(Exception):
+    """``--dry-run`` stops where install would refuse; errors are on the context."""
+
+
 class InstallFailureAlreadyRendered(RuntimeError):
     """Signal a failed install whose user-facing diagnostics are complete."""
 

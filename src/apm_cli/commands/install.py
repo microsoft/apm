@@ -1471,6 +1471,8 @@ def install(  # noqa: PLR0913
             apm_modules_dir=get_modules_dir(scope),
             validation=None,
             logger=logger,
+            # A preview never creates lifecycle lock state (#2549); its
+            # resolution staging rolls back when the transaction completes.
             acquire_lock=not dry_run,
         )
 
@@ -1776,13 +1778,60 @@ def _install_apm_packages(ctx, outcome):
             scope=ctx.scope,
         )
 
+    # Every package install and its --dry-run preview enter one pipeline (#4085).
+    pipeline_options = dict(
+        force=ctx.force,
+        parallel_downloads=ctx.parallel_downloads,
+        logger=logger,
+        scope=ctx.scope,
+        auth_resolver=ctx.auth_resolver,
+        target=ctx.target or ctx.runtime,
+        allow_insecure=ctx.allow_insecure,
+        allow_insecure_hosts=ctx.allow_insecure_hosts,
+        marketplace_provenance=(
+            outcome.marketplace_provenance if ctx.packages and outcome else None
+        ),
+        protocol_pref=ctx.protocol_pref,
+        allow_protocol_fallback=ctx.allow_protocol_fallback,
+        no_policy=ctx.no_policy,
+        audit_override=ctx.audit_override,
+        legacy_skill_paths=ctx.legacy_skill_paths,
+        trust_transitive_mcp=ctx.trust_transitive_mcp,
+        install_mcp=should_install_mcp,
+        mcp_runtime=ctx.runtime,
+        frozen=ctx.frozen,
+        plan_callback=ctx.plan_callback,
+        skill_subset=ctx.skill_subset,
+        skill_subset_from_cli=ctx.skill_subset_from_cli,
+        refresh=ctx.refresh,
+        trust_bin=ctx.trust_bin,
+        transaction=ctx.transaction,
+        lsp_preflight=LspPreflight.for_install(ctx),
+    )
+
     if ctx.dry_run:
+        from apm_cli.install.dry_run_plan import pipeline_preview
+
+        preview = None
+        if should_install_apm and has_any_apm_deps and APM_DEPS_AVAILABLE:
+            preview = pipeline_preview(
+                lambda: _install_apm_dependencies(
+                    apm_package,
+                    ctx.update,
+                    ctx.verbose,
+                    ctx.only_packages,
+                    **pipeline_options,
+                    dry_run=True,
+                ),
+                logger,
+            )
         prospective_plan = ProspectiveInstallPlan.from_install_context(
             apm_package,
             ctx,
             should_install_apm=should_install_apm,
             should_install_mcp=should_install_mcp,
             updated_packages=outcome.updated_packages if outcome is not None else (),
+            preview=preview,
         )
         logger.record_dry_run_incomplete(bool(prospective_plan.dependency_preview_errors))
         logger.record_dry_run_apm_updates(len(prospective_plan.updated_apm_identities))
@@ -1799,16 +1848,18 @@ def _install_apm_packages(ctx, outcome):
                 list(prospective_plan.selected_apm_dependencies),
                 apm_package=apm_package,
             )
-        from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
+        if preview is None:
+            # No package pipeline ran: preview policy on the declared services.
+            from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
 
-        _dr_preflight(
-            project_root=ctx.project_root,
-            apm_deps=list(prospective_plan.selected_apm_dependencies),
-            mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None,
-            no_policy=ctx.no_policy,
-            logger=logger,
-            dry_run=True,
-        )
+            _dr_preflight(
+                project_root=ctx.project_root,
+                apm_deps=list(prospective_plan.selected_apm_dependencies),
+                mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None,
+                no_policy=ctx.no_policy,
+                logger=logger,
+                dry_run=True,
+            )
 
         from apm_cli.install.presentation.dry_run import render_and_exit
 
@@ -1886,39 +1937,8 @@ def _install_apm_packages(ctx, outcome):
             raise InstallFailureAlreadyRendered("APM dependency system not available")
 
         try:
-            # Use the same canonical package selection as the dry-run preview.
             install_result = _install_apm_dependencies(
-                apm_package,
-                ctx.update,
-                ctx.verbose,
-                ctx.only_packages,
-                force=ctx.force,
-                parallel_downloads=ctx.parallel_downloads,
-                logger=logger,
-                scope=ctx.scope,
-                auth_resolver=ctx.auth_resolver,
-                target=ctx.target or ctx.runtime,
-                allow_insecure=ctx.allow_insecure,
-                allow_insecure_hosts=ctx.allow_insecure_hosts,
-                marketplace_provenance=(
-                    outcome.marketplace_provenance if ctx.packages and outcome else None
-                ),
-                protocol_pref=ctx.protocol_pref,
-                allow_protocol_fallback=ctx.allow_protocol_fallback,
-                no_policy=ctx.no_policy,
-                audit_override=ctx.audit_override,
-                legacy_skill_paths=ctx.legacy_skill_paths,
-                trust_transitive_mcp=ctx.trust_transitive_mcp,
-                install_mcp=should_install_mcp,
-                mcp_runtime=ctx.runtime,
-                frozen=ctx.frozen,
-                plan_callback=ctx.plan_callback,
-                skill_subset=ctx.skill_subset,
-                skill_subset_from_cli=ctx.skill_subset_from_cli,
-                refresh=ctx.refresh,
-                trust_bin=ctx.trust_bin,
-                transaction=ctx.transaction,
-                lsp_preflight=LspPreflight.for_install(ctx),
+                apm_package, ctx.update, ctx.verbose, ctx.only_packages, **pipeline_options
             )
             if not isinstance(install_result, InstallResult):
                 install_result = InstallResult(

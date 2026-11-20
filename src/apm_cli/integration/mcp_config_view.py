@@ -989,11 +989,13 @@ def _collect_locked_dependencies(
             manifest = load_yaml(manifest_path)
             if not isinstance(manifest, dict):
                 raise ValueError("package manifest must be a mapping")
+            # Collecting declarations only reads: never create user config.
             package = APMPackage.from_mapping(
                 manifest,
                 package_path=manifest_path.parent,
                 source_path=manifest_path.parent,
                 manifest_path=manifest_path,
+                create_config=False,
             )
             authored_declarations = _authored_mcp_declarations(manifest)
         except (OSError, ValueError, UnicodeError, yaml.YAMLError) as exc:

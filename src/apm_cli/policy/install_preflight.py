@@ -55,6 +55,35 @@ def emit_check_violations(logger, check, *, severity: str, source: str | None) -
         )
 
 
+def render_dry_run_verdicts(logger, audit_result, enforcement: str) -> None:
+    """Render failed checks as a capped ``--dry-run`` preview per severity."""
+    block_lines: list[tuple[str, str]] = []
+    warn_lines: list[tuple[str, str]] = []
+    for check in audit_result.failed_checks:
+        # #832: a failed check without subjects still yields one entry
+        # (keyed by its name), so it is never silently omitted.
+        for subject in check.violation_subjects():
+            line = (subject.ref, subject.reason)
+            if enforcement == "block":
+                block_lines.append(line)
+            else:
+                warn_lines.append(line)
+
+    for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+        logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
+    overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
+    if overflow > 0:
+        logger.warning(
+            f"... and {overflow} more would be blocked by policy. Run `apm audit` for full report."
+        )
+
+    for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+        logger.warning(f"Policy warning: {dep_ref} -- {detail}")
+    overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
+    if overflow > 0:
+        logger.warning(f"... and {overflow} more policy warnings. Run `apm audit` for full report.")
+
+
 def run_policy_preflight(
     *,
     project_root: Path,
@@ -173,38 +202,7 @@ def run_policy_preflight(
 
     if not audit_result.passed:
         if dry_run:
-            # -- D2: capped preview per severity bucket ----------------
-            block_lines: list[tuple[str, str]] = []
-            warn_lines: list[tuple[str, str]] = []
-            for check in audit_result.failed_checks:
-                # #832: a failed check without subjects still yields one
-                # entry (keyed by its name), so it is never silently
-                # omitted from the dry-run preview.
-                for subject in check.violation_subjects():
-                    line = (subject.ref, subject.reason)
-                    if enforcement == "block":
-                        block_lines.append(line)
-                    else:
-                        warn_lines.append(line)
-
-            # Emit block bucket (capped)
-            for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
-            overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
-            if overflow > 0:
-                logger.warning(
-                    f"... and {overflow} more would be blocked by policy. "
-                    "Run `apm audit` for full report."
-                )
-
-            # Emit warn bucket (capped)
-            for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(f"Policy warning: {dep_ref} -- {detail}")
-            overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
-            if overflow > 0:
-                logger.warning(
-                    f"... and {overflow} more policy warnings. Run `apm audit` for full report."
-                )
+            render_dry_run_verdicts(logger, audit_result, enforcement)
         else:
             # -- Real install: push each violation to DiagnosticCollector
             for check in audit_result.failed_checks:

@@ -93,16 +93,33 @@ def enforce_mcp_policy(
     )
 
 
+def _resolved_rows(ctx: InstallContext) -> list[tuple[Any, None, int, str | None, bool]]:
+    """Return lockfile rows for the resolved packages, before acquisition."""
+    from apm_cli.install.source_helpers import locked_parent_identity
+
+    tree = ctx.dependency_graph.dependency_tree if ctx.dependency_graph is not None else None
+    rows = []
+    for dependency in ctx.deps_to_install:
+        node = tree.get_node(dependency.get_unique_key()) if tree is not None else None
+        depth = node.depth if node else 1
+        is_dev = bool(node.is_dev) if node else False
+        rows.append((dependency, None, depth, locked_parent_identity(ctx, node), is_dev))
+    return rows
+
+
 def prospective_lockfile(ctx: InstallContext) -> LockFile:
     """Return the package set this install is about to commit.
 
     Every package is acquired before the first deploy, so its lock row is
     known: rows acquired this run replace the existing lockfile's rows, and
-    only packages in the resolved graph are kept.
+    only packages in the resolved graph are kept. ``--dry-run`` stops before
+    acquisition, so its rows come from the resolved packages.
     """
     from apm_cli.deps.lockfile import LockFile
 
-    acquired = LockFile.from_installed_packages(ctx.installed_packages, ctx.dependency_graph)
+    acquired = LockFile.from_installed_packages(
+        _resolved_rows(ctx) if ctx.dry_run else ctx.installed_packages, ctx.dependency_graph
+    )
     for key, dependency in acquired.dependencies.items():
         if key in ctx.package_hashes:
             dependency.content_hash = ctx.package_hashes[key]
@@ -142,6 +159,7 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
         prospective_lock=prospective,
     )
     view = prepared.current_view
+    ctx.preview_mcp_dependencies = tuple(prepared.dependencies)
     enforce_mcp_policy(
         list(prepared.dependencies),
         brought_in_by=view.brought_in_by if view is not None else None,
@@ -161,7 +179,9 @@ def check_before_deploy(ctx: InstallContext) -> None:
     from apm_cli.install.integrity import enforce_installed_hash_policy
 
     prospective = prospective_lockfile(ctx)
-    enforce_installed_hash_policy(ctx, prospective)
+    if not ctx.dry_run:
+        # --dry-run acquires nothing, so no content hash exists to check yet.
+        enforce_installed_hash_policy(ctx, prospective)
     if ctx.install_mcp and not ctx.lockfile_only and ctx.apm_package is not None:
         _check_merged_mcp_policy(ctx, prospective)
 

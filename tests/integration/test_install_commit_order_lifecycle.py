@@ -106,7 +106,9 @@ def test_dry_run_reaches_the_install_decision_for_transitive_mcp(
 
     preview = chain.run("install", "--dry-run", "--trust-transitive-mcp", *_TARGET)
     text = preview.stdout + preview.stderr
+    assert preview.returncode == 0, text
     assert _committed_state(chain.project) == before, text
+    assert not (chain.project / "apm_modules").exists(), text
     assert "Would be blocked by policy" in text and "evil-srv" in text, text
 
     _assert_blocked_without_commit(chain, before)

@@ -183,7 +183,8 @@ class InstallTransaction:
         if result.disposition is InstallDisposition.DRY_RUN:
             with self._lock:
                 if self._rolled_back:
-                    raise RuntimeError("Cannot complete an install transaction after rollback")
+                    # A preview whose staging already rolled back changed nothing.
+                    return result
                 try:
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)

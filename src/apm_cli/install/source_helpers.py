@@ -311,3 +311,12 @@ def rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
         matched_pattern="",
         resolved_at=dep_locked_chk.resolved_at or "",
     )
+
+
+def with_preserved_install_hint(message: str, install_path: Path | None) -> str:
+    """Explain that a failed replacement left the current install active."""
+    if install_path is None or not install_path.exists():
+        return message
+    return (
+        f"{message}. The existing installation remains active; fix the cause and retry the install."
+    )

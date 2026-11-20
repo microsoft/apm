@@ -79,6 +79,11 @@ class InstallContext:
     install_mcp: bool = True
     mcp_runtime: str | None = None
     mcp_policy_enforced: bool = False
+    # --dry-run: what this pipeline could not resolve, and the merged MCP set
+    # the commit gate collected (install/dry_run_plan.py renders both).
+    preview_errors: list[str] = field(default_factory=list)
+    preview_declaration_errors: list[str] = field(default_factory=list)
+    preview_mcp_dependencies: tuple[Any, ...] | None = None
     transaction: Any = None  # InstallTransaction
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
     # Dependency keys routed to native Claude this run, admitted or parked.

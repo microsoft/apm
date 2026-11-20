@@ -480,8 +480,12 @@ class InstallLogger(CommandLogger):
         Called from the MAIN thread by the resolver/download callback
         BEFORE network work begins; F7's parallel BFS keeps emission
         on the main thread so output ordering is deterministic even
-        when downloads are dispatched to a worker pool.
+        when downloads are dispatched to a worker pool. A ``--dry-run``
+        preview keeps it verbose-only so it lists only what it would install.
         """
+        if self.dry_run:
+            self.verbose_detail(f"Resolving {dep_name}...")
+            return
         _rich_info(f"Resolving {dep_name}...", symbol="running")
 
     def download_complete(

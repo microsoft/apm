@@ -64,7 +64,7 @@ def run(ctx: InstallContext) -> None:
         fetch_result,
         logger=logger,
         fetch_failure_default=fetch_failure_default,
-        raise_blocking_errors=True,
+        raise_blocking_errors=getattr(ctx, "dry_run", False) is not True,
     )
 
     # ------------------------------------------------------------------
@@ -126,7 +126,13 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # One violation per offending dependency / MCP server; the check
     # name is only the category (#3835).
-    from apm_cli.policy.install_preflight import emit_check_violations
+    from apm_cli.policy.install_preflight import emit_check_violations, render_dry_run_verdicts
+
+    if getattr(ctx, "dry_run", False) is True:
+        # --dry-run previews the same verdicts and never stops the preview.
+        if not audit_result.passed and logger:
+            render_dry_run_verdicts(logger, audit_result, enforcement)
+        return
 
     has_blocking = False
     for check in audit_result.checks:

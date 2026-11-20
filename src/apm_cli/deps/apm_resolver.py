@@ -166,6 +166,8 @@ class APMDependencyResolver:
         frozen: bool = False,
         update_keys: set[str] | None = None,
         read_only: bool = False,
+        create_config: bool | None = None,
+        preview: bool = False,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -202,6 +204,10 @@ class APMDependencyResolver:
             read_only: Preview using local sources and unchanged installed packages.
                 Never fetch, activate, or materialize metadata; unknown subtrees
                 are reported as resolution errors rather than treated as leaves.
+            create_config: Whether manifest loads may create a missing user
+                config file; defaults to False for read-only and preview runs.
+            preview: ``--dry-run`` through the install pipeline: fetch like an
+                install, create no user config, and record unavailable subtrees.
         """
         if read_only and any(
             callback is not None
@@ -216,6 +222,8 @@ class APMDependencyResolver:
                 "Read-only resolution cannot use fetching or materialization callbacks"
             )
         self._read_only = read_only
+        self._create_config = not (read_only or preview) if create_config is None else create_config
+        self._preview = preview
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
@@ -364,7 +372,7 @@ class APMDependencyResolver:
                 root_package = APMPackage.from_apm_yml(
                     apm_yml_path,
                     source_path=project_root.resolve(),
-                    create_config=not self._read_only,
+                    create_config=self._create_config,
                 )
             except (ValueError, FileNotFoundError) as e:
                 # Create error graph
@@ -821,7 +829,7 @@ class APMDependencyResolver:
                     source_path=self._project_root.resolve()
                     if self._project_root is not None
                     else root_apm_yml.parent.resolve(),
-                    create_config=not self._read_only,
+                    create_config=self._create_config,
                 )
             except (ValueError, FileNotFoundError) as e:
                 _logger.warning("Failed to parse root apm.yml: %s", e)
@@ -1068,6 +1076,11 @@ class APMDependencyResolver:
                         f"{exc or 'package metadata is not available locally'}"
                     )
                     continue
+                if self._preview and (exc is not None or loaded_package is None):
+                    tree.unavailable_subtrees.append(
+                        f"{dep_ref.to_display_reference()}: "
+                        f"{exc or 'package metadata is not available'}"
+                    )
                 if exc is not None:
                     if isinstance(exc, MarketplaceManifestMaterializationError):
                         message = f"Marketplace package materialization failed: {exc}"
@@ -1621,6 +1634,7 @@ class APMDependencyResolver:
                 source_path=dep_source_path,
                 agent_plugin_detection=native_detection,
                 read_only=self._read_only,
+                create_config=self._create_config,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1654,6 +1668,7 @@ class APMDependencyResolver:
                 install_path,
                 source_path=dep_source_path,
                 read_only=self._read_only,
+                create_config=self._create_config,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1713,7 +1728,7 @@ class APMDependencyResolver:
             package = APMPackage.from_apm_yml(
                 apm_yml_path,
                 source_path=dep_source_path,
-                create_config=not self._read_only,
+                create_config=self._create_config,
             )
         except FileNotFoundError:
             self._raise_downloaded_package_error(

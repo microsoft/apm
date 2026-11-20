@@ -7,14 +7,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
 from apm_cli.drift import locked_marketplace_row
-from apm_cli.install.package_selection import (
-    selected_dependency_identity,
-    selected_subtree_dependencies,
-)
+from apm_cli.install.package_selection import selected_dependency_identity
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -36,6 +31,56 @@ def _resolved_key(
     return (locked or dependency).get_unique_key()
 
 
+def record_preview_resolution(ctx: Any, graph: Any) -> None:
+    """Record ``--dry-run`` resolution gaps; stop where install would refuse."""
+    from apm_cli.install.errors import PreviewIncomplete
+
+    ctx.preview_errors.extend(graph.resolution_errors)
+    ctx.preview_errors.extend(graph.dependency_tree.unavailable_subtrees)
+    ctx.preview_declaration_errors.extend(graph.declaration_errors)
+    if graph.circular_dependencies:
+        ctx.preview_errors.append("Circular dependencies prevent a complete install preview")
+    if graph.resolution_errors or graph.circular_dependencies:
+        raise PreviewIncomplete()
+
+
+def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
+    """Return the install pipeline's ``--dry-run`` plan, or None when none was built.
+
+    A source the preview cannot reach is reported as an incomplete preview,
+    not a failure, so ``--dry-run`` keeps its exit code.
+    """
+    import click
+
+    from apm_cli.install.errors import (
+        AuthenticationError,
+        FrozenInstallError,
+        InstallFailureAlreadyRendered,
+        PolicyViolationError,
+    )
+    from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
+
+    try:
+        result = run_pipeline()
+    except (
+        AuthenticationError,
+        FrozenInstallError,
+        InsecureDependencyPolicyError,
+        InstallFailureAlreadyRendered,
+        PolicyViolationError,
+        click.UsageError,
+    ):
+        raise
+    except Exception as exc:  # unreachable source, network, or resolver failure
+        message = str(exc) or type(exc).__name__
+        logger.verbose_detail(f"Dry-run resolution stopped: {message}")
+        return PipelinePreview(
+            dependencies=(), resolved_dependencies=(), mcp_dependencies=None, errors=(message,)
+        )
+    preview = getattr(result, "preview", None)
+    return preview if isinstance(preview, PipelinePreview) else None
+
+
 class _SilentLogger:
     """Discard the MCP resolver's progress lines while dry-run previews its choice."""
 
@@ -43,6 +88,18 @@ class _SilentLogger:
 
     def __getattr__(self, _name: str) -> Any:
         return lambda *_args, **_kwargs: None
+
+
+@dataclass(frozen=True)
+class PipelinePreview:
+    """What ``run_install_pipeline(dry_run=True)`` resolved and decided."""
+
+    dependencies: tuple[DependencyReference, ...]
+    resolved_dependencies: tuple[DependencyReference, ...]
+    # The commit gate's merged direct + transitive MCP set; None when not collected.
+    mcp_dependencies: tuple[Any, ...] | None
+    errors: tuple[str, ...] = ()
+    declaration_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -127,11 +184,9 @@ class ProspectiveInstallPlan:
         should_install_apm: bool,
         should_install_mcp: bool,
         updated_packages: Sequence[str] = (),
+        preview: PipelinePreview | None = None,
     ) -> ProspectiveInstallPlan:
-        """Build the scoped, trust-filtered offline plan for one CLI invocation."""
-        from apm_cli.core.scope import get_modules_dir, get_source_root
-
-        source_root = get_source_root(ctx.scope)
+        """Project one CLI invocation's install pipeline plan into a preview."""
         plan = cls.from_apm_package(
             apm_package,
             should_install_apm=should_install_apm,
@@ -139,53 +194,25 @@ class ProspectiveInstallPlan:
             only_packages=ctx.only_packages,
             updated_packages=updated_packages,
         ).with_allowed_lsp_dependencies(apm_package, ctx.logger)
-        plan = plan.with_mcp_target_runtimes(apm_package, ctx)
-        return plan.with_resolved_dependencies(
-            apm_package,
-            project_root=source_root if source_root != ctx.project_root else ctx.apm_dir,
-            apm_modules_dir=get_modules_dir(ctx.scope),
-            lockfile_dir=ctx.apm_dir,
-            update=RefFreshnessPolicy.for_install_intent(
-                update_refs=ctx.update, refresh=ctx.refresh
-            ).requires_remote,
-            frozen=ctx.frozen,
-        )
+        plan = plan.with_pipeline_preview(preview, lockfile_dir=ctx.apm_dir)
+        return plan.with_mcp_target_runtimes(apm_package, ctx)
 
-    def with_resolved_dependencies(
-        self,
-        apm_package: APMPackage,
-        *,
-        project_root: Path,
-        apm_modules_dir: Path,
-        lockfile_dir: Path,
-        update: bool,
-        frozen: bool = False,
+    def with_pipeline_preview(
+        self, preview: PipelinePreview | None, *, lockfile_dir: Path
     ) -> ProspectiveInstallPlan:
-        """Reuse installation's graph owner without downloading or changing files."""
-        if not self.should_install_apm:
+        """Take dependencies and MCP servers from the install pipeline's own plan."""
+        if preview is None:
             return self
+        plan = self
+        if preview.mcp_dependencies is not None and self.should_install_mcp:
+            plan = replace(plan, mcp_dependencies=preview.mcp_dependencies)
+        if not self.should_install_apm:
+            return plan
         try:
             lockfile = LockFile.read(get_lockfile_path(lockfile_dir))
-        except (OSError, ValueError) as exc:
-            return replace(self, dependency_preview_errors=(f"Cannot read lockfile: {exc}",))
-        resolver = APMDependencyResolver(
-            apm_modules_dir=apm_modules_dir,
-            existing_lockfile=lockfile,
-            update_refs=update,
-            frozen=frozen,
-            read_only=True,
-        )
-        graph = resolver.resolve_dependencies(project_root, root_package=apm_package)
-        resolved_dependencies = tuple(graph.flattened_dependencies.get_installation_list())
-        dependencies = (
-            tuple(
-                selected_subtree_dependencies(
-                    self.only_packages, graph.dependency_tree, resolved_dependencies
-                )
-            )
-            if self.only_packages is not None
-            else resolved_dependencies
-        )
+        except (OSError, ValueError):
+            lockfile = None
+        dependencies = preview.dependencies
         resolved_keys = {dependency.get_unique_key() for dependency in dependencies}
         marketplace_index = lockfile.marketplace_index() if lockfile is not None else None
         dependencies += tuple(
@@ -193,15 +220,12 @@ class ProspectiveInstallPlan:
             for dependency in self.selected_apm_dependencies
             if _resolved_key(dependency, lockfile, marketplace_index) not in resolved_keys
         )
-        errors = list(graph.resolution_errors)
-        if graph.circular_dependencies:
-            errors.append("Circular dependencies prevent a complete install preview")
         return replace(
-            self,
+            plan,
             selected_apm_dependencies=dependencies,
-            resolved_apm_dependencies=resolved_dependencies,
-            dependency_preview_errors=tuple(errors),
-            dependency_declaration_errors=tuple(graph.declaration_errors),
+            resolved_apm_dependencies=preview.resolved_dependencies,
+            dependency_preview_errors=preview.errors,
+            dependency_declaration_errors=preview.declaration_errors,
         )
 
     def with_mcp_target_runtimes(

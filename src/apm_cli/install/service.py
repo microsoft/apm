@@ -217,6 +217,10 @@ class InstallService:
             # rewrite or keep them, so every primitive type answers alike.
             self._enforce_frozen_deployed_hashes(request, deployed=False)
 
+        if request.dry_run:
+            # A preview runs no lifecycle scripts and commits nothing.
+            return self._run_pipeline(request)
+
         runner = self._build_script_runner(request)
         event = self._build_event("pre-install", request)
         runner.fire("pre-install", event)
@@ -269,6 +273,7 @@ class InstallService:
             trust_transitive_mcp=request.trust_transitive_mcp,
             install_mcp=request.install_mcp,
             mcp_runtime=request.mcp_runtime,
+            dry_run=request.dry_run,
             verbose=request.verbose,
             only_packages=request.only_packages,
             force=request.force,

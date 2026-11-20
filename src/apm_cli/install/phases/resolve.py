@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.install.dry_run_plan import record_preview_resolution
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -22,6 +23,7 @@ from apm_cli.install.helpers.ref_reuse import (
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
+from apm_cli.install.source_helpers import with_preserved_install_hint
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.models.dependency import materialization as _materialization
@@ -111,15 +113,6 @@ def _materialization_migration_logger(
         )
 
     return report
-
-
-def _with_preserved_install_hint(message: str, install_path: Path | None) -> str:
-    """Explain that a failed replacement left the current install active."""
-    if install_path is None or not install_path.exists():
-        return message
-    return (
-        f"{message}. The existing installation remains active; fix the cause and retry the install."
-    )
 
 
 def _prepare_callback_materialization_path(
@@ -333,6 +326,8 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
 
 def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     """Raise when the resolver recorded fatal dependency-resolution errors."""
+    if ctx.dry_run:
+        return record_preview_resolution(ctx, dependency_graph)
     if not dependency_graph.resolution_errors:
         return
     for error in dependency_graph.resolution_errors:
@@ -741,7 +736,7 @@ def _resolve_dependencies(
             else:
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
-            fail_msg = _with_preserved_install_hint(fail_msg, install_path)
+            fail_msg = with_preserved_install_hint(fail_msg, install_path)
 
             # Verbose: inline detail via logger (single output path).
             # Deferred diagnostics below cover the non-logger case.
@@ -782,6 +777,7 @@ def _resolve_dependencies(
         existing_lockfile=existing_lockfile,
         reference_resolver=downloader,
         frozen=ctx.frozen,
+        preview=ctx.dry_run,
         cache_validation_callback=partial(
             validate_cached_legacy_plugin,
             lockfile=existing_lockfile,
