@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
+import importlib
 import os
 import re
 import shlex
@@ -101,9 +102,11 @@ from tests.lifecycle.journeys.twins import RELEASE_TAG, TWINS, publish_twins
 from tests.lifecycle.oracles import (
     MUTATING_COMMANDS,
     ORACLE_LAWS,
+    Evidence,
     ExpectedCell,
     Observation,
     check_cross_cutting,
+    check_obligation,
     operation_for,
 )
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
@@ -113,6 +116,7 @@ from tests.utils.artifact_snapshot import ArtifactSnapshot, ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.promise(*(f"P-INV-I{i}" for i in range(1, 10))),
 ]
@@ -133,6 +137,12 @@ _STEP_KEYS = {
 _O_LAWS = {f"O{i}" for i in range(1, 14)} | {"KEY", "FORBID"}
 # HOME paths a project command may write: receipts and bookkeeping (as in rows.py).
 _HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
+# $APM_HOME entries that user-configuration commands own (declared write set for I5).
+_APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
+    "marketplace": ("marketplaces.json", "cache"),
+    "experimental": ("config.json",),
+    "config": ("config.json",),
+}
 _UNTRACKED_ROOTS = frozenset({".git", ".apm-local"})
 _DECLARED_WRITES = ("apm.yml", "apm.lock.yaml", ".gitignore", "apm_modules/")
 _VERSION_PIN = re.compile(
@@ -225,7 +235,8 @@ def page_fences(page: str) -> list[Fence]:
 
 
 def _stripped(line: str) -> str:
-    return re.sub(r"^-\s+", "", line.strip())
+    """A fence line as a command: no list dash, no trailing ``# comment``."""
+    return re.sub(r"\s+#\s.*$", "", re.sub(r"^-\s+", "", line.strip()))
 
 
 def docs_problems(docs: Mapping) -> list[str]:
@@ -290,12 +301,46 @@ class _Command:
 
 @dataclass
 class _StepFacts:
-    """What one step did: its commands, their expected exits and the project delta."""
+    """What one step did: its commands, their expected exits and the project delta.
+
+    ``evidence`` collects, per oracle, the facts it checked: ``check_obligation``
+    re-verifies them when the step's obligation ``J|<J>|<n>|<O>`` is credited.
+    """
 
     step: dict
     commands: list[_Command]
     exits: list[tuple[_Command, int]]
-    delta: set[str]
+    before: ArtifactSnapshotSet
+    after: ArtifactSnapshotSet
+    evidence: dict[str, tuple[Evidence, CommandResult]] = field(default_factory=dict)
+
+    @property
+    def delta(self) -> set[str]:
+        return _delta(self.before.snapshot("project"), self.after.snapshot("project"))
+
+    @property
+    def last(self) -> CommandResult:
+        """The step's last apm command (its last command when it runs no apm)."""
+        return (self.apm or self.commands)[-1].result
+
+    def combined(self, *, normalized: bool) -> CommandResult:
+        """The last command's result carrying the whole step's (normalized) output."""
+        pick = (
+            (lambda c: (c.stdout, c.stderr))
+            if normalized
+            else (lambda c: (c.result.stdout, c.result.stderr))
+        )
+        last = self.last
+        return CommandResult(
+            last.command,
+            last.returncode,
+            "\n".join(pick(c)[0] for c in self.commands),
+            "\n".join(pick(c)[1] for c in self.commands),
+            last.cwd,
+        )
+
+    def record(self, law: str, evidence: Evidence, result: CommandResult | None = None) -> None:
+        self.evidence[law] = (evidence, result or self.combined(normalized=True))
 
     @property
     def apm(self) -> list[_Command]:
@@ -337,6 +382,7 @@ class JourneyRun:
     outputs: dict[int, list[_Command]] = field(default_factory=dict)
     seen: set[str] = field(default_factory=set)
     _experimental: tuple[str, ...] | None = None
+    _pending: dict[int, list[tuple]] = field(default_factory=dict)
 
     # setup ------------------------------------------------------------------
 
@@ -446,7 +492,7 @@ class JourneyRun:
         self.world.env.update({k: str(v) for k, v in (step.get("env") or {}).items()})
         try:
             self._prepare(step)
-            start = ArtifactSnapshot.capture(self.world.project)
+            start = self._roots()
             commands: list[_Command] = []
             exits: list[tuple[_Command, int]] = []
             for line, code in zip(step["run"], _exits(step), strict=True):
@@ -463,12 +509,35 @@ class JourneyRun:
                     commands.append(self._checked(step, "apm install --frozen", cells, command))
             self.outputs[n] = commands
             self._finish(step)
-            end = ArtifactSnapshot.capture(self.world.project)
+            end = self._roots()
         finally:
             self.world.env.clear()
             self.world.env.update(saved)
-        facts = _StepFacts(step, commands, exits, _delta(start, end))
-        return self._step_oracles(facts, oracles)
+        facts = _StepFacts(step, commands, exits, start, end)
+        violations = self._step_oracles(facts, oracles)
+        self._pending[n] = self._credits(facts, oracles, violations)
+        return violations
+
+    def _roots(self) -> ArtifactSnapshotSet:
+        return ArtifactSnapshotSet.capture({"project": self.world.project, "home": self.world.home})
+
+    def _credits(self, facts: _StepFacts, oracles: set[str], violations) -> list[tuple]:
+        """Index oracles of this step that passed with no violation (a known cell earns none)."""
+        failed = {law for law, _ in violations}
+        cell_laws = {
+            c["law"] for c in self.journey.get("known_cells") or () if c["step"] == facts.step["n"]
+        }
+        credits = []
+        for law in sorted(oracles):
+            if law in failed or law in cell_laws:
+                continue
+            if law in ORACLE_LAWS:
+                # check_cross_cutting checked this invariant around every apm command.
+                credits.append((law, Evidence(exit=facts.last.returncode), facts.last, facts))
+            elif law in facts.evidence:
+                evidence, result = facts.evidence[law]
+                credits.append((law, evidence, result, facts))
+        return credits
 
     def _checked(self, step, line: str, cells, paired: _Command | None = None) -> _Command:
         """One apm command with I1-I9 (check_cross_cutting) around it."""
@@ -476,12 +545,13 @@ class JourneyRun:
         args = driver.command_args(_sub(line))
         helps = "--help" in args or "--version" in args
         mutating = args[0] in MUTATING_COMMANDS and not helps and "--dry-run" not in args
-        writes = bool(step.get("files")) or bool(step.get("chdir"))
+        user_writes = self._user_writes(args)
+        writes = bool(step.get("files")) or bool(step.get("chdir")) or bool(user_writes)
         op = operation_for(
             args,
             scope=scope,
             forbidden={"home": ("*",)} if scope == "project" else {},
-            allowed={"home": _HOME_ALLOWED},
+            allowed={"home": (*_HOME_ALLOWED, *user_writes)},
             mutating=mutating,
             read_only=not mutating and not writes,
             paired={"audit": paired.result.returncode} if paired else {},
@@ -492,6 +562,17 @@ class JourneyRun:
         after = self._observe(step)
         check_cross_cutting(before, after, command.result, model, op)
         return command
+
+    def _user_writes(self, args: tuple[str, ...]) -> tuple[str, ...]:
+        """HOME-relative paths a user-configuration command declares it writes (I5)."""
+        names = _APM_HOME_WRITES.get(args[0], ())
+        if not names or "--help" in args:
+            return ()
+        try:
+            base = self.world.apm_home.relative_to(self.world.home).as_posix()
+        except ValueError:
+            return ()  # APM_HOME outside HOME is not a snapshot root
+        return tuple(f"{base}/{name}" for name in names)
 
     def _observe(self, step) -> Observation:
         project = self.world.project
@@ -576,18 +657,19 @@ class JourneyRun:
         return found
 
     def _evaluate(self, facts: _StepFacts, law: str, check) -> list[tuple[str, str]]:
+        """One (journey, step, oracle): its violations; its evidence lands in ``facts``."""
         return [(law, message) for message in check(facts)]
 
     def _key(self, facts: _StepFacts) -> list[str]:
-        return [
-            f"key line not printed: {k!r}"
-            for k in facts.step.get("key_lines") or ()
-            if _sub(k) not in facts.text
-        ]
+        keys = [_sub(k) for k in facts.step.get("key_lines") or ()]
+        facts.record("KEY", Evidence(output_matches=[re.escape(k) for k in keys]))
+        return [f"key line not printed: {k!r}" for k in keys if k not in facts.text]
 
     def _forbid(self, facts: _StepFacts) -> list[str]:
         found = []
-        for line in facts.step.get("forbidden_lines") or ():
+        forbidden = [str(line) for line in facts.step.get("forbidden_lines") or ()]
+        facts.record("FORBID", Evidence(output_forbids=[re.escape(line) for line in forbidden]))
+        for line in forbidden:
             hits = [t.strip() for t in facts.text.splitlines() if line in t]
             if hits:
                 found.append(f"forbidden {line!r} printed: {hits[0]!r}")
@@ -628,6 +710,7 @@ class JourneyRun:
             return [f"no golden {golden.relative_to(REPO).as_posix()}; run regen_goldens.py"]
         want = golden.read_text(encoding="ascii").splitlines()
         got = rendered.splitlines()
+        facts.record("O1", Evidence(expected=norm.canonical(want), observed=norm.canonical(got)))
         if norm.canonical(want) == norm.canonical(got):
             return []
         diff = "\n".join(list(difflib.unified_diff(want, got, "golden", "run", lineterm=""))[:60])
@@ -638,6 +721,15 @@ class JourneyRun:
         lines = [_o2_form(line) for line in docs.get("output") or () if line.strip() != "..."]
         if not lines:
             return []  # O2 applies only where the docs print an output block
+        facts.record(
+            "O2",
+            Evidence(output_matches=[_o2_regex(line) for line in lines]),
+            replace(
+                facts.combined(normalized=True),
+                stdout=_o2_text(facts, "stdout"),
+                stderr=_o2_text(facts, "stderr"),
+            ),
+        )
         streams = [
             [_o2_form(t) for t in text.splitlines() if t.strip()]
             for c in facts.apm
@@ -658,6 +750,7 @@ class JourneyRun:
         return found
 
     def _o3(self, facts: _StepFacts) -> list[str]:
+        facts.record("O3", Evidence(ascii_output=True), facts.combined(normalized=False))
         return [
             f"{c.line!r} {name} is not ASCII"
             for c in facts.apm
@@ -685,6 +778,7 @@ class JourneyRun:
                     pairs = [p for p in map(_kind_destination, block[1:]) if p]
                     repeated = sorted({p for p in pairs if pairs.count(p) > 1})
                     found += [f"{block[0].strip()!r} lists {p} twice" for p in repeated]
+        facts.record("O4", Evidence(expected=[], observed=list(found)))
         return found
 
     def _o5(self, facts: _StepFacts) -> list[str]:
@@ -703,14 +797,17 @@ class JourneyRun:
                 found.append(f"{command.line!r} exited {code} without an [x] or error line")
             if "Usage:" in command.stderr and "Error:" in command.stderr and code != 2:
                 found.append(f"{command.line!r} usage error exited {code}, not 2")
+        last = facts.exits[-1] if facts.exits else None
+        if last is not None:
+            facts.record("O5", Evidence(exit=last[1]), last[0].result)
         return found
 
     def _o6(self, facts: _StepFacts) -> list[str]:
         step = facts.step
         if any(c.result.returncode for c in facts.apm):
-            if facts.delta and not step.get("remediate_from"):
-                return [f"failing step changed {sorted(facts.delta)}"]
-            return []
+            changed = [] if step.get("remediate_from") else sorted(facts.delta)
+            facts.record("O6", Evidence(expected=[], observed=changed))
+            return [f"failing step changed {changed}"] if changed else []
         found = []
         for path in sorted(facts.delta):
             if _declared(path, step):
@@ -719,6 +816,9 @@ class JourneyRun:
             names = [path] + ["/".join(parts[:k]) + "/" for k in range(2, len(parts))]
             if not any(name in facts.text for name in names):
                 found.append(f"{path} changed but no output line announces it")
+        facts.record(
+            "O6", Evidence(present={"project": _added(facts)}, expected=[], observed=found)
+        )
         return found
 
     def _o7(self, facts: _StepFacts) -> list[str]:
@@ -747,6 +847,16 @@ class JourneyRun:
                     for name in experimental
                     if re.search(rf"\bapm {name}\b", command.stdout)
                 ]
+        facts.record(
+            "O7",
+            Evidence(
+                output_forbids=[
+                    rf"\bapm {name}\b" for name in experimental if not _help_root(facts)
+                ],
+                expected=[],
+                observed=list(found),
+            ),
+        )
         return found
 
     def _experimental_commands(self) -> tuple[str, ...]:
@@ -773,6 +883,7 @@ class JourneyRun:
                 result = self._execute(line, probe).result
                 if result.returncode != 0:
                     found.append(f"after the advice {line!r} still exits {result.returncode}")
+                facts.record("O8", Evidence(exit=0), result)
         finally:
             shutil.rmtree(copy, ignore_errors=True)
         return found
@@ -807,16 +918,26 @@ class JourneyRun:
             for pattern in patterns
             if not any(_matches(path, pattern) for path in facts.delta)
         ]
+        status = ""
         if facts.step.get("git_clean"):
             status = self._shell("git status --porcelain").stdout.strip()
             if status:
                 found.append(f"git status --porcelain is not empty: {status.splitlines()}")
+        facts.record(
+            "O9",
+            Evidence(
+                present={"project": _added(facts)},
+                absent={"project": _removed(facts)},
+                expected=sorted(patterns),
+                observed=sorted(p for p in patterns if any(_matches(d, p) for d in facts.delta)),
+            ),
+        )
         return found
 
     def _o12(self, facts: _StepFacts) -> list[str]:
-        del facts
         log = self.world.services.egress_log()
         refused = sorted({entry["host"] for entry in log if entry["status"] == 502})
+        facts.record("O12", Evidence(egress=tuple(log), egress_absent_hosts=refused))
         return [f"contacted a host the world does not serve: {host}" for host in refused]
 
     def _o13(self, facts: _StepFacts) -> list[str]:
@@ -832,6 +953,7 @@ class JourneyRun:
                 )
                 if not ran:
                     found.append(f"docs command {part!r} is not run literally")
+        facts.record("O13", Evidence(expected=[], observed=list(found)))
         return found
 
     # settle -----------------------------------------------------------------
@@ -862,6 +984,15 @@ class JourneyRun:
             pytest.fail(
                 f"{self.journey['id']} step {n}:\n" + "\n".join(unexpected) + f"\n---\n{evidence}"
             )
+        for law, evidence, result, facts in self._pending.pop(n, ()):
+            check_obligation(
+                f"J|{self.journey['id']}|{n}|{law}",
+                strength="e2e",
+                before=facts.before,
+                after=facts.after,
+                result=result,
+                evidence=evidence,
+            )
 
     def check_seen(self) -> None:
         strict = {_label(c) for c in self.journey.get("known_cells") or ()}
@@ -884,6 +1015,29 @@ def _exits(step: dict) -> list[int]:
 
 def _o2_form(line: str) -> str:
     return re.sub(r"\d+(?:\.\d+)?", "<N>", norm.normalize_text(line, {})).rstrip()
+
+
+def _o2_regex(line: str) -> str:
+    """A docs line (O2 form) as a regex over the O2-form output: <N> stands for a number."""
+    return re.escape(line).replace(re.escape("<N>"), "<N>")
+
+
+def _o2_text(facts: _StepFacts, stream: str) -> str:
+    return "\n".join(_o2_form(line) for c in facts.apm for line in getattr(c, stream).splitlines())
+
+
+def _help_root(facts: _StepFacts) -> bool:
+    return any(driver.command_args(c.line) == ("--help",) for c in facts.apm)
+
+
+def _added(facts: _StepFacts) -> list[str]:
+    diff = facts.before.snapshot("project").diff(facts.after.snapshot("project"))
+    return sorted(p for p in diff.added if p.split("/")[0] not in _UNTRACKED_ROOTS)
+
+
+def _removed(facts: _StepFacts) -> list[str]:
+    diff = facts.before.snapshot("project").diff(facts.after.snapshot("project"))
+    return sorted(p for p in diff.removed if p.split("/")[0] not in _UNTRACKED_ROOTS)
 
 
 def _kind_destination(child: str) -> tuple[str, str] | None:
@@ -940,9 +1094,23 @@ def _params() -> list:
 
 @pytest.fixture(scope="session")
 def journey_twins(lifecycle_template, tmp_path_factory) -> Mapping[str, Path]:
-    """Content twins of the upstream repositories, served by the world (once per session)."""
+    """Content twins of the upstream repositories, served by the world (once per session).
+
+    Every ``twins_<group>.py`` beside this module plugs in by exporting
+    ``publish_<group>_twins(services, root, env) -> dict[str, Path]``.
+    """
     root = tmp_path_factory.mktemp("journey-twins")
-    return publish_twins(lifecycle_template.services, root, lifecycle_template.env)
+    services, env = lifecycle_template.services, lifecycle_template.env
+    published = dict(publish_twins(services, root / "core", env))
+    for path in sorted(HERE.glob("twins_*.py")):
+        group = path.stem.removeprefix("twins_")
+        module = importlib.import_module(f"tests.lifecycle.journeys.{path.stem}")
+        publish = getattr(module, f"publish_{group}_twins")
+        added = publish(services, root / path.stem, env)
+        clash = set(added) & set(published)
+        assert not clash, f"{path.name} republishes {sorted(clash)}"
+        published.update(added)
+    return published
 
 
 def test_journey_files_agree_with_the_index() -> None:
