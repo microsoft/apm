@@ -277,7 +277,7 @@ class InstallService:
         # diagnostics and an unreliable ledger, so raising here would
         # replace the real cause with a confusing lockfile complaint.
         if withheld is not None and install_worked:
-            self._enforce_frozen_no_rewrite(request, withheld)
+            self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
             post_event = self._build_event("post-install", request)
@@ -747,7 +747,9 @@ class InstallService:
             )
 
     @staticmethod
-    def _enforce_frozen_no_rewrite(request: InstallRequest, withheld: list[str]) -> None:
+    def _enforce_frozen_no_rewrite(
+        request: InstallRequest, withheld: list[str], active_keys: frozenset[str] | None = None
+    ) -> None:
         """Fail a frozen install whose result does not match the committed lockfile.
 
         Three post-deploy checks share this owner:
@@ -760,16 +762,13 @@ class InstallService:
           claims a narrower install would *drop* (``--target`` filter,
           ``--only``, a removed dependency) do not fail.  Equivalence ignores
           ``generated_at`` and ``apm_version`` (Section 5.5).
-        * **Deployed presence.** Every recorded deployed file must still be on
-          disk, through the verifier ``apm audit`` deployed-files-present
-          uses. A hook the executables gate retired under an unchanged lock
-          fails here instead of passing silently (#4043).
+        * **Deployed presence.** Every file the resolved graph (*active_keys*)
+          records must be on disk, via audit's verifier; a retired hook fails
+          here (#4043), a kept undeclared package does not (#3662).
         * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
-          entry is re-verified against the on-disk bytes through the same
-          verifier ``apm audit`` uses, so ``install --frozen`` and
-          ``audit --ci`` give one answer.  This catches a user edit the
-          install kept and an APM upgrade that renders a locked file
-          differently (#3654).
+          entry is re-verified through the verifier ``apm audit`` uses, so
+          ``install --frozen`` and ``audit --ci`` give one answer, catching a
+          kept user edit or an upgrade that re-renders a file (#3654).
 
         Native target files are outside the install transaction, so files
         already deployed stay on disk; only the lockfile write is withheld.
@@ -825,10 +824,10 @@ class InstallService:
 
         deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
         missing, _gitignored = find_missing_deployed_files(deploy_root, committed, targets)
-        if missing:
-            # Deny wins (#3944); frozen names the retired files it cannot unrecord.
-            from apm_cli.install.frozen_retirement import frozen_missing_files_error
+        from apm_cli.install.frozen_retirement import frozen_missing_files_error, graph_claims
 
+        if missing := graph_claims(committed, missing, active_keys):
+            # Deny wins (#3944); frozen names the retired files it cannot unrecord.
             raise frozen_missing_files_error(
                 request,
                 committed,

@@ -419,10 +419,7 @@ def _build_package_info(
     install_path: Path,
 ):
     """Construct ``PackageInfo`` with the selected manifest's package identity."""
-    from apm_cli.agent_plugins.errors import (
-        AgentPluginDeploymentBoundaryError,
-        AgentPluginError,
-    )
+    from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError, AgentPluginError
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
     from apm_cli.models.apm_package import (
@@ -470,7 +467,10 @@ def _build_package_info(
         pkg = None
         if apm_yml.exists():
             try:
-                pkg = APMPackage.from_apm_yml(apm_yml, source_path=install_path)
+                # Replay reads config; it never creates it (dry-run and audit stay read-only).
+                pkg = APMPackage.from_apm_yml(
+                    apm_yml, source_path=install_path, create_config=False
+                )
             except Exception:
                 if lock_dep.replacement is not None:
                     raise

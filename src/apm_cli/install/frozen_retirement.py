@@ -43,6 +43,27 @@ def _withheld_sources(
     )
 
 
+def graph_claims(
+    committed: LockFile, missing: Sequence[str], active_keys: frozenset[str] | None
+) -> list[str]:
+    """Drop missing files claimed only by packages outside the resolved graph.
+
+    ``--frozen`` keeps an undeclared package's lock claims without deploying
+    it (#3662), so its absent files are not this install's to verify.
+    """
+    if active_keys is None:
+        return list(missing)
+    from apm_cli.deps.lockfile import _SELF_KEY
+
+    graph_paths = {
+        path
+        for key, dep in committed.dependencies.items()
+        if key in active_keys or key == _SELF_KEY
+        for path in dep.deployed_files
+    }
+    return [path for path in missing if path in graph_paths]
+
+
 def frozen_missing_files_error(
     request: InstallRequest,
     committed: LockFile,
