@@ -45,7 +45,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 TAG = "v1.0.0"
-_NATIVE = frozenset({"p-native-claude", "p-native-codex"})
+_NATIVE = frozenset({"p-native-claude", "p-native-codex", "p-native-claude-bin"})
 _TRAPPED = ("claude", "codex")
 
 
