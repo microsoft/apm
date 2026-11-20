@@ -2566,10 +2566,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-policy-remote-origin-owner",
         rule_id="install-deployment-policy-remote-origin-owner",
         path="src/apm_cli/policy/_remote.py",
-        old='[get_git_executable(), "remote", "get-url", "origin"],',
+        old='    origin = _git(project_root, "remote", "get-url", "origin")\n',
         new=(
-            '[get_git_executable(), "remote", "get-url", "origin"],\n'
-            '            [get_git_executable(), "remote", "get-url", "origin"],'
+            '    origin = _git(project_root, "remote", "get-url", "origin")\n'
+            '    origin = _git(project_root, "remote", "get-url", "origin")\n'
         ),
         intent="A second git-remote origin read appears outside the single canonical reader.",
     ),
