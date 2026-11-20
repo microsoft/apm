@@ -4138,7 +4138,8 @@
         "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c4_frozen_install_of_untouched_pre036_project_writes_nothing",
         "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file",
         "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c5_unedited_036_project_upgrades_unchanged",
-        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c5b_036_stamped_project_whose_render_changed_converges"
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c5b_036_stamped_project_whose_render_changed_converges",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout"
       ]
     },
     {
