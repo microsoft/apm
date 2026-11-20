@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.compilation.context_optimizer import (
     ContextOptimizer,
     DirectoryAnalysis,
@@ -426,6 +428,21 @@ class TestCalculateDistributionScore:
         score = opt._calculate_distribution_score(dirs)
         # With depth variance, diversity_factor >= 1, so score can exceed base_ratio
         assert score >= 0.0
+
+    def test_exact_score_from_known_depths_and_ratio(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "a.py")  # counted in the total, not matching
+        _touch(tmp_path, "sub1/b.py")  # depth 1
+        _touch(tmp_path, "sub2/sub3/sub4/c.py")  # depth 3
+        opt = ContextOptimizer(str(tmp_path))
+        opt._analyze_project_structure()
+
+        matching = {
+            (tmp_path / "sub1").resolve(),
+            (tmp_path / "sub2" / "sub3" / "sub4").resolve(),
+        }
+        # ratio 2/3, depths [1, 3] -> variance 1, diversity 1 + 1 * 0.5 -> score 1.0.
+        score = opt._calculate_distribution_score(matching)
+        assert score == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
