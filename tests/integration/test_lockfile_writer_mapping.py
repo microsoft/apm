@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -174,6 +175,7 @@ def test_each_lock_writing_command_maps_to_its_registered_writer(
     for args, cwd, writer in steps:
         recorder.clear()
         _ok(cwd, world.environment, *args)
+        assert (cwd / _LOCKFILE).is_file(), args
         assert recorder.declared == [writer], (args, recorder.declared)
         assert recorder.persisted <= 1, (args, recorder.persisted)
 
@@ -188,7 +190,7 @@ def test_install_with_mcp_and_lsp_persists_the_lockfile_once(
 
     _ok(root, world.environment, "install", *_NO_POLICY)
 
-    lock = load_yaml(root / _LOCKFILE)
+    lock = yaml.safe_load((root / _LOCKFILE).read_text(encoding="utf-8"))
     assert lock.get("mcp_servers") and lock.get("lsp_servers"), lock
     assert recorder.opened == [LockfileWriter.INSTALL]
     assert recorder.persisted == 1
@@ -210,8 +212,10 @@ def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
 
     for args, cwd, writer in _writer_steps(world, bundle, apm_bundle):
         before = _tree(cwd)
+        lock_before = (cwd / _LOCKFILE).read_bytes()
         recorder.clear()
         assert _invoke(cwd, world.environment, *args) != 0, args
+        assert (cwd / _LOCKFILE).read_bytes() == lock_before, writer
         assert recorder.opened == [], (writer, recorder.opened)
         assert recorder.persisted == 0, writer
         assert _tree(cwd) == before, writer

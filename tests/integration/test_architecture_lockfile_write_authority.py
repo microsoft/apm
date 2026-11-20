@@ -105,6 +105,10 @@ _SUB_CHECK_MUTATIONS = (
 
 def test_commit_sites_only_shrink() -> None:
     assert COMMIT_SITES <= _COMMIT_SITE_BASELINE
+    # Every registered site still names a real function in its source file.
+    assert all(
+        f"def {name}(" in (_ROOT / path).read_text(encoding="utf-8") for path, name in COMMIT_SITES
+    )
 
 
 _FLUSH_SITE_BASELINE = frozenset(
@@ -120,11 +124,16 @@ _FLUSH_SITE_BASELINE = frozenset(
 
 def test_flush_sites_only_shrink() -> None:
     assert FLUSH_SITES <= _FLUSH_SITE_BASELINE
+    assert all(
+        f"def {name}(" in (_ROOT / path).read_text(encoding="utf-8") for path, name in FLUSH_SITES
+    )
 
 
 def test_sub_check_mutations_are_sorted() -> None:
     names = [case[0] for case in _SUB_CHECK_MUTATIONS]
     assert names == sorted(names)
+    # Each mutation targets a source file that exists.
+    assert all((_ROOT / case[1]).is_file() for case in _SUB_CHECK_MUTATIONS)
 
 
 @pytest.mark.parametrize(
