@@ -175,13 +175,23 @@ Uninstall deletes a removed package's files only with evidence that APM wrote
 their current bytes: a local deployment receipt, or byte equality with what the
 locked version renders. It renders before removing the package from
 `apm_modules/`, fetching the locked commit when the checkout is gone; a lockfile
-hash alone is never evidence. If a target-scoped file owned only by a removed
-package was edited, has no evidence, or cannot be deleted, uninstall lists the
-retained paths and exits before changing `apm.yml`.
-Files it already removed are dropped from `apm.lock.yaml`, so the lockfile
-claims only what is still on disk. Direct and orphan directories run first and
-may already be gone; declarations remain. Resolve the listed files and retry the
-same uninstall command.
+hash alone is never evidence. If a file it would delete was edited or has no
+evidence, uninstall exits 1 before changing anything: `apm.yml`,
+`apm.lock.yaml`, `apm_modules/` and every file stay as they were. It names each
+file and why, then offers two remedies:
+
+- Run `apm install` once with access to the package source, which
+  re-establishes deployment evidence, then rerun `apm uninstall`.
+- If the source is unreachable, or a listed file holds your edits, move each
+  listed file aside or delete it, then rerun `apm uninstall`.
+
+After upgrading, uninstall needs this evidence. If the source is unreachable,
+use the second remedy. If a target-scoped file cannot be deleted, uninstall
+lists the retained paths and exits before changing `apm.yml`. Files it already
+removed are dropped from `apm.lock.yaml`, so the lockfile claims only what is
+still on disk. Direct and orphan directories run first and may already be gone;
+declarations remain. Resolve the listed files and retry the same uninstall
+command.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the

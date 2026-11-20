@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes and upgrade notes
+
+- After upgrading, `apm uninstall` needs deployment evidence for each file it deletes; without it, it changes nothing and names each file. If the source is unreachable, see the uninstall reference. (#3701)
+
 ### Changed
 
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
