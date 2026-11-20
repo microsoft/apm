@@ -219,7 +219,14 @@ class TestParsedExtensions:
 
 
 class TestApmLockRecordsDependencyExtensions:
-    def test_install_dry_run_warns_once_per_invocation(self, tmp_path: Path) -> None:
+    def test_install_dry_run_warns_once_per_invocation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A long tmp path (macOS) must not hard-wrap the warning line; the
+        # console is a cached singleton, so it is rebuilt at this width.
+        monkeypatch.setenv("COLUMNS", "1000")
+        monkeypatch.setattr("apm_cli.utils.console._console_instance", None)
+        monkeypatch.setattr("apm_cli.utils.console._stderr_console_instance", None)
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=tmp_path):
             project = Path.cwd()
