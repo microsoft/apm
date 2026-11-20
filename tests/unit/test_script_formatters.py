@@ -8,6 +8,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestFormatContentPreviewRichFallback(unittest.TestCase):
     """Verify the except-Exception fallback in format_content_preview (~line 176)."""

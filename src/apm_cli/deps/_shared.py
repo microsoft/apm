@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 if TYPE_CHECKING:
     from ..models.apm_package import APMPackage
     from ..models.dependency.reference import DependencyReference
@@ -88,7 +90,7 @@ def materialize_marketplace_manifest(dep_ref: DependencyReference, target_path: 
     from apm_cli.utils.file_ops import robust_rmtree
     from apm_cli.utils.yaml_io import load_yaml
 
-    apm_yml_path = target_path / "apm.yml"
+    apm_yml_path = manifest_file(target_path)
     apm_dir = target_path / ".apm"
     stage_path = target_path / ".apm-marketplace-stage.yml"
     try:

@@ -17,6 +17,8 @@ from apm_cli.install.context import InstallContext
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

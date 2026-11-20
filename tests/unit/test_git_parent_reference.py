@@ -5,6 +5,8 @@ import pytest
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.unit
+
 
 class TestGitParentParse:
     def test_basic_parent_decl(self):

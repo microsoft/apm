@@ -47,8 +47,10 @@ APM uses a tiered approach to integration testing:
 - **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
 - **Source and ownership fixtures**: downloader stubs must return real `PackageInfo` and `ResolvedReference` values and materialize each package at the requested path, including staging directories. Native MCP cleanup tests must generate managed baselines through the real writer, then prove both authorized removal and unchanged bytes on unverifiable or foreign entries. Keep successful transitive-service, frozen replay, and exact-byte assertions; a mock-error exit is not success.
 - **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
-- **Generated lifecycle model**: `test_generated_lifecycle_state_machine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, and prune sequences against the real CLI. The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Its mandatory and generated project, global-canonical, and global-aliased replays verify that ordinary reinstall preserves edited skill bytes and their original deployment hashes. After prune removes ownership, ordinary install must refuse the retained user file without changing its bytes or durable state. Deliberate repair uses existing `install --force` consent, then checks exact source bytes, installed lock state, and a clean audit. The mandatory spine replays once per world, inside the first generated example; later examples restore that post-spine world in place. Every transition captures complete project and user roots, and mutating commands must stay inside reviewed write sets. It stays in the merge-group family until hosted runtime supports promotion to the bounded PR-time smoke set.
-- **GATE state machine**: `test_generated_gate_state_machine.py` drives `python -m apm_cli.cli` through declare, approve, deny, revoke, org-policy tightening, install, `install --frozen`, update, uninstall, prune and `audit --ci` for hook, LSP and native-plugin content, at project scope and at user scope with `APM_HOME` outside `HOME`. After every step `check_cross_cutting` (`tests/utils/lifecycle_oracle.py`) checks lock/deployed agreement, idempotence, frozen/audit agreement, gate monotonicity (relative to the model: after each successful mutating step nothing is deployed that current approvals and policy do not allow), write sets, ASCII output, failure atomicity, exit codes and duplicated output. A cell that fails on `main` is a strict expected failure naming its tracking issue. Every step emits a `cell:` event; the mandatory spine must cover `tests/quality/gate_cell_obligations.json`, and a recorded mutant that skips the approval check must fail the machine. PR shards run 4 derandomized examples per scope; `.github/workflows/gate-machine-nightly.yml` explores 25 fresh examples per scope (`APM_GATE_MAX_EXAMPLES=25`).
+- **Spine state machine**: `tests/lifecycle/machines/test_m_spine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, prune, update, lock, compile and frozen sequences through the lifecycle driver (`python -m apm_cli.cli` on PR, the packaged binary on the nightly). The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Its mandatory and generated project, global-canonical, and global-aliased replays verify that ordinary reinstall preserves edited skill bytes and their original deployment hashes. After prune removes ownership, ordinary install must refuse the retained user file without changing its bytes or durable state. Deliberate repair uses existing `install --force` consent, then checks exact source bytes, installed lock state, and a clean audit. Every command, including those the shared helpers run, is followed by `check_cross_cutting`, so each step keeps I1-I9 and earns receipts; per-rule write-set snapshots stay as before. The mandatory spine replays once per world; later examples restore that post-spine world in place. PR shards run 4 derandomized examples per variant; the nightly explores 25 (`APM_SPINE_MAX_EXAMPLES=25`).
+- **GATE state machine**: `tests/lifecycle/machines/test_m_gate.py` drives the lifecycle driver (`python -m apm_cli.cli` on PR, the packaged binary on the nightly) through declare, approve, deny, revoke, org-policy tightening, install, `install --frozen`, update, uninstall, prune and `audit --ci` for hook, LSP and native-plugin content, at project scope and at user scope with `APM_HOME` outside `HOME`. After every step `check_cross_cutting` (`tests/lifecycle/oracles.py`) checks lock/deployed agreement, idempotence, frozen/audit agreement, gate monotonicity (relative to the model: after each successful mutating step nothing is deployed that current approvals and policy do not allow), write sets, ASCII output, failure atomicity, exit codes and duplicated output. A cell that fails on `main` is a strict expected failure naming its tracking issue. Every step emits a `cell:` event; the mandatory spine must cover `tests/quality/gate_cell_obligations.json`, and a recorded mutant that skips the approval check must fail the machine. PR shards run 4 derandomized examples per scope; `.github/workflows/gate-machine-nightly.yml` builds the binary and explores 25 fresh examples per scope (`APM_LIFECYCLE_DRIVER=binary`, `APM_GATE_MAX_EXAMPLES=25`).
+- **Lifecycle family core**: `tests/lifecycle/` holds the shared pieces: a pure reference model (`model/state.py`, `model/expected.py`), a driver (`driver.py`, `APM_LIFECYCLE_DRIVER=engine|binary`), the cross-cutting oracle (`oracles.py`) and receipts (`receipts.py`). Each oracle law that applies to a step and passes writes one receipt; only the oracle module may write receipts. `tests/quality/promise_obligations.json` lists every obligation as `required`, with the witness test that must earn its receipt (checked inside the lifecycle shards), or in the `baseline` with the lane that will cover it. A new obligation must be in one of the two lists, and the 0.37 release needs an empty baseline.
+- **Docs journeys**: `tests/lifecycle/journeys/test_journeys.py` replays the 25 journeys of `index.yaml` (one YAML file per journey; the schema is the module docstring) through the driver and applies output oracles O1-O13 plus `check_cross_cutting`. Golden journeys carry `lifecycle_smoke`; `.github/workflows/lifecycle-journeys.yml` runs all of them nightly on Linux, Windows and macOS, and on dispatch for a release-candidate `ref`. Regenerate goldens with `python tests/lifecycle/journeys/regen_goldens.py`.
 - **Frozen under-recording**: the required smoke scenario and the generated model's mandatory project replay add a local skill without refreshing the lockfile, require frozen refusal with unchanged lockfile bytes, repair with ordinary install, and verify two byte-stable frozen replays. The scenario uses `ApmLifecycleRunner` in an isolated environment. It does not promise filesystem rollback: the new skill is deployed before refusal.
 - **Frozen local dependencies**: `test_frozen_local_path_lifecycle.py` uses the selected installed CLI to check direct and transitive source changes before deployment, including portable identities for packages inside the consumer project. It covers a fresh consumer with a separate empty cache, unchanged lock and managed bytes on refusal, preserved unrelated cache content, and recovery by restoring the source or explicitly accepting it with a normal install. This is separate from the root project's under-recording scenario above.
 - **Known gap**: a late lockfile replacement failure can leave target files on the newly declared target while retaining the prior lockfile. The required lifecycle suite bounds that blast radius and proves the next install converges; expanding the install transaction is a separate design decision recorded in the ledger.
@@ -238,13 +240,28 @@ with one entry per line; entries may only be removed.
    names the promises it protects in its module-level `pytestmark`, using ids
    from `tests/quality/promise-catalog.json`: OpenAPM `req-*` ids,
    `P-OWN-<owner id>` architecture owners, `P-INV-I1`..`P-INV-I9` lifecycle
-   invariants and `P-LAW-<id>` lifecycle laws. Add a missing promise to the
+   invariants, `P-LAW-<id>` lifecycle laws and `P-DOC-<id>` documented-surface
+   promises. Add a missing promise to the
    catalog in the same pull request. A new id family (`P-<FAMILY>-<id>`) must
    first be declared in the catalog's `families`; undeclared families fail.
 
 ```python
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
 ```
+
+`scripts/check_test_assertions.py` (baseline
+`tests/quality/assertion_quality_baseline.json`) ratchets per-file counts the
+same way: AQ001 constant assertions, AQ002 `pytest.raises(Exception)`, AQ003
+component or e2e tests that assert no user-visible output, exit code or durable
+state, AQ004 tests that patch a symbol defined in an owner module they import,
+and AQ006 e2e modules that do not drive the real CLI (they use `CliRunner`,
+patch an owner module, or never run `apm` through `ApmLifecycleRunner`, the
+`apm_binary_path` or `apm_engine_command` fixtures, or the lifecycle `driver`).
+
+For consolidation, `uv run --frozen python scripts/check_exact_test_duplicates.py
+--report-equal-copies` lists equal copies that are safe to delete. A copy
+qualifies only if body, decorators, fixtures, class context, module bindings and
+CI lane all match its kept twin. The report never fails and never edits files.
 
 Moving a listed test or module to another directory under the same name keeps
 its allowance and is reported as moved. Prune stale or moved duplicate entries
@@ -292,13 +309,14 @@ uv run pytest tests/integration/test_golden_scenario_e2e.py -v
 # Run only a marker family
 uv run pytest tests/integration -m requires_github_token -v
 
-# Run the bounded generated lifecycle model with a real local apm command
-APM_E2E_TESTS=1 APM_BINARY_PATH="$(command -v apm)" \
-  uv run --extra dev pytest -q \
-  tests/integration/test_generated_lifecycle_state_machine.py
+# Run the spine state machine (python -m apm_cli.cli; no binary needed)
+uv run --extra dev pytest -q tests/lifecycle/machines/test_m_spine.py
 
 # Run the GATE state machine (python -m apm_cli.cli; no binary needed)
-uv run --extra dev pytest -q tests/integration/test_generated_gate_state_machine.py
+uv run --extra dev pytest -q tests/lifecycle/machines/test_m_gate.py
+
+# Run the lifecycle family core and its obligation ratchet
+uv run --extra dev pytest -q tests/lifecycle tests/quality/test_promise_obligations.py
 ```
 
 ### Hermetic lifecycle fixtures
@@ -768,6 +786,14 @@ Promotion integration tests run on:
    needs.
 3. Update the CI matrix if the runtime introduces new platform
    support.
+
+### Lifecycle family: add a row or a machine rule
+
+1. Name the promise ids, for example `P-INV-I4` or `P-LAW-<property>`. Every id must resolve in `tests/quality/promise-catalog.json`; the row loader rejects any other id.
+2. For a fixed command sequence, add a row to `tests/lifecycle/replay/rows/` (copy `core_gate_row.yaml`) with `promises`, `world`, `given`, `when` and `then` (`exit`, `deployed: expected`, `announce`). `RowReplay` (`tests/lifecycle/rows.py`) runs every step through the driver and `check_cross_cutting`, and compares the final world with `expected_deployed`.
+3. For a transition that must hold from many states, add a rule to the matching state machine. Each rule builds an `Operation` (`oracles.operation_for(args)`) and calls `check_cross_cutting`; never write receipts yourself.
+4. If a step fails on `main`, open a neutral tracking issue and add a `known_cells` entry (law, tracking issue, step, `match`). It is a strict expected failure; never skip the step.
+5. Run the row red first: use a recorded mutant (`entry_point=`), or remove the oracle call and check that its obligations show up uncovered. Then move the obligations it covers from `baseline` to `required` in `tests/quality/promise_obligations.json`, with the row's test as witness.
 
 ### For New Features:
 1. Add a smoke test for compilation/validation.

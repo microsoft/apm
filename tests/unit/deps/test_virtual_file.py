@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.deps.virtual_file import materialize_virtual_file_package
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
+
+pytestmark = pytest.mark.component
 
 
 def test_rematerialization_invalidates_cached_manifest(tmp_path: Path) -> None:

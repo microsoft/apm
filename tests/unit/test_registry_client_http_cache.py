@@ -8,6 +8,8 @@ import pytest
 
 from apm_cli.registry.client import SimpleRegistryClient
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def isolated_cache(tmp_path, monkeypatch):

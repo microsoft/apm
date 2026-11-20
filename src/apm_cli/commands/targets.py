@@ -19,13 +19,15 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 
 def _manifest_targets(project_root: Path) -> list[str] | None:
     """Return the targets apm.yml restricts deployment to, read like install does."""
     from apm_cli.constants import APM_YML_FILENAME
     from apm_cli.models.apm_package import APMPackage, package_target_declaration
 
-    manifest = project_root / APM_YML_FILENAME
+    manifest = manifest_file(project_root)
     if not manifest.is_file():
         return None
     try:

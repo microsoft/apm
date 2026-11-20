@@ -17,9 +17,13 @@ import threading
 import unittest
 from dataclasses import dataclass, field
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import build_download_ref, detect_ref_change
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Minimal stubs

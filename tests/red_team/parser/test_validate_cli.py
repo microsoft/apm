@@ -17,6 +17,8 @@ from click.testing import CliRunner
 
 from .conftest import write_apm_yml
 
+pytestmark = pytest.mark.component
+
 
 def _run_validate(tmp_path, monkeypatch, content):
     from apm_cli.commands.lifecycle import lifecycle

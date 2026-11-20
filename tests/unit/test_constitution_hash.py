@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.compilation.constitution_block import compute_constitution_hash
+
+pytestmark = pytest.mark.unit
 
 
 def test_hash_stable_and_truncated():

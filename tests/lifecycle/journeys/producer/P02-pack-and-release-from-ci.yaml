@@ -1,0 +1,69 @@
+# P02 Pack a bundle and release from CI, nightly (#4110). Schema: test_journeys.py.
+# The index lists no docs page (docs_missing); commands follow the index and
+# producer/release-a-version.md ("run apm pack --archive and upload
+# build/<name>-<version>.zip"). The world project becomes the package; its
+# consumer apm.yml moves to ../consumer for step 4.
+schema: 1
+id: P02
+persona: producer
+title: Pack a bundle and release from CI
+docs: []
+# O4 (i) counts JSON punctuation of the --json report as repeated lines.
+allow_repeat: ["},", "]", "],", "}"]
+world:
+  setup:
+    - mkdir ../consumer
+    - mv apm.yml ../consumer/apm.yml
+    - apm init -y --name my-package
+    - mkdir -p .apm/skills/review
+    - touch .apm/skills/review/SKILL.md
+steps:
+  - n: 1
+    edit:
+      - append: .apm/skills/review/SKILL.md
+        text: |
+          ---
+          name: review
+          description: Review a diff against the team's checklist.
+          ---
+
+          # Review
+
+          List findings as Blocking, Should fix or Nit.
+    run: [apm pack --check-versions --check-clean --json]
+    exit: 0
+    files: []
+    note: >-
+      the index redirects stdout to gate-report.json; the runner has no shell, so the
+      JSON document is asserted on stdout and the [i] diagnostics are on stderr.
+    key_lines: ['"ok": true', '"errors": []', "[i] Version alignment check skipped: no marketplace block"]
+    forbidden_lines: ["[x]", Traceback]
+  - n: 2
+    run: [apm pack --archive --check-versions --strict-metadata --json]
+    exit: 0
+    files: [build/my-package-1.0.0.zip]
+    note: the index names dist/<name>-<ver>.zip; the CLI and release-a-version.md use build/.
+    key_lines: ['"ok": true', '"path": "build/my-package-1.0.0.zip"', "No 'license:' field in apm.yml"]
+    forbidden_lines: ["[x]", Traceback]
+  - n: 3
+    run: [apm pack --dry-run --verbose]
+    exit: 0
+    files: []
+    chdir: ../consumer
+    key_lines:
+      - "[!] No 'license:' field in apm.yml"
+      - "[dry-run] Would pack 2 file(s) plus apm.lock.yaml -> build/my-package-1.0.0"
+      - skills/review/SKILL.md
+    forbidden_lines: ["[x]"]
+  - n: 4
+    run: [apm install ../project/build/my-package-1.0.0.zip, apm audit --ci]
+    exit: 0
+    files: [apm.lock.yaml, .agents/skills/review/SKILL.md]
+    key_lines: ["[*] Installed 1 file(s) from local bundle", "[*] All 11 check(s) passed"]
+    forbidden_lines: ["[x]"]
+known_cells:
+  - id: pack-json-drops-license-warning
+    law: KEY
+    tracking: "#4203"
+    step: 2
+    match: "No 'license:' field in apm.yml"

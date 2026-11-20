@@ -23,6 +23,8 @@ from apm_cli.deps.registry.client import (
     _quote,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_response(
     *,

@@ -19,6 +19,8 @@ from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
 from apm_cli.primitives.models import Chatmode, Context, Instruction, PrimitiveCollection
 from apm_cli.version import get_version
 
+pytestmark = pytest.mark.component
+
 
 class TestClaudeFormatterInit:
     """Tests for ClaudeFormatter initialization."""

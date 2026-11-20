@@ -1,0 +1,75 @@
+# J15 Adopt existing agent files and migrate: a repository with hand-copied
+# Claude skills previews discovery, applies it, then installs a package whose
+# skill already sits in .claude/skills/ byte for byte (#4110).
+# Schema: test_journeys.py. The pre-existing copy of p-skill comes from the
+# world's package tree (../../packages/p-skill), so it equals the install output.
+schema: 1
+id: J15
+persona: consumer
+title: Adopt existing agent files and migrate
+docs: [getting-started/coming-from.md, reference/cli/init.md]
+world:
+  project: empty
+  git: init
+  setup:
+    - mkdir -p .claude/skills/review
+    - "python -c \"from pathlib import Path as P; P('.claude/skills/review/SKILL.md').write_text('---\\nname: review\\ndescription: Review code.\\n---\\n\\nReview the change.\\n')\""
+steps:
+  - n: 1
+    run: [apm init --help]
+    exit: 0
+    help_docs: reference/cli/init.md
+    key_lines: ["--apply, --write", "(implies --discover)"]
+  - n: 2
+    run: [apm init --discover]
+    exit: 0
+    files: []
+    docs:
+      page: getting-started/coming-from.md
+      commands: [apm init --discover]
+      output:
+        - "[i] supported: .claude/skills/review -- Existing local package; only a dependency will be added."
+        - "[i] apm.yml dependencies.apm: path: ./.claude/skills/review"
+        - "[i] Read-only preview. Use --apply to add these dependencies after confirmation."
+    key_lines: ["[i] Read-only preview. Use --apply to add these dependencies after confirmation."]
+  - n: 3
+    run: [apm init --discover --apply --yes]
+    exit: 0
+    files: [apm.yml]
+    key_lines:
+      - "[i] apm.yml dependencies.apm: path: ./.claude/skills/review"
+      - "[*] Updated consumer apm.yml. Run 'apm install' separately."
+  - n: 4
+    run: [apm init --apply]
+    exit: 1
+    files: []
+    key_lines: ["Error: Applying discovery requires consent. Review --discover, then rerun --apply --yes."]
+    note: help says --apply implies --discover; without --yes a non-interactive apply is refused (exit 1, init.md exit codes)
+  - n: 5
+    run:
+      - mkdir -p .claude/skills/p-skill
+      - cp ../../packages/p-skill/skills/p-skill/SKILL.md .claude/skills/p-skill/SKILL.md
+      - apm install lifecycle/p-skill#v1.0.0 --target claude
+    exit: 0
+    key_lines: ["[+] lifecycle/p-skill #v1.0.0 @<SHA8>", adopted]
+    forbidden_lines: [1 file skipped, "[!]", "[x]"]
+  - n: 6
+    run: [apm audit]
+    exit: 0
+    key_lines: ["[+] No drift detected"]
+known_cells:
+  - id: J15-identical-skill-reported-as-integrated-not-adopted
+    law: KEY
+    tracking: "#4198"
+    step: 5
+    match: "key line not printed: 'adopted'"
+  - id: J15-install-pkg-drops-declared-local-dep-from-lock
+    law: I1
+    tracking: "#4198"
+    step: 5
+    match: "deployed file is not in the lock: \\.claude/skills/review/SKILL\\.md"
+  - id: J15-audit-after-install-lock-misses-local-dep
+    law: I1
+    tracking: "#4198"
+    step: 6
+    match: "deployed file is not in the lock: \\.claude/skills/review/SKILL\\.md"

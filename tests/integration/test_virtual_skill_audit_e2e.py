@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -487,23 +488,77 @@ def test_non_virtual_manifestless_package_still_fails_audit_from_cold_cache(
     _assert_same_state(before, after)
 
 
+def _project_state(lifecycle: _VirtualSkillLifecycle) -> tuple[bytes, LifecycleStateSnapshot]:
+    """The lockfile bytes and deployed project state audit must never change."""
+    return (lifecycle.project_root / "apm.lock.yaml").read_bytes(), _capture_state(lifecycle)
+
+
+def _cache_mismatch_lines(result: CommandResult) -> list[str]:
+    """The shared locked-content diagnostic lines naming this package."""
+    text = re.sub(r"\s+", " ", result.stdout + result.stderr)
+    return re.findall(
+        r"Content hash mismatch for \S*virtual-skills\S*: expected sha256:[0-9a-f]{64}, "
+        r"got sha256:[0-9a-f]{64}\.",
+        text,
+    )
+
+
 def test_malformed_virtual_package_still_fails_audit(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """An is_virtual lock bit cannot waive an invalid installed package shape."""
-    virtual_skill_lifecycle = _install_virtual_skill_lifecycle(tmp_path, apm_binary_path)
-    (virtual_skill_lifecycle.module_root / "SKILL.md").unlink()
+    """I3: a cache copy that contradicts the lock gets one verdict from frozen and audit.
 
-    audit = _run_audit(
-        virtual_skill_lifecycle,
-        expected_returncode=1,
-        scenario_id="malformed-virtual-skill-audit",
-    )
+    Both commands name the cache mismatch, verify from the locked source and
+    pass; audit leaves the lockfile and deployed files byte-identical. The
+    lock-level package-shape witness is the cold-cache wrong-type test below.
+    """
+    lifecycle = _install_virtual_skill_lifecycle(tmp_path, apm_binary_path)
+    (lifecycle.module_root / "SKILL.md").unlink()
+    before = _project_state(lifecycle)
 
-    config_check = _config_check(audit)
-    assert config_check["passed"] is False
-    assert any("package manifest not found" in detail for detail in config_check["details"])
+    audit = _run_audit(lifecycle, expected_returncode=0, scenario_id="tampered-cache-audit")
+    assert _project_state(lifecycle) == before, "I5: audit --ci changed project state"
+    assert _cache_mismatch_lines(audit), audit.stderr
+
+    (lifecycle.module_root / "SKILL.md").unlink(missing_ok=True)
+    frozen = lifecycle.runner.run_sequence(
+        (("install", "--target", "copilot", "--no-policy", "--frozen"),),
+        expected_returncodes=(0,),
+        scenario_id="tampered-cache-frozen",
+        cwd=lifecycle.project_root,
+        env=lifecycle.environment,
+    )[0]
+    assert _cache_mismatch_lines(frozen), frozen.stdout + frozen.stderr
+    assert (lifecycle.module_root / "SKILL.md").is_file()
+
+
+def test_tampered_cache_with_unreachable_source_fails_frozen_and_audit_alike(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """I3 negative: unverifiable locked content fails closed in frozen and audit alike."""
+    lifecycle = _install_virtual_skill_lifecycle(tmp_path, apm_binary_path)
+    (lifecycle.module_root / "SKILL.md").unlink()
+    shutil.rmtree(lifecycle.repository.origin)
+    if lifecycle.isolated.cache_root.exists():
+        shutil.rmtree(lifecycle.isolated.cache_root)
+    lifecycle.isolated.cache_root.mkdir(parents=True, exist_ok=True)
+    before = _project_state(lifecycle)
+
+    audit = _run_audit(lifecycle, expected_returncode=1, scenario_id="unverifiable-cache-audit")
+    assert _project_state(lifecycle) == before, "I5: audit --ci changed project state"
+    assert _cache_mismatch_lines(audit), audit.stdout + audit.stderr
+
+    frozen = lifecycle.runner.run_sequence(
+        (("install", "--target", "copilot", "--no-policy", "--frozen"),),
+        expected_returncodes=(1,),
+        scenario_id="unverifiable-cache-frozen",
+        cwd=lifecycle.project_root,
+        env=lifecycle.environment,
+    )[0]
+    assert _cache_mismatch_lines(frozen), frozen.stdout + frozen.stderr
+    assert (lifecycle.project_root / "apm.lock.yaml").read_bytes() == before[0]
 
 
 def test_wrong_virtual_package_type_still_fails_audit_from_cold_cache(

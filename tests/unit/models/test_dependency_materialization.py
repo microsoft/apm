@@ -20,6 +20,8 @@ from apm_cli.models.dependency.materialization import (
 from apm_cli.models.dependency.reference import DependencyReference
 from tests.helpers.prune_casing import CaseSensitiveMaterializationReader
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize(
     "raw",

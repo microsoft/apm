@@ -418,6 +418,8 @@ jobs:
           tests/quality/test_quality_baselines.py \
           tests/quality/test_lifecycle_bug_ledger.py \
           tests/quality/test_ci_topology.py \
+          tests/quality/test_promise_obligations.py \
+          tests/quality/test_cli_docs_surface.py \
           tests/quality/test_journey_index.py
 
   test-architecture-scaling:
@@ -760,8 +762,8 @@ jobs:
   #
   # #2238 (bounded best-effort ref-lookup retries) is intentionally NOT
   # duplicated here: its regression coverage
-  # (tests/unit/deps/test_download_strategies_phase3.py,
-  # tests/unit/deps/test_git_reference_resolver.py) is unit-level and
+  # (tests/unit/deps/test_download_strategies_selection.py,
+  # tests/integration/test_git_reference_resolver.py) is in-process and
   # already required today via build-and-test-shard.
   #
   # Why this stays hermetic, network-free, and credential-free
@@ -840,7 +842,7 @@ jobs:
           -p scripts.ci_sharding --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
           --shard-durations .github/ci-durations/linux-x86_64.json \
           -n 4 --dist loadgroup --durations=20 \
-          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration tests/lifecycle
 
     # The M-GATE spines write their visited cells to build/gate-cells/;
     # gate-cell-coverage merges every shard's set.

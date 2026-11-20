@@ -9,6 +9,8 @@ import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
+
 from ..deps.lockfile import resolve_lockfile_path_for_read
 from ..primitives.discovery import get_dependency_declaration_order
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
@@ -255,7 +257,7 @@ class ClaudeFormatter:
             return []
 
         metadata_paths = (
-            self.source_dir / "apm.yml",
+            manifest_file(self.source_dir),
             resolve_lockfile_path_for_read(installed_root, read_only=True),
         )
         if any(path.exists() or path.is_symlink() for path in metadata_paths):

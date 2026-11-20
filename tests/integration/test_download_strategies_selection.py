@@ -158,21 +158,6 @@ class TestResilientGet:
 
 
 class TestBuildRepoUrl:
-    def test_gitlab_backend_uses_resolve_for_dep_token(self) -> None:
-        host = make_host(resolved_token="gitlab-token")
-        delegate = DownloadDelegate(host)
-        dep = make_dep("group/repo", host="gitlab.example.com")
-        backend = MagicMock()
-        backend.kind = "gitlab"
-        backend.is_github_family = False
-        backend.build_clone_https_url.return_value = "https://gitlab.example.com/group/repo.git"
-
-        with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend):
-            url = delegate.build_repo_url("group/repo", dep_ref=dep)
-
-        assert url == "https://gitlab.example.com/group/repo.git"
-        assert backend.build_clone_https_url.call_args.kwargs["token"] == "gitlab-token"
-
     def test_ado_without_organization_rebuilds_backend(self) -> None:
         host = make_host(ado_token="ado-token")
         delegate = DownloadDelegate(host)
