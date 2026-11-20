@@ -28,7 +28,7 @@ class TestCodexRuntime:
         with pytest.raises(RuntimeError, match="Codex CLI not available"):
             CodexRuntime()
 
-    @patch("apm_cli.runtime.codex_runtime.subprocess.Popen")
+    @patch("subprocess.Popen")
     @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_execute_prompt_success(self, mock_which, mock_popen):
         """Test successful prompt execution."""
@@ -46,7 +46,7 @@ class TestCodexRuntime:
         assert result == "Test response from Codex"
         mock_popen.assert_called_once()
 
-    @patch("apm_cli.runtime.codex_runtime.subprocess.Popen")
+    @patch("subprocess.Popen")
     @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_execute_prompt_failure(self, mock_which, mock_popen):
         """Test prompt execution failure."""
@@ -74,7 +74,7 @@ class TestCodexRuntime:
         assert "codex-default" in models
         assert models["codex-default"]["provider"] == "codex"
 
-    @patch("apm_cli.runtime.codex_runtime.subprocess.run")
+    @patch("subprocess.run")
     @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_get_runtime_info(self, mock_which, mock_run):
         """Test getting runtime info."""

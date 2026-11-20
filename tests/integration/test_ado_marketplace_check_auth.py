@@ -72,7 +72,7 @@ marketplace:
             stderr="",
         )
 
-    monkeypatch.setattr("apm_cli.marketplace.ref_resolver.subprocess.run", fake_git)
+    monkeypatch.setattr("subprocess.run", fake_git)
 
     result = CliRunner().invoke(marketplace, ["check", "--verbose"])
 

@@ -1417,7 +1417,7 @@ dependencies:
         assert repo_ref == farthest_ref
         return None, "503: farthest parent refresh unavailable"
 
-    with patch("apm_cli.policy.discovery.time.time", return_value=fixed_time):
+    with patch("time.time", return_value=fixed_time):
         _setup_cache(
             nearest_ref,
             tmp_path,
@@ -1467,7 +1467,7 @@ def test_farther_failure_overrides_nearest_stale_ancestor(
         assert repo_ref == farthest_ref
         return None, "503: root unavailable"
 
-    with patch("apm_cli.policy.discovery.time.time", return_value=fixed_time):
+    with patch("time.time", return_value=fixed_time):
         _setup_cache(
             nearest_ref,
             tmp_path,

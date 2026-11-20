@@ -1,0 +1,2521 @@
+# Stable catalogue of the 25 lifecycle journeys (Part of #4110).
+# Transcribed from the steward's journey model. Ids, step numbers and oracle ids
+# are pinned by tests/quality/test_journey_index.py. key_lines must print;
+# forbidden_lines must not print. Step oracles may also name an invariant
+# (I1-I9) that an oracle's invariant field covers. docs paths are relative to
+# docs/src/content/docs/; docs_unresolved keeps model paths with no page today.
+schema_version: 1
+oracles:
+  O1:
+    name: TRANSCRIPT
+    invariant: '-'
+    check: normalized stdout+stderr of each step equals the reviewed golden file tests/journeys/goldens/<J>/<step>.txt; package blocks compared as unordered units, lines inside a block ordered
+    applies: golden journeys only (PR tier)
+  O2:
+    name: DOCS-OUTPUT
+    invariant: '-'
+    check: every docs output block that follows the command is an ordered subsequence of the normalized transcript; blocks marked abridged allow extra lines only from an allowlist; extra [!] or [x] lines are never allowed
+    applies: every step that has a docs output block
+  O3:
+    name: ASCII
+    invariant: I6
+    check: every byte of stdout and stderr < 0x80 under LANG=C.UTF-8 and a UTF-8 terminal (force_terminal), so Rich cannot fall back silently
+    applies: every binary invocation (global)
+  O4:
+    name: UNIQUE-QUIET
+    invariant: I9
+    check: (i) no identical normalized non-blank line twice within one command unless allowlisted per-item; (ii) per package block, (primitive kind, destination set) appears once; (iii) no adjacent repeated token; (iv) every diagnostic id requires its trigger fact in the state; (v) each diagnostic id at most once per command
+    applies: every binary invocation (global)
+  O5:
+    name: EXIT
+    invariant: I8
+    check: exit code equals the journey step expectation and the docs exit table; any [x] line implies exit != 0; exit != 0 implies an [x] or error line; usage errors exit 2
+    applies: every step
+  O6:
+    name: ANNOUNCED
+    invariant: I7
+    check: filesystem delta under project and HOME is fully attributed to announced lines or the command's declared write set; failing steps have an empty delta unless the partial state is announced; --frozen never modifies an existing deployed file
+    applies: every mutating step
+  O7:
+    name: HELP-TRUTH
+    invariant: '-'
+    check: every flag in docs exists on that subcommand and vice versa; help claims ([experimental], deprecated, requires --X, mutually exclusive, exit 2) are probed and must match behavior; experimental commands never appear in root Common workflows or init Next Steps; help and docs enumerations are equal
+    applies: help steps plus the CLI surface truth test
+  O8:
+    name: REMEDIATION-TRUTH
+    invariant: I3
+    check: 'parse every Run ''apm ...'' advice from a failing step, execute it in the same state, re-run the failing command: it must now pass (or reach the documented next state)'
+    applies: every red step
+  O9:
+    name: FS-DELTA
+    invariant: I1,I5
+    check: files created/changed equal the journey's expected set; after the documented commit step git status --porcelain is empty; nothing outside project and declared user-scope roots
+    applies: every mutating step
+  O10:
+    name: TWIN-FIDELITY
+    invariant: '-'
+    check: hermetic content twins are byte-shape equal to the real upstream at the documented ref (nightly), and the first-run journey on the real upstream prints zero [!] lines
+    applies: J01, J04, J05, P01 (nightly real-network variant)
+  O11:
+    name: VENDOR-SHAPE
+    invariant: '-'
+    check: emitted vendor files validate against the vendor's published schema or a recorded vendor sample
+    applies: J05, P03
+  O12:
+    name: EGRESS
+    invariant: I4
+    check: a recording proxy observes only allowed hosts; with PROXY_REGISTRY_ONLY=1 no direct host is contacted for packages, catalogs or MCP registry
+    applies: E03
+  O13:
+    name: DOCS-AS-SCRIPT
+    invariant: '-'
+    check: journey commands are extracted from docs code fences and executed literally (placeholders substituted); pinned versions in docs equal the current release
+    applies: every journey
+normalizers:
+  N1: 'env: NO_COLOR=1 TERM=dumb COLUMNS=200 LANG=C.UTF-8 APM_E2E_TESTS=1; strip ANSI'
+  N2: 'hex placeholders: 40-hex -> <SHA40>, @8-hex -> @<SHA8>, sha256:64-hex -> sha256:<H>'
+  N3: durations 'in 1.3s' -> 'in <DUR>'; dates -> <DATE>; apm version -> <VER>
+  N4: 'paths: tmp root, HOME, APM_HOME, project -> <TMP>, <HOME>, <APM_HOME>, <PROJECT>; backslash -> slash'
+  N5: package blocks ([+] header plus its |-- children) compared as a multiset of ordered blocks
+  N6: 'no soft wrap: COLUMNS=200'
+  N7: regen script rewrites goldens, refuses any golden that fails O3 or O4, prints the review diff; goldens carry a schema version header
+journeys:
+- id: J01
+  persona: consumer
+  title: First run (quickstart)
+  golden: true
+  tier: pr
+  docs:
+  - quickstart.mdx
+  - getting-started/installation.md
+  fixtures:
+  - 'content twin of microsoft/apm-sample-package@v1.0.0 incl. transitive skill and mode: frontmatter'
+  - local git HTTP server
+  - empty org policy repo (outcome absent)
+  steps:
+  - n: 1
+    cmd: apm --version
+    argv:
+    - - apm
+      - --version
+    kind: apm
+    exit: 0
+    key_lines:
+    - <VER>
+    forbidden_lines:
+    - Traceback
+    - A new version of APM is available
+    files: []
+    oracles:
+    - O5
+    - O3
+  - n: 2
+    cmd: apm --help
+    argv:
+    - - apm
+      - --help
+    kind: apm
+    exit: 0
+    key_lines:
+    - 'Common workflows:'
+    forbidden_lines:
+    - apm run <script>
+    files: []
+    oracles:
+    - O7
+    - O3
+  - n: 3
+    cmd: apm init -y --target copilot,claude
+    argv:
+    - - apm
+      - init
+      - -y
+      - --target
+      - copilot,claude
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[*] APM project initialized successfully!'
+    - apm install <owner>/<repo>
+    forbidden_lines:
+    - 'Run a script:'
+    - agentrc
+    - non-ASCII box characters
+    files:
+    - apm.yml
+    oracles:
+    - O1
+    - O2
+    - O3
+    - O4
+    - O7
+    - O9
+  - n: 4
+    cmd: apm install microsoft/apm-sample-package#v1.0.0
+    argv:
+    - - apm
+      - install
+      - microsoft/apm-sample-package#v1.0.0
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] microsoft/apm-sample-package #v1.0.0 @<SHA8>'
+    - '|-- 2 prompts integrated -> .github/prompts/'
+    - '|-- 1 skill(s) integrated -> .agents/skills/'
+    - '[*] Installed 2 APM dependencies in <DUR>.'
+    forbidden_lines:
+    - '[!]'
+    - Skipped inactive experimental resolver
+    - dependency unpinned
+    - Skill integrated -> (twice for one package)
+    - Traceback
+    files:
+    - apm.yml (dependency added)
+    - apm.lock.yaml
+    - apm_modules/ (gitignored)
+    - .gitignore
+    - .agents/skills/
+    - .github/prompts/
+    - .github/agents/
+    - .github/instructions/
+    - .claude/
+    oracles:
+    - O1
+    - O2
+    - O3
+    - O4
+    - O5
+    - O6
+    - O9
+    - O10
+  - n: 5
+    cmd: git add apm.yml apm.lock.yaml .gitignore .github .claude .agents && git commit -m 'Add agent dependencies' && git status --porcelain
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - ?? .apm-local/
+    - ?? apm_modules/
+    files: []
+    oracles:
+    - O9
+    - O13
+  - n: 6
+    cmd: apm install (second run)
+    argv:
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[*]'
+    forbidden_lines:
+    - integrated
+    - '[!]'
+    files:
+    - none changed; lock byte-identical (I2)
+    oracles:
+    - O1
+    - O4
+    - O6
+    - O9
+  - n: 7
+    cmd: apm install microsoft/apm/packages/apm-guide#<release tag>
+    argv:
+    - - apm
+      - install
+      - microsoft/apm/packages/apm-guide#<release tag>
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[*] Installed'
+    forbidden_lines:
+    - '[!]'
+    files: []
+    oracles:
+    - O13
+    - O4
+- id: J02
+  persona: consumer
+  title: Team onboarding from a committed lock
+  golden: true
+  tier: pr
+  docs:
+  - quickstart.mdx
+  - consumer/install-packages.md
+  fixtures:
+  - J01 end state committed to a local bare repo
+  - fresh HOME (cold cache)
+  steps:
+  - n: 1
+    cmd: git clone <repo> && cd <repo>
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O13
+  - n: 2
+    cmd: apm install --frozen
+    argv:
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[*] Installed 2 APM dependencies'
+    - '[i] Deployed files verified against apm.lock.yaml.'
+    forbidden_lines:
+    - '[!]'
+    - Targeting declared targets from apm.yml (twice)
+    - Skipped inactive experimental resolver
+    files:
+    - apm_modules/ only; tracked files unchanged
+    oracles:
+    - O1
+    - O2
+    - O3
+    - O4
+    - O5
+    - O6
+    - O9
+  - n: 3
+    cmd: apm audit
+    argv:
+    - - apm
+      - audit
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] No drift detected'
+    - '[*] <N> file(s) scanned -- no issues found'
+    forbidden_lines:
+    - '[!]'
+    files: []
+    oracles:
+    - O1
+    - O2
+    - O3
+    - O5
+  - n: 4
+    cmd: apm find --source .agents/skills/<skill>/SKILL.md
+    argv:
+    - - apm
+      - find
+      - --source
+      - .agents/skills/<skill>/SKILL.md
+    kind: apm
+    exit: 0
+    key_lines:
+    - <owner>/<repo>@<SHA12>
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+    - O3
+    - O5
+  - n: 5
+    cmd: apm install (plain, same clone)
+    argv:
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - integrated
+    files:
+    - none changed; lock byte-identical
+    oracles:
+    - O4
+    - O6
+    - O9
+- id: J03
+  persona: consumer
+  title: 'CI gate: --frozen and audit --ci, green and red'
+  golden: true
+  tier: pr
+  docs:
+  - consumer/run-in-ci.mdx
+  - enterprise/enforce-in-ci.mdx
+  - reference/cli/install.md
+  - reference/cli/audit.md
+  fixtures:
+  - J02 clone
+  - parametrize edited primitive kind K in {skill, instruction, agent, prompt, command, hook config, mcp config}
+  steps:
+  - n: 1
+    cmd: apm install --help
+    argv:
+    - - apm
+      - install
+      - --help
+    kind: apm
+    exit: 0
+    key_lines:
+    - --frozen
+    forbidden_lines:
+    - Use 'apm audit' for on-disk integrity
+    files: []
+    oracles:
+    - O7
+  - n: 2
+    cmd: apm install --frozen
+    argv:
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[i] Deployed files verified against apm.lock.yaml.'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O1
+    - O3
+    - O4
+    - O5
+  - n: 3
+    cmd: apm audit --ci -f sarif -o apm.sarif
+    argv:
+    - - apm
+      - audit
+      - --ci
+      - -f
+      - sarif
+      - -o
+      - apm.sarif
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - apm.sarif (valid SARIF 2.1.0)
+    oracles:
+    - O1
+    - O5
+    - O9
+  - n: 4
+    cmd: edit one deployed file of kind K; apm install --frozen
+    kind: edit
+    exit: 1
+    key_lines:
+    - '[x]'
+    - '<path>: expected sha256:<H>'
+    forbidden_lines:
+    - Run 'apm install' to re-sync
+    files:
+    - 'none changed: edited file kept, lock byte-identical'
+    oracles:
+    - O1
+    - O5
+    - O6
+    - O8
+  - n: 5
+    cmd: apm audit --ci (same state)
+    argv:
+    - - apm
+      - audit
+      - --ci
+    kind: apm
+    exit: 1
+    key_lines:
+    - hash drift
+    - <path>
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O8
+    - I3
+  - n: 6
+    cmd: execute the printed remediation verbatim; apm install --frozen; apm audit --ci
+    kind: manual
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O8
+    - O5
+  - n: 7
+    cmd: edit apm.yml to add a dep without re-locking; apm install --frozen
+    kind: edit
+    exit: 1
+    key_lines:
+    - '[x]'
+    - apm.lock.yaml
+    forbidden_lines: []
+    files:
+    - none changed
+    oracles:
+    - O5
+    - O6
+    - O8
+  - n: 8
+    cmd: copy docs CI workflow snippet; check pinned versions
+    kind: manual
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O13
+- id: J04
+  persona: consumer
+  title: Add one skill from a skill bundle
+  golden: false
+  tier: nightly
+  docs:
+  - getting-started/coming-from.md
+  fixtures:
+  - 'twin of vercel-labs/agent-skills shape: no semver tags, many skills'
+  steps:
+  - n: 1
+    cmd: apm install vercel-labs/agent-skills --skill deploy-to-vercel
+    argv:
+    - - apm
+      - install
+      - vercel-labs/agent-skills
+      - --skill
+      - deploy-to-vercel
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] vercel-labs/agent-skills #main @<SHA8>'
+    - '|-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/'
+    forbidden_lines:
+    - Skill integrated -> (second line for the same skill)
+    - Skipped inactive experimental resolver
+    files:
+    - 'apm.yml skills: [deploy-to-vercel]'
+    - one skill dir per target
+    oracles:
+    - O2
+    - O3
+    - O4
+    - O6
+    - O9
+  - n: 2
+    cmd: apm install vercel-labs/agent-skills --skill preview
+    argv:
+    - - apm
+      - install
+      - vercel-labs/agent-skills
+      - --skill
+      - preview
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - 'skills: union [deploy-to-vercel, preview]'
+    oracles:
+    - O6
+    - O9
+  - n: 3
+    cmd: apm install vercel-labs/agent-skills --skill nope
+    argv:
+    - - apm
+      - install
+      - vercel-labs/agent-skills
+      - --skill
+      - nope
+    kind: apm
+    exit: 1
+    key_lines:
+    - available
+    forbidden_lines: []
+    files:
+    - none changed
+    oracles:
+    - O5
+    - O6
+    - O8
+  - n: 4
+    cmd: apm install vercel-labs/agent-skills --skill '*'
+    argv:
+    - - apm
+      - install
+      - vercel-labs/agent-skills
+      - --skill
+      - '*'
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O9
+  - n: 5
+    cmd: apm uninstall vercel-labs/agent-skills
+    argv:
+    - - apm
+      - uninstall
+      - vercel-labs/agent-skills
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - all skill dirs and lock row removed
+    oracles:
+    - O6
+    - O9
+- id: J05
+  persona: consumer
+  title: Add a marketplace plugin
+  golden: false
+  tier: nightly
+  docs:
+  - consumer/installing-from-marketplaces.md
+  fixtures:
+  - local marketplace twin of anthropics/claude-code (claude-code-plugins)
+  - plugin with commands and prompts; plugin with bin/; plugin with missing component path
+  steps:
+  - n: 1
+    cmd: apm marketplace add anthropics/claude-code --ref <tag>
+    argv:
+    - - apm
+      - marketplace
+      - add
+      - anthropics/claude-code
+      - --ref
+      - <tag>
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] Marketplace ''claude-code-plugins'' registered (<N> plugins)'
+    - '[i] Install plugins with: apm install <plugin>@claude-code-plugins'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+    - O3
+    - O5
+  - n: 2
+    cmd: apm marketplace browse claude-code-plugins
+    argv:
+    - - apm
+      - marketplace
+      - browse
+      - claude-code-plugins
+    kind: apm
+    exit: 0
+    key_lines:
+    - commit-commands@claude-code-plugins (full, untruncated)
+    forbidden_lines:
+    - non-ASCII
+    - truncation ellipsis
+    files: []
+    oracles:
+    - O3
+    - O4
+  - n: 3
+    cmd: apm install commit-commands@claude-code-plugins
+    argv:
+    - - apm
+      - install
+      - commit-commands@claude-code-plugins
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] <host>/<owner>/<repo>/plugins/commit-commands#<ref> @<SHA8>'
+    - '|-- 3 commands integrated -> .claude/commands/'
+    forbidden_lines:
+    - '#main #main'
+    - bin/ executables skipped (plugin ships no bin/)
+    - Skipped inactive experimental resolver
+    files: []
+    oracles:
+    - O2
+    - O3
+    - O4
+    - O6
+    - O9
+  - n: 4
+    cmd: 'harness check: Claude /plugin listing or recorded vendor sample'
+    kind: manual
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O11
+  - n: 5
+    cmd: apm install <plugin-with-bad-path>@claude-code-plugins
+    argv:
+    - - apm
+      - install
+      - <plugin-with-bad-path>@claude-code-plugins
+    kind: apm
+    exit: 1
+    key_lines:
+    - '[x]'
+    - plugin name, path and cause
+    forbidden_lines:
+    - staging path
+    - Traceback
+    files:
+    - none changed
+    oracles:
+    - O5
+    - O6
+  - n: 6
+    cmd: apm install --frozen (fresh clone)
+    argv:
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O1
+    - O4
+- id: J06
+  persona: consumer
+  title: Add an MCP server (and LSP)
+  golden: false
+  tier: nightly
+  docs:
+  - consumer/install-mcp-servers.md
+  fixtures:
+  - local MCP registry
+  - targets claude,copilot declared
+  steps:
+  - n: 1
+    cmd: apm install --mcp io.github.github/github-mcp-server --transport http
+    argv:
+    - - apm
+      - install
+      - --mcp
+      - io.github.github/github-mcp-server
+      - --transport
+      - http
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] io.github.github/github-mcp-server -> Claude, Copilot (configured)'
+    - '[*] Configured 1 server'
+    - '[+] Added MCP server ''io.github.github/github-mcp-server'''
+    forbidden_lines:
+    - Successfully configured MCP server (second success line)
+    - '  + io.github.github/github-mcp-server (third)'
+    - absolute path of apm.yml
+    files:
+    - apm.yml dependencies.mcp
+    - .mcp.json
+    - .vscode/mcp.json or Copilot equivalent
+    - apm.lock.yaml mcp section
+    oracles:
+    - O2
+    - O3
+    - O4
+    - O6
+    - O9
+  - n: 2
+    cmd: apm mcp list; apm mcp show github-mcp-server
+    argv:
+    - - apm
+      - mcp
+      - list
+    - - apm
+      - mcp
+      - show
+      - github-mcp-server
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+  - n: 3
+    cmd: apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+    argv:
+    - - apm
+      - install
+      - --mcp
+      - filesystem
+      - --
+      - npx
+      - -y
+      - '@modelcontextprotocol/server-filesystem'
+      - /workspace
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O9
+  - n: 4
+    cmd: apm install --frozen (fresh clone)
+    argv:
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 0
+    key_lines:
+    - Installed 0 APM dependencies and 2 MCP servers or equivalent
+    forbidden_lines:
+    - Targeting declared targets from apm.yml (twice)
+    files: []
+    oracles:
+    - O1
+    - O4
+  - n: 5
+    cmd: apm uninstall --mcp-equivalent removal (edit apm.yml, apm install)
+    kind: edit
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - server removed from every harness config it was written to
+    oracles:
+    - O6
+    - O9
+- id: J07
+  persona: consumer
+  title: Update and upgrade
+  golden: false
+  tier: nightly
+  docs:
+  - consumer/update-and-refresh.mdx
+  - enterprise/drift-detection.md
+  - reference/cli/outdated.md
+  fixtures:
+  - 'package with tags v1.0.0, v1.1.0; mutable #main dep; marketplace dep'
+  steps:
+  - n: 1
+    cmd: apm outdated
+    argv:
+    - - apm
+      - outdated
+    kind: apm
+    exit: 0
+    key_lines:
+    - <pkg> v1.0.0 -> v1.1.0
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+  - n: 2
+    cmd: apm update --dry-run
+    argv:
+    - - apm
+      - update
+      - --dry-run
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - none changed
+    oracles:
+    - O6
+    - O9
+  - n: 3
+    cmd: apm update --yes
+    argv:
+    - - apm
+      - update
+      - --yes
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - lock updated; deployed files replaced, added, removed
+    oracles:
+    - O1
+    - O4
+    - O6
+    - O9
+  - n: 4
+    cmd: apm install --frozen (fresh clone after commit)
+    argv:
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+  - n: 5
+    cmd: apm deps update <pkg>
+    argv:
+    - - apm
+      - deps
+      - update
+      - <pkg>
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+  - n: 6
+    cmd: apm self-update --check
+    argv:
+    - - apm
+      - self-update
+      - --check
+    kind: apm
+    exit: 0
+    key_lines:
+    - current version and latest
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+- id: J08
+  persona: consumer
+  title: Uninstall and cleanup
+  golden: false
+  tier: nightly
+  docs:
+  - consumer/install-packages.md
+  - reference/cli/uninstall.md
+  - reference/cli/prune.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm uninstall <pkg>
+    argv:
+    - - apm
+      - uninstall
+      - <pkg>
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - manifest entry, lock row, deployed files removed; user-edited files kept and announced
+    oracles:
+    - O4
+    - O6
+    - O9
+  - n: 2
+    cmd: apm prune --dry-run
+    argv:
+    - - apm
+      - prune
+      - --dry-run
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - none changed
+    oracles:
+    - O6
+  - n: 3
+    cmd: apm prune
+    argv:
+    - - apm
+      - prune
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O9
+  - n: 4
+    cmd: apm deps clean --yes
+    argv:
+    - - apm
+      - deps
+      - clean
+      - --yes
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - apm_modules removed
+    oracles:
+    - O6
+  - n: 5
+    cmd: apm audit --ci
+    argv:
+    - - apm
+      - audit
+      - --ci
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - I3
+- id: J09
+  persona: consumer
+  title: Switch or add a harness
+  golden: false
+  tier: nightly
+  docs:
+  - troubleshooting/common-errors.md
+  - reference/cli/compile.md
+  - reference/cli/targets.md
+  - reference/targets-matrix.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: 'apm targets (fresh repo with targets: in apm.yml)'
+    argv:
+    - - apm
+      - targets
+    kind: apm
+    exit: 0
+    key_lines:
+    - 'declared targets shown active (source: apm.yml)'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+    - O3
+  - n: 2
+    cmd: add cursor to targets:; apm install
+    kind: edit
+    exit: 0
+    key_lines:
+    - '[i] Targets: claude, copilot, cursor  (source: apm.yml)'
+    forbidden_lines: []
+    files:
+    - .cursor/ files added; others unchanged
+    oracles:
+    - O2
+    - O6
+    - O9
+  - n: 3
+    cmd: remove claude from targets:; apm install
+    kind: edit
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - .claude/ files owned by APM removed, user files kept
+    oracles:
+    - O6
+    - O9
+  - n: 4
+    cmd: apm compile -t copilot
+    argv:
+    - - apm
+      - compile
+      - -t
+      - copilot
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - .github/copilot-instructions.md or AGENTS.md
+    oracles:
+    - O3
+    - O6
+  - n: 5
+    cmd: apm install --frozen
+    argv:
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - I3
+- id: J10
+  persona: consumer
+  title: Global (-g) setup
+  golden: false
+  tier: nightly
+  docs:
+  - consumer/installing-from-marketplaces.md
+  - consumer/install-mcp-servers.md
+  - reference/environment-variables.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm install -g <pkg> --target claude
+    argv:
+    - - apm
+      - install
+      - -g
+      - <pkg>
+      - --target
+      - claude
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - $APM_HOME/apm.yml, $APM_HOME/apm.lock.yaml, ~/.claude/...
+    oracles:
+    - O6
+    - O9
+    - I5
+  - n: 2
+    cmd: apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/server-fetch
+    argv:
+    - - apm
+      - install
+      - -g
+      - --target
+      - claude
+      - --mcp
+      - fetch
+      - --
+      - npx
+      - -y
+      - '@modelcontextprotocol/server-fetch'
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O9
+  - n: 3
+    cmd: apm deps list -g
+    argv:
+    - - apm
+      - deps
+      - list
+      - -g
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+  - n: 4
+    cmd: apm install -g --frozen --target claude
+    argv:
+    - - apm
+      - install
+      - -g
+      - --frozen
+      - --target
+      - claude
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - I3
+  - n: 5
+    cmd: apm uninstall -g <pkg>
+    argv:
+    - - apm
+      - uninstall
+      - -g
+      - <pkg>
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - project untouched
+    oracles:
+    - O9
+    - I5
+- id: J11
+  persona: consumer
+  title: Deploy a bundle
+  golden: false
+  tier: nightly
+  docs:
+  - consumer/install-packages.md
+  - reference/cli/unpack.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm install ./dist/my-pkg-1.0.0.zip --target copilot (fresh folder)
+    argv:
+    - - apm
+      - install
+      - ./dist/my-pkg-1.0.0.zip
+      - --target
+      - copilot
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - 'Skipped <file>: file exists with different content'
+    files: []
+    oracles:
+    - O2
+    - O4
+    - O6
+    - O9
+  - n: 2
+    cmd: apm install ./bundle-without-lock.zip
+    argv:
+    - - apm
+      - install
+      - ./bundle-without-lock.zip
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[!] announced missing integrity'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+  - n: 3
+    cmd: apm install --dry-run ./dist/my-pkg-1.0.0.zip
+    argv:
+    - - apm
+      - install
+      - --dry-run
+      - ./dist/my-pkg-1.0.0.zip
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - none changed
+    oracles:
+    - O6
+  - n: 4
+    cmd: apm audit --ci; apm install --frozen
+    argv:
+    - - apm
+      - audit
+      - --ci
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - I3
+  - n: 5
+    cmd: apm unpack <bundle>
+    argv:
+    - - apm
+      - unpack
+      - <bundle>
+    kind: apm
+    exit: 0
+    key_lines:
+    - deprecation warning naming apm install
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O7
+- id: J12
+  persona: consumer
+  title: Local edit, drift and recovery
+  golden: false
+  tier: nightly
+  docs:
+  - reference/cli/audit.md
+  - enterprise/drift-detection.md
+  - reference/cli/export-patch.md
+  - enterprise/security.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: edit a deployed skill; apm audit
+    kind: edit
+    exit: 1
+    key_lines:
+    - drift
+    - <path>
+    forbidden_lines:
+    - Run 'apm install' to re-sync deployed files
+    files: []
+    oracles:
+    - O5
+    - O8
+  - n: 2
+    cmd: apm export-patch
+    argv:
+    - - apm
+      - export-patch
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - patch file with ASCII name
+    oracles:
+    - O6
+    - O9
+  - n: 3
+    cmd: 'follow advice: apm install --force (or delete + apm install)'
+    kind: manual
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O8
+  - n: 4
+    cmd: apm audit
+    argv:
+    - - apm
+      - audit
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] No drift detected'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O8
+  - n: 5
+    cmd: plant hidden Unicode; apm audit --strip --dry-run; apm audit --strip; apm audit --ci --no-drift
+    kind: edit
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O8
+- id: J13
+  persona: consumer
+  title: Run scripts (experimental)
+  golden: false
+  tier: nightly
+  docs:
+  - reference/cli/run.md
+  - reference/cli/preview.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm list
+    argv:
+    - - apm
+      - list
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+  - n: 2
+    cmd: apm preview review --param target=src/auth.py
+    argv:
+    - - apm
+      - preview
+      - review
+      - --param
+      - target=src/auth.py
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+  - n: 3
+    cmd: apm run review --param target=src/auth.py (stub runtime on PATH)
+    argv:
+    - - apm
+      - run
+      - review
+      - --param
+      - target=src/auth.py
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+  - n: 4
+    cmd: apm run missing
+    argv:
+    - - apm
+      - run
+      - missing
+    kind: apm
+    exit: 1
+    key_lines:
+    - available scripts
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O8
+- id: J14
+  persona: consumer
+  title: Diagnose and inspect
+  golden: false
+  tier: nightly
+  docs:
+  - troubleshooting/index.md
+  - troubleshooting/install-failures.md
+  - reference/cli/deps.md
+  - consumer/install-packages.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm doctor
+    argv:
+    - - apm
+      - doctor
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+  - n: 2
+    cmd: apm deps list; apm deps tree; apm deps why <pkg> --json
+    argv:
+    - - apm
+      - deps
+      - list
+    - - apm
+      - deps
+      - tree
+    - - apm
+      - deps
+      - why
+      - <pkg>
+      - --json
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+  - n: 3
+    cmd: apm view <pkg> versions
+    argv:
+    - - apm
+      - view
+      - <pkg>
+      - versions
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - non-ASCII box
+    files: []
+    oracles:
+    - O3
+  - n: 4
+    cmd: apm cache info; apm cache clean --yes; apm cache prune --days 30
+    argv:
+    - - apm
+      - cache
+      - info
+    - - apm
+      - cache
+      - clean
+      - --yes
+    - - apm
+      - cache
+      - prune
+      - --days
+      - '30'
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+  - n: 5
+    cmd: 'apm install --verbose (failure case: unreachable dep)'
+    argv:
+    - - apm
+      - install
+      - --verbose
+    kind: apm
+    exit: 1
+    key_lines:
+    - '[x]'
+    - one next action
+    forbidden_lines:
+    - Traceback
+    files: []
+    oracles:
+    - O5
+    - O8
+- id: J15
+  persona: consumer
+  title: Adopt existing agent files and migrate
+  golden: false
+  tier: nightly
+  docs:
+  - getting-started/coming-from.md
+  - reference/cli/init.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm init --help
+    argv:
+    - - apm
+      - init
+      - --help
+    kind: apm
+    exit: 0
+    key_lines:
+    - --apply ... requires --discover (or implies it)
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O7
+  - n: 2
+    cmd: apm init --discover
+    argv:
+    - - apm
+      - init
+      - --discover
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - none changed
+    oracles:
+    - O6
+  - n: 3
+    cmd: apm init --discover --apply --yes
+    argv:
+    - - apm
+      - init
+      - --discover
+      - --apply
+      - --yes
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - apm.yml with local path deps
+    oracles:
+    - O6
+    - O9
+  - n: 4
+    cmd: apm init --apply (alone, as help suggests)
+    argv:
+    - - apm
+      - init
+      - --apply
+    kind: apm
+    exit: 0 or 2 consistent with help
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O7
+  - n: 5
+    cmd: claude-only repo with .claude/skills/<s>/ equal to package output; apm install <pkg> --target claude
+    kind: edit
+    exit: 0
+    key_lines:
+    - adopted
+    forbidden_lines:
+    - 1 file skipped
+    files: []
+    oracles:
+    - O4
+    - O6
+  - n: 6
+    cmd: apm audit
+    argv:
+    - - apm
+      - audit
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] No drift detected'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - I3
+- id: P01
+  persona: producer
+  title: Create and release a package
+  golden: false
+  tier: nightly
+  docs:
+  - producer/create-a-package.mdx
+  - producer/test-packages.md
+  - producer/release-a-version.md
+  fixtures:
+  - local git HTTP server with push support
+  - separate consumer repo
+  steps:
+  - n: 1
+    cmd: apm init -y team-skills (or --target copilot,claude)
+    argv:
+    - - apm
+      - init
+      - -y
+      - team-skills
+    kind: apm
+    exit: 0
+    key_lines:
+    - '# targets: left commented'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+    - O3
+    - O7
+  - n: 2
+    cmd: write .apm/skills/review/SKILL.md; apm install --target copilot,claude
+    kind: edit
+    exit: 0
+    key_lines:
+    - '[i] Targets: claude, copilot  (source: --target flag)'
+    - '[+] <project root> (local)'
+    - '|-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O1
+    - O2
+    - O4
+  - n: 3
+    cmd: apm compile --validate; apm compile --dry-run
+    argv:
+    - - apm
+      - compile
+      - --validate
+    - - apm
+      - compile
+      - --dry-run
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - none changed
+    oracles:
+    - O3
+    - O6
+  - n: 4
+    cmd: apm audit
+    argv:
+    - - apm
+      - audit
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] No drift detected'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+  - n: 5
+    cmd: git add . && git commit && git tag -a v1.0.0 -m v1.0.0 && git push --follow-tags
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O13
+  - n: 6
+    cmd: 'consumer: apm install you/team-skills#v1.0.0'
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] you/team-skills #v1.0.0 @<SHA8>'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+    - O4
+    - O13
+  - n: 7
+    cmd: 'consumer: apm view you/team-skills versions'
+    kind: apm
+    exit: 0
+    key_lines:
+    - v1.0.0  tag
+    forbidden_lines:
+    - non-ASCII box
+    files: []
+    oracles:
+    - O3
+- id: P02
+  persona: producer
+  title: Pack a bundle and release from CI
+  golden: false
+  tier: nightly
+  docs:
+  - reference/cli/pack.md
+  docs_missing: true
+  docs_unresolved:
+  - producer/releasing-from-any-ci.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm pack --check-versions --check-clean --json > gate-report.json
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - stdout is pure JSON; diagnostics on stderr
+    oracles:
+    - O5
+    - O9
+  - n: 2
+    cmd: apm pack --archive --check-versions --strict-metadata --json > pack-report.json
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - dist/<name>-<ver>.zip
+    oracles:
+    - O5
+    - O9
+  - n: 3
+    cmd: apm pack --dry-run --verbose
+    argv:
+    - - apm
+      - pack
+      - --dry-run
+      - --verbose
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - none
+    oracles:
+    - O6
+  - n: 4
+    cmd: 'consumer: apm install ./dist/<name>-<ver>.zip; apm audit --ci'
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - I3
+- id: P03
+  persona: producer
+  title: Plugin init and publish to a marketplace
+  golden: false
+  tier: nightly
+  docs:
+  - producer/publish-to-a-marketplace.mdx
+  - reference/package-types.md
+  - reference/cli/plugin.md
+  - reference/cli/marketplace.md
+  - reference/cli/publish.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm plugin init my-plugin --yes
+    argv:
+    - - apm
+      - plugin
+      - init
+      - my-plugin
+      - --yes
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - plugin.json, apm.yml (license line present or commented)
+    oracles:
+    - O6
+    - O9
+  - n: 2
+    cmd: apm pack
+    argv:
+    - - apm
+      - pack
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - '[!] (any warning about scaffolded content)'
+    files: []
+    oracles:
+    - O4
+  - n: 3
+    cmd: apm experimental list
+    argv:
+    - - apm
+      - experimental
+      - list
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - marketplace_authoring
+    files: []
+    oracles:
+    - O7
+  - n: 4
+    cmd: apm marketplace init --owner acme-org; apm marketplace package add ./ --name my-plugin --version 0.1.0 --no-verify
+    argv:
+    - - apm
+      - marketplace
+      - init
+      - --owner
+      - acme-org
+    - - apm
+      - marketplace
+      - package
+      - add
+      - ./
+      - --name
+      - my-plugin
+      - --version
+      - 0.1.0
+      - --no-verify
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O9
+  - n: 5
+    cmd: apm marketplace check; apm marketplace outdated
+    argv:
+    - - apm
+      - marketplace
+      - check
+    - - apm
+      - marketplace
+      - outdated
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - non-ASCII box
+    files: []
+    oracles:
+    - O3
+  - n: 6
+    cmd: apm pack (marketplace outputs incl. .agents/plugins/marketplace.json for Codex)
+    argv:
+    - - apm
+      - pack
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O11
+  - n: 7
+    cmd: apm install (in the plugin repo, to try it locally)
+    argv:
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - plugin skills deployed
+    oracles:
+    - O9
+  - n: 8
+    cmd: 'consumer: apm marketplace add ./apm.yml --name alice-dev; apm install my-plugin@alice-dev'
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+    - O4
+- id: P04
+  persona: producer
+  title: Author hooks and lifecycle scripts
+  golden: false
+  tier: nightly
+  docs:
+  - producer/write-primitives.md
+  - reference/cli/lifecycle.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm lifecycle init; apm lifecycle validate
+    argv:
+    - - apm
+      - lifecycle
+      - init
+    - - apm
+      - lifecycle
+      - validate
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+    - O5
+  - n: 2
+    cmd: apm lifecycle test post-install
+    argv:
+    - - apm
+      - lifecycle
+      - test
+      - post-install
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - none executed
+    oracles:
+    - O6
+  - n: 3
+    cmd: apm install (untrusted lifecycle)
+    argv:
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines:
+    - 'announced: scripts not run, trust command'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O8
+  - n: 4
+    cmd: apm lifecycle trust; apm install
+    argv:
+    - - apm
+      - lifecycle
+      - trust
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O8
+  - n: 5
+    cmd: apm lifecycle untrust; apm install
+    argv:
+    - - apm
+      - lifecycle
+      - untrust
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines:
+    - scripts stop running
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - I4
+- id: E01
+  persona: enterprise
+  title: Org policy rollout and CI policy gate
+  golden: true
+  tier: pr (steps 3-6) + nightly
+  docs:
+  - enterprise/apm-policy.mdx
+  - reference/policy-schema.md
+  - reference/cli/policy.md
+  - troubleshooting/common-errors.md
+  fixtures:
+  - loopback GitHub HTTPS fixture serving contoso/.github apm-policy.yml (as _policy_scope_kit.py)
+  - consumer origin https://github.com/contoso/consumer.git
+  steps:
+  - n: 1
+    cmd: apm policy status --check --json
+    argv:
+    - - apm
+      - policy
+      - status
+      - --check
+      - --json
+    kind: apm
+    exit: 0
+    key_lines:
+    - '"outcome": "found"'
+    - '"enforcement": "warn"'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O2
+    - O5
+  - n: 2
+    cmd: apm install --dry-run (denied dep declared)
+    argv:
+    - - apm
+      - install
+      - --dry-run
+    kind: apm
+    exit: 0
+    key_lines:
+    - would be blocked / warned
+    forbidden_lines: []
+    files:
+    - none
+    oracles:
+    - O6
+  - n: 3
+    cmd: 'apm audit --ci --policy org (enforcement: warn)'
+    argv:
+    - - apm
+      - audit
+      - --ci
+      - --policy
+      - org
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] dependency-allowlist'
+    - '[*] All <N> check(s) passed'
+    forbidden_lines:
+    - non-ASCII box
+    files: []
+    oracles:
+    - O1
+    - O2
+    - O3
+    - O5
+  - n: 4
+    cmd: 'flip to enforcement: block; apm audit --ci --policy org -f sarif -o apm.sarif'
+    kind: edit
+    exit: 1
+    key_lines:
+    - '[x] dependency-allowlist'
+    - '[x] 1 of <N> check(s) failed'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O1
+    - O5
+    - O8
+  - n: 5
+    cmd: apm install acme/evil-pkg (denied)
+    argv:
+    - - apm
+      - install
+      - acme/evil-pkg
+    kind: apm
+    exit: 1
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - apm.yml, lock and deployed files unchanged
+    oracles:
+    - O5
+    - O6
+    - I4
+  - n: 6
+    cmd: 'policy fetch_failure: block; make policy unreachable; fresh runner (no cache); apm install --frozen; apm audit --ci'
+    kind: edit
+    exit: 1
+    key_lines:
+    - '[x] policy could not be fetched'
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O6
+    - I4
+  - n: 7
+    cmd: apm audit --help; apm policy explain <dep>
+    argv:
+    - - apm
+      - audit
+      - --help
+    - - apm
+      - policy
+      - explain
+      - <dep>
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - '[experimental] on --policy'
+    files: []
+    oracles:
+    - O7
+- id: E02
+  persona: enterprise
+  title: Executables approvals
+  golden: false
+  tier: nightly
+  docs:
+  - reference/cli/approve.md
+  - reference/cli/deny.md
+  - enterprise/security.md
+  fixtures:
+  - APM package with .apm/hooks
+  - Claude plugin (.claude-plugin/plugin.json + hooks/hooks.json) from git
+  - manifestless hooks/ layout
+  steps:
+  - n: 1
+    cmd: 'declare executables: {}; apm install'
+    kind: edit
+    exit: 0
+    key_lines:
+    - '[!] hook parked: not approved in executables.allow'
+    - Run 'apm approve <pkg>'
+    forbidden_lines:
+    - allowExecutables (unless the user wrote it)
+    - bin/ executables skipped (no bin/)
+    files: []
+    oracles:
+    - O4
+    - O6
+  - n: 2
+    cmd: apm approve --pending
+    argv:
+    - - apm
+      - approve
+      - --pending
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+  - n: 3
+    cmd: apm approve <pkg>; apm install
+    argv:
+    - - apm
+      - approve
+      - <pkg>
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - hook config written for each source shape
+    oracles:
+    - O8
+    - O9
+  - n: 4
+    cmd: apm deny <pkg>; apm install --frozen
+    argv:
+    - - apm
+      - deny
+      - <pkg>
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: 1
+    key_lines:
+    - names the executables gate
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O8
+  - n: 5
+    cmd: apm install
+    argv:
+    - - apm
+      - install
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - hook retired
+    oracles:
+    - O6
+    - I4
+  - n: 6
+    cmd: apm policy explain <pkg>
+    argv:
+    - - apm
+      - policy
+      - explain
+      - <pkg>
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+- id: E03
+  persona: enterprise
+  title: Proxy-only and air-gapped
+  golden: false
+  tier: nightly
+  docs:
+  - enterprise/registry-proxy.md
+  - getting-started/installation.md
+  - troubleshooting/ssl-issues.md
+  fixtures:
+  - recording proxy (local_header_capture_proxy.py / local_scripted_https_proxy.py)
+  - warm cache snapshot
+  steps:
+  - n: 1
+    cmd: PROXY_REGISTRY_URL=<proxy> PROXY_REGISTRY_ONLY=1 apm install
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O12
+  - n: 2
+    cmd: same env; apm install --mcp <registry server>
+    kind: shell
+    exit: 1 with announced refusal, or 0 via configured MCP_REGISTRY_URL
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O12
+    - O8
+  - n: 3
+    cmd: same env; apm marketplace add <catalog>
+    kind: shell
+    exit: refused or proxied
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O12
+  - n: 4
+    cmd: same env; apm update --yes
+    kind: shell
+    exit: 0
+    key_lines:
+    - hash verified or announced
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O6
+    - O12
+  - n: 5
+    cmd: network off; apm install --frozen (warm cache)
+    kind: edit
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O12
+  - n: 6
+    cmd: APM_RELEASE_METADATA_URL=<mirror> apm self-update --check
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O12
+- id: E04
+  persona: enterprise
+  title: Private hosts (GHE, ADO, GitLab)
+  golden: false
+  tier: nightly
+  docs:
+  - getting-started/authentication.md
+  - consumer/install-packages.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: GITHUB_HOST=github.company.com GITHUB_APM_PAT_MYORG=<t> apm install myorg/internal-package
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O9
+  - n: 2
+    cmd: ADO_APM_PAT=<t> apm install dev.azure.com/myorg/myproject/myrepo#main
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+  - n: 3
+    cmd: GITLAB_HOST=gitlab.acme.internal apm install <group>/<sub>/<repo>
+    kind: shell
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+  - n: 4
+    cmd: bad token; apm install
+    kind: edit
+    exit: 1
+    key_lines:
+    - '[x] host, which variable was tried, next action'
+    forbidden_lines:
+    - token value
+    - Traceback
+    files: []
+    oracles:
+    - O5
+    - O8
+  - n: 5
+    cmd: apm auth (status)
+    argv:
+    - - apm
+      - auth
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - token value
+    files: []
+    oracles:
+    - O3
+- id: E05
+  persona: enterprise
+  title: Audit evidence and SBOM
+  golden: false
+  tier: nightly
+  docs:
+  - reference/cli/lock.md
+  - reference/cli/audit.md
+  - enterprise/security.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm audit -f sarif -o audit.sarif; apm audit -f json -o report.json; apm audit -f markdown -o report.md
+    argv:
+    - - apm
+      - audit
+      - -f
+      - sarif
+      - -o
+      - audit.sarif
+    - - apm
+      - audit
+      - -f
+      - json
+      - -o
+      - report.json
+    - - apm
+      - audit
+      - -f
+      - markdown
+      - -o
+      - report.md
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - schema-valid reports
+    oracles:
+    - O5
+    - O9
+    - O11
+  - n: 2
+    cmd: apm lock export --format cyclonedx -o sbom.json (lock produced by a real install)
+    argv:
+    - - apm
+      - lock
+      - export
+      - --format
+      - cyclonedx
+      - -o
+      - sbom.json
+    kind: apm
+    exit: 0
+    key_lines:
+    - '[+] SBOM written to sbom.json (format=cyclonedx)'
+    forbidden_lines: []
+    files:
+    - purl pkg:github/<owner>/<repo>@<sha> with hashes
+    oracles:
+    - O2
+    - O9
+  - n: 3
+    cmd: apm lock export --format spdx -o sbom.spdx.json
+    argv:
+    - - apm
+      - lock
+      - export
+      - --format
+      - spdx
+      - -o
+      - sbom.spdx.json
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O9
+  - n: 4
+    cmd: apm deps list --json; apm find --source <file>
+    argv:
+    - - apm
+      - deps
+      - list
+      - --json
+    - - apm
+      - find
+      - --source
+      - <file>
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files:
+    - stdout pure JSON
+    oracles:
+    - O5
+- id: E06
+  persona: enterprise
+  title: Private registry (experimental registries)
+  golden: false
+  tier: nightly
+  docs:
+  - reference/registries.md
+  - reference/registry-http-api.md
+  - reference/cli/experimental.md
+  fixtures: null
+  steps:
+  - n: 1
+    cmd: apm experimental enable registries
+    argv:
+    - - apm
+      - experimental
+      - enable
+      - registries
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O3
+  - n: 2
+    cmd: apm config set registry.corp-main.url <url>; apm config set registry.corp-main.token <t>; apm config set registry.corp-main.default true
+    argv:
+    - - apm
+      - config
+      - set
+      - registry.corp-main.url
+      - <url>
+    - - apm
+      - config
+      - set
+      - registry.corp-main.token
+      - <t>
+    - - apm
+      - config
+      - set
+      - registry.corp-main.default
+      - 'true'
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - token value
+    files: []
+    oracles:
+    - O6
+  - n: 3
+    cmd: apm install <registry pkg>
+    argv:
+    - - apm
+      - install
+      - <registry pkg>
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O9
+  - n: 4
+    cmd: apm config get registry.corp-main.token
+    argv:
+    - - apm
+      - config
+      - get
+      - registry.corp-main.token
+    kind: apm
+    exit: 0
+    key_lines: []
+    forbidden_lines:
+    - token value unredacted
+    files: []
+    oracles:
+    - O3
+  - n: 5
+    cmd: apm experimental disable registries; apm install --frozen
+    argv:
+    - - apm
+      - experimental
+      - disable
+      - registries
+    - - apm
+      - install
+      - --frozen
+    kind: apm
+    exit: documented behavior
+    key_lines: []
+    forbidden_lines: []
+    files: []
+    oracles:
+    - O5
+    - O8
