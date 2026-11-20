@@ -51,20 +51,20 @@ def _publish(scenario: _Scenario, name: str, *, dependencies=()) -> str:
     return f"{remote}#{commit.sha}"
 
 
-def _git_entries_without_valid_hash(lock_path: Path) -> dict[str, list[str]]:
-    lock = load_yaml(lock_path) or {}
-    missing: dict[str, list[str]] = {}
-    for entry in lock.get("dependencies") or []:
+def _git_entries_by_kind(lock_path: Path) -> dict[str, dict[str, dict]]:
+    """Every non-local lock row, keyed by kind (direct, transitive, marketplace) and name."""
+    kinds: dict[str, dict[str, dict]] = {}
+    for entry in (load_yaml(lock_path) or {}).get("dependencies") or []:
         if entry.get("source") == "local" or entry.get("local_path"):
             continue
-        if not entry.get("resolved_commit"):
-            continue
-        if not _ENVELOPE.fullmatch(str(entry.get("content_hash") or "")):
-            kind = "transitive" if entry.get("resolved_by") else "direct"
-            if entry.get("marketplace_plugin") or entry.get("marketplace"):
-                kind = "marketplace"
-            missing.setdefault(kind, []).append(str(entry.get("repo_url")))
-    return missing
+        if entry.get("discovered_via"):
+            kind = "marketplace"
+        elif entry.get("resolved_by"):
+            kind = "transitive"
+        else:
+            kind = "direct"
+        kinds.setdefault(kind, {})[entry["name"]] = entry
+    return kinds
 
 
 def test_every_git_lock_entry_records_a_content_hash(tmp_path: Path, apm_binary_path: Path) -> None:
@@ -91,13 +91,6 @@ def test_every_git_lock_entry_records_a_content_hash(tmp_path: Path, apm_binary_
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
 
-    project_lock = load_yaml(consumer.root / "apm.lock.yaml")
-    kinds = {
-        "direct": [e for e in project_lock["dependencies"] if not e.get("resolved_by")],
-        "transitive": [e for e in project_lock["dependencies"] if e.get("resolved_by")],
-    }
-    assert kinds["direct"] and kinds["transitive"], project_lock
-
     user = _run(
         scenario,
         consumer.root,
@@ -106,11 +99,35 @@ def test_every_git_lock_entry_records_a_content_hash(tmp_path: Path, apm_binary_
     )
     assert user.returncode == 0, user.stdout + user.stderr
 
-    missing = {
-        "project": _git_entries_without_valid_hash(consumer.root / "apm.lock.yaml"),
-        "user": _git_entries_without_valid_hash(scenario.isolated.config_root / "apm.lock.yaml"),
+    by_scope = {
+        "project": _git_entries_by_kind(consumer.root / "apm.lock.yaml"),
+        "user": _git_entries_by_kind(scenario.isolated.config_root / "apm.lock.yaml"),
     }
-    assert missing == {"project": {}, "user": {}}, missing
+    names = {
+        scope: {kind: sorted(entries) for kind, entries in kinds.items()}
+        for scope, kinds in by_scope.items()
+    }
+    assert names == {
+        "project": {
+            "direct": ["hash-parent"],
+            "marketplace": [_PACKAGE],
+            "transitive": ["hash-leaf"],
+        },
+        "user": {"direct": ["hash-user"]},
+    }, names
+    assert by_scope["project"]["marketplace"][_PACKAGE]["discovered_via"] == _MARKETPLACE
+    unrecorded = [
+        (scope, kind, name, field)
+        for scope, kinds in by_scope.items()
+        for kind, entries in kinds.items()
+        for name, entry in entries.items()
+        for field, valid in (
+            ("resolved_commit", bool(entry.get("resolved_commit"))),
+            ("content_hash", bool(_ENVELOPE.fullmatch(str(entry.get("content_hash") or "")))),
+        )
+        if not valid
+    ]
+    assert unrecorded == [], unrecorded
 
     audit = _run(scenario, consumer.root, ("audit", "--ci", "--no-policy"), "hashes-audit-ci")
     frozen = _run(
