@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import statistics
 import subprocess
 import time
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import MagicMock
 from urllib.parse import quote
 
 import pytest
@@ -224,26 +226,73 @@ def test_clone_is_fast_private_and_moves_every_path(
 def test_each_world_starts_with_an_empty_egress_log(lifecycle_world: World) -> None:
     assert lifecycle_world.services.egress_log() == []
     assert set(lifecycle_world.packages) >= set(PACKAGE_NAMES)
+    # Nothing is installed yet: no lockfile and no materialized dependencies.
+    assert not (lifecycle_world.project / "apm.lock.yaml").exists()
+    assert not (lifecycle_world.project / "apm_modules").exists()
 
 
 # -- packages at project and user scope --------------------------------------
+
+
+# The Codex native plugin's post-approval install at user scope runs the real
+# Codex CLI. The world traps codex (exit 91), so this one cell puts the host's
+# QUALIFIED codex ahead of the trap; without one it is skipped locally and fails
+# under CI or APM_REQUIRE_CODEX, so CI never silently loses the cell (#4154).
+_CODEX_CELL = ("p-native-codex", "user")
+
+
+def qualified_codex(path: str | None) -> tuple[str | None, str]:
+    """The host codex that production qualification admits, or why there is none."""
+    from apm_cli.codex_plugins.client import MINIMUM_CODEX_VERSION, is_qualified_codex_version
+
+    need = f"needs the Codex CLI (codex) >= {MINIMUM_CODEX_VERSION} on PATH"
+    codex = shutil.which("codex", path=path)
+    if codex is None:
+        return None, f"{need}; none found"
+    try:
+        probe = subprocess.run(
+            [codex, "--version"], capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"{need}; {codex} --version failed: {exc}"
+    if probe.returncode != 0:
+        return None, f"{need}; {codex} --version exited {probe.returncode}"
+    if not is_qualified_codex_version(probe.stdout):
+        return None, f"{need}; {codex} reports {probe.stdout.strip()!r}"
+    return codex, ""
+
+
+def _use_qualified_codex(world: World) -> None:
+    """Put the host's qualified codex ahead of the world trap for this cell only."""
+    codex, reason = qualified_codex(os.environ.get("PATH"))
+    if codex is None:
+        if os.environ.get("CI") or os.environ.get("APM_REQUIRE_CODEX"):
+            pytest.fail(reason)
+        pytest.skip(reason)
+    qualified = world.root / "qualified-codex"
+    qualified.mkdir(exist_ok=True)
+    if os.name == "nt":
+        (qualified / "codex.cmd").write_text(f'@"{codex}" %*\r\n', encoding="ascii")
+    else:
+        (qualified / "codex").symlink_to(codex)
+    world.env["PATH"] = os.pathsep.join([str(qualified), world.env["PATH"]])
+
+
+def _cell_marks(package: str, scope: str) -> list[pytest.MarkDecorator]:
+    if (package, scope) not in _KNOWN:
+        return []
+    return [
+        pytest.mark.xfail(
+            strict=True, reason=f"tracking {_KNOWN[(package, scope)]}", raises=AssertionError
+        )
+    ]
 
 
 _CELLS = [
     pytest.param(
         package,
         scope,
-        marks=(
-            [
-                pytest.mark.xfail(
-                    strict=True,
-                    reason=f"tracking {_KNOWN[(package, scope)]}",
-                    raises=AssertionError,
-                )
-            ]
-            if (package, scope) in _KNOWN
-            else []
-        ),
+        marks=_cell_marks(package, scope),
         id=f"{package}-{scope}",
     )
     for package in PACKAGE_NAMES
@@ -257,6 +306,8 @@ def test_each_package_installs_through_the_real_cli(
     lifecycle_world: World, package: str, scope: str
 ) -> None:
     world = lifecycle_world
+    if (package, scope) == _CODEX_CELL:
+        _use_qualified_codex(world)
     if package in _TARGETS:
         _set_targets(world, scope, _TARGETS[package])
     _install_and_approve(world, package, scope)
@@ -552,8 +603,13 @@ def test_ado_auth_mode_is_reset_for_the_next_world(
 ) -> None:
     lifecycle_template.services.require_ado_auth()
     world = clone(lifecycle_template, tmp_path / "next")
+    items, _commit = _repo_api_urls("ado")
+    refused = _get(world, items)
+    assert refused.status_code == 401, refused.text
     world.services.reset()
     assert world.services.ado_auth_required is False
+    served = _get(world, items)
+    assert served.status_code == 200 and "name: p-skill" in served.text, served.text
 
 
 def test_ado_policy_is_read_through_the_items_api(lifecycle_world: World) -> None:
@@ -631,10 +687,10 @@ def test_every_git_host_serves_repository_contents_and_commits(
     contents_url, commit_url = _repo_api_urls(shape)
     contents = _get(world, contents_url)
     assert contents.status_code == 200, contents.text
-    body = contents.content
+    text = contents.text
     if contents.headers.get("Content-Type", "").startswith("application/json"):
-        body = base64.b64decode(contents.json()["content"])
-    assert b"name: p-skill" in body
+        text = base64.b64decode(contents.json()["content"]).decode("utf-8")
+    assert "name: p-skill" in text
     commit = _get(world, commit_url)
     assert commit.status_code == 200 and _commit_sha(commit) == expected, commit.text
     missing = _get(world, contents_url.replace("apm.yml", "missing.md"))
@@ -940,3 +996,50 @@ def test_proxy_refuses_and_records_unknown_hosts(lifecycle_world: World) -> None
     assert result.returncode == 1
     refused = [entry for entry in world.services.egress_log() if entry["method"] == "CONNECT"]
     assert refused and all(entry["status"] == 502 for entry in refused), refused
+
+
+def _fake_codex(tmp_path: Path, script: str) -> str:
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    codex = bindir / "codex"
+    codex.write_text(f"#!/bin/sh\n{script}\n", encoding="ascii")
+    codex.chmod(0o755)
+    return str(bindir)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell fake codex")
+@pytest.mark.parametrize(
+    ("script", "qualified"),
+    [
+        ('echo "codex-cli 0.163.0"', True),
+        ('echo "codex-cli 0.170.0"', True),
+        ('echo "codex-cli 0.163.0-alpha.1"', False),
+        ('echo "codex-cli 0.162.9"', False),
+        ('echo "codex-cli 0.170.0"; exit 3', False),
+    ],
+    ids=["floor", "later", "floor-prerelease", "older", "failed-probe"],
+)
+def test_qualified_codex_matches_production_qualification(
+    tmp_path: Path, script: str, qualified: bool
+) -> None:
+    """The guard admits exactly what native registration admits; a failed probe is absent."""
+    codex, reason = qualified_codex(_fake_codex(tmp_path, script))
+    assert (codex is not None) is qualified, reason
+    if qualified:
+        assert codex is not None and Path(codex).is_file() and reason == ""
+    else:
+        # The reason is the skip or failure message the cell prints.
+        assert "reports 'codex-cli" in reason or "exited 3" in reason, reason
+
+
+def test_missing_codex_fails_the_cell_under_ci(tmp_path: Path, monkeypatch) -> None:
+    """Under CI a runner without a qualified codex fails the cell instead of skipping."""
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv("CI", "true")
+    world = MagicMock(root=tmp_path, env={"PATH": str(tmp_path)})
+    with pytest.raises(pytest.fail.Exception, match=r"none found"):
+        _use_qualified_codex(world)
+    monkeypatch.delenv("CI")
+    monkeypatch.delenv("APM_REQUIRE_CODEX", raising=False)
+    with pytest.raises(pytest.skip.Exception, match=r"none found"):
+        _use_qualified_codex(world)
