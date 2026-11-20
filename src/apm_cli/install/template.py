@@ -510,6 +510,18 @@ def _integrate_materialization(
     if m.package_info is None or not ctx.targets:
         return deltas
 
+    from apm_cli.native_plugins.scopes import carried_native_row
+
+    carried = carried_native_row(
+        ctx.existing_lockfile, dep_key, dep_ref.target_subset, [t.name for t in ctx.targets]
+    )
+    if carried is not None:
+        # The run never reaches this native plugin: deploy nothing for it. Left
+        # out of the outcome, its files and ledger records keep agreeing with
+        # the row the lockfile phase keeps whole (#3921).
+        ctx.native_carried_keys.add(dep_key)
+        return deltas
+
     try:
         # Per-package effective selection: ``--skill`` is additive (issue
         # #1786), so the owner unions the persisted apm.yml ``skills:``

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Project installs deploy native plugins intact to committed `.agents/plugins`, so a fresh clone loads them in Claude Code and GitHub Copilot without APM. (closes #3921, #4010)
+
 ## [0.37.0] - 2026-11-20
 
 ### Highlights

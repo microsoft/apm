@@ -1160,48 +1160,19 @@ def _native_ownership_before(lockfile, lockfile_path) -> _NativeBefore:
 def _resync_native_registration_after_uninstall(
     *, deploy_root, modules_dir, scope, lockfile, logger, native_before=None, lockfile_path=None
 ) -> None:
-    """Rebuild native plugin rows from surviving locked state.
+    """Retire removed native plugins from every harness through the shared owner."""
+    from ...native_plugins.uninstall import reconcile_after_uninstall
 
-    Claude removal errors remain fatal; Copilot settings refresh is advisory.
-    """
-    from ...claude_plugins.admission import ClaudeNativePluginError
-    from ...claude_plugins.registrar import reconcile_claude_plugins
-
-    try:
-        reconcile_claude_plugins(
-            modules_dir=modules_dir,
-            scope=scope,
-            previous=native_before.ownership if native_before is not None else None,
-            lockfile=lockfile,
-            deploy_root=deploy_root,
-            logger=logger,
-        )
-    except ClaudeNativePluginError as exc:
-        if native_before is not None and native_before.lock_bytes and lockfile_path is not None:
-            # One rollback unit: keep the removed plugins' ownership for the retry.
-            lockfile_path.write_bytes(native_before.lock_bytes)
-        raise ClaudeNativePluginError(
-            "Package removal may already be complete, but Claude registration did not converge. "
-            f"{exc} Reconcile remaining declarations with 'apm install --global' and the "
-            "original --target selection; do not re-add the removed package."
-        ) from exc
-    try:
-        from ...agent_plugins.errors import AgentPluginError
-        from ...copilot_plugins.registrar import resync_native_plugins
-        from ...copilot_plugins.settings import CopilotSettingsCollisionError
-
-        resync_native_plugins(
-            project_root=deploy_root,
-            modules_dir=modules_dir,
-            scope=scope,
-            lockfile=lockfile,
-            logger=logger,
-        )
-    except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
-        logger.warning(
-            f"GitHub Copilot plugin registration could not be updated: {registration_error} "
-            "Re-run 'apm install' to re-register once resolved."
-        )
+    reconcile_after_uninstall(
+        deploy_root=deploy_root,
+        modules_dir=modules_dir,
+        scope=scope,
+        lockfile=lockfile,
+        logger=logger,
+        ownership=native_before.ownership if native_before is not None else None,
+        lock_bytes=native_before.lock_bytes if native_before is not None else None,
+        lockfile_path=lockfile_path,
+    )
 
 
 def _retire_native_registration(token) -> None:

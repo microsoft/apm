@@ -14,6 +14,7 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginError,
     enforce_agent_plugin_deployment_boundary,
 )
+from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
@@ -1950,8 +1951,12 @@ def _install_apm_packages(ctx, outcome):
             raise
         except click.UsageError:
             raise
-        except (CopilotSettingsCollisionError, RequiredIntegrationError) as e:
-            # A Copilot settings merge collision or the LSP capability gate.
+        except (
+            CopilotSettingsCollisionError,
+            ClaudeNativePluginError,
+            RequiredIntegrationError,
+        ) as e:
+            # A native plugin settings refusal or the LSP capability gate.
             # Surface the already-actionable message verbatim (no
             # "Failed to install..." prefix) and keep the raw decoder detail,
             # when present, behind --verbose.

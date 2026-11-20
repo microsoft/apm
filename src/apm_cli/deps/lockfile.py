@@ -591,6 +591,9 @@ class LockedDependency:
     # Intact native plugin APM deployed and declared for this dependency; the
     # only ownership evidence for native settings keys and deployed roots.
     native_plugin: NativePluginRecord | None = None
+    # Harnesses whose settings held APM's ``true`` for that plugin when this
+    # lock was written: what APM last wrote, so it can tell a hand edit apart.
+    native_declared: list[str] | None = None
     replacement: ReplacementBinding | None = field(default=None, repr=False)
     # Stream ``content_hash`` was recorded in; set from the owning lockfile's
     # version, never serialized per row (see ``FRAMED_CONTENT_HASH_VERSION``).
@@ -759,6 +762,8 @@ class LockedDependency:
             result["exec_status"] = self.exec_status
         if self.native_plugin is not None:
             result["native_plugin"] = self.native_plugin.to_lock_data()
+            if self.native_declared is not None:
+                result["native_declared"] = sorted(self.native_declared)
         if self.exec_allowed_types:
             result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
@@ -849,6 +854,7 @@ class LockedDependency:
             "exec_allowed_types",
             "name",
             "native_plugin",
+            "native_declared",
             "replacement",
             # legacy migration key handled above
             "deployed_skills",
@@ -911,6 +917,9 @@ class LockedDependency:
                 locked.native_plugin = NativePluginRecord.from_lock_data(data["native_plugin"])
             except NativePluginRecordError as exc:
                 raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
+            declared = data.get("native_declared")
+            if isinstance(declared, list):
+                locked.native_declared = sorted({h for h in declared if isinstance(h, str)})
         if "replacement" in data:
             try:
                 locked.replacement = ReplacementBinding.from_dict(

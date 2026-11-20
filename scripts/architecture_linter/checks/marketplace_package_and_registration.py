@@ -426,7 +426,7 @@ def _check_native_registration(provider: FactsProvider) -> tuple[Violation, ...]
 _RID_COPILOT = "marketplace-integrations-copilot-ownership"
 
 
-_SYNC_DEF = re.compile(r"^def synchronize_copilot_plugins\(")
+_SYNC_DEF = re.compile(r"^def plan_legacy_copilot_retirement\(")
 
 
 _SETTINGS_KEYS = re.compile(r"extraKnownMarketplaces|enabledPlugins")
@@ -442,7 +442,7 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             violation(
                 _RID_COPILOT,
                 "src/apm_cli/copilot_plugins/registrar.py",
-                f"synchronize_copilot_plugins must be defined exactly once, found {count}",
+                f"plan_legacy_copilot_retirement must be defined exactly once, found {count}",
             )
         )
     findings.extend(
@@ -473,7 +473,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
     for path, symbol in (
-        (_CLAUDE_OWNER, "reconcile_claude_plugins"),
+        (_CLAUDE_OWNER, "reconcile_native_plugins"),
         (_CLAUDE_OWNER, "verify_claude_native_cache"),
         ("src/apm_cli/claude_plugins/admission.py", "plan_native_claude_plugin"),
     ):
@@ -501,10 +501,14 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             (
                 "None if previous is None else frozenset(prior_names),",
                 "following = native_ownership(lockfile) if lockfile is not None else {}",
-                "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+                "if fingerprint_of(source) != own.record.fingerprint:",
                 "and prior.pin == own.pin",
                 "name not in prior_names\n            and existing.exists()",
-                "write_declaration(",
+                "changes[harness] = write_declaration(target, declarations[harness])",
+                "_refuse_binding(preview_declaration(target, declarations[harness]), target, marketplace)",
+                "rollback.undo(prior_names)",
+                "rollback.snapshot(legacy.settings_files if legacy else ())",
+                "legacy = _migratable(legacy, harnesses, run_targets, logger)",
             ),
             "Claude declarations must derive ownership from the lockfile and verify approved bytes",
         )
@@ -516,9 +520,10 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             _RID_CLAUDE,
             "src/apm_cli/native_plugins/settings.py",
             (
-                "if enabled.get(key) is True:",
+                "if enabled.get(key) is True or (plugin in managed and enabled.get(key) is False):",
+                "managed = declaration.managed if owned is not None else frozenset()",
                 "if current is not None and current != declaration.marketplace_value:",
-                "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
+                "for plugin in sorted((owned or frozenset()) - wanted):",
             ),
             "Native settings writes must keep explicit user false and unowned marketplaces",
         )
@@ -566,7 +571,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             "src/apm_cli/install/drift.py",
             (
                 'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
-                'if result.get("native_claude_plugin"):',
+                'if result.get("native_plugin") and lock_dep.native_plugin is not None:',
                 "verify_claude_native_cache(",
                 'local_modules_dir=scratch_root / "apm_modules",',
             ),
@@ -594,7 +599,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             "src/apm_cli/install/deployment_plan.py",
             (
                 "plan_native_claude_plugin(",
-                "if codex_native is not None\n        else plan_native_claude_plugin(",
+                "if codex_native is not None or is_first_party\n        else plan_native_claude_plugin(",
                 "native_plugin_root=native_plugin.source_root if native_plugin else None,",
                 "return [target for target in targets if target.name not in native_target_names]",
                 "claude_native=native_claude_plugin",
@@ -828,7 +833,10 @@ RULES: tuple[Rule, ...] = (
         id=_RID_COPILOT,
         group=GROUP,
         guard_ids=(_RID_COPILOT,),
-        description="APM-owned Copilot marketplace catalog and settings stay in copilot_plugins/.",
+        description=(
+            "Copilot settings go through the shared native writer; only the legacy "
+            "apm-registration.json migration lives in copilot_plugins/."
+        ),
         check=_check_copilot_ownership,
     ),
     Rule(
