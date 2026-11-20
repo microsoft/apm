@@ -4392,6 +4392,20 @@
       ]
     },
     {
+      "issue": 4484,
+      "fixed_in": "Unreleased",
+      "summary": "apm update --dry-run re-verifies locked marketplace provenance read-only: catalogs are read but not persisted to the marketplace cache, so nothing under APM_HOME changes.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/lifecycle/world/test_world.py::test_marketplace_update_dry_run_writes_nothing_under_apm_home"
+      ]
+    },
+    {
       "issue": 4492,
       "fixed_in": "Unreleased",
       "summary": "apm install <bundle> stages the parked-executables record and writes apm_modules/.local-bundle-pending.json only when the install commits, so a bundle install that fails (for example on an integrity check) leaves the project byte-identical while apm approve --pending still lists a successful install's parked executables.",
