@@ -138,8 +138,18 @@ def assert_writable(path: Path, *, action: str = "use", before_mutation: bool = 
         else "The lockfile was not rewritten; review other files this command changed."
     )
     raise LockfileGeneratorError(
-        f"Refusing to {action} {Path(path).name}: {reason}. {outcome}\n{remedy}"
+        f"Refusing to {action} {_display_name(Path(path))}: {reason}. {outcome}\n{remedy}"
     )
+
+
+def _display_name(path: Path) -> str:
+    """Name a project lockfile by file name, any other (user scope) by its path (#3967)."""
+    try:
+        if path.absolute().parent == Path.cwd().absolute():
+            return path.name
+    except OSError:
+        pass
+    return str(path)
 
 
 def check_current_cli(project_root: Path, *, command: str) -> Path:
@@ -164,9 +174,24 @@ def require_current_cli(project_root: Path, *, command: str) -> Path:
     try:
         return check_current_cli(project_root, command=command)
     except LockfileGeneratorError as exc:
-        import click
+        raise refusal_exit(exc) from exc
 
-        raise click.ClickException(str(exc)) from exc
+
+def refusal_exit(exc: LockfileGeneratorError) -> Exception:
+    """Return the exit-1 exception every command renders a refusal with.
+
+    One renderer keeps the ``[x]`` prefix ``apm install`` prints, on stderr
+    where click reports errors, so no command says ``Error: Refusing`` (#3967).
+    """
+    import click
+
+    class _LockfileRefusalExit(click.ClickException):
+        def show(self, file=None) -> None:
+            from ..utils.console import _rich_echo
+
+            _rich_echo(self.message, color="red", symbol="error", err=True)
+
+    return _LockfileRefusalExit(str(exc))
 
 
 def warn_if_newer(path: Path, recorded: object, *, bundle: bool = False) -> None:

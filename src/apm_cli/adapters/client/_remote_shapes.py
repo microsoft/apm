@@ -279,6 +279,12 @@ UNVERIFIED_REMOTE_SHAPES: frozenset[str] = frozenset(
 )
 
 
+def harness_label(runtime: str) -> str:
+    """Product name of a runtime for user-facing output ("OpenCode", "VS Code")."""
+    row = REMOTE_SHAPES.get(runtime)
+    return row.label if row is not None else runtime.title()
+
+
 def remote_shape_row(runtime: str) -> RemoteShape:
     """Return the row an adapter class binds in its own body."""
     return REMOTE_SHAPES[runtime]

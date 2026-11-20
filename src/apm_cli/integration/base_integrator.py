@@ -268,7 +268,7 @@ class BaseIntegrator:
             diagnostics.skip(rel_path)
         else:
             _rich_warning(
-                f"Skipping {rel_path} — local file exists (not managed by APM). "
+                f"Skipping {rel_path} -- local file exists (not managed by APM). "
                 f"Use 'apm install --force' to overwrite."
             )
         return True

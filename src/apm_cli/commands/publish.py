@@ -28,23 +28,29 @@ Reads apm.yml for the package name/version, packs a flat registry zip archive
 or uses a pre-built zip via --zip, then uploads to the registry via
 PUT /v1/packages/{owner}/{repo}/versions/{version}.
 
+
 Requires the 'registries' experimental feature:
   apm experimental enable registries
 
 Examples:
 
+
   # Auto-pack and publish to the only configured registry:
   apm publish --package acme/my-skill
 
+
   # Choose a registry when multiple are configured:
   apm publish --package acme/my-skill --registry corp-main
 
+
   # The host is part of the identity (same as a registry dependency's id:):
   apm publish --package gitlab.com/acme/my-skill
 
+
   # Publish a pre-built zip (skip the pack step):
   apm publish --package acme/my-skill --zip ./build/my-package-1.0.0.zip
 
+
   # Preview what would be uploaded:
   apm publish --package acme/my-skill --dry-run
 """
@@ -189,7 +195,7 @@ def _resolve_registry_name(name: str | None, registries: dict[str, str]) -> str:
     if not registries:
         raise click.ClickException(
             "No registries configured in apm.yml.\n"
-            "Add a 'registries:' block — see 'apm experimental enable registries'."
+            "Add a 'registries:' block -- see 'apm experimental enable registries'."
         )
     if name:
         if name not in registries:

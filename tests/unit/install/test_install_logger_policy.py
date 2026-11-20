@@ -678,8 +678,26 @@ class TestPolicyReasonHelpers:
         )
         assert "acme/evil-pkg" in msg
         assert "acme/.github/apm-policy.yml" in msg
-        assert "--no-policy" in msg
+        assert "use `--no-policy` for one-off bypass" in msg
+        assert "APM_POLICY_DISABLE" not in msg
         assert "apm.yml" in msg
+
+    def test_reason_blocked_for_update_names_only_a_bypass_update_accepts(self):
+        """'apm update' has no --no-policy; name the one-shot env prefix (#3994)."""
+        msg = InstallLogger._policy_reason_blocked(
+            "acme/evil-pkg", "org:acme/.github", remedy=PolicyRemedy.REMOVE, command="update"
+        )
+        assert "--no-policy" not in msg
+        assert "`APM_POLICY_DISABLE=1 apm update` (never export it in CI)" in msg
+
+    def test_update_logger_renders_the_update_bypass(self, capsys):
+        logger = InstallLogger(command="update")
+        logger.policy_violation(
+            "acme/evil-pkg", "denied", severity="block", source="org:acme/.github"
+        )
+        err = " ".join(capsys.readouterr().err.split())
+        assert "APM_POLICY_DISABLE=1 apm update" in err
+        assert "--no-policy" not in err
 
     def test_reason_blocked_transitive_mcp_names_declaring_dependency(self):
         msg = InstallLogger._policy_reason_blocked(

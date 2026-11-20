@@ -85,6 +85,14 @@ class DependencyTree:
     max_depth: int = 0
     resolution_errors: list[str] = field(default_factory=list)
     resolution_warnings: list[str] = field(default_factory=list)
+    # apm.yml mistakes every install refuses, whatever is cached locally; a
+    # subset of resolution_errors that previews must show (#3967).
+    declaration_errors: list[str] = field(default_factory=list)
+
+    def add_declaration_error(self, error: str) -> None:
+        """Record an apm.yml declaration error install always refuses."""
+        self.resolution_errors.append(error)
+        self.declaration_errors.append(error)
 
     def add_node(self, node: DependencyNode) -> None:
         """Add a node to the tree."""
@@ -200,6 +208,7 @@ class DependencyGraph:
     flattened_dependencies: FlatDependencyMap
     circular_dependencies: list[CircularRef] = field(default_factory=list)
     resolution_errors: list[str] = field(default_factory=list)
+    declaration_errors: list[str] = field(default_factory=list)
 
     def has_circular_dependencies(self) -> bool:
         """Check if there are any circular dependencies."""

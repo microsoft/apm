@@ -9,7 +9,7 @@ sidebar:
 
 The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, `apm audit --ci`, `apm policy status`, and the install preflight before any package is written to disk.
 
-For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](../cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../../enterprise/governance-guide/).
+For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](../cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../../enterprise/security/).
 
 ## What apm-policy.yml governs
 
@@ -37,7 +37,7 @@ Those controls are owned by the **agent harness** that runs your agents, not by 
 Discovery order, in priority:
 
 1. Explicit policy source on `apm audit --ci` via `--policy <ref>` or `apm policy status` via `--policy-source <ref>`. `apm install` auto-discovers from the project's git remote and supports `--no-policy`; it does not accept `--policy` today.
-2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; see the `absent` row in [Discovery outcomes](../../enterprise/policy-reference/#discovery-outcomes) for the `.github-private` hint.
+2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; `apm policy status` reports outcome `absent` (see [output fields](../cli/policy/#output-fields)). On GitHub, if `.github-private` returned 404, the status adds a hint that the credential may lack read access, because GitHub also answers 404 for private repositories you cannot read.
 
 The `<ref>` accepts:
 
@@ -105,7 +105,7 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
 | `allow`              | list of patterns or null | `null`        | `null` = no opinion. `[]` = nothing allowed. `[...]` = only these.                          |
 | `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Always wins over `allow`. |
-| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. |
+| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = adds nothing; inherited entries still apply. Packages every consumer manifest must include. Exact and host-bound; see below. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
 | `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, exact package release tag such as `name@1.2.3` or `@scope/name@1.2.3`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
@@ -149,7 +149,24 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
 
 A range is classified as the author wrote it: `fourth/lib#^1.2.0` stays `OK` after the install selects `v1.4.0` for it, and `acme/lib#main` stays `FAIL` whatever commit it resolves to. The package name used for `{name}-v{version}` and `{name}--v{version}` tags is the final path segment of a subdirectory dependency, otherwise the repository name. An exact `name@X.Y.Z` or `@scope/name@X.Y.Z` tag (optional `v`, semver prerelease/build allowed, at most one scope segment) counts for any name, because monorepo tags often name the published package rather than the directory. `release@next`, `feature/x@1.2.3`, `name@^1.2.0` and `name@1.x` are not exact releases and still fail. The check judges declared release intent, not immutability: a tag can be moved. Replaying a committed lockfile with `apm install --frozen` installs the locked commit; [`security.integrity.require_hashes`](#integrity-and-drift-enforcement) only requires every locked entry to carry a content hash, so an update can still record a moved tag's new commit.
 
-Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; see [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns)). Wildcards via shell-style globs, e.g. `contoso/*`.
+Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; see [Allow-list semantics](#allow-list-semantics)). Wildcards via shell-style globs, e.g. `contoso/*`.
+
+`require` entries are exact and name one host. A hostless entry names the default host (`GITHUB_HOST`, else `github.com`); a package on any other host (GitLab, GHES, Gitea) must be written with its host:
+
+```yaml
+dependencies:
+  require:
+    - contoso/baseline                      # on the default host
+    - gitlab.example.com/platform/sub/pkg   # on a self-managed GitLab
+```
+
+`required-packages` (declared in `apm.yml`) and `required-packages-deployed` (present in `apm.lock.yaml`) compare the same identity. An entry that matches no declared package fails both checks; when the package is declared on another host, the message names that host and the policy entry that would match it, so you can either move the dependency or, for a trusted host, change the entry.
+
+A dependency written as an explicit registry-proxy path (`host/artifactory/...`) is identified by the proxy host; set `PROXY_REGISTRY_URL` and keep plain shorthand so default-host entries keep matching.
+
+A project's `default_host:` does not change what a hostless entry names, and `GITHUB_HOST` can differ between machines: for an org-wide policy, write every `require` entry with its host. Ports are ignored, as for `deny`.
+
+Required-package matching follows source replacement. When a root `replace:` rule swaps `example-org/app` for `fork-org/app-fork`, an entry identifies the selected package. Write `fork-org/app-fork` (with its host, if that is not the default). `required-packages-deployed` reads the lock entry, which stays recorded under `example-org/app`. `apm install` and `apm audit --ci` match the same way, and both judge `registry_source` against the selected source.
 
 ## mcp
 
@@ -341,7 +358,7 @@ For every `allow:` field, the three states are distinct:
 
 `allow`, `deny`, and exact `require` patterns match on each dependency's canonical identity casing, not the pattern's literal case. GitHub owner/repository identities, and registry-backed identities (already canonicalized that way), compare case-insensitively -- `Contoso/Repo` and `contoso/repo` are the same package. Non-GitHub git hosts, ADO, local paths, marketplace identities, virtual in-repository subpaths (the path segment after `owner/repo`), Git refs/version strings (after `#`), MCP server names, and registry *names* stay case-sensitive.
 
-A hostless pattern such as `owner/repo` matches that package on any host; a host-qualified pattern such as `github.com/owner/**` matches only dependencies whose effective host (written, or `GITHUB_HOST`/`github.com` by default) is that host. Hosts compare case-insensitively and exactly. See [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns). Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
+A hostless `allow` or `deny` pattern such as `owner/repo` matches that package on any host (a hostless `require` entry names the default host only); a host-qualified pattern such as `github.com/owner/**` matches only dependencies whose effective host (written, or `GITHUB_HOST`/`github.com` by default) is that host. Hosts compare case-insensitively and exactly. Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
 
 For example, a mixed-case `deny` written as `**/Secure-Baseline` does not fire against the canonical lowercase repository name; write the owner/repository prefix first. A mixed-case owner-prefix deny that older releases failed to match can correctly surface new violations after upgrade.
 
@@ -496,7 +513,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 
 **Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
 
-**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
+**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../../producer/publish-to-a-marketplace/#choose-a-repository-shape) for the producer-side contract (directory layout, executable bit, scope and trust posture).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -527,4 +544,4 @@ No. apm-policy.yml controls what gets installed; your harness controls what runs
 - [apm policy](../cli/policy/) -- the `apm policy status` command.
 - [Govern with apm-policy.yml](../../enterprise/apm-policy/) -- end-to-end rollout guide.
 - [Enforce in CI](../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
-- [Governance deep-dive](../../enterprise/governance-guide/) -- the full enterprise control surface.
+- [Governance deep-dive](../../enterprise/security/) -- the full enterprise control surface.

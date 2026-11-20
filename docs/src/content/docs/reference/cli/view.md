@@ -41,7 +41,7 @@ Output includes: name, version, description, author, source, install path, lockf
 
 Lists available versions for the package. Calls the remote -- requires network access.
 
-For git packages, output is a table with name, type (`tag` or `branch`), and short commit SHA. For registry packages, output is a version and published-timestamp table. Registry packages are identified by three signals checked in order: (1) the `--registry [NAME]` flag forces the registry path; (2) a `source: registry` entry in `apm.lock.yaml` routes the package to the registry that installed it; (3) a configured default registry causes plain shorthands (e.g., `owner/repo`) to route to the registry even without a lockfile entry -- use a full git URL to override this. Private git repositories require `GITHUB_APM_PAT`; private registries use the registry token configured for that registry (see [authentication](../../../consumer/authentication/)).
+For git packages, output is a table with name, type (`tag` or `branch`), and short commit SHA. For registry packages, output is a version and published-timestamp table. Registry packages are identified by three signals checked in order: (1) the `--registry [NAME]` flag forces the registry path; (2) a `source: registry` entry in `apm.lock.yaml` routes the package to the registry that installed it; (3) a configured default registry causes plain shorthands (e.g., `owner/repo`) to route to the registry even without a lockfile entry -- use a full git URL to override this. Private git repositories require `GITHUB_APM_PAT`; private registries use the registry token configured for that registry (see [authentication](../../../getting-started/authentication/)).
 
 ### `apm view --file PATH`
 
@@ -157,7 +157,7 @@ Example output:
 Inspect a user-scope skill file:
 
 ```bash
-apm view --file ~/.copilot/skills/code-review/SKILL.md -g
+apm view --file ~/.agents/skills/code-review/SKILL.md -g
 ```
 
 View a marketplace plugin's manifest entry:
@@ -171,4 +171,4 @@ apm view code-review@acme-plugins
 - [`apm outdated`](../outdated/) -- compare locked versions against remote tags
 - [`apm install`](../install/) -- add a package to `apm.yml` and install it
 - [`apm find`](../find/) -- list the packages whose `deployed_files` include a path
-- [Skills](../../../producer/author-primitives/skills/#skill-names-and-provenance) -- skill names and provenance
+- [Skills](../../../producer/write-primitives/#skills) -- skill names and provenance

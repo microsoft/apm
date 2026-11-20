@@ -588,7 +588,7 @@ def test_lifecycle_docs_match_explicit_compilation_contract() -> None:
         / "content"
         / "docs"
         / "concepts"
-        / "lifecycle.md"
+        / "how-apm-works.md"
     ).read_text(encoding="utf-8")
 
     assert "does not run aggregate\ncompilation" in lifecycle

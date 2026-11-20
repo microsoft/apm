@@ -417,8 +417,9 @@ def test_policy_host_qualified_patterns_match_effective_host(monkeypatch):
 @pytest.mark.req("req-pl-018")
 def test_policy_host_recognition_grammar_and_scope(monkeypatch, tmp_path):
     """Clause (g): leading-dot paths stay hostless, numeric ports and one
-    trailing dot are removed on both sides, require is not host-qualified,
-    and audit gates locked transitive dependencies."""
+    trailing dot are removed on both sides, an exact require entry names its
+    host (hostless names the default host), and audit gates locked transitive
+    dependencies."""
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.dependency import DependencyReference
     from apm_cli.policy.policy_checks import (
@@ -445,8 +446,13 @@ def test_policy_host_recognition_grammar_and_scope(monkeypatch, tmp_path):
     monkeypatch.delenv("GITHUB_HOST")
 
     shorthand = [DependencyReference.parse("contoso/repo")]
-    require = DependencyPolicy(require=("github.com/contoso/repo",))
-    assert not _check_required_packages(shorthand, require).passed
+    gitlab = [DependencyReference.parse("gitlab.com/contoso/repo")]
+    for entry in ("contoso/repo", "github.com/contoso/repo", "GitHub.com:443/contoso/repo"):
+        assert _check_required_packages(shorthand, DependencyPolicy(require=(entry,))).passed
+        assert not _check_required_packages(gitlab, DependencyPolicy(require=(entry,))).passed
+    assert _check_required_packages(
+        gitlab, DependencyPolicy(require=("gitlab.com/contoso/repo",))
+    ).passed
 
     (tmp_path / "apm.yml").write_text(
         "name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - example-org/app\n",
@@ -470,6 +476,96 @@ def test_policy_host_recognition_grammar_and_scope(monkeypatch, tmp_path):
     assert _check_dependency_allowlist(
         [DependencyReference.parse("github.com/example-org/app")], policy.dependencies
     ).passed
+
+
+@pytest.mark.req("req-pl-018")
+def test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile(monkeypatch):
+    """Clause (g), require: one identity on both sides, never skipped, local
+    paths hostless, and a manifest default_host: never rebinds a hostless entry."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.models.dependency.manifest_host import ManifestHostScope
+    from apm_cli.policy.policy_checks import (
+        _check_required_packages,
+        _check_required_packages_deployed,
+    )
+    from apm_cli.policy.schema import DependencyPolicy
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+
+    def both(deps, lock, entry):
+        policy = DependencyPolicy(require=(entry,))
+        return (
+            _check_required_packages(deps, policy).passed,
+            _check_required_packages_deployed(deps, lock, policy).passed,
+        )
+
+    def locked(dep):
+        lock = LockFile()
+        lock.add_dependency(LockedDependency.from_dependency_ref(dep, None, 1, None))
+        return lock
+
+    gitlab = DependencyReference.parse("gitlab.example.com/group/sub/pkg")
+    assert both([gitlab], locked(gitlab), "gitlab.example.com/group/sub/pkg") == (True, True)
+    assert both([gitlab], locked(gitlab), "group/sub/pkg") == (False, False)
+    assert both([], LockFile(), "gitlab.example.com/group/sub/pkg") == (False, False)
+
+    local = DependencyReference.parse("./packages/local")
+    assert _check_required_packages([local], DependencyPolicy(require=("./packages/local",))).passed
+
+    with ManifestHostScope("gitlab.corp.example"):
+        shorthand = DependencyReference.parse("contoso/repo")
+    assert both([shorthand], locked(shorthand), "contoso/repo") == (False, False)
+    assert both([shorthand], locked(shorthand), "gitlab.corp.example/contoso/repo") == (
+        True,
+        True,
+    )
+
+
+@pytest.mark.req("req-rpl-002", "req-pl-018")
+def test_required_package_matching_follows_source_replacement(tmp_path, monkeypatch):
+    """req-rpl-002: policy matching evaluates the selected package; clause (g)
+    reads the lock entry under the original's lockfile identity. ``apm audit
+    --ci`` (``run_policy_checks``) judges the same projection as install."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.dependency.replacement import project_manifest_dependencies
+    from apm_cli.policy.policy_checks import run_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    replace = [
+        {
+            "for": {"git": "https://github.com/example-org/app"},
+            "with": {"git": "https://github.com/fork-org/app-fork", "ref": "v1.0.0"},
+        }
+    ]
+    dump_yaml(
+        {
+            "$schema": "https://microsoft.github.io/apm/specs/schemas/"
+            "manifest-source-replacements-v1.schema.json",
+            "name": "consumer",
+            "version": "1.0.0",
+            "dependencies": {"apm": ["example-org/app#v1.0.0"]},
+            "replace": replace,
+        },
+        tmp_path / "apm.yml",
+    )
+    (bound,) = project_manifest_dependencies(APMPackage.from_apm_yml(tmp_path / "apm.yml"))
+    lock = LockFile(replacements=replace)
+    lock.add_dependency(LockedDependency.from_dependency_ref(bound, "a" * 40, 1, None))
+    lock.write(tmp_path / "apm.lock.yaml")
+    assert list(lock.dependencies) == ["example-org/app"]
+
+    def presence(entry):
+        policy = ApmPolicy(dependencies=DependencyPolicy(require=(entry,)))
+        checks = run_policy_checks(tmp_path, policy, fail_fast=False).checks
+        names = ("required-packages", "required-packages-deployed")
+        return tuple(next(c for c in checks if c.name == name).passed for name in names)
+
+    assert presence("fork-org/app-fork") == (True, True)
+    assert presence("example-org/app") == (False, False)
 
 
 @pytest.mark.req("req-pl-018")

@@ -42,7 +42,11 @@ _SCAFFOLD = (
         pytest.param(
             {"name": "p", "version": "1.0.0", "description": "d", "author": "a"},
             True,
-            _SCAFFOLD.format(author="author: a\n", dev="devDependencies:\n  apm: []\n"),
+            _SCAFFOLD.format(author="author: a\n", dev="devDependencies:\n  apm: []\n").replace(
+                "\ndependencies:\n",
+                "\n# SPDX license for this package (set before publishing), for example:\n"
+                "# license: MIT\n\ndependencies:\n",
+            ),
             id="plugin-init",
         ),
     ],
@@ -53,3 +57,14 @@ def test_minimal_manifest_bytes(
     target = tmp_path / "apm.yml"
     write_minimal_manifest(dict(config), plugin=plugin, target_path=target)
     assert target.read_text(encoding="utf-8") == expected
+
+
+def test_pinned_targets_header_lists_the_saved_default(tmp_path: Path) -> None:
+    """The precedence comment matches the resolver: config default before detection (#3994)."""
+    target = tmp_path / "apm.yml"
+    config = {"name": "p", "version": "1.0.0", "description": "d", "targets": ["claude"]}
+    write_minimal_manifest(config, target_path=target)
+    assert (
+        "# Resolution order: --target flag > this field > 'apm config set target'\n"
+        "# > auto-detect from filesystem.\n"
+    ) in target.read_text(encoding="utf-8")

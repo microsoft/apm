@@ -1447,3 +1447,26 @@ class TestGateProjectScopedRuntimes:
         # contributor collapsing to a single space would silently break
         # provenance-line parity with the install phase.
         assert re.search(r"Skipped MCP config for [^(]+  \(active targets:", out)
+
+
+class TestExcludeReadsLikeTarget:
+    """``--exclude`` folds case, honours the vscode alias and never ignores silently (C4)."""
+
+    def test_case_and_alias_select_copilot(self, capsys) -> None:
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
+
+        for value in ("COPILOT", "VSCode", "vscode"):
+            assert "copilot" not in filter_excluded_mcp_runtimes(["copilot", "claude"], value)
+
+    def test_unknown_value_warns(self, capsys, monkeypatch) -> None:
+        from apm_cli.integration import mcp_user_scope_runtimes
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
+
+        monkeypatch.setattr(mcp_user_scope_runtimes, "_unknown_exclusions_warned", set())
+        assert filter_excluded_mcp_runtimes(["claude"], "bogus") == ["claude"]
+        captured = capsys.readouterr()
+        assert "names no target or MCP runtime" in (captured.out + captured.err).replace("\n", " ")
+        # Frozen install resolves runtimes twice; the warning stays single.
+        assert filter_excluded_mcp_runtimes(["claude"], "bogus") == ["claude"]
+        captured = capsys.readouterr()
+        assert "names no target" not in captured.out + captured.err

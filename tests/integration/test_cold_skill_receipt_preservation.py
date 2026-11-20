@@ -86,7 +86,11 @@ def test_cold_overlapping_skill_replay_preserves_files_and_lock(
     for _ in range(2):
         result = runner.run(replay, cwd=project, env=env)
         output = " ".join((result.stdout + result.stderr).split())
-        if edited:
+        if edited and frozen:
+            # The deployed-hash gate refuses before any write (#3994).
+            assert result.returncode != 0, output
+            assert "deployed files do not match the hashes" in output, output
+        elif edited:
             assert result.returncode != 0, output
             assert "no trustworthy local deployment baseline" in output
             assert (

@@ -1308,7 +1308,7 @@ class TestContentIntegrity:
         result = _check_content_integrity(tmp_path, lock)
         assert result.passed, result.details
 
-    def test_hash_skips_symlink(self, tmp_path):
+    def test_hash_flags_locked_file_replaced_by_symlink(self, tmp_path):
         import os
 
         from apm_cli.utils.content_hash import compute_file_hash  # noqa: F401
@@ -1321,8 +1321,8 @@ class TestContentIntegrity:
         link_path.parent.mkdir(parents=True, exist_ok=True)
         os.symlink(target, link_path)
 
-        # Record an obviously wrong hash -- symlinks must be skipped, not
-        # flagged.
+        # A locked file replaced by a symlink is never followed: it fails as
+        # an unresolved path whatever hash is recorded (#3994).
         _write_lockfile(
             tmp_path,
             textwrap.dedent("""\
@@ -1340,7 +1340,8 @@ class TestContentIntegrity:
 
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_content_integrity(tmp_path, lock)
-        assert result.passed, result.details
+        assert not result.passed
+        assert "unsafe or unresolved deployed path" in result.message
 
     def test_hash_covers_self_entry_local_files(self, tmp_path):
         # Local content lives in lock.local_deployed_files / hashes; the
@@ -1399,7 +1400,7 @@ class TestRunBaselineChecks:
         )
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 9
+        assert len(result.checks) == 10
 
     def test_mixed_pass_fail(self, tmp_path):
         # Ref mismatch (fail) + missing file (fail) + clean otherwise

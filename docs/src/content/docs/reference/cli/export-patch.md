@@ -69,4 +69,4 @@ apm export-patch -o /tmp/spec-patches
 ## Related
 
 - [`apm audit`](../audit/) -- detect the drift this command exports.
-- [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) -- why local edits to managed files are overwritten on the next install.
+- [Drift and secure by default](../../../enterprise/drift-detection/) -- why local edits to managed files are overwritten on the next install.

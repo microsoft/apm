@@ -25,6 +25,7 @@ def render_and_exit(
     update: bool,
     apm_dir: Path,
     local_cleanup_pending: Callable[[LockFile], bool] | None = None,
+    project_root: Path | None = None,
 ) -> None:
     """Render the dry-run preview to the user.
 
@@ -80,6 +81,9 @@ def render_and_exit(
         else:
             logger.progress("No dependencies found in apm.yml")
 
+    for error in plan.dependency_declaration_errors:
+        # Shown without --verbose: install refuses these whatever is cached.
+        logger.warning(f"apm install would refuse: {error}")
     if plan.dependency_preview_errors:
         logger.dry_run_notice(
             "Dependency preview incomplete; showing only locally known dependencies. "
@@ -87,7 +91,8 @@ def render_and_exit(
             "to resolve dependencies."
         )
         for error in plan.dependency_preview_errors:
-            logger.verbose_detail(error)
+            if error not in plan.dependency_declaration_errors:
+                logger.verbose_detail(error)
 
     try:
         _dryrun_lock = LockFile.read(get_lockfile_path(apm_dir))
@@ -111,6 +116,24 @@ def render_and_exit(
                 logger.progress(f"  - {_orphan}")
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
+
+    if _dryrun_lock and plan.should_install_mcp and project_root is not None:
+        from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves
+
+        retired_preview = preview_retired_mcp_moves(
+            _dryrun_lock,
+            project_root,
+            declared=plan.selected_mcp_dependencies,
+            target_runtimes=plan.mcp_target_runtimes,
+        )
+        for retired, names in retired_preview.moves.items():
+            logger.progress(f"MCP servers that would move from {retired} to .mcp.json:")
+            for name in names:
+                logger.progress(f"  - {name}")
+        for retired, names in retired_preview.removals.items():
+            logger.progress(f"MCP servers that would be removed from {retired}:")
+            for name in names:
+                logger.progress(f"  - {name}")
 
     cleanup_pending = False
     if not selected_apm_dependencies and local_cleanup_pending and _dryrun_lock:
