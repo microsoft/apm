@@ -25,6 +25,26 @@ def receipted_evidence(*roots: Path, deploy_root: Path | None = None) -> Deploym
     return DeploymentEvidence(deploy_root=base, receipts=receipts, render=None)
 
 
+def seed_receipts(
+    project_root: Path, files: list[Path], *, target: str, owner: str, user_scope: bool = False
+) -> None:
+    """Record local deployment receipts for *files*, as the installing machine holds them.
+
+    Fixtures that forge a lockfile and its deployed files model a real install;
+    the receipt is the deployment evidence that install would have written.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    session = DeploymentMaterializationSession(project_root, scope, None)
+    session.record(
+        {path: compute_file_hash(path) for path in files}, [KNOWN_TARGETS[target]], owner
+    )
+    session.flush()
+
+
 def no_evidence(deploy_root: Path) -> DeploymentEvidence:
     """Return evidence that authorizes nothing (a clone without receipts or render)."""
     return DeploymentEvidence.none(deploy_root)

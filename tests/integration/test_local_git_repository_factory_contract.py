@@ -987,7 +987,7 @@ def test_factory_passes_bounded_timeout_to_git(
         raise subprocess.TimeoutExpired(command, timeout_seconds)
 
     monkeypatch.setattr(
-        "tests.utils.local_git_repository.subprocess.run",
+        "subprocess.run",
         timeout_run,
     )
     factory = LocalGitRepositoryFactory(
