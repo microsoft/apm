@@ -607,6 +607,18 @@
         "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
         "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
       ]
+    },
+    {
+      "issue": 4270,
+      "fixed_in": "Unreleased",
+      "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",
+      "failure_modes": ["cache", "outcome"],
+      "properties": ["source.ref_cache_coherent", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/install/test_legacy_plugin_compat.py::test_cached_pass_classifies_as_the_fresh_pass",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
+        "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
+      ]
     }
   ],
   "lifecycle_contracts": [
