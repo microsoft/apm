@@ -11,7 +11,7 @@ import pytest
 
 from apm_cli.core.auth_outcome import RepositoryNotFoundError
 from apm_cli.core.scope import InstallScope
-from apm_cli.install.repository_access import inaccessible_package_reason, not_found_next_step
+from apm_cli.install.repository_access import not_found_next_step, probe_failure_reason
 from apm_cli.models.dependency.reference import DependencyReference
 
 pytestmark = [
@@ -21,18 +21,16 @@ pytestmark = [
 
 
 @pytest.mark.parametrize(
-    ("user_scope", "package", "retry"),
+    ("scope", "package", "retry"),
     [
-        (False, "acme/pkg", "apm install --verbose acme/pkg"),
-        (True, "acme/pkg", "apm install -g --verbose acme/pkg"),
-        (False, "acme/pkg#rel;echo", "apm install --verbose 'acme/pkg#rel;echo'"),
+        (InstallScope.PROJECT, "acme/pkg", "apm install --verbose acme/pkg"),
+        (InstallScope.USER, "acme/pkg", "apm install -g --verbose acme/pkg"),
+        (None, "acme/pkg#rel;echo", "apm install --verbose 'acme/pkg#rel;echo'"),
     ],
 )
-def test_inaccessible_retry_keeps_scope_and_quotes(
-    user_scope: bool, package: str, retry: str
-) -> None:
+def test_inaccessible_retry_keeps_scope_and_quotes(scope, package: str, retry: str) -> None:
     dep_ref = DependencyReference.parse("acme/pkg")
-    reason = inaccessible_package_reason(dep_ref, package, None, False, user_scope=user_scope)
+    reason = probe_failure_reason(dep_ref, package, None, False, scope=scope)
     assert reason.endswith(f"Run '{retry}' to see each probe and credential.")
 
 

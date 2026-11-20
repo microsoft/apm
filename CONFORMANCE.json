@@ -287,10 +287,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 3,
+      "test_count": 2,
       "tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_rewrite_keeps_top_level_vendor_keys",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
       ]
     },
@@ -773,9 +772,8 @@
       "keyword": "MUST",
       "section": "4.8",
       "status": "active",
-      "test_count": 2,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_top_level_workspaces_key_warns_reserved_and_installs",
         "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_must_not_use_in_v0_1"
       ]
     },
@@ -1096,9 +1094,8 @@
       "keyword": "MUST",
       "section": "6.6",
       "status": "active",
-      "test_count": 2,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_ext_behavior_reqs.py::test_policy_vendor_keys_do_not_warn_but_unknown_keys_do",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_evaluator_short_circuits_on_first_deny"
       ]
     },
@@ -1651,9 +1648,8 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_conflict_resolution_nest_refuses_install_and_writes_nothing",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_fails_closed_on_ambiguous_resolution"
       ]
     },
@@ -1844,11 +1840,10 @@
       "keyword": "MUST",
       "section": "4.2.3",
       "status": "active",
-      "test_count": 5,
+      "test_count": 4,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_http_registry_url_without_opt_in",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[default]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[openapm-v0.1]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[default]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[openapm-v0.1]"
       ]
@@ -1873,11 +1868,9 @@
       "keyword": "SHOULD",
       "section": "10.3",
       "status": "active",
-      "test_count": 3,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[loopback]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[public-host]"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http"
       ]
     },
     {

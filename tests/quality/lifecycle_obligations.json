@@ -23708,15 +23708,15 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:965"
+    "src/apm_cli/commands/install.py:934"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1245",
-    "src/apm_cli/commands/install.py:1009",
-    "src/apm_cli/commands/install.py:983",
+    "src/apm_cli/commands/install.py:1214",
+    "src/apm_cli/commands/install.py:978",
+    "src/apm_cli/commands/install.py:952",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:701",
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "a8794b01f4c7a30a71e76d8d2e4692da93d30acf83ca8439f41851b43c273ac0"
+ "sha256": "912207d756403edcafe44d377121d44569e1ee0d09bbd8d97ef730a22b31d4a8"
 }
