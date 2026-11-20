@@ -52,8 +52,6 @@ COMMIT_SITES = frozenset(
         ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),
         ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),
         ("src/apm_cli/commands/update.py", "_annotate_lockfile_revision_tags"),
-        # Provisional #4228 provenance restore; routed through the commit owner by #4430.
-        ("src/apm_cli/commands/update.py", "_reverified_lock"),
         ("src/apm_cli/install/manifest_reconcile.py", "reconcile_project_deployed_state"),
         ("src/apm_cli/install/phases/claude_plugins.py", "run"),
         ("src/apm_cli/install/phases/lockfile.py", "_write_if_changed"),

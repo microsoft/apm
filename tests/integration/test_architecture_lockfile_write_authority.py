@@ -25,8 +25,6 @@ _COMMIT_SITE_BASELINE = frozenset(
         ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),
         ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),
         ("src/apm_cli/commands/update.py", "_annotate_lockfile_revision_tags"),
-        # #4228 provenance re-verification, staged provisionally; removal: #4430.
-        ("src/apm_cli/commands/update.py", "_reverified_lock"),
         ("src/apm_cli/install/local_bundle_handler.py", "install_local_bundle"),
         ("src/apm_cli/install/local_bundle_hook_trust.py", "_drop_lock_rows"),
         ("src/apm_cli/install/lsp/integration.py", "run_owned_lsp_integration"),

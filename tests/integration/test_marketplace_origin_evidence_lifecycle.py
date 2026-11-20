@@ -19,6 +19,7 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
+from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
 pytestmark = [
     pytest.mark.integration,
@@ -31,6 +32,7 @@ pytestmark = [
 _HOST = "gitlab.example.invalid"
 _REMOTE_A = f"https://{_HOST}/team/catalog-a"
 _REMOTE_B = f"https://{_HOST}/team/catalog-b"
+_REMOTE_PLUGIN = f"https://{_HOST}/team/plugin-source"
 _ALIAS = "company"
 _PLUGIN = "example-plugin"
 _SUBDIR = f"plugins/{_PLUGIN}"
@@ -330,4 +332,123 @@ def test_failed_update_keeps_the_lock_after_reverifying_provenance(
         cwd=consumer.root,
         env=environment,
     )
+    # The re-verification did restore a row before the update failed.
+    assert "Restored marketplace provenance for" in _output(failed), _output(failed)
+    assert f"({_PLUGIN}@{_ALIAS})" in _output(failed), _output(failed)
     assert lock_path.read_bytes() == locked_bytes, _output(failed)
+
+
+def test_noop_update_records_restored_provenance_in_one_lock_write(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A no-op update whose re-verification restores a catalog digest persists it once (#4430).
+
+    The plugin lives in its own repository, so republishing the catalog moves
+    only the catalog digest: no ref changes, yet the restored provenance must
+    reach apm.lock.yaml through the update's single lockfile write.
+    """
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+    )
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    plugin_repo = repositories.create("plugin-source")
+    packages = LocalPackageFactory(plugin_repo.worktree / "plugins")
+    package = packages.create(_PLUGIN, targets=("codex",))
+    packages.add_skill(package, _PLUGIN, _skill_document("separate source"))
+    repositories.commit(plugin_repo, message="publish plugin")
+    catalog_a = repositories.create("catalog-a")
+    catalog_path = catalog_a.worktree / ".claude-plugin" / "marketplace.json"
+    catalog_path.parent.mkdir()
+    catalog = {
+        "name": "catalog-a",
+        "owner": {"name": "APM Test"},
+        "plugins": [
+            {
+                "name": _PLUGIN,
+                "source": {
+                    "source": "git-subdir",
+                    "url": _REMOTE_PLUGIN,
+                    "path": _SUBDIR,
+                    "ref": "main",
+                },
+            }
+        ],
+    }
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    repositories.commit(catalog_a, message="publish catalog")
+    environment = repositories.url_rewrite_subprocess_env_many(
+        ((catalog_a, _REMOTE_A), (plugin_repo, _REMOTE_PLUGIN))
+    )
+    factory = LocalPackageFactory(isolated.work_root)
+    dependencies = ({"name": _PLUGIN, "marketplace": _ALIAS},)
+    consumer = factory.create("consumer", targets=("codex",), dependencies=dependencies)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    lock_path = consumer.root / "apm.lock.yaml"
+    runner.run_sequence(
+        (
+            ("marketplace", "add", _REMOTE_A, "--name", _ALIAS, "--ref", "main"),
+            ("install", *_INSTALL_FLAGS),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="restored-provenance-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    stale = _locked_row(lock_path)
+
+    catalog["metadata"] = {"description": "republished"}
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    repositories.commit(catalog_a, message="republish catalog metadata")
+    # Oracle: what a fresh install records against the republished catalog.
+    fresh = factory.create("fresh", targets=("codex",), dependencies=dependencies)
+    runner.run_sequence(
+        (("install", *_INSTALL_FLAGS),),
+        expected_returncodes=(0,),
+        scenario_id="restored-provenance-oracle",
+        cwd=fresh.root,
+        env=environment,
+    )
+    expected = _locked_row(fresh.root / "apm.lock.yaml")
+    assert expected["source_digest"] != stale["source_digest"]
+    assert expected["resolved_commit"] == stale["resolved_commit"]
+
+    update = ("update", "--yes", *_UPDATE_FLAGS)
+    if INOTIFY_AVAILABLE:
+        with count_lockfile_writes(consumer.root) as counter:
+            (updated,) = runner.run_sequence(
+                (update,),
+                expected_returncodes=(0,),
+                scenario_id="restored-provenance-update",
+                cwd=consumer.root,
+                env=environment,
+            )
+        assert counter.writes == 1, (counter.events, _output(updated))
+    else:
+        (updated,) = runner.run_sequence(
+            (update,),
+            expected_returncodes=(0,),
+            scenario_id="restored-provenance-update",
+            cwd=consumer.root,
+            env=environment,
+        )
+    assert "Restored marketplace provenance for" in _output(updated), _output(updated)
+    row = _locked_row(lock_path)
+    for field in ("source_url", "source_digest", "resolved_commit"):
+        assert row[field] == expected[field], (field, _output(updated))
+    restored_bytes = lock_path.read_bytes()
+
+    runner.run_sequence(
+        (
+            ("audit", "--ci", "--no-policy"),
+            ("install", *_INSTALL_FLAGS, "--frozen"),
+            update,
+        ),
+        expected_returncodes=(0, 0, 0),
+        scenario_id="restored-provenance-converged",
+        cwd=consumer.root,
+        env=environment,
+    )
+    assert lock_path.read_bytes() == restored_bytes
