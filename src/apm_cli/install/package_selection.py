@@ -55,8 +55,8 @@ def selected_subtree_dependencies(
         only_identities.update(
             node.dependency_ref.get_identity()
             for node in tree.nodes.values()
-            if node.depth == 1
-            and node.dependency_ref.is_local
+            if node.dependency_ref.is_local
+            and node.depth == 1
             and node.dependency_ref.get_unique_key() not in locked_keys
         )
 

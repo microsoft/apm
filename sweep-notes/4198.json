@@ -1,0 +1,24 @@
+{
+  "changelog": "`apm install <pkg>` also locks declared local-path dependencies missing from `apm.lock.yaml`, and reports byte-identical pre-existing skills as adopted (#4217)",
+  "ledger_row": {
+    "issue": 4198,
+    "fixed_in": "Unreleased",
+    "summary": "apm install <pkg> after apm init --discover --apply left the declared local dependency out of apm.lock.yaml and reported an identical pre-existing skill as integrated instead of adopted.",
+    "failure_modes": [
+      "ownership",
+      "observation"
+    ],
+    "properties": [
+      "outcome.status_matches_state",
+      "idempotency.byte_stable"
+    ],
+    "regression_tests": [
+      "tests/integration/test_brownfield_lifecycle.py::test_install_package_locks_declared_local_dependency_and_reports_adoption",
+      "tests/unit/install/test_dry_run_graph.py::test_selected_subtree_adds_unlocked_direct_local_dependencies"
+    ]
+  },
+  "red": "APM_E2E_TESTS=1 APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_brownfield_lifecycle.py::test_install_package_locks_declared_local_dependency_and_reports_adoption -n 0 -p no:cacheprovider -q -> on main source: FAILED test_brownfield_lifecycle.py:357 assert '  |-- 1 skill(s) adopted -> .claude/skills/' in [...] (printed '1 skill(s) integrated'); with only the reporting fix applied: FAILED :361 KeyError: './.claude/skills/review' (local dependency absent from apm.lock.yaml)",
+  "green": "same command -> passed; whole module tests/integration/test_brownfield_lifecycle.py -> 6 passed (includes apm audit '[+] No drift detected', apm audit --ci exit 0, and a byte-identical converged re-install); unit neighbours -> 3626 passed (one pre-existing environmental failure, see notes)",
+  "owner": "src/apm_cli/install/package_selection.py (selected_subtree_dependencies locked_keys=, used by install/phases/resolve.py _apply_only_filter and install/dry_run_plan.py) + src/apm_cli/integration/skill_integrator.py (_promote_sub_skills records adoption; SkillIntegrationResult.sub_skills_adopted) + src/apm_cli/install/services.py (_sub_skill_phrase)",
+  "notes": "Lock part: a partial install (apm install <pkg>) filtered the resolved graph to the named subtree, so a declared direct local-path dependency that no lock row recorded was resolved but never integrated or locked; with --target claude its source under .claude/skills/ is its own deployment path, so the files sat in a target root unclaimed (I1). The selection owner now also selects direct local deps whose key is missing from the existing lock (all of them when there is no lock); the dry-run planner passes the same evidence so preview equals install. Locked local deps and remote deps keep the old partial-install behaviour. Reporting part: sub-skill promotion now records skills whose unowned pre-existing copy was byte-identical (adopted) and install prints 'N skill(s) adopted' / 'N skill(s) integrated (M adopted)', matching the per-kind lines. Native single-skill packages keep their existing wording. Docs: reference/cli/install.md and apm-guide commands.md. Unit test tests/unit/test_drift_detection.py::test_locked_copy_proof_lets_a_readable_git_head_decide fails in this environment on main too (gpg commit signing via env git config), unrelated. I used git stash twice early in this bug before the shared-stash warning; verified afterwards that the worktree holds only my changes and the stash list is empty. PR #4138 touches install/phases/resolve.py, dry_run_plan.py and package_resolution.py: small textual conflict risk at the selected_subtree_dependencies call sites (one keyword argument each)."
+}
