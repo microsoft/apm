@@ -1,0 +1,23 @@
+# Absorbed from tests/integration/test_executables_deny_retires_hooks_lifecycle.py
+# ::test_audit_and_update_honor_the_current_executables_decision[copilot] (#3958):
+# a gated package audits green; `apm update` with no ref change deploys a new
+# approval and retires a deny, which audits red until then; a dry run changes
+# nothing.
+id: T10/update/executables-decision/hook
+promises: [P-INV-I1, P-INV-I3, P-INV-I4, P-INV-I5, P-INV-I7, P-INV-I8, P-LAW-outcome.status_matches_state]
+cell: {OP: update, SRC: local-path, PRIM: hook, SCOPE: project, GATE: denied}
+world: {packages: [p-skill, p-exec], targets: [copilot], scope: project}
+given:
+  - apm install p-skill p-exec
+  - {run: apm audit --ci, exit: 0}
+when:
+  - apm approve p-exec
+  - apm update --yes
+  - apm deny p-exec
+  - {run: apm audit --ci, exit: 1}
+  - apm update --dry-run
+  - apm update --yes
+then:
+  exit: 0
+  deployed: expected
+  announce: hooks skipped (denied)
