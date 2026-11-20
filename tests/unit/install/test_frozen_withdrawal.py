@@ -16,6 +16,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.frozen_withdrawal import (
     WriteJournal,
     kept_lines,
+    refusal_tip,
     withdraw_unrecorded_deployments,
 )
 from apm_cli.utils.content_hash import compute_file_hash
@@ -154,3 +155,7 @@ def test_each_kept_reason_is_named_with_a_next_step(
         "rerun 'apm install --frozen'",
     ]
     assert adopted.is_file() and edited.is_file() and stuck.is_file()
+    assert refusal_tip(outcome.kept).startswith(
+        "Tip: the other unrecorded files were removed again and apm.lock.yaml is unchanged."
+    )
+    assert refusal_tip({}).startswith("Tip: the unrecorded files were removed again")

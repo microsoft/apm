@@ -220,6 +220,16 @@ def kept_lines(kept: Mapping[str, str]) -> list[str]:
     return [f"  - kept {path}: {_KEPT_REASONS[reason]}" for path, reason in sorted(kept.items())]
 
 
+def refusal_tip(kept: Mapping[str, str]) -> str:
+    """The refusal's tip: what was withdrawn, and how to record the deployment."""
+    removed = "the other unrecorded files were" if kept else "the unrecorded files were"
+    return (
+        f"Tip: {removed} removed again and apm.lock.yaml is unchanged. Run "
+        "'apm install' without --frozen, retaining --root DIR or --global if "
+        "specified, then commit the deployed files and apm.lock.yaml."
+    )
+
+
 def refuse_unrecorded_deployments(
     withheld: Iterable[str], unclaimed: set[str], committed: LockFile, lockfile_dir: Path
 ) -> Exception:
@@ -245,13 +255,8 @@ def refuse_unrecorded_deployments(
         for path in _outermost(unclaimed)
     ]
     reasons += kept_lines(outcome.kept)
-    removed = "the other unrecorded files were" if outcome.kept else "the unrecorded files were"
     return FrozenInstallError(
         "--frozen: apm.lock.yaml does not record everything this install deploys.",
         reasons=reasons,
-        tip=(
-            f"Tip: {removed} removed again and apm.lock.yaml is unchanged. Run "
-            "'apm install' without --frozen, retaining --root DIR or --global if "
-            "specified, then commit the deployed files and apm.lock.yaml."
-        ),
+        tip=refusal_tip(outcome.kept),
     )
