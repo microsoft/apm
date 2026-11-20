@@ -289,3 +289,32 @@ def test_audit_verifies_source_and_deployed_copy_against_the_lock(home) -> None:
                 verify_claude_native_cache(
                     modules_dir=home.modules, locked=locked, source_root=source
                 )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not enforced on Windows")
+def test_unchanged_deployed_root_is_tightened_to_owner_only_on_upgrade(tmp_path: Path) -> None:
+    """A root deployed before #1620's guard keeps its fingerprint but loses setuid bits."""
+    import stat
+
+    from apm_cli.native_plugins.layout import deploy_plugin
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    source = tmp_path / "source"
+    (source / ".claude-plugin").mkdir(parents=True)
+    (source / ".claude-plugin/plugin.json").write_text('{"name": "tool"}', encoding="utf-8")
+    (source / "bin").mkdir()
+    (source / "bin/tool").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    (source / "bin/tool").chmod(0o755)
+    fingerprint = compute_native_plugin_hash(source)
+    root = tmp_path / "plugins"
+    deploy_plugin(root, "tool", source, fingerprint, compute_native_plugin_hash)
+    deployed = root / "tool/bin/tool"
+    # What an earlier, unguarded copy left behind: same fingerprint, unsafe bits.
+    deployed.chmod(0o4755)
+    assert compute_native_plugin_hash(root / "tool") == fingerprint
+
+    outcome = deploy_plugin(root, "tool", source, fingerprint, compute_native_plugin_hash)
+
+    assert outcome.changed is False
+    assert stat.S_IMODE(deployed.stat().st_mode) == 0o700
+    assert compute_native_plugin_hash(root / "tool") == fingerprint
