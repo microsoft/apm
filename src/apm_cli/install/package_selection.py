@@ -100,7 +100,14 @@ def with_unlocked_local_dependencies(
     locked = lockfile.dependencies if lockfile is not None else {}
     tree = ctx.dependency_graph.dependency_tree
     keep = {dep.get_identity() for dep in ctx.deps_to_install}
-    keep |= {dep.get_identity() for dep in unlocked_local_dependencies(tree, complete, locked)}
+    implicit = [
+        dep
+        for dep in unlocked_local_dependencies(tree, complete, locked)
+        if dep.get_identity() not in keep
+    ]
+    # The CLI --skill overlay targets the named packages, never these (#4198).
+    ctx.implicit_local_keys = frozenset(dep.get_unique_key() for dep in implicit)
+    keep |= {dep.get_identity() for dep in implicit}
     return [dep for dep in complete if dep.get_identity() in keep]
 
 
