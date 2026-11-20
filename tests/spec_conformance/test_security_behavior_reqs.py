@@ -359,10 +359,11 @@ def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
     ids=["public-host", "loopback"],
 )
 def test_proxy_token_is_not_attached_over_http_to_a_public_host(
-    monkeypatch: pytest.MonkeyPatch, host: str, attached: bool
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], host: str, attached: bool
 ) -> None:
     from apm_cli.deps import registry_proxy
 
+    registry_proxy._emitted_warnings.clear()
     for name in ("ARTIFACTORY_BASE_URL", "ARTIFACTORY_APM_TOKEN", "PROXY_REGISTRY_ALLOW_HTTP"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://{host}/artifactory/github")
@@ -370,6 +371,8 @@ def test_proxy_token_is_not_attached_over_http_to_a_public_host(
     config = registry_proxy.RegistryConfig.from_env()
     assert config is not None
     assert ("Authorization" in config.headers_for("http", host)) is attached
+    captured = capsys.readouterr()
+    assert ("PROXY_REGISTRY_TOKEN is not sent" in captured.out + captured.err) is not attached
 
 
 def test_token_text_is_redacted_from_diagnostics() -> None:
