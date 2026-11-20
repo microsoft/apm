@@ -1356,3 +1356,35 @@ def test_output_oracle_reports_one_violation_per_duplicated_cause() -> None:
     )
     with pytest.raises(OutputOracleError, match=r"I9: stdout repeats a line: '\[i\] Targeting x'"):
         check_cli_output(("install",), _cli(("install",), stdout), known_cells=(policy_cell,))
+
+
+def test_known_output_cell_output_shape_narrows_where_it_is_strict() -> None:
+    cell = KnownOutputCell(
+        "twice-with-mcp",
+        "I9",
+        "#1",
+        lambda args, _scenario: args[:1] == ("install",),
+        "Policy off",
+        output=r"^\+- MCP Servers",
+    )
+    twice = "[!] Policy off\n[i] a\n[!] Policy off\n+- MCP Servers (1)\n"
+    check_cli_output(("install",), _cli(("install",), twice), known_cells=(cell,))
+    check_cli_output(("install",), _cli(("install",), "[!] Policy off\n"), known_cells=(cell,))
+    with pytest.raises(OutputOracleError, match=r"twice-with-mcp \(#1\) did not fail"):
+        check_cli_output(
+            ("install",),
+            _cli(("install",), "[!] Policy off\n+- MCP Servers (1)\n"),
+            known_cells=(cell,),
+        )
+
+
+def test_known_output_cells_are_well_formed() -> None:
+    from tests.utils.lifecycle_evidence import KNOWN_OUTPUT_CELLS
+
+    ids = [cell.id for cell in KNOWN_OUTPUT_CELLS]
+    assert len(ids) == len(set(ids))
+    for cell in KNOWN_OUTPUT_CELLS:
+        assert cell.law in {"I6", "I8", "I9"}, cell.id
+        assert re.fullmatch(r"#[1-9][0-9]*", cell.issue), cell.id
+        re.compile(cell.message)
+        re.compile(cell.output)

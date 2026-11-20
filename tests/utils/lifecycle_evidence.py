@@ -340,9 +340,11 @@ class OutputViolation:
 class KnownOutputCell:
     """A STRICT expected output failure of the product, tracked by *issue*.
 
-    Where ``applies(args, scenario_id)`` holds, a violation of *law* whose
-    message matches *message* is excused; if none occurs the cell fails,
-    because the defect is fixed and the cell must be removed.
+    Where ``applies(args, scenario_id)`` holds and stdout matches *output*
+    (a multiline regex naming the output shape that triggers the defect), a
+    violation of *law* whose message matches *message* is excused; if none
+    occurs the cell fails, because the defect is fixed and the cell must be
+    removed.
     """
 
     id: str
@@ -350,10 +352,82 @@ class KnownOutputCell:
     issue: str
     applies: Callable[[tuple[str, ...], str], bool]
     message: str
+    output: str = ""
+
+    def covers(self, args: tuple[str, ...], scenario_id: str, stdout: str) -> bool:
+        return self.applies(args, scenario_id) and (
+            not self.output or re.search(self.output, stdout, re.MULTILINE | re.DOTALL) is not None
+        )
 
 
-# Product defects the oracle observes on main; each one names its issue.
-KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = ()
+def _runs(command: str, *flags: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: the command is *command* and every flag in *flags* is passed."""
+    return lambda args, _scenario: _command_name(args) == command and all(f in args for f in flags)
+
+
+def _scenario(*ids: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: the lifecycle scenario id is one of *ids*."""
+    return lambda _args, scenario_id: scenario_id in ids
+
+
+# Product defects the oracle observes on main; each one names its issue and
+# is keyed by the surface family (command, flags, output shape) it occurs in.
+KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
+    KnownOutputCell(
+        "install-no-policy-warning-per-phase",
+        "I9",
+        "#4241",
+        _runs("install", "--no-policy"),
+        r"Policy enforcement disabled by --no-policy",
+        output=r"^  \[\+\] .*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
+        "install-frozen-mcp-targeting-twice",
+        "I9",
+        "#4196",
+        _runs("install", "--frozen"),
+        r"\[i\] Targeting (declared targets?|specific runtimes?)",
+        output=r"^\+- MCP Servers",
+    ),
+    KnownOutputCell(
+        "uninstall-unattributed-survivor-lines",
+        "I9",
+        "#4219",
+        _scenario("diamond-uninstall-root-a", "diamond-uninstall-root-b"),
+        r"\(files unchanged\)",
+    ),
+    KnownOutputCell(
+        "install-hook-line-per-target",
+        "I9",
+        "#4243",
+        _scenario("target-contraction-install-a-b"),
+        r"PreToolUse: runs echo scope",
+    ),
+    KnownOutputCell(
+        "install-registry-lookup-per-registry",
+        "I9",
+        "#4244",
+        _runs("install"),
+        r"Looking up 1 MCP server in registry",
+        output=r"^\[i\] Using MCP registry: .*^\[i\] Using MCP registry: ",
+    ),
+    KnownOutputCell(
+        "install-mcp-passthrough-warning-per-parse",
+        "I9",
+        "#4242",
+        _runs("install", "hermes"),
+        r"'hermes-stdio': unknown key\(s\) preserved in extra",
+        output=r"'hermes-stdio': unknown key\(s\) preserved.*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
+        "install-frozen-trust-notice-repeats",
+        "I9",
+        "#4256",
+        _runs("install", "--frozen", "--trust-transitive-mcp"),
+        r"Trusting direct dependency MCP",
+        output=r"^\[i\] Trusting direct dependency MCP",
+    ),
+)
 
 _EXPECTED_VIOLATIONS: ContextVar[frozenset[str]] = ContextVar(
     "apm_expected_output_violations", default=frozenset()
@@ -521,7 +595,7 @@ def check_cli_output(
     violations = [v for v in output_violations(args, result) if v.law not in expected]
     problems: list[str] = []
     for cell in KNOWN_OUTPUT_CELLS if known_cells is None else known_cells:
-        if cell.law in expected or not cell.applies(args, scenario_id):
+        if cell.law in expected or not cell.covers(args, scenario_id, result.stdout):
             continue
         owned = [v for v in violations if v.law == cell.law and re.search(cell.message, v.message)]
         if not owned:
