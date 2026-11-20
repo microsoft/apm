@@ -41,7 +41,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     ),
 }
 # A shard selector belongs to the nearest command line above it.
-_COMMAND_MARKERS = ("pytest", EMITTER, "scripts.ci_selections")
+_COMMAND_MARKERS = ("pytest", "-p scripts.ci_sharding", EMITTER, "scripts.ci_selections")
 _LOOKBACK = 8
 
 
