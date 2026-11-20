@@ -155,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Trust and integrity consistency hardening. (closes #4027)
+- Trust and integrity consistency hardening. (#4051)
 - `apm pack` builds plugin MCP servers from `apm.yml` and authored `.mcp.json` entries, never the copies `apm install` renders, so output matches before and after install without credentials. (closes #3966, #3988)
 - `apm approve` and `apm deny` match package names exactly and refuse names matching several packages; a partial name could approve another package's executables. (#3988)
 - `apm update` with no ref change and `apm audit --ci` honour the current executables decision, so hooks left after `apm deny` are retired or reported. (closes #3958, #3988)
