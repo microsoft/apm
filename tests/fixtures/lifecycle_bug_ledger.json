@@ -529,6 +529,22 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4080,
+      "fixed_in": "0.37.0",
+      "summary": "apm unpack deployed bundle files without the shared install owners that apm install <bundle> uses: org policy, integrity under require_hashes, the lifecycle lock and the lockfile record.",
+      "failure_modes": ["transaction", "ownership", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_applies_org_dependency_policy",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_altered_bytes_when_policy_requires_hashes",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_fails_closed_when_policy_is_unavailable_under_block",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_records_deployed_files_in_the_project_lockfile",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_into_a_project_keeps_unapproved_executables_out",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_into_a_non_project_dir_announces_and_writes_no_lockfile",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_waits_for_the_lifecycle_lock"
+      ]
     }
   ],
   "lifecycle_contracts": [

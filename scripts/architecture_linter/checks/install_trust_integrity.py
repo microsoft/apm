@@ -9,6 +9,9 @@
 * ``apm unpack`` refuses executable content before it writes anything.
 * ``apm install -g <bundle>`` keeps its lock, approvals and gate config
   under ``APM_HOME`` (``core.scope``), never the home directory.
+* Every bundle deploy entry point admits the bundle through
+  ``install/bundle_admission.py`` (org policy and integrity) and records what
+  it deployed through the shared local-bundle lockfile owner (#4080).
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ GUARD_UPDATE_CONTENT_INTEGRITY = "install-deployment-update-content-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
 GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
 GUARD_LOCAL_BUNDLE_HOOK_TRUST = "install-deployment-local-bundle-hook-trust"
+GUARD_BUNDLE_ADMISSION = "install-deployment-bundle-admission-owner"
 
 _OWNER = "src/apm_cli/policy/outcome_routing.py"
 _EXECUTABLES = "src/apm_cli/security/executables.py"
@@ -337,5 +341,124 @@ def check_local_bundle_hook_trust(provider: FactsProvider) -> tuple[Violation, .
             )
             for number, line in enumerate(_lines(facts), start=1)
             if any(token in line for token in _MARKER_TOKENS)
+        )
+    return tuple(findings)
+
+
+_ADMISSION = "src/apm_cli/install/bundle_admission.py"
+_PACK_COMMAND = "src/apm_cli/commands/pack.py"
+# Calls that write bundle files into a deployment root.
+_BUNDLE_DEPLOY_PRIMITIVES = frozenset({"integrate_local_bundle", "unpack_bundle"})
+# Closed world: every function that deploys bundle files, with the admission
+# call and the lockfile record call it must make.
+_BUNDLE_ENTRY_POINTS: dict[tuple[str, str], tuple[str, ...]] = {
+    (_LOCAL_BUNDLE, "install_local_bundle"): (
+        "admit_bundle",
+        "DeploymentLedgerCodec.record_local_bundle_files",
+    ),
+    (_PACK_COMMAND, "unpack_cmd"): ("apm_bundle_admission", "record_unpacked_files"),
+}
+# The owner's own routing: policy preflight and require_hashes in one place,
+# and the unpack record through the shared local-bundle lockfile owner.
+_ADMISSION_ROUTES: dict[str, tuple[str, ...]] = {
+    "admit_bundle": ("run_policy_preflight", "require_hashes_enabled"),
+    "admit": ("admit_bundle",),
+    "record_unpacked_files": ("DeploymentLedgerCodec.record_local_bundle_files",),
+}
+
+
+def _scope_calls(facts: object, scope: str) -> set[str]:
+    return {call.qualname for call in getattr(facts, "calls", ()) if call.scope == scope}
+
+
+def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every bundle deploy entry point routes through the bundle admission owner."""
+    import re
+
+    findings: list[Violation] = []
+    for path in _python_paths(provider, "src/apm_cli/"):
+        facts, failures = _facts_for(provider, path, GUARD_BUNDLE_ADMISSION)
+        if failures:
+            continue
+        findings.extend(
+            violation(
+                GUARD_BUNDLE_ADMISSION,
+                path,
+                f"{call.scope} deploys bundle files outside the registered bundle "
+                "entry points; admit the bundle through install/bundle_admission.py",
+                line=call.line,
+            )
+            for call in facts.calls
+            if call.qualname.rsplit(".", 1)[-1] in _BUNDLE_DEPLOY_PRIMITIVES
+            and (path, call.scope) not in _BUNDLE_ENTRY_POINTS
+        )
+    for (path, function), required in _BUNDLE_ENTRY_POINTS.items():
+        facts, failures = _facts_for(provider, path, GUARD_BUNDLE_ADMISSION)
+        findings.extend(failures)
+        if failures:
+            continue
+        missing = [name for name in required if name not in _scope_calls(facts, function)]
+        if missing:
+            findings.append(
+                _summary(
+                    GUARD_BUNDLE_ADMISSION,
+                    path,
+                    f"{function} must admit and record the bundle through the shared "
+                    "owners; missing " + ", ".join(missing),
+                )
+            )
+    facts, failures = _facts_for(provider, _ADMISSION, GUARD_BUNDLE_ADMISSION)
+    findings.extend(failures)
+    if not failures:
+        for function, required in _ADMISSION_ROUTES.items():
+            missing = [name for name in required if name not in _scope_calls(facts, function)]
+            if missing:
+                findings.append(
+                    _summary(
+                        GUARD_BUNDLE_ADMISSION,
+                        _ADMISSION,
+                        f"{function} must route through " + ", ".join(missing),
+                    )
+                )
+    facts, failures = _facts_for(provider, _UNPACKER, GUARD_BUNDLE_ADMISSION)
+    findings.extend(failures)
+    if not failures:
+        admit = _first_line_re(facts, re.compile(r"^\s+admit\($"))
+        first_exit = min(
+            (
+                line
+                for line in (
+                    _first_line_re(facts, re.compile(r"^\s+if dry_run:")),
+                    _first_line_re(facts, re.compile(r"shutil\.copy")),
+                )
+                if line is not None
+            ),
+            default=None,
+        )
+        if (
+            not _present(facts, "    admit: Callable[[UnpackCandidate], None],")
+            or admit is None
+            or (first_exit is not None and admit > first_exit)
+        ):
+            findings.append(
+                _summary(
+                    GUARD_BUNDLE_ADMISSION,
+                    _UNPACKER,
+                    "unpack_bundle must require an admission and run it before a preview or a write",
+                )
+            )
+    facts, failures = _facts_for(provider, _PACK_COMMAND, GUARD_BUNDLE_ADMISSION)
+    findings.extend(failures)
+    if not failures and not any(
+        definition.name == "unpack_cmd"
+        and "serialized_lifecycle_unless('dry_run')" in definition.decorators
+        for definition in facts.definitions
+    ):
+        findings.append(
+            _summary(
+                GUARD_BUNDLE_ADMISSION,
+                _PACK_COMMAND,
+                "apm unpack must hold the lifecycle lock (serialized_lifecycle_unless)",
+            )
         )
     return tuple(findings)

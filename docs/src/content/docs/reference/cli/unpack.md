@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::caution[Deprecated]
-`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the deploy path for legacy `--format apm` tarballs without executable content (see [Behavior](#behavior)).
+`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the deploy path for legacy `--format apm` bundles without executable content, under the same org policy (see [Behavior](#behavior)).
 :::
 
 ## Synopsis
@@ -24,8 +24,7 @@ Extraction is **additive-only**: only files listed in the bundle's lockfile are 
 `BUNDLE_PATH` accepts a `.zip` archive (the default), a legacy `.tar.gz` archive, or the directory form of an unpacked bundle.
 
 :::caution[Executable content is refused]
-`apm unpack` copies files verbatim, so it cannot apply the
-[executables gate](../approve/) or org policy. It refuses, before writing or
+`apm unpack` cannot apply the [executables gate](../approve/). It refuses, before writing or
 previewing anything, a bundle that carries hooks or hook scripts, MCP or LSP
 configuration, `bin/` executables, or canvas extensions (with the `canvas`
 flag off, canvas files are dropped instead). Install such bundles with
@@ -85,8 +84,11 @@ apm unpack bundle.zip --force
 - **Security scan.** Bundle contents are scanned before deployment. Critical hidden-character findings block extraction unless `--force` is passed (exit code `1`). Non-critical warnings are surfaced with a hint to run [`apm audit`](../audit/).
 - **Verification.** By default, every entry in the bundle's `deployed_files` must exist inside the archive. `--skip-verify` disables this check; missing files are then reported as skipped.
 - **Target mismatch warning.** If the bundle was packed for a different harness target than the output project's detected target, `apm unpack` warns and -- with `--verbose` -- suggests the `apm pack --target` command the publisher should run.
-- **Lockfile is metadata.** The bundle's `apm.lock.yaml` is read for verification and target metadata but is never written to the output directory.
-- **Exit codes.** `0` on success (including `--dry-run`); `1` on missing bundle, invalid bundle, executable content (`--force` does not override this), or critical security findings without `--force`.
+- **Org policy and integrity.** Before a preview or a write, `apm unpack` applies the same org policy checks as `apm install <bundle>`, resolved from the output directory: the bundle's locked dependencies and pack target are checked, and an unavailable policy under `fetch_failure_default: block` fails closed. Each file is checked against its locked hash; a mismatch is refused when policy sets `security.integrity.require_hashes`, otherwise it warns.
+- **Tracked output.** When the output directory is an APM project (it has `apm.yml`), the deployed files are recorded in its `apm.lock.yaml`, as `apm install <bundle>` does, so `apm audit` checks them. Any other directory stays untracked and `apm unpack` says so.
+- **Lockfile is metadata.** The bundle's own `apm.lock.yaml` is read for verification and target metadata but is never copied to the output directory.
+- **One operation at a time.** `apm unpack` waits for any other running APM operation, like `apm install` (not with `--dry-run`).
+- **Exit codes.** `0` on success (including `--dry-run`); `1` on missing bundle, invalid bundle, executable content (`--force` does not override this), an org policy or integrity refusal, or critical security findings without `--force`.
 
 ## Related
 

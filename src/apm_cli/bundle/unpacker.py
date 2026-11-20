@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -34,6 +35,18 @@ class UnpackResult:
     security_critical: int = 0
     canvas_blocked: int = 0
     pack_meta: dict = field(default_factory=dict)
+    written_files: list[str] = field(default_factory=list)
+    """Regular files this unpack wrote, relative to the output directory."""
+
+
+@dataclass(frozen=True)
+class UnpackCandidate:
+    """A parsed bundle awaiting admission, before anything is written."""
+
+    source_dir: Path
+    lockfile: LockFile
+    files: list[str]
+    pack_meta: dict
 
 
 def unpack_bundle(
@@ -42,6 +55,8 @@ def unpack_bundle(
     skip_verify: bool = False,
     dry_run: bool = False,
     force: bool = False,
+    *,
+    admit: Callable[[UnpackCandidate], None],
 ) -> UnpackResult:
     """Extract and apply an APM bundle to a project directory.
 
@@ -55,6 +70,8 @@ def unpack_bundle(
         skip_verify: If *True*, skip completeness verification against the lockfile.
         dry_run: If *True*, resolve the file list but write nothing to disk.
         force: If *True*, deploy even when critical hidden characters are found.
+        admit: Bundle admission (org policy and integrity) run before a
+            preview or a write; it raises to refuse the bundle.
 
     Returns:
         :class:`UnpackResult` describing what was (or would be) extracted.
@@ -237,6 +254,16 @@ def unpack_bundle(
                 "Learn more: https://apm.github.io/apm/enterprise/security/"
             )
 
+        # 3c. Admission: org policy and integrity, before a preview or a write.
+        admit(
+            UnpackCandidate(
+                source_dir=source_dir,
+                lockfile=lockfile,
+                files=_bundle_file_paths(unique_files, source_dir),
+                pack_meta=pack_meta,
+            )
+        )
+
         # Dry-run: return file list without writing
         if dry_run:
             return UnpackResult(
@@ -257,6 +284,7 @@ def unpack_bundle(
         output_dir = Path(output_dir)
         destinations = _validated_unpack_destinations(unique_files, source_dir, output_dir)
         skipped = 0
+        copied: list[str] = []
         for rel_path, dest in destinations:
             src = source_dir / rel_path
             if has_symlink_component(source_dir, src):
@@ -273,6 +301,12 @@ def unpack_bundle(
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dest, follow_symlinks=False)
+            copied.append(rel_path)
+        written = [
+            rel
+            for rel in _bundle_file_paths(copied, source_dir)
+            if (output_dir / rel).is_file() and not (output_dir / rel).is_symlink()
+        ]
 
         return UnpackResult(
             extracted_dir=bundle_path,
@@ -284,6 +318,7 @@ def unpack_bundle(
             security_critical=security_critical,
             canvas_blocked=canvas_blocked,
             pack_meta=pack_meta,
+            written_files=written,
         )
     finally:
         # Clean up temp dir if we created one

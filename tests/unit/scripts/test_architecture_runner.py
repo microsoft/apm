@@ -626,6 +626,7 @@ contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
+install-deployment-bundle-admission-owner
 install-deployment-bundle-compile-staging
 install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout

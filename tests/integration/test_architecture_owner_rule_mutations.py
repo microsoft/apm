@@ -1610,6 +1610,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
+        guard_id="install-deployment-bundle-admission-owner",
+        rule_id="install-deployment-bundle-admission-owner",
+        path="src/apm_cli/commands/pack.py",
+        old="            admit=apm_bundle_admission(Path(output), logger, dry_run=dry_run),\n",
+        new="            admit=lambda candidate: None,\n",
+        intent="apm unpack deploys a bundle without the shared bundle admission owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-bundle-compile-staging",
         rule_id="install-deployment-bundle-compile-staging",
         path="src/apm_cli/install/local_bundle_handler.py",

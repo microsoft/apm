@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.bundle.unpacker import unpack_bundle
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from tests.utils.unpack_admission import unpack_bundle
 
 
 def _build_bundle_dir(tmp_path: Path, deployed_files: list[str]) -> Path:
@@ -404,6 +404,95 @@ class TestUnpackBundle:
         result = unpack_bundle(bundle_dir, output)
 
         assert result.pack_meta == {}
+
+
+class TestUnpackAdmission:
+    """Admission (org policy and integrity) runs before a preview or a write."""
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_refused_admission_writes_nothing(self, tmp_path, dry_run):
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        output = tmp_path / "target"
+        output.mkdir()
+
+        def refuse(candidate):
+            raise ValueError("refused")
+
+        with pytest.raises(ValueError, match="refused"):
+            unpack_bundle(bundle, output, dry_run=dry_run, admit=refuse)
+        assert not any(output.iterdir())
+
+    def test_admission_sees_every_file_it_would_write(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, [".github/skills/s/"])
+        (bundle / ".github" / "skills" / "s" / "SKILL.md").write_text("x", encoding="utf-8")
+        seen = []
+
+        unpack_bundle(bundle, tmp_path / "target", admit=seen.append)
+
+        assert ".github/skills/s/SKILL.md" in seen[0].files
+        assert seen[0].lockfile.get_package_dependencies()[0].repo_url == "owner/repo"
+
+
+class TestApmBundleIntegrity:
+    """``--format apm`` bundles are checked against their per-file lock hashes."""
+
+    @staticmethod
+    def _check(bundle, logger):
+        from apm_cli.install.bundle_admission import apm_bundle_integrity
+
+        lockfile = LockFile.read(bundle / "apm.lock.yaml")
+        return apm_bundle_integrity(bundle, lockfile, [".github/agents/a.md"], logger)
+
+    @staticmethod
+    def _hashed_bundle(tmp_path):
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[".github/agents/a.md"],
+                deployed_file_hashes={
+                    ".github/agents/a.md": compute_file_hash(bundle / ".github/agents/a.md")
+                },
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        return bundle
+
+    def test_matching_hashes_pass_under_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        logger = MagicMock()
+        self._check(self._hashed_bundle(tmp_path), logger)(True)
+        logger.warning.assert_not_called()
+
+    def test_altered_file_is_refused_under_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        bundle = self._hashed_bundle(tmp_path)
+        (bundle / ".github/agents/a.md").write_text("altered", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"Hash mismatch: \.github/agents/a\.md"):
+            self._check(bundle, MagicMock())(True)
+
+    def test_altered_file_warns_without_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        bundle = self._hashed_bundle(tmp_path)
+        (bundle / ".github/agents/a.md").write_text("altered", encoding="utf-8")
+        logger = MagicMock()
+        self._check(bundle, logger)(False)
+        assert ".github/agents/a.md" in logger.warning.call_args.args[0]
+
+    def test_unhashed_file_is_refused_under_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        with pytest.raises(ValueError, match="No locked hash"):
+            self._check(bundle, MagicMock())(True)
+        self._check(bundle, MagicMock())(False)
 
 
 class TestUnpackCmdLogging:

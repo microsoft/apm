@@ -33,6 +33,7 @@ from tests.integration._policy_scope_kit import (
     lock_repo_urls,
     output,
     run_step,
+    tree_snapshot,
     write,
 )
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
@@ -305,10 +306,11 @@ def test_update_accepts_new_content_for_a_moved_commit(
         assert "New locked content" not in output(again), output(again)
 
 
-def test_unpack_refuses_executable_content(tmp_path: Path, apm_binary_path: Path) -> None:
-    world = PolicyScopeWorld(tmp_path, dict(os.environ))
-    hooked = _publish_hooked(world, "pkg-hooked")
-    runner = _runner(apm_binary_path)
+def _packed_hooked_dependency_bundle(
+    world: PolicyScopeWorld, runner: ApmLifecycleRunner, env: dict, out: Path
+) -> Path:
+    """Pack a ``--format apm`` bundle whose dependency deploys hooks."""
+    hooked = world.packages["pkg-hooked"]
     producer = world.consumer(
         "producer",
         dependencies=[f"{hooked.slug}#v1.0.0"],
@@ -316,23 +318,25 @@ def test_unpack_refuses_executable_content(tmp_path: Path, apm_binary_path: Path
         extra={"executables": {"allow": {hooked.slug: {"hooks": True}}}},
     )
     (producer / ".claude").mkdir()
+    run_step(runner, ("install", "--no-policy"), cwd=producer, env=env, step="producer")
+    assert _hooks_deployed(producer)
+    run_step(
+        runner, ("pack", "--format", "apm", "-o", str(out)), cwd=producer, env=env, step="pack"
+    )
+    return next(out.iterdir())
+
+
+def test_unpack_refuses_executable_content(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    _publish_hooked(world, "pkg-hooked")
+    runner = _runner(apm_binary_path)
     target = world.isolated.work_root / "target"
     target.mkdir()
     (target / ".claude").mkdir()
 
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = fx.child_environment(world.git_env())
-        run_step(runner, ("install", "--no-policy"), cwd=producer, env=env, step="producer")
-        assert _hooks_deployed(producer)
-        out = tmp_path / "out"
-        run_step(
-            runner,
-            ("pack", "--format", "apm", "-o", str(out)),
-            cwd=producer,
-            env=env,
-            step="pack",
-        )
-        bundle = next(out.iterdir())
+        bundle = _packed_hooked_dependency_bundle(world, runner, env, tmp_path / "out")
 
         result = run_step(
             runner, ("unpack", str(bundle)), cwd=target, env=env, step="unpack", expected=1
@@ -595,3 +599,234 @@ def test_reinstalling_an_approved_bundle_records_a_missing_key(
     assert key in record.read_text(encoding="utf-8")
     run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="kept")
     assert _target_hooks_deployed(project, target)
+
+
+# -- apm unpack uses the shared install owners (#4080) -------------------------
+
+
+def _packed_skill_bundle(
+    world: PolicyScopeWorld, runner: ApmLifecycleRunner, env: dict, out: Path
+) -> Path:
+    """Pack a ``--format apm`` bundle whose one dependency is ``contoso/pkg-a``."""
+    pkg = world.packages["pkg-a"]
+    producer = world.consumer("producer", dependencies=[f"{pkg.slug}#v1.0.0"], targets=("claude",))
+    (producer / ".claude").mkdir()
+    run_step(runner, ("install", "--no-policy"), cwd=producer, env=env, step="producer")
+    run_step(
+        runner, ("pack", "--format", "apm", "-o", str(out)), cwd=producer, env=env, step="pack"
+    )
+    return next(out.iterdir())
+
+
+def _unpack_target(world: PolicyScopeWorld, **kwargs) -> Path:
+    target = world.consumer("target", targets=("claude",), **kwargs)
+    (target / ".claude").mkdir()
+    return target
+
+
+_SKILL = ".claude/skills/pkg-a-skill/SKILL.md"
+
+
+def _unpack(bundle: Path, target: Path) -> tuple[str, ...]:
+    # The restore contract of microsoft/apm-action: ``apm unpack <bundle> -o <dir>``.
+    return ("unpack", str(bundle), "-o", str(target))
+
+
+def test_unpack_applies_org_dependency_policy(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy({**_POLICY, "dependencies": {"deny": [f"{ORG}/pkg-a"]}})
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        target = _unpack_target(world)
+        before = tree_snapshot(target)
+
+        result = run_step(
+            runner, _unpack(bundle, target), cwd=target, env=env, step="denied", expected=1
+        )
+
+        assert f"{ORG}/pkg-a" in output(result), output(result)
+        assert tree_snapshot(target) == before, output(result)
+
+        # Control: the same bundle unpacks once the org policy allows it.
+        world.publish_policy(_POLICY)
+        world.clear_policy_cache()
+        result = run_step(runner, _unpack(bundle, target), cwd=target, env=env, step="allowed")
+        assert (target / _SKILL).is_file(), output(result)
+
+
+def test_unpack_refuses_altered_bytes_when_policy_requires_hashes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy({**_POLICY, "security": {"integrity": {"require_hashes": True}}})
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        (bundle / _SKILL).write_text("# altered\n", encoding="utf-8")
+        target = _unpack_target(world)
+        before = tree_snapshot(target)
+
+        result = run_step(
+            runner, _unpack(bundle, target), cwd=target, env=env, step="altered", expected=1
+        )
+
+    assert "[x]" in output(result), output(result)
+    assert _SKILL in "".join(output(result).split()), output(result)
+    assert tree_snapshot(target) == before
+
+
+def test_unpack_fails_closed_when_policy_is_unavailable_under_block(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        target = _unpack_target(world, extra={"policy": {"fetch_failure_default": "block"}})
+        before = tree_snapshot(target)
+
+        result = run_step(
+            runner, _unpack(bundle, target), cwd=target, env=env, step="unavailable", expected=1
+        )
+
+    text = output(result)
+    assert "[x]" in text, text
+    assert "fetch_failure_default=block" in text, text
+    assert tree_snapshot(target) == before
+
+
+def _plain_dir(world: PolicyScopeWorld, name: str, *, project: bool) -> Path:
+    """A non-git output directory, optionally an APM project root."""
+    root = world.isolated.work_root / name
+    (root / ".claude").mkdir(parents=True)
+    if project:
+        write(root / "apm.yml", f"name: {name}\nversion: 1.0.0\ntargets: [claude]\n")
+    return root
+
+
+def test_unpack_records_deployed_files_in_the_project_lockfile(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+    project = _plain_dir(world, "project", project=True)
+    env = world.isolated.subprocess_env()
+
+    run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack")
+
+    lock = load_yaml(project / "apm.lock.yaml")
+    assert lock["local_deployed_files"] == [_SKILL]
+    assert lock["local_deployed_file_hashes"][_SKILL].startswith("sha256:")
+    audit = ("audit", "--ci", "--no-drift", "--no-policy")
+    run_step(runner, audit, cwd=project, env=env, step="audit-clean")
+
+    # The record is what audit reads: altered bytes are reported.
+    (project / _SKILL).write_text("# altered\n", encoding="utf-8")
+    result = run_step(runner, audit, cwd=project, env=env, step="audit-altered", expected=1)
+    assert "content-integrity" in output(result), output(result)
+    assert _SKILL in "".join(output(result).split()), output(result)
+
+
+def test_unpack_into_a_project_keeps_unapproved_executables_out(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    _publish_hooked(world, "pkg-hooked")
+    runner = _runner(apm_binary_path)
+    project = _plain_dir(world, "project", project=True)
+    before = tree_snapshot(project)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_hooked_dependency_bundle(world, runner, env, tmp_path / "out")
+        result = run_step(
+            runner, _unpack(bundle, project), cwd=project, env=env, step="unpack", expected=1
+        )
+
+    assert "Refusing to unpack" in output(result), output(result)
+    assert tree_snapshot(project) == before
+    assert not _hooks_deployed(project)
+
+
+def test_unpack_into_a_non_project_dir_announces_and_writes_no_lockfile(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+    output_dir = _plain_dir(world, "restore", project=False)
+
+    result = run_step(
+        runner,
+        _unpack(bundle, output_dir),
+        cwd=output_dir,
+        env=world.isolated.subprocess_env(),
+        step="unpack",
+    )
+
+    text = " ".join(output(result).split())
+    assert "[i] unpack output is not tracked; use 'apm install <bundle>'" in text, text
+    assert set(tree_snapshot(output_dir)) == {_SKILL}
+
+
+def test_unpack_waits_for_the_lifecycle_lock(tmp_path: Path, apm_binary_path: Path) -> None:
+    import subprocess
+    import time
+
+    from filelock import FileLock
+
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy(_POLICY)
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        target = _unpack_target(world)
+        lock_path = world.isolated.home / ".apm-local" / ".apm-lifecycle.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        holder = FileLock(str(lock_path))
+        holder.acquire()
+        try:
+            proc = subprocess.Popen(
+                [str(apm_binary_path), *_unpack(bundle, target)],
+                cwd=target,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline and proc.poll() is None:
+                time.sleep(0.2)
+            still_waiting = proc.poll() is None
+            deployed_while_held = (target / _SKILL).exists()
+        finally:
+            holder.release()
+        text, _ = proc.communicate(timeout=300)
+
+    assert still_waiting, text
+    assert not deployed_while_held, text
+    assert proc.returncode == 0, text
+    assert "Another APM operation is running" in text, text
+    assert (target / _SKILL).is_file(), text

@@ -358,6 +358,13 @@
       "guards": ["install-deployment-unpack-executable-refusal"]
     },
     {
+      "id": "bundle-admission-owner",
+      "decision": "Which org policy, integrity check and lockfile record apply when a bundle deploys, for every bundle deploy entry point (#4080)",
+      "owner": "install/bundle_admission.py (admit_bundle runs the install policy preflight and the require_hashes integrity decision; record_unpacked_files records through DeploymentLedgerCodec.record_local_bundle_files); entry points: install/local_bundle_handler.py install_local_bundle, commands/pack.py unpack_cmd",
+      "selectors": ["src/apm_cli/install/bundle_admission.py"],
+      "guards": ["install-deployment-bundle-admission-owner"]
+    },
+    {
       "id": "local-bundle-hook-trust",
       "decision": "Whether a deployed local bundle's hooks are still admitted by the approval key that admitted them, under the current project, user and org trust (#4027)",
       "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement goes through HookIntegrator.retire_local_bundle_hooks; consumers: commands/install.py, commands/update.py, commands/prune.py, policy/ci_checks.py",
