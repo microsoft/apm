@@ -149,6 +149,9 @@ class EnterpriseRegistryWorld:
         env["APM_NON_INTERACTIVE"] = "1"
         # Test mode keeps the CLI's own update check off the producer Git host.
         env["APM_E2E_TESTS"] = "1"
+        env["COLUMNS"] = "400"
+        # Let git reach HTTPS so any producer-Git fallback lands on the recorder.
+        env["GIT_ALLOW_PROTOCOL"] = "file:https"
         env[f"APM_REGISTRY_TOKEN_{REGISTRY_NAME.upper()}"] = TOKEN
         return env
 
@@ -158,6 +161,26 @@ class EnterpriseRegistryWorld:
         result = self.runner.run(args, scenario_id=step, cwd=cwd, env=env)
         if expect is not None:
             assert result.returncode == expect, f"step={step}\n{_evidence(result)}"
+        return result
+
+    def egress_step(
+        self,
+        proxy: ScriptedHttpsProxy,
+        env: dict[str, str],
+        cwd: Path,
+        *args: str,
+        step: str,
+        allowed: str = REGISTRY_HOST,
+        expect_failure: bool = False,
+    ) -> CommandResult:
+        """Run one networked step; egress is judged before the exit code."""
+        proxy.clear()
+        result = self.run(env, cwd, *args, step=step, expect=None)
+        foreign = [(o.host, o.method, o.path) for o in proxy.observations if o.host != allowed]
+        assert foreign == [], f"step={step} reached hosts other than {allowed}: {foreign}"
+        assert self.producer_git == [], f"step={step} contacted the producer Git host"
+        failed = result.returncode != 0
+        assert failed is expect_failure, f"step={step}\n{_evidence(result, proxy)}"
         return result
 
     def provision(self, isolated: IsolatedApmEnvironment, env: dict[str, str], cwd: Path) -> None:
@@ -198,7 +221,8 @@ class EnterpriseRegistryWorld:
             source = root / ".apm" / "instructions" / f"{name}.instructions.md"
             source.write_text(_instruction(name), encoding="utf-8")
             (root / "LICENSE").write_text("MIT\n", encoding="utf-8")
-            self.run(
+            self.egress_step(
+                proxy,
                 env,
                 root,
                 "publish",
@@ -248,11 +272,6 @@ def _assert_nothing_deployed(project: Path) -> None:
         assert not (project / "apm_modules" / "acme" / name / "apm.yml").exists(), name
 
 
-def _foreign(proxy: ScriptedHttpsProxy, allowed: set[str]) -> list[tuple[str, str, str]]:
-    """Every request (including refused CONNECTs) to a host outside *allowed*."""
-    return [(o.host, o.method, o.path) for o in proxy.observations if o.host not in allowed]
-
-
 def test_enterprise_registry_publish_install_frozen_replay_audit_uninstall(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -269,9 +288,9 @@ def test_enterprise_registry_publish_install_frozen_replay_audit_uninstall(
         consumer["targets"] = ["copilot"]
         dump_yaml(consumer, project / "apm.yml")
         world.provision(world.employee, employee, project)
-        proxy.clear()
-        world.run(employee, project, *INSTALL, f"acme/widget#{VERSION}", step="employee-install")
-        assert _foreign(proxy, {REGISTRY_HOST}) == [], _foreign(proxy, {REGISTRY_HOST})
+        world.egress_step(
+            proxy, employee, project, *INSTALL, f"acme/widget#{VERSION}", step="employee-install"
+        )
         assert proxy.hosts_receiving(TOKEN) == {REGISTRY_HOST}
         assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == [f"acme/widget#{VERSION}"]
         _assert_registry_state(project, artifacts, world.registry)
@@ -288,7 +307,11 @@ def test_enterprise_registry_publish_install_frozen_replay_audit_uninstall(
         frozen = (*INSTALL, "--frozen")
         widget_download = world.registry.download_path("acme/widget", VERSION)
 
-        for fault in ("outage", "wrong-bytes"):
+        # --verbose surfaces which guard rejected the artifact (archive hash, not tree hash).
+        for fault, reason in (
+            ("outage", "registry HTTP 503"),
+            ("wrong-bytes", "archive sha256 mismatch"),
+        ):
             world.registry.download_fault = fault
             if fault == "wrong-bytes":
                 world.registry.substitute_archive = flat_registry_archive(
@@ -297,20 +320,23 @@ def test_enterprise_registry_publish_install_frozen_replay_audit_uninstall(
                         (".apm/instructions/widget.instructions.md", "# substituted\n"),
                     )
                 )
-            proxy.clear()
-            failed = world.run(ci, checkout, *frozen, step=f"ci-frozen-{fault}", expect=None)
-            assert failed.returncode != 0, _evidence(failed, proxy)
+            failed = world.egress_step(
+                proxy,
+                ci,
+                checkout,
+                *frozen,
+                "--verbose",
+                step=f"ci-frozen-{fault}",
+                expect_failure=True,
+            )
+            assert reason in " ".join((failed.stdout + failed.stderr).split()), _evidence(failed)
             fetched = [o for o in proxy.requests_to(REGISTRY_HOST) if o.path == widget_download]
             assert fetched, _evidence(failed, proxy)
-            assert _foreign(proxy, {REGISTRY_HOST}) == [], _evidence(failed, proxy)
             assert (checkout / "apm.lock.yaml").read_bytes() == committed_lock
             _assert_nothing_deployed(checkout)
         world.registry.download_fault = None
 
-        proxy.clear()
-        replay = world.run(ci, checkout, *frozen, step="ci-frozen-replay")
-        assert _foreign(proxy, {REGISTRY_HOST}) == [], _evidence(replay, proxy)
-        assert world.producer_git == []
+        world.egress_step(proxy, ci, checkout, *frozen, step="ci-frozen-replay")
         downloads = sorted(o.path for o in proxy.requests_to(REGISTRY_HOST))
         assert downloads == sorted(
             world.registry.download_path(f"acme/{name}", VERSION) for name, _ in PACKAGES
@@ -319,29 +345,25 @@ def test_enterprise_registry_publish_install_frozen_replay_audit_uninstall(
         _assert_registry_state(checkout, artifacts, world.registry)
         assert (checkout / SENTINEL).read_bytes() == SENTINEL_BYTES
 
-        proxy.clear()
-        audit = world.run(ci, checkout, "audit", "--ci", "-f", "json", step="ci-audit")
+        audit = world.egress_step(
+            proxy, ci, checkout, "audit", "--ci", "-f", "json", step="ci-audit"
+        )
         checks = {c["name"]: c["passed"] for c in json.loads(audit.stdout)["checks"]}
         assert checks and all(checks.values()), _evidence(audit)
         assert {"ref-consistency", "deployed-files-present", "content-integrity", "drift"} <= set(
             checks
         )
-        assert _foreign(proxy, {REGISTRY_HOST}) == [], _evidence(audit, proxy)
         assert (checkout / "apm.lock.yaml").read_bytes() == committed_lock
         _assert_registry_state(checkout, artifacts, world.registry)
 
         # Employee uninstall removes both packages and keeps the unrelated file.
-        proxy.clear()
-        removed = world.run(
-            employee, project, "uninstall", "acme/widget", step="employee-uninstall"
-        )
-        assert _foreign(proxy, {REGISTRY_HOST}) == [], _evidence(removed, proxy)
-    assert world.producer_git == []
+        world.egress_step(proxy, employee, project, "uninstall", "acme/widget", step="uninstall")
     assert _locked(project) == {}
     assert "dependencies" not in load_yaml(project / "apm.yml") or not (
         load_yaml(project / "apm.yml")["dependencies"].get("apm")
     )
     _assert_nothing_deployed(project)
+    assert (project / SENTINEL).is_file(), "uninstall deleted the unrelated sentinel file"
     assert (project / SENTINEL).read_bytes() == SENTINEL_BYTES
 
 
@@ -354,12 +376,19 @@ def test_employee_registers_and_browses_public_https_catalog(
     with world.serve() as proxy:
         env = world.env(world.employee, proxy)
         world.provision(world.employee, env, project)
-        proxy.clear()
-        added = world.run(env, project, "marketplace", "add", CATALOG_URL, step="catalog-add")
-        browse = world.run(env, project, "marketplace", "browse", "corp-catalog", step="browse")
-        assert _foreign(proxy, {CATALOG_HOST}) == [], _evidence(browse, proxy)
+        added = world.egress_step(
+            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
+        )
+        browse = world.egress_step(
+            proxy,
+            env,
+            project,
+            *("marketplace", "browse", "corp-catalog"),
+            step="browse",
+            allowed=CATALOG_HOST,
+        )
+        assert [o.path for o in proxy.requests_to(CATALOG_HOST)] == ["/apm/marketplace.json"]
         assert proxy.hosts_receiving(TOKEN) == set()
-    assert world.producer_git == []
     assert "corp-catalog" in added.stdout, _evidence(added)
     listing = " ".join(browse.stdout.split())
     assert "widget" in listing and "Widget registry package" in listing, _evidence(browse)
