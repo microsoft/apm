@@ -207,7 +207,10 @@
         "src/apm_cli/utils/content_hash.py",
         "src/apm_cli/deps/package_validator.py"
       ],
-      "guards": ["marketplace-integrations-codex-native-lifecycle"]
+      "guards": [
+        "marketplace-integrations-codex-native-lifecycle",
+        "marketplace-integrations-codex-offline-launch"
+      ]
     },
     {
       "id": "copilot-marketplace-ownership",
