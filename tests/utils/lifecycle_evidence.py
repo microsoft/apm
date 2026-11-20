@@ -420,6 +420,14 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         ),
     ),
     KnownOutputCell(
+        "approve-org-policy-warning-twice",
+        "I9",
+        "#4178",
+        _runs("approve"),
+        r"\[!\] (Org policy not applied|Using stale cached org policy)",
+        output=r"^\[!\] (Org policy not applied|Using stale cached org policy)",
+    ),
+    KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
         "#4196",

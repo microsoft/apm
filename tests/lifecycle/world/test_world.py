@@ -138,7 +138,6 @@ _TARGETS = {
 _KNOWN = {
     ("p-parent", "user"): _TRACK_USER_TRANSITIVE,
     ("p-parent2", "user"): _TRACK_USER_TRANSITIVE,
-    ("p-native-claude", "user"): _TRACK_NATIVE_APPROVE,
     ("p-native-codex", "user"): _TRACK_NATIVE_APPROVE,
 }
 

@@ -117,26 +117,20 @@ def test_credential_flags_in_free_text_values_are_redacted(value: str, expected:
             f"--endpoint=https://h.invalid/x?sig={_SHORT} --mode fast",
             "--endpoint=https://h.invalid/x?sig=******** --mode fast",
         ),
-    ],
-)
-def test_query_credentials_in_config_values_are_masked(value: str, expected: str) -> None:
-    assert render_config_value("external.skillspector.args", value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (
+        # Userinfo inside --flag=URL arguments is removed, not masked.
+        pytest.param(
             f"--endpoint=https://{_SECRET}@reg.example.invalid/apm",
             "--endpoint=https://reg.example.invalid/apm",
+            id="userinfo-equals-form-arg",
         ),
-        (
+        pytest.param(
             f"--endpoint=https://u:a:{_SHORT}@reg.example.invalid/apm --x",
             "--endpoint=https://reg.example.invalid/apm --x",
+            id="userinfo-colon-password-equals-form-arg",
         ),
     ],
 )
-def test_userinfo_inside_equals_form_args_is_removed(value: str, expected: str) -> None:
+def test_credentials_in_config_values_are_masked_or_removed(value: str, expected: str) -> None:
     assert render_config_value("external.skillspector.args", value) == expected
 
 
