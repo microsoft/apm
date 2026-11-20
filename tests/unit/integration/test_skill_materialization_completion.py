@@ -176,8 +176,12 @@ def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callba
             unchanged=True,
             diagnostics=diagnostics,
         )
-    assert copy.call_count == (2 if baseline == "valid" else 0)
+    # "changed": the files already hold the package's bytes, so they are
+    # rewritten and recorded (adopted), never reported as kept edits.
+    assert copy.call_count == (0 if baseline == "missing" else 2)
     assert diagnostics.error_count == (2 if baseline == "missing" else 0)
+    if baseline != "missing":
+        assert not diagnostics.has_diagnostics
     assert written == copied
     assert len(written) == copy.call_count
     assert {path.name: path.read_bytes() for path in destination.iterdir()} == {

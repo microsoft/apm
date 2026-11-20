@@ -385,6 +385,32 @@ class BaseIntegrator:
             user_scope=user_scope,
         )
 
+    @staticmethod
+    def _member_edit(
+        target_file: Path, source_file: Path, expected: str | None, *, baseline_required: bool
+    ) -> str | None:
+        """Classify an existing member against the bytes APM recorded deploying.
+
+        ``None`` writes it. ``"untrusted"``: no baseline proves APM wrote it.
+        ``"drift"``: a user edit while the package brings the recorded bytes.
+        ``"blocked"``: a user edit while the package brings new bytes (an
+        upgrade the kept edit blocks). A file that already holds the package's
+        bytes is rewritten, which records them.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        if not target_file.is_file():
+            return None
+        if expected is None:
+            return "untrusted" if baseline_required else None
+        disk = compute_file_hash(target_file)
+        if disk == expected:
+            return None
+        incoming = compute_file_hash(source_file)
+        if incoming == disk:
+            return None
+        return "drift" if incoming == expected else "blocked"
+
     def copy_directory_files(
         self,
         source: Path,
@@ -410,7 +436,6 @@ class BaseIntegrator:
         without deleting or inventorying destination siblings. *package* is the
         owning dependency key used to attribute refusal diagnostics.
         """
-        from apm_cli.utils.content_hash import compute_file_hash
 
         copied: list[Path] = []
         destination_existed = destination.exists()
@@ -458,22 +483,18 @@ class BaseIntegrator:
                     if baseline_hash is not None
                     else recorded_hashes.get(entry)
                 )
-                if (
-                    not force
-                    and target_file.is_file()
-                    and (
-                        (baseline_hash is not None and expected is None)
-                        or (expected is not None and compute_file_hash(target_file) != expected)
-                    )
-                ):
-                    # A kept edit blocks the requested state only when the
-                    # package brings new bytes for the file (an upgrade) that
-                    # the file does not already hold.
-                    blocking = expected is None or compute_file_hash(source_file) not in (
+                state = (
+                    None
+                    if force
+                    else self._member_edit(
+                        target_file,
+                        source_file,
                         expected,
-                        compute_file_hash(target_file),
+                        baseline_required=baseline_hash is not None,
                     )
-                    if expected is None:
+                )
+                if state is not None:
+                    if state == "untrusted":
                         message = self.untrusted_member_message(
                             entry, path_entry(destination), destination
                         )
@@ -482,10 +503,10 @@ class BaseIntegrator:
                             entry, user_scope=self.install_user_scope(), proven_edit=True
                         )
                     if diagnostics is not None:
-                        if blocking:
-                            diagnostics.error(message, package=package)
-                        else:
+                        if state == "drift":
                             diagnostics.warn(message)
+                        else:
+                            diagnostics.error(message, package=package)
                     else:
                         _rich_warning(message)
                     if on_member_skipped is not None:
