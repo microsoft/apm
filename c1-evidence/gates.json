@@ -1,0 +1,20 @@
+{
+ "counts_left": {},
+ "decisions": [
+  "gate contract changed from whole-file bytes to ast-body-v1 and stale-as-info; old gate tests replaced by contract tests (crlf case obsolete: AST hashing ignores line endings by design)"
+ ],
+ "folds": {
+  "tests/unit/scripts/test_check_exact_test_duplicates.py::test_crlf_and_lf_are_not_exact_duplicates": "tests/unit/scripts/test_check_exact_test_duplicates.py::test_different_literal_is_not_a_duplicate",
+  "tests/unit/scripts/test_check_exact_test_duplicates.py::test_malformed_digest_fails_closed": "tests/unit/scripts/test_check_exact_test_duplicates.py::test_malformed_baseline_fails_closed",
+  "tests/unit/scripts/test_check_exact_test_duplicates.py::test_near_duplicate_pair_passes": "tests/unit/scripts/test_check_exact_test_duplicates.py::test_different_literal_is_not_a_duplicate",
+  "tests/unit/scripts/test_check_exact_test_duplicates.py::test_new_exact_pair_fails": "tests/unit/scripts/test_check_exact_test_duplicates.py::test_seeded_duplicate_body_fails_naming_file_and_fix",
+  "tests/unit/scripts/test_check_exact_test_duplicates.py::test_reduction_requires_baseline_tightening": "tests/unit/scripts/test_check_exact_test_duplicates.py::test_stale_entries_are_info_and_update_prunes_them",
+  "tests/unit/scripts/test_check_exact_test_duplicates.py::test_third_copy_exceeds_pair_baseline": "tests/unit/scripts/test_check_exact_test_duplicates.py::test_third_copy_exceeds_baselined_pair",
+  "tests/unit/scripts/test_check_exact_test_duplicates.py::test_update_refuses_existing_group_growth_without_writing": "tests/unit/scripts/test_check_exact_test_duplicates.py::test_update_refuses_growth_without_writing",
+  "tests/unit/scripts/test_check_test_assertions.py::test_reduction_is_stale_until_baseline_is_tightened": "tests/unit/scripts/test_check_test_assertions.py::test_reduction_is_reported_as_stale_info_not_failure"
+ },
+ "partition": "gates (#4028)",
+ "steps_done": [
+  1
+ ]
+}
