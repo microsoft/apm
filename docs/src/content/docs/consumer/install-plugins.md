@@ -63,9 +63,12 @@ apm install -g --target claude review-kit@contoso
   `enabledPlugins["<plugin>@apm-u-<hash>"]: true`. It needs no `claude` command.
   `/plugin` lists the plugin under that marketplace name.
 - **Enabled only when approved.** One approval, pinned to the plugin's file paths and
-  bytes, covers the whole plugin, including its hooks, MCP servers and LSP servers.
-  From `~/.apm`, run `apm approve <package>`, then install again. Until then the
-  plugin is parked: not deployed, not declared, one warning, exit code 0.
+  bytes, covers the whole plugin, including its hooks, MCP servers, LSP servers and
+  `bin/`. Run `cd ~/.apm && apm approve <package>`, then install again. Until then
+  the plugin is parked: not deployed, not declared, one warning, exit code 0.
+- **`bin/` stays in the plugin.** It deploys inside the plugin folder, not under
+  `~/.claude/skills`. It also needs `--trust-bin` (or an interactive install), and
+  your organization's `bin_deploy` policy applies; otherwise the plugin is parked.
 - **MCP and LSP servers stay in the plugin.** Claude Code loads them from the plugin,
   and APM writes no Claude entry for them; other targets still get APM's copy. Your
   organization's MCP policy applies to each server: under `enforcement: block` a
@@ -84,10 +87,10 @@ apm install -g --target claude review-kit@contoso
   and removes APM's marketplace entry once no plugins remain. If something is out of
   step, rerun `apm install --global` with the original `--target`.
 
-APM refuses, and changes nothing, for a plugin with a partial skill selection,
-symlinks, `bin/`, unknown manifest capabilities, paths outside the plugin, or names
-that collide when case is ignored. A plugin that declares plugin `dependencies` is
-parked.
+APM parks, with a warning that names the package and the next step, a plugin with
+a partial skill selection, symlinks, `monitors/` or `workflows/`, unknown manifest
+capabilities, paths outside the plugin, names that collide when case is ignored, or
+plugin `dependencies`. Other packages in the same install continue.
 
 ## Known gaps
 
