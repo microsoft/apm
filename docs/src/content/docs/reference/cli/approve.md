@@ -294,7 +294,9 @@ Existing `owner/repo#1.2.0` keys still match the package regardless of the
 installed version; `apm approve` folds them into the version-blind key. Local
 bundle grants are different: copy the full `name#version@sha256:<digest>` key
 from the install diagnostic. A changed local bundle does not inherit the prior
-grant.
+grant. `apm approve` does not accept a local bundle key: add the key under
+`executables.allow` in `apm.yml`, as the install diagnostic prints it, then run
+`apm install` again.
 
 ## Examples
 
