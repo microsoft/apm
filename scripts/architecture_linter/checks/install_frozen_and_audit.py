@@ -18,7 +18,6 @@ from scripts.architecture_linter.checks.contracts_dependency_policy import _uniq
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _INSTALL_ADAPTER,
     _SRC_PREFIX,
-    _UNINSTALL_ENGINE,
     _awk_body,
     _body_has,
     _duplicate_definition_lines,
@@ -517,25 +516,24 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
     return tuple(findings)
 
 
+_ORPHAN_OWNER = "src/apm_cli/install/orphans.py"
+
+
 def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Uninstall engine must reuse deps/reachability.py's forward-reachability walk."""
+    """The orphan owner must reuse deps/reachability.py's forward-reachability walk."""
     rule_id = _GUARD_UNINSTALL_REACHABILITY
     findings: list[Violation] = []
-    engine, engine_fail = _facts_for(provider, _UNINSTALL_ENGINE, rule_id)
-    if engine_fail:
-        return tuple(engine_fail)
+    owner, owner_fail = _facts_for(provider, _ORPHAN_OWNER, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
 
-    reach_pattern = re.compile(
-        r"reachability\.compute_forward_reachable_keys"
-        r"|from \.\.\.deps\.reachability import"
-        r"|from apm_cli\.deps\.reachability import"
-    )
-    if not _present_re(engine, reach_pattern):
+    if not _present_re(owner, re.compile(r"\bcompute_forward_reachable_keys\(")):
         findings.append(
             _summary(
                 rule_id,
-                _UNINSTALL_ENGINE,
-                "Uninstall engine must call deps/reachability.py's compute_forward_reachable_keys",
+                _ORPHAN_OWNER,
+                "Uninstall orphan decisions must call deps/reachability.py's "
+                "compute_forward_reachable_keys",
             )
         )
     for path in _python_paths(provider, "src/apm_cli/commands/uninstall/"):
@@ -560,14 +558,20 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
                     findings.append(
                         violation(rule_id, path, message, line=number, column=column + 1)
                     )
-    # Prune and the expected-path selector ask the same owner which lock
-    # entries are retained instead of re-deriving ``depth > 1`` (#3668).
-    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/install/orphans.py"):
+    # Prune's orphan decision asks the reachability owner which lock entries
+    # are retained instead of re-deriving ``depth > 1`` (#3668).
+    for path in ("src/apm_cli/commands/prune.py", _ORPHAN_OWNER):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
         if failures:
             continue
-        if not _present_re(facts, re.compile(r"\bretained_lock_keys\(")):
+        # The owner runs the walk; prune hands it the walk's inputs.
+        needle = (
+            re.compile(r"\bretained_lock_keys\(")
+            if path == _ORPHAN_OWNER
+            else re.compile(r"\breachability=ReachabilityProbe\(")
+        )
+        if not _present_re(facts, needle):
             findings.append(
                 _summary(rule_id, path, "Retained lock keys must come from deps/reachability.py")
             )

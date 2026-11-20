@@ -1392,3 +1392,18 @@ class TestSyncPreservesUserFiles:
         assert not (hooks_dir / "managed.json").exists()
         assert (hooks_dir / "user-hooks.json").exists()
         assert json.loads((hooks_dir / "user-hooks.json").read_text()) == {"user": True}
+
+
+def test_compute_deployed_hashes_hashes_cowork_rows(tmp_path, monkeypatch):
+    """cowork:// rows carry provenance hashes like project rows (#3701)."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    cowork = tmp_path / "cowork"
+    skill = cowork / "demo" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("demo\n", encoding="utf-8")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+    hashes = compute_deployed_hashes(
+        ["cowork://skills/demo/SKILL.md", "cowork://skills/../escape.md"], tmp_path / "project"
+    )
+    assert hashes == {"cowork://skills/demo/SKILL.md": compute_file_hash(skill)}

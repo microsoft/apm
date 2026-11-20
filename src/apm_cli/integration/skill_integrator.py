@@ -1582,7 +1582,10 @@ class SkillIntegrator(BaseIntegrator):
         lockfile_root = (
             get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root
         )
-        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+        from apm_cli.core.deployment_ledger import (
+            DeploymentLedgerCodec,
+            DeploymentMaterializationSession,
+        )
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
         self._skill_files = []
@@ -1591,11 +1594,7 @@ class SkillIntegrator(BaseIntegrator):
         self._skill_can_complete = True
         self._skill_completed_roots = {}
         self._skill_completed_files = {}
-        self._skill_current_owner = (
-            package_info.dependency_ref.get_unique_key()
-            if package_info.dependency_ref is not None
-            else "."
-        )
+        self._skill_current_owner = DeploymentMaterializationSession.receipt_owner(package_info)
         self._skill_current_commit = installing_commit(package_info)
         snapshots = self._hash_snapshots if self._hash_snapshots is not None else {}
         if lockfile_root not in snapshots:
@@ -1938,8 +1937,8 @@ class SkillIntegrator(BaseIntegrator):
         )
         return dest_manifest
 
-    @staticmethod
     def _copy_plugin_file(
+        self,
         src_file: Path,
         dest_file: Path,
         *,
@@ -1968,6 +1967,7 @@ class SkillIntegrator(BaseIntegrator):
 
         if not skip_copy:
             shutil.copy2(src_file, dest_file)
+            self.note_rendered_write(dest_file)
 
         if make_executable and os.name == "posix":
             # User-only (0o700-style): set the exact deploy mode so group,

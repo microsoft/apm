@@ -1122,7 +1122,7 @@ def _cleanup_claim_findings(provider: FactsProvider, rule_id: str) -> list[Viola
     )
     if (
         len(owner_calls) != 1
-        or not _present(facts, "if deployed_file not in surviving_files")
+        or not _present(facts, "deployment_claims=DeploymentClaims(live_files=surviving_files")
         or not _present(facts, "other_deployed = surviving_files - set(new_deployed)")
         or not all(
             _body_has(survivor_body, snippet)
@@ -1387,6 +1387,9 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             'atomic_write_text(ignore, "*\\n", new_file_mode=0o600, create_only=True)',
             'self.identity_path, installation + "\\n", new_file_mode=0o600, create_only=True',
             "create_only=not self._state_present",
+            'take = getattr(integrator, "take_rendered_writes", None)',
+            "record_rendered_writes(None, integrator, targets=(), package_info=package_info)",
+            "DeploymentMaterializationSession.receipt_owner(package_info),",
         ),
         _SKILL_INTEGRATOR: (
             "on_member_written=written.append",
@@ -1398,6 +1401,8 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "removed_paths.append(target)",
         ),
         _BASE_INTEGRATOR_OWNER: (
+            'self.__dict__.setdefault("_rendered_writes", []).append(path)',
+            'return self.__dict__.pop("_rendered_writes", [])',
             "baseline_hash(target_file)",
             "(baseline_hash is not None and expected is None)",
             "on_member_written(target_file)",
@@ -1442,6 +1447,36 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
         if not failures and not all(snippet in text for snippet in snippets):
             findings.append(
                 _summary(rule_id, path, "Local materialization evidence must use the guarded owner")
+            )
+    # Every file-primitive writer reports its final-rendered writes, and the
+    # install service records them for each integrator call (#3701).
+    write_reports = {
+        "src/apm_cli/install/services.py": (
+            "with recorded_writes(integrators.skill, _integrator, [_target], package_info):",
+            "with recorded_writes(integrators.skill, integrators.skill, projection_targets,",
+        ),
+        **{
+            f"src/apm_cli/integration/{name}.py": ("note_rendered_write(",)
+            for name in (
+                "agent_integrator",
+                "canvas_integrator",
+                "command_integrator",
+                "hook_bundle",
+                "hook_integrator",
+                "instruction_integrator",
+                "kiro_hook_integrator",
+                "prompt_integrator",
+                "skill_integrator",
+            )
+        },
+    }
+    for path, snippets in write_reports.items():
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        text = "\n".join(_lines(facts))
+        if not failures and not all(snippet in text for snippet in snippets):
+            findings.append(
+                _summary(rule_id, path, "Final-rendered writes must be reported for receipts")
             )
     allowed = set(requirements)
     for path in _python_paths(provider, _SRC_PREFIX):
