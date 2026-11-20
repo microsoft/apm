@@ -17,6 +17,7 @@ from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS, HookIntegra
 from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 
 
@@ -129,6 +130,7 @@ def test_instruction_preflight_precedes_excluded_hook_reconciliation(tmp_path: P
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
             package_name="targeted-hooks",
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     assert hook_integrator.reconciled_targets == []
@@ -162,6 +164,7 @@ def test_native_plugin_reconciles_excluded_targets(
         managed_files=set(),
         diagnostics=DiagnosticCollector(),
         package_name="targeted-hooks",
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     assert hook_integrator.reconciled_targets == ["claude"]
@@ -195,6 +198,7 @@ def _run_with_targets(
         diagnostics=diagnostics,
         package_name="targeted-hooks",
         dep_target_subset=dep_target_subset,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
     return diagnostics
 
@@ -341,6 +345,7 @@ def test_hooks_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> N
         managed_files=set(),
         diagnostics=DiagnosticCollector(),
         package_name="targeted-hooks",
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     assert result["hooks"] == 2
@@ -455,6 +460,7 @@ def test_divergent_hook_files_fail_closed_under_multi_dep_targets(
             diagnostics=DiagnosticCollector(),
             package_name="targeted-hooks",
             dep_target_subset=[first, second],
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     message = str(excinfo.value)
@@ -490,6 +496,7 @@ def test_divergent_hook_files_fail_closed_under_single_dep_target(
             diagnostics=DiagnosticCollector(),
             package_name="targeted-hooks",
             dep_target_subset=[active],
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     assert _deployed_commands(project, active) == []
@@ -538,6 +545,7 @@ def test_copilot_never_absorbs_foreign_per_file_manifest(tmp_path: Path, foreign
             diagnostics=DiagnosticCollector(),
             package_name="targeted-hooks",
             dep_target_subset=["copilot"],
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     assert not (project / ".github" / "hooks").exists()
@@ -563,6 +571,7 @@ def test_kiro_never_absorbs_foreign_per_file_manifest(tmp_path: Path) -> None:
             diagnostics=DiagnosticCollector(),
             package_name="targeted-hooks",
             dep_target_subset=["kiro"],
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     assert not list((project / ".kiro").rglob("*.json"))
@@ -591,6 +600,7 @@ def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> 
         managed_files=set(),
         diagnostics=DiagnosticCollector(),
         package_name="targeted-hooks",
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     assert skill_integrator.seen_targets == ["claude", "codex"]

@@ -839,8 +839,13 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
         ),
         (
             "src/apm_cli/install/exec_gate.py",
-            "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
-            "denied = frozenset(unapproved)",
+            "denied |= denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+            "denied |= frozenset(unapproved)",
+        ),
+        (
+            "src/apm_cli/install/exec_gate.py",
+            "denied = frozenset(t for t, status in pinned_status.items() if status == TRUST_DENIED)",
+            "denied = frozenset()",
         ),
     ],
 )
@@ -940,7 +945,7 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hook_trust.py",
-            "        elif not all(is_package_approved(allow_map, key, EXEC_TYPE_HOOKS) for key in keys):\n",
+            "        elif not all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys):\n",
             "        elif False:\n",
         ),
         (
@@ -1007,6 +1012,126 @@ def test_trust_and_integrity_owners_reject_bypasses(
 
     assert report.failures == ()
     assert {violation.rule_id for violation in report.violations} == {rule_id}
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/dry_run_plan.py",
+            "filter_lsp_by_allow_executables(list(self.lsp_dependencies), allow_map, ctx.logger)",
+            "filter_lsp_by_allow_executables(\n"
+            "                list(self.lsp_dependencies),\n"
+            '                getattr(apm_package, "allow_executables", None),\n'
+            "                ctx.logger,\n"
+            "            )",
+            id="manifest-grants-bypass-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "            allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),\n",
+            "",
+            id="omitted-first-party-map",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "                            allow_executables=replay_allow,\n",
+            "                            allow_executables=None,\n",
+            id="literal-none-map",
+        ),
+        pytest.param(
+            "src/apm_cli/install/lsp/integration.py",
+            "    allow_map = closed_exec_map(None)\n",
+            "    allow_map = None\n",
+            id="none-placeholder-map",
+        ),
+    ],
+)
+def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, new: str) -> None:
+    """Closed-world provenance: every allow-map consumer gets an owner map (#4018)."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/deployment_plan.py",
+            "def prepare_package_deployment(",
+            "def _hooks_ok(allow_executables, key):\n"
+            "    from apm_cli.security.executables import is_package_approved\n\n"
+            '    return is_package_approved(allow_executables, key, "hooks")\n\n\n'
+            "def prepare_package_deployment(",
+            id="out-of-owner-approval-lookup",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                hooks_approved=_hooks_approved_bundle,\n"
+            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "            )\n"
+            "            if _deploy_rel is None:",
+            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "            )\n"
+            "            if _deploy_rel is None:",
+            id="omitted-hooks-approved",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_paths.py",
+            "    hooks_approved: bool,\n    canvas_approved: bool,\n) -> str | None:\n"
+            '    """Return a bundle path relative',
+            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n) -> str | None:\n"
+            '    """Return a bundle path relative',
+            id="fail-open-hooks-approved-default",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    non_interactive: bool,\n",
+            "    non_interactive: bool = False,\n",
+            id="fail-open-trust-bin-default",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    if package_name == FIRST_PARTY_PACKAGE or exec_map_authorizes_all(allow_executables):\n"
+            "        return True, True, True, True, True\n",
+            "    if allow_executables is None or exec_map_authorizes_all(allow_executables):\n"
+            "        return True, True, True, True, True\n",
+            id="missing-map-authorizes",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    if native_install(package_info):\n",
+            "    if False:\n",
+            id="native-admission-skipped",
+        ),
+        pytest.param(
+            "src/apm_cli/install/deployment_plan.py",
+            "        hook_file_admitted=hook_filter,\n",
+            "",
+            id="pinned-hook-admission-omitted",
+        ),
+    ],
+)
+def test_executable_approval_cannot_leave_the_trust_owners(path: str, old: str, new: str) -> None:
+    """Closed-world: no adapter looks approvals up or fails open on omission (#4018)."""
+    rule_id = "install-deployment-executable-item-admission"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 @pytest.mark.parametrize(
@@ -3406,7 +3531,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = [key for key in lockfile.dependencies if key not in wanted]\n",
-            "orphaned_packages must come from the decide_orphan_removal decision",
+            "Removal sites must not filter installed or locked sets",
             id="renamed-evidence-predicate",
         ),
         pytest.param(

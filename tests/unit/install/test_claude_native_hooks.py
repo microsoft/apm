@@ -21,6 +21,7 @@ from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 from apm_cli.models.validation import validate_apm_package
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.component
@@ -87,6 +88,9 @@ def _integrate(home: Path, info: PackageInfo, **kwargs):
         scope=kwargs.pop("scope", InstallScope.USER),
         skill_subset=kwargs.pop("skill_subset", None),
         ctx=ctx,
+        allow_executables=kwargs.pop(
+            "allow_executables", authorized_exec_map(AUTHORIZED_GATE_DISABLED)
+        ),
         **kwargs,
     )
     return result, ctx
@@ -122,6 +126,7 @@ def test_prepared_native_plan_preserves_unmanaged_loose_skill(tmp_path: Path) ->
         package_name="owner/hooks",
         scope=InstallScope.USER,
         skill_subset=None,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
     assert plan.claude_native is not None
     assert plan.codex_native is None

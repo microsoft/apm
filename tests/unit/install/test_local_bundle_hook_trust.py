@@ -20,6 +20,12 @@ from apm_cli.integration.hook_ownership import (
 _KEY = "hookpkg#1.0.0@sha256:" + "a" * 64
 
 
+def _gate_off():
+    from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+
+    return authorized_exec_map(AUTHORIZED_GATE_DISABLED)
+
+
 def test_marker_round_trips_the_alias_slug_and_real_key() -> None:
     marker = local_bundle_hook_source_marker("team-hooks", _KEY)
     assert parse_local_bundle_hook_source(marker) == ("team-hooks", _KEY)
@@ -48,7 +54,10 @@ def _project(tmp_path: Path, marker: str) -> tuple[Path, list]:
 def test_granted_key_is_admitted_and_gate_off_admits_all(tmp_path: Path) -> None:
     root, targets = _project(tmp_path, local_bundle_hook_source_marker("hookpkg", _KEY))
     assert unadmitted_bundle_hooks(root, targets, lambda: {_KEY: {"hooks": True}}) == []
-    assert unadmitted_bundle_hooks(root, targets, lambda: None) == []
+    assert unadmitted_bundle_hooks(root, targets, _gate_off) == []
+    # A missing map is not a gate-off map: it admits nothing.
+    (missing,) = unadmitted_bundle_hooks(root, targets, lambda: None)
+    assert missing.reason == REASON_NOT_GRANTED
 
 
 def test_revoked_or_unrecorded_key_is_not_admitted(tmp_path: Path) -> None:
