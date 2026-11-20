@@ -111,6 +111,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "reported the bundle",
     "legacy-bundle-unpack": _OUTSIDE,
     "registry-package-install": _NETWORK,
+    "update-undeclared-package": "covered by the update undeclared-package refusal lifecycle "
+    "test, which asserts the printed next step",
 }
 
 

@@ -147,8 +147,8 @@
     {
       "id": "apm-package-manifest-construction",
       "decision": "APMPackage interpreted-manifest construction",
-      "owner": "models/apm_package.py (APMPackage.from_mapping)",
-      "selectors": ["src/apm_cli/models/apm_package.py"],
+      "owner": "models/apm_package.py (APMPackage.from_mapping) + models/extension_keys.py (x- extension keys are accepted and preserved, never interpreted)",
+      "selectors": ["src/apm_cli/models/apm_package.py", "src/apm_cli/models/extension_keys.py"],
       "guards": ["marketplace-integrations-package-construction"]
     },
     {

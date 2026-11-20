@@ -780,6 +780,7 @@ REGISTRY_PACKAGE_INSTALL = _entry(
 PROJECT_MANIFEST_BOOTSTRAP = _entry(
     "project-manifest-bootstrap", "apm install <org/repo>", "create apm.yml with that package"
 )
+UPDATE_UNDECLARED_PACKAGE = _entry("update-undeclared-package", "apm install {package}", "add it")
 
 # -- end commands/** (W1) -----------------------------------------------------
 
