@@ -4426,7 +4426,7 @@
     {
       "issue": 4526,
       "fixed_in": "Unreleased",
-      "summary": "APM rewrote a user-edited MCP config (.github/mcp.json, .mcp.json, ~/.claude.json, the IntelliJ MCP config) in 2-space style; it now keeps the file's indentation, final newline, line endings and literal non-ASCII text and changes only its own entries, so removing them restores the user's bytes.",
+      "summary": "APM rewrote a user-edited MCP config (.github/mcp.json, .mcp.json, ~/.claude.json, the IntelliJ MCP config) in 2-space style; it now keeps the file's indentation, final newline, line endings and literal non-ASCII text (other layout such as inline arrays is normalized), so removing its entries from a file in that layout restores the user's bytes.",
       "failure_modes": ["ownership", "idempotency"],
       "properties": ["ownership.preserve_unowned", "idempotency.byte_stable"],
       "regression_tests": [

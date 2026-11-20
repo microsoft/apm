@@ -7,6 +7,9 @@ server on install, rewrites it on update and removes it on uninstall; each
 write keeps the user's style, so after uninstall each file is byte-identical
 to what the user wrote. ``apm audit --ci`` and ``apm install --frozen`` stay
 clean after every step, and a repeat install leaves the bytes alone.
+
+Only indentation, the final newline, line endings and non-ASCII text are kept;
+other layout (an inline array) is normalized, pinned by its own cell.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.windows_compat,
     pytest.mark.promise("P-OWN-mcp-json-config-writer"),
 ]
 
@@ -156,3 +160,28 @@ def test_a_user_formatted_mcp_config_survives_install_update_and_uninstall(
     scope.ok("uninstall", *scope.flags, str(package))
     assert scope.config.read_bytes() == original
     scope.assert_clean()
+
+
+# An inline array is user layout APM does not keep: the file is JSON
+# round-tripped in the user's indentation, so the array gets one item per line.
+_INLINE_ARRAY_MCP = (
+    b'{\n    "mcpServers": {\n        "mine": {\n            "command": "my-tool",\n'
+    b'            "args": ["--a", "--b"]\n        }\n    }\n}\n'
+)
+_INLINE_ARRAY_NORMALIZED = (
+    b'{\n    "mcpServers": {\n        "mine": {\n            "command": "my-tool",\n'
+    b'            "args": [\n                "--a",\n                "--b"\n'
+    b"            ]\n        }\n    }\n}\n"
+)
+
+
+def test_other_user_layout_is_normalized_in_the_users_indentation(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scope, package, _original = _world(tmp_path, apm_binary_path, user=False)
+    scope.config.write_bytes(_INLINE_ARRAY_MCP)
+
+    scope.ok("install", "--no-policy")
+    scope.ok("uninstall", str(package))
+
+    assert scope.config.read_bytes() == _INLINE_ARRAY_NORMALIZED

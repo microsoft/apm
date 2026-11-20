@@ -3,8 +3,10 @@
 ``.github/mcp.json``, ``.mcp.json``, ``~/.claude.json`` and the IntelliJ MCP
 config are shared with the user. Like npm with ``package.json``, APM keeps the
 file's existing style when it rewrites one: indentation (N spaces or a tab),
-the final newline, LF or CRLF line endings, and literal non-ASCII text. Only
-the entries the caller changed differ. A new, empty or single-line (minified)
+the final newline, LF or CRLF line endings, and literal non-ASCII text. Other
+layout is normalized by the JSON round trip: an inline array gets one item per
+line, and a file mixing literal and escaped non-ASCII text is written
+literally. A new, empty or single-line (minified)
 file is written in the caller's default style: 2-space indentation, LF, ASCII
 escapes, and a final newline when ``default_trailing_newline`` is set.
 
