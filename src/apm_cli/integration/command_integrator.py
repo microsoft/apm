@@ -16,7 +16,6 @@ import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
-from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -273,17 +272,6 @@ class CommandIntegrator(BaseIntegrator):
 
         return (command_name, new_post, warnings, dropped_keys)
 
-    def _render_command(self, source: Path, target: Path, format_id: str) -> str | None:
-        """Return the exact text deployment writes, for the adopt check (#4360)."""
-        try:
-            if format_id == "gemini_command":
-                return self._render_gemini_command(source)
-            _name, post, _warnings, _dropped = self._transform_prompt_to_command(source)
-            post.content, _links = self.resolve_links(post.content, source, target)
-            return frontmatter.dumps(post)
-        except yaml.YAMLError:
-            return None
-
     def integrate_command(
         self,
         source: Path,
@@ -346,12 +334,12 @@ class CommandIntegrator(BaseIntegrator):
 
         # Surface dropped (lossy-transform) frontmatter keys.  The shared
         # claude_command transformer preserves only a common subset of
-        # frontmatter; any other source key is silently discarded by the
-        # transformer.  Warn so users see the lossy transform at install
-        # time -- core "install adds, never silently mutates" contract.
-        if dropped_keys and diagnostics is not None:
+        # frontmatter.  A key the target format cannot carry is expected
+        # behaviour, not a problem the user must act on, so it is a verbose
+        # note rather than a [!] warning (#4182).
+        if dropped_keys and diagnostics is not None and getattr(diagnostics, "verbose", False):
             preserved_list = ", ".join(sorted(_PRESERVED_COMMAND_KEYS_DISPLAY))
-            diagnostics.warn(
+            diagnostics.info(
                 message=(
                     f"{target_name.capitalize()} command {command_name}: "
                     f"frontmatter keys not supported for {target_name} commands "
@@ -454,12 +442,8 @@ class CommandIntegrator(BaseIntegrator):
         if scan_verdict is not None and scan_verdict.has_critical:
             return (links_resolved, False, bool(dropped_keys))
 
-        # Ensure target directory exists
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write the command file
-        with open(target, "w", encoding="utf-8") as f:
-            f.write(compiled)
+        # A byte-identical rendered command is left untouched (#4184).
+        self.write_text_if_changed(target, compiled)
 
         return (links_resolved, True, bool(dropped_keys))
 
@@ -591,15 +575,7 @@ class CommandIntegrator(BaseIntegrator):
             rel_path = portable_relpath(target_path, project_root)
 
             skip, adopted = self._check_adopt_or_skip(
-                target_path,
-                prompt_file,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics,
-                target_paths,
-                # Commands are transformed: adopt against the rendered text.
-                expected_content=self._render_command(prompt_file, target_path, mapping.format_id),
+                target_path, prompt_file, rel_path, managed_files, force, diagnostics, target_paths
             )
             if skip:
                 if adopted:
@@ -608,6 +584,7 @@ class CommandIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
+            prior_bytes = target_path.read_bytes() if target_path.is_file() else None
             if mapping.format_id == "gemini_command":
                 try:
                     self._write_gemini_command(prompt_file, target_path)
@@ -665,9 +642,13 @@ class CommandIntegrator(BaseIntegrator):
                 continue
             if had_dropped:
                 any_dropped_keys = True
+            target_paths.append(target_path)
+            # Rendered bytes already on disk are adopted, not integrated (#4184).
+            if prior_bytes is not None and target_path.read_bytes() == prior_bytes:
+                files_adopted += 1
+                continue
             files_integrated += 1
             total_links_resolved += links_resolved
-            target_paths.append(target_path)
             self.note_rendered_write(target_path)
 
         # One-shot install-time notice for cursor-style targets that
@@ -742,12 +723,6 @@ class CommandIntegrator(BaseIntegrator):
 
         Ref: https://geminicli.com/docs/cli/gemini-md/
         """
-        target.parent.mkdir(parents=True, exist_ok=True)
-        write_text_lf(target, CommandIntegrator._render_gemini_command(source))
-
-    @staticmethod
-    def _render_gemini_command(source: Path) -> str:
-        """Return the Gemini CLI ``.toml`` text for one ``.prompt.md`` file."""
         import toml as _toml
 
         post = load_frontmatter(source)
@@ -762,7 +737,8 @@ class CommandIntegrator(BaseIntegrator):
         doc = {"prompt": prompt_text}
         if description:
             doc = {"description": description, "prompt": prompt_text}
-        return _toml.dumps(doc)
+
+        BaseIntegrator.write_text_if_changed(target, _toml.dumps(doc))
 
     # ------------------------------------------------------------------
     # Legacy per-target API (DEPRECATED)

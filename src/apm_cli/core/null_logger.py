@@ -24,7 +24,7 @@ class NullCommandLogger:
 
     Implements only the subset of ``CommandLogger`` needed by
     the integrators: ``start``, ``progress``, ``info``, ``success``,
-    ``warning``, ``error``, ``verbose_detail``, ``tree_item``, and
+    ``warning``, ``error``, ``verbose_detail``, ``tree_item``, ``blank_line``, and
     ``package_inline_warning``.
 
     **Not implemented** (will raise ``AttributeError`` if called):
@@ -88,6 +88,9 @@ class NullCommandLogger:
 
     def tree_item(self, message: str):
         _rich_echo(message, color="green")
+
+    def blank_line(self):
+        _rich_echo("")
 
     def package_inline_warning(self, message: str):
         """Discard inline warnings (verbose is always False)."""

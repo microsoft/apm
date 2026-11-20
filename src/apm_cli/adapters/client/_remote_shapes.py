@@ -26,13 +26,13 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from ...core.command_logger import library_logger
 from ...mcp_transport import (
     CANONICAL_REMOTE_TRANSPORTS,
     TRANSPORT_SSE,
     TRANSPORT_STREAMABLE_HTTP,
     canonical_remote_transport,
 )
-from ...utils.console import _rich_warning
 
 
 class _Unsupported:
@@ -370,7 +370,7 @@ def skip_unsupported_remote(
     if adapter._comparison_render_depth:
         raise UnsupportedRemoteTransportError(message)
     if warn is None:
-        _rich_warning(message, symbol="warning")
+        library_logger().warning(message, symbol="warning")
     else:
         warn(message)
 

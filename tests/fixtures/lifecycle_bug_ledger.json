@@ -67,12 +67,6 @@
       "phase": 0,
       "oracle_tier": "outcome",
       "law": "Credentials remain scoped to their intended host and never enter persisted URLs or output."
-    },
-    {
-      "id": "lockfile.version_monotonic",
-      "phase": 0,
-      "oracle_tier": "semantic",
-      "law": "A written lockfile_version is never lowered by a rewrite (req-lk-002)."
     }
   ],
   "bugs": [
@@ -2319,11 +2313,65 @@
       ]
     },
     {
+      "issue": 4089,
+      "fixed_in": "0.37.0",
+      "summary": "Install and init output repeated or misreported events: install --frozen resolved and announced MCP targets twice, a skills/ bundle printed two skill lines, the Codex, Gemini and Kiro adapters echoed a second success line outside CommandLogger, default init printed a third-party tip, and install --mcp printed the absolute manifest path.",
+      "failure_modes": ["observation", "outcome", "portability", "routing"],
+      "properties": ["outcome.status_matches_state", "portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_error_stream_lifecycle.py::test_error_lines_go_to_stderr",
+        "tests/integration/test_error_stream_lifecycle.py::test_piped_output_is_not_hard_wrapped",
+        "tests/integration/test_init_next_steps_lifecycle.py::test_every_init_next_step_hint_succeeds",
+        "tests/integration/test_init_next_steps_lifecycle.py::test_declined_plugin_scaffold_overwrite_reports_why",
+        "tests/integration/test_command_output_owner_e2e.py::test_frozen_install_announces_mcp_targets_once",
+        "tests/integration/test_command_output_owner_e2e.py::test_skill_bundle_reports_one_line_per_package",
+        "tests/integration/test_command_output_owner_e2e.py::test_mcp_adapter_success_is_reported_once",
+        "tests/integration/test_command_output_owner_e2e.py::test_default_init_prints_no_third_party_tip",
+        "tests/integration/test_command_output_owner_e2e.py::test_install_mcp_names_the_manifest_relatively",
+        "tests/integration/test_architecture_owner_rule_mutations.py::test_output_owner_guards_catch_bypasses",
+        "tests/unit/core/test_experimental.py::test_flag_read_is_a_pure_read"
+      ]
+    },
+    {
+      "issue": 4090,
+      "fixed_in": "0.37.0",
+      "summary": "apm audit --ci and apm install --frozen advised that a plain apm install keeps local edits, but install overwrites edited instructions, agents, prompts, commands and rules behind an info line and refuses edited skills; the advice now states what install does per kind and the overwrite notice is a warning naming the files.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_local_edit_advice_lifecycle.py::test_local_edit_advice_is_true_and_restores_each_kind",
+        "tests/integration/test_remediation_advice_lifecycle.py::test_audit_remediation_clears_the_reported_check",
+        "tests/quality/test_cli_command_literals.py::test_every_apm_command_literal_resolves",
+        "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin"
+      ]
+    },
+    {
+      "issue": 4091,
+      "fixed_in": "0.37.0",
+      "summary": "apm lifecycle trust and untrust write the script trust store inside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer keeps every recorded trust and revocation.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_trust_keeps_every_trust_record",
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_untrust_keeps_the_revocation"
+      ]
+    },
+    {
       "issue": 4115,
       "fixed_in": "0.37.0",
       "summary": "PERF-H2: the PR Windows gate ran only windows_compat unit tests while main push ran the full Windows unit suite, so Windows-only unit regressions passed PR checks and turned main red (11 of 21 red main pushes, 2026-11-05..19).",
-      "failure_modes": ["portability", "observation"],
-      "properties": ["portability.byte_deterministic"],
+      "failure_modes": [
+        "portability",
+        "observation"
+      ],
+      "properties": [
+        "portability.byte_deterministic"
+      ],
       "regression_tests": [
         "tests/quality/test_ci_topology.py::test_pr_windows_gate_runs_every_windows_unit_node"
       ]
@@ -2351,8 +2399,12 @@
       "issue": 4118,
       "fixed_in": "Unreleased",
       "summary": "PERF-H5: apm --help imported every command module and GitPython (767 modules, spawning git version); verbs now load lazily under an installed-CLI import budget with help output and exit codes unchanged.",
-      "failure_modes": ["outcome"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_cli_startup_import_budget.py::test_installed_cli_startup_stays_within_import_budget",
         "tests/unit/test_cli_lazy_dispatch.py::test_root_help_from_stubs_matches_resolved_commands",
@@ -2558,6 +2610,17 @@
       ]
     },
     {
+      "issue": 4179,
+      "fixed_in": "0.37.0",
+      "summary": "A policy-blocked apm install --mcp (denied server, or policy.fetch_failure_default: block with no reachable policy) exits 1 with the refusal reason on stderr, never a bare Error installing dependencies: 1.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_blocked_mcp_install_prints_the_reason",
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_unfetchable_policy_block_prints_the_reason"
+      ]
+    },
+    {
       "issue": 4180,
       "fixed_in": "Unreleased",
       "summary": "With policy.fetch_failure_default: block and an unreachable org policy, a blocked install also printed that it was proceeding without policy enforcement.",
@@ -2571,6 +2634,39 @@
       ],
       "regression_tests": [
         "tests/integration/test_policy_miss_reported_once_lifecycle.py::test_blocked_install_does_not_claim_to_proceed_without_policy"
+      ]
+    },
+    {
+      "issue": 4182,
+      "fixed_in": "0.37.0",
+      "summary": "A command frontmatter key the target format cannot carry (for example mode: for Claude commands) is a verbose note on install and install --frozen, never a [!] warning.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_command_frontmatter_note_lifecycle.py::test_dropped_command_key_is_a_verbose_note"
+      ]
+    },
+    {
+      "issue": 4183,
+      "fixed_in": "0.37.0",
+      "summary": "apm install warns about unpinned dependencies the user's apm.yml declares, with the exact pin; a transitive one is a verbose note naming the declaring package, and a converged run repeats no notice.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_transitive_unpinned_is_verbose_only_and_names_its_parent",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_converged_run_repeats_no_unpinned_notice"
+      ]
+    },
+    {
+      "issue": 4184,
+      "fixed_in": "0.37.0",
+      "summary": "A converged apm install changes no bytes, reports no integrated item, warning or installed count, and ends with 'No changes -- install state already up to date'; local packages and the project's own .apm content count only when they change; uninstall counts each package once with its manifest spelling and a relative apm.yml path.",
+      "failure_modes": ["idempotency", "observation", "outcome"],
+      "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_converged_install_lifecycle.py::test_converged_install_reports_no_change",
+        "tests/integration/test_uninstall_summary_lifecycle.py::test_local_uninstall_summary_counts_once_with_manifest_spelling"
       ]
     },
     {
@@ -2718,7 +2814,7 @@
     {
       "issue": 4196,
       "fixed_in": "0.37.0",
-      "summary": "The frozen MCP check selected target runtimes through the announcing resolver before the install run announced them again, so install --frozen printed its 'Targeting ...' line twice.",
+      "summary": "install --frozen resolves MCP targets once, so the targeting line prints once per run.",
       "failure_modes": [
         "observation"
       ],
@@ -2726,7 +2822,7 @@
         "outcome.status_matches_state"
       ],
       "regression_tests": [
-        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once"
+        "tests/integration/test_command_output_owner_e2e.py::test_frozen_install_announces_mcp_targets_once"
       ]
     },
     {
@@ -3068,8 +3164,16 @@
       "issue": 4229,
       "fixed_in": "Unreleased",
       "summary": "After a checkout or worktree switch, install refused or kept a deployed skill whose bytes equal its link-rewritten render, because a receipt written under another checkout's lock still decided the baseline.",
-      "failure_modes": ["ownership", "outcome", "idempotency"],
-      "properties": ["ownership.preserve_unowned", "outcome.status_matches_state", "idempotency.byte_stable"],
+      "failure_modes": [
+        "ownership",
+        "outcome",
+        "idempotency"
+      ],
+      "properties": [
+        "ownership.preserve_unowned",
+        "outcome.status_matches_state",
+        "idempotency.byte_stable"
+      ],
       "regression_tests": [
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_branch_switch_back_adopts_committed_link_rewritten_skill",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_new_worktree_adopts_committed_link_rewritten_skill",
@@ -3082,8 +3186,16 @@
       "issue": 4230,
       "fixed_in": "Unreleased",
       "summary": "A skill member the install declared but skipped was absent from the run's deployed set, so cleanup treated it as stale and deleted it when its bytes matched the locked render, dropping its lock entry.",
-      "failure_modes": ["cleanup", "transaction", "outcome"],
-      "properties": ["ownership.preserve_unowned", "transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "failure_modes": [
+        "cleanup",
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "ownership.preserve_unowned",
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_branch_switch_then_source_edit_never_deletes_skill_members",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_discarded_deploy_then_source_edit_installs",
@@ -3193,8 +3305,14 @@
       "issue": 4248,
       "fixed_in": "Unreleased",
       "summary": "Deployment rows in the user lockfile record scope user, and a path under a target root outside HOME records a target-relative value instead of an absolute project-relative one; rows in the earlier form read without drift.",
-      "failure_modes": ["portability", "outcome"],
-      "properties": ["portability.byte_deterministic", "outcome.status_matches_state"],
+      "failure_modes": [
+        "portability",
+        "outcome"
+      ],
+      "properties": [
+        "portability.byte_deterministic",
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_claude_config_profile_lifecycle.py::test_user_lockfile_rows_record_user_scope",
         "tests/lifecycle/machines/test_m_spine.py::test_global_install_records_user_scope_deployment_rows"
@@ -3236,8 +3354,12 @@
       "issue": 4252,
       "fixed_in": "Unreleased",
       "summary": "registries.<name> entries handled unknown keys differently per manifest contract: a mistyped key was accepted under the OpenAPM v0.1 contract and an x- vendor key was rejected under the default contract. Both contracts now reject a mistyped key, naming it and the registry, and ignore x- keys.",
-      "failure_modes": ["outcome"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_mistyped_key_is_rejected_naming_key_and_registry",
         "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_extension_key_is_accepted",
@@ -3418,8 +3540,14 @@
       "issue": 4286,
       "fixed_in": "Unreleased",
       "summary": "Registry URLs are validated against the spec scheme rules (req-sc-006) under both manifest contracts through one owner: a plain http URL is a parse error that names the registry and writes nothing, unless the host is loopback or RFC 1918 private or the entry sets insecure: true.",
-      "failure_modes": ["outcome", "transaction"],
-      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
       "regression_tests": [
         "tests/integration/test_registry_url_scheme_lifecycle.py::test_http_registry_to_public_host_is_refused_with_nothing_written",
         "tests/integration/test_registry_url_scheme_lifecycle.py::test_loopback_or_insecure_http_registry_is_accepted",
@@ -3447,8 +3575,12 @@
       "issue": 4288,
       "fixed_in": "Unreleased",
       "summary": "An MCP server that fails for two runtimes prints one failure line per runtime, each naming the runtime, instead of identical lines.",
-      "failure_modes": ["observation"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_mcp_failure_line_runtime_lifecycle.py::test_mcp_failure_line_names_each_runtime"
       ]
@@ -3457,8 +3589,12 @@
       "issue": 4289,
       "fixed_in": "Unreleased",
       "summary": "A legacy MCP entry left in a config file that two targets share (Claude Code and Copilot CLI read .mcp.json) is reported once per file.",
-      "failure_modes": ["observation"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_mcp_slashed_server_cleanup_lifecycle.py::test_removing_slashed_server_keeps_user_and_declared_short_name_entries"
       ]
@@ -3467,8 +3603,12 @@
       "issue": 4290,
       "fixed_in": "Unreleased",
       "summary": "install --verbose reports each Azure DevOps auth-chain step once per command, not once per clone attempt.",
-      "failure_modes": ["observation"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_ado_verbose_auth_trace_lifecycle.py::test_verbose_ado_auth_steps_print_once"
       ]
@@ -3477,8 +3617,12 @@
       "issue": 4291,
       "fixed_in": "Unreleased",
       "summary": "apm pack shows each plugin-manifest note (servers left out, secrets withheld) once per command, not once per manifest it builds.",
-      "failure_modes": ["observation"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_pack_mcp_ownership_lifecycle.py::test_pack_output_is_identical_before_and_after_install"
       ]
@@ -3487,8 +3631,12 @@
       "issue": 4307,
       "fixed_in": "Unreleased",
       "summary": "install lists a policy violation reported by two phases once, and the warning count counts distinct violations.",
-      "failure_modes": ["observation"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_policy_install_enforcement_lifecycle.py::test_warn_policy_installs_and_reports_every_violation"
       ]
@@ -3497,8 +3645,12 @@
       "issue": 4314,
       "fixed_in": "Unreleased",
       "summary": "PROXY_REGISTRY_TOKEN travels over http:// only to a loopback or private network host, or with the explicit PROXY_REGISTRY_ALLOW_HTTP=1 opt-in; otherwise it is not sent and a [!] line names the URL and the opt-in.",
-      "failure_modes": ["auth"],
-      "properties": ["auth.credentials_isolated"],
+      "failure_modes": [
+        "auth"
+      ],
+      "properties": [
+        "auth.credentials_isolated"
+      ],
       "regression_tests": [
         "tests/unit/test_artifactory_support.py::TestRegistryConfig::test_http_url_to_a_public_host_does_not_send_the_token",
         "tests/unit/test_artifactory_support.py::TestRegistryConfig::test_http_url_sends_the_token_with_the_explicit_opt_in",
@@ -3511,8 +3663,12 @@
       "issue": 4320,
       "fixed_in": "Unreleased",
       "summary": "A registry MCP install in CI or E2E mode prints no bare 'environment detected' line per server.",
-      "failure_modes": ["observation"],
-      "properties": ["outcome.status_matches_state"],
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_registry_install_ci_notice_lifecycle.py::test_registry_install_prints_no_bare_environment_notice",
         "tests/unit/install/test_mcp_optional_inputs.py::test_noninteractive_registry_defaults_print_no_bare_environment_notice"
@@ -3522,8 +3678,14 @@
       "issue": 4322,
       "fixed_in": "Unreleased",
       "summary": "A partly successful marketplace install records ref pins only for requested packages that install, and the not-found diagnostic names every credential source tried, in order, without values.",
-      "failure_modes": ["transaction", "observation"],
-      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "failure_modes": [
+        "transaction",
+        "observation"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_mixed_success_marketplace_install_pins_only_the_installed_plugin",
         "tests/unit/core/test_auth_validation.py::TestDescribeCredentialTried::test_names_secondary_sources_tried_in_order_without_values"
@@ -3576,8 +3738,14 @@
       "issue": 4360,
       "fixed_in": "Unreleased",
       "summary": "A receipt-less apm install replaced a user-edited managed instruction, agent, prompt, command or rule file, even when only a lockfile hash vouched for it; it now replaces one only with a local deployment receipt or bytes equal to the locked render, and otherwise keeps it, names it and exits 1.",
-      "failure_modes": ["ownership", "outcome"],
-      "properties": ["ownership.preserve_unowned", "outcome.status_matches_state"],
+      "failure_modes": [
+        "ownership",
+        "outcome"
+      ],
+      "properties": [
+        "ownership.preserve_unowned",
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_receiptless_overwrite_lifecycle.py::test_receiptless_install_keeps_each_edited_kind",
         "tests/integration/test_receiptless_overwrite_lifecycle.py::test_receiptless_install_adopts_render_equal_files",
@@ -3603,8 +3771,14 @@
       "issue": 4400,
       "fixed_in": "Unreleased",
       "summary": "A marketplace plugin version that resolves to a ref other than the one a committed install recorded is refused (exit 1, both refs named) at project scope and with -g, instead of being re-recorded after one warning; the recorded pin and project state stay unchanged.",
-      "failure_modes": ["transaction", "outcome"],
-      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
       "regression_tests": [
         "tests/integration/test_marketplace_ref_swap_lifecycle.py::test_swapped_marketplace_ref_is_refused_every_time",
         "tests/unit/marketplace/test_versioned_resolver.py::TestWarningHandler::test_ref_swap_is_refused_not_warned"

@@ -318,15 +318,26 @@ _LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``.
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Imply ``lifecycle_smoke`` and bind OpenAPM req markers to the conformance map.
 
-    The merge-group selection is then a subset of the full lifecycle smoke
-    selection by construction. ``tryfirst`` runs this before ``-m``
-    deselection, so ``-m lifecycle_smoke`` collects merge-group nodes.
+    A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``, so the
+    merge-group selection is a subset of the full lifecycle smoke selection by
+    construction; ``tryfirst`` runs this before ``-m`` deselection. Running
+    first also means environment-dependent skip markers that other conftests
+    add at collection time never change a requirement's recorded status.
     """
     for item in items:
         if item.get_closest_marker(_LIFECYCLE_MERGE_GROUP_MARKER) and not item.get_closest_marker(
             _LIFECYCLE_SMOKE_MARKER
         ):
             item.add_marker(_LIFECYCLE_SMOKE_MARKER)
+
+    # Bounded candidate copies (mutation harnesses) ship no tests/spec_conformance.
+    if not config.getoption("collectonly", False) and not any(
+        item.get_closest_marker("req") for item in items
+    ):
+        return
+    from tests.spec_conformance.coverage_map import record
+
+    record(config, items)

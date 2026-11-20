@@ -12,6 +12,7 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout
 
+from apm_cli.core.remediation import CASING_MIGRATION_SOURCE_MISSING
 from apm_cli.utils.file_ops import robust_replace
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
@@ -156,7 +157,7 @@ class ResolutionStagingSession:
             if not source.exists():
                 raise FileNotFoundError(
                     f"Package directory disappeared before casing migration: {source}. "
-                    "Run 'apm install' again."
+                    f"{CASING_MIGRATION_SOURCE_MISSING.sentence()}"
                 )
             if destination.exists():
                 if not os.path.samefile(source, destination):

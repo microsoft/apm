@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import replace
 from typing import TypeVar
 
+from ...core.remediation import ADO_COORDINATES_MISMATCHED
+
 _CoordinateT = TypeVar("_CoordinateT", bound="ProviderCoordinateMixin")
 
 
@@ -33,8 +35,7 @@ class ProviderCoordinateMixin(ABC):
         if supplied != canonical:
             raise ValueError(
                 f"Incomplete or mismatched Azure DevOps reference coordinates for "
-                f"{self.repo_url}. Run `apm install <original-ado-url>` with "
-                "the original Azure DevOps URL to regenerate its state."
+                f"{self.repo_url}. {ADO_COORDINATES_MISMATCHED.sentence()}"
             )
 
     @staticmethod

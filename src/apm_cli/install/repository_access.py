@@ -79,5 +79,10 @@ def not_found_next_step(error: BaseException, dep_ref, *, is_direct: bool, scope
 
     if not is_direct or not reports_repository_not_found(error):
         return ""
-    flag = "-g " if is_user_scope(scope) else ""
-    return f" Run 'apm uninstall {flag}{shlex.quote(dep_ref.get_identity())}' to remove it from apm.yml."
+    from apm_cli.core.remediation import REPOSITORY_NOT_FOUND
+
+    package = shlex.quote(dep_ref.get_identity())
+    step = REPOSITORY_NOT_FOUND.bind(package=package)
+    if is_user_scope(scope):
+        step = step.with_command(f"apm uninstall -g {package}")
+    return f" {step.sentence()}"

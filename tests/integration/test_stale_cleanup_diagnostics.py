@@ -95,8 +95,10 @@ def test_cleanup_output_names_dependency(
 
     output = cleaned.stdout + cleaned.stderr
     assert cleaned.returncode == 0, output
+    # The lockfile keys an absolute local dependency by its path; output names
+    # it by the portable key so no machine-specific path is printed.
     noun = "path" if count == 1 else "paths"
-    expected = f"Cleaned {count} stale deployed {noun} for {dependency.root}:"
+    expected = f"Cleaned {count} stale deployed {noun} for _local/{dependency.root.name}:"
     assert expected in output, output
     _, listed = _announced_removals(cleaned.stdout)
     assert listed == [f"~/.agents/skills/stale-{index}/" for index in range(count)], output

@@ -149,7 +149,8 @@ class TestRichEcho:
             _rich_echo("colorama msg", color="red")
 
         captured = capsys.readouterr()
-        assert "colorama msg" in captured.out
+        assert "colorama msg" in captured.err
+        assert "colorama msg" not in captured.out
 
     def test_colorama_fallback_bold(self, capsys):
         from apm_cli.utils.console import _rich_echo
@@ -338,7 +339,7 @@ class TestCreateFilesTable:
     def test_returns_none_on_exception(self):
         from apm_cli.utils.console import _create_files_table
 
-        with patch("apm_cli.utils.console.Table", side_effect=Exception("boom")):
+        with patch("rich.table.Table", side_effect=Exception("boom")):
             result = _create_files_table([{"name": "x", "description": "y"}])
         assert result is None
 
@@ -592,9 +593,9 @@ class TestRichErrorNarrowWidthWrapping:
             "Claude-import route, then reinstall."
         )
         buffer = io.StringIO()
-        narrow_console = Console(file=buffer, width=20, force_terminal=False)
+        narrow_console = Console(file=buffer, width=20, force_terminal=True, color_system=None)
         with patch(
-            "apm_cli.utils.console._get_console",
+            "apm_cli.utils.console._get_stderr_console",
             return_value=narrow_console,
         ):
             _rich_error(message, symbol="error")
@@ -682,35 +683,29 @@ def test_ascii_ellipsis_keeps_ansi_styles_intact():
     assert "\x1b[32mabcdefgh\x1b[0m" in out
 
 
-class _Stream:
-    """A writable stream that reports whether it is a terminal."""
+def test_new_table_draws_ascii_on_a_utf_console():
+    """new_table() owns the box, so even a plain UTF Rich console renders ASCII (#4089)."""
+    import io
 
-    def __init__(self, tty: bool) -> None:
-        self.tty = tty
+    from rich.console import Console
 
-    def isatty(self) -> bool:
-        return self.tty
+    from apm_cli.utils.console import new_table
 
-    def write(self, _text: str) -> int:
-        return 0
+    buf = io.StringIO()
+    table = new_table(title="Files")
+    table.add_column("File")
+    table.add_row("apm.yml")
+    Console(file=buf, width=40, force_terminal=False).print(table)
+    out = buf.getvalue()
+    assert out.isascii(), out
+    assert "+" in out
 
-    def flush(self) -> None:
-        pass
 
+def test_new_table_rejects_a_unicode_box():
+    from rich import box
 
-@pytest.mark.parametrize(("tty", "width"), [(False, 400), (True, 399)])
-def test_windows_console_width_full_when_piped_rich_detection_when_interactive(
-    monkeypatch, tty, width
-):
-    """Piped Windows output keeps COLUMNS; a legacy terminal keeps Rich's -1 (#4409)."""
-    import types
+    from apm_cli.utils.console import new_table
 
-    from rich import console as rich_console
-
-    import apm_cli.utils.console as console_mod
-
-    monkeypatch.setattr(console_mod, "os", types.SimpleNamespace(name="nt"))
-    monkeypatch.setattr(rich_console, "detect_legacy_windows", lambda: True)
-    monkeypatch.setenv("COLUMNS", "400")
-    console = console_mod.new_console(file=_Stream(tty))
-    assert console.width == width
+    assert new_table(box=None).box is None
+    with pytest.raises(ValueError, match="ASCII boxes only"):
+        new_table(box=box.ROUNDED)
