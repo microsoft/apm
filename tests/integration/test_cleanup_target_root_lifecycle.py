@@ -79,3 +79,35 @@ def test_retiring_the_last_deployed_file_keeps_the_target_root(
     converged = _tree(root)
     install("repeat")
     assert _tree(root) == converged
+
+
+def test_user_scope_removes_the_target_root_it_created(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """At user scope, a root APM created goes with its last deployed file."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "user-roots", base_env=dict(os.environ))
+    packages = LocalPackageFactory(isolated.work_root)
+    dependency = packages.create("user-rules", targets=("claude",))
+    packages.add_instruction(dependency, "retired", _RULE)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    env = isolated.subprocess_env()
+    claude_root = isolated.home / ".claude"
+    assert not claude_root.exists()
+
+    installed = runner.run(
+        ("install", "-g", str(dependency.root), "--target", "claude"),
+        cwd=isolated.work_root,
+        env=env,
+        scenario_id="user-roots-install",
+    )
+    assert installed.returncode == 0, _evidence(installed)
+    assert any(path.is_file() for path in claude_root.rglob("*")), _evidence(installed)
+
+    removed = runner.run(
+        ("uninstall", "-g", str(dependency.root)),
+        cwd=isolated.work_root,
+        env=env,
+        scenario_id="user-roots-uninstall",
+    )
+    assert removed.returncode == 0, _evidence(removed)
+    assert not claude_root.exists(), sorted(p.as_posix() for p in claude_root.rglob("*"))

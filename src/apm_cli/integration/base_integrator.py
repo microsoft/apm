@@ -35,9 +35,10 @@ def _target_root_dirs(base: Path) -> frozenset[Path]:
     """Every project-layout target root directory under *base*.
 
     A project's target roots signal which harnesses it uses (opt-in targets
-    deploy only where their root exists), so cleanup never removes them.
-    User-scope roots APM created itself (such as ``~/.copilot``) still go
-    when their last file is retired.
+    deploy only where their root exists), so project cleanup never removes
+    them. Cleanup bounded by the home directory is user scope, where roots
+    APM created itself (such as ``~/.claude``) go when their last file is
+    retired.
     """
     from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -974,8 +975,13 @@ class BaseIntegrator:
         if not deleted_paths:
             return
         stop_resolved = stop_at.resolve()
-        # A harness looks for its target root; cleanup never removes one (#4132).
-        target_roots = _target_root_dirs(stop_resolved)
+        # A project's target roots stay (#4132); at user scope the same names
+        # are roots APM created, which go with their last file.
+        target_roots = (
+            frozenset()
+            if stop_resolved == Path.home().resolve()
+            else _target_root_dirs(stop_resolved)
+        )
         # Collect unique parents (skip stop_at itself)
         candidates: set = set()
         for p in deleted_paths:
