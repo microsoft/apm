@@ -210,7 +210,8 @@ def test_kiro_prompt_installed_lifecycle(
     owner = records[".kiro/prompts/review.md"]["owners"][0]
     before = snapshot()
     removal = run("uninstall", *scope, owner, expected_returncode=1)
-    text = " ".join(removal.stdout.split())
+    # The refusal is an error, so it goes to stderr (RA-004).
+    text = " ".join((removal.stdout + removal.stderr).split())
     assert "Uninstall refused" in text, text
     assert ".kiro/prompts/edited.md: edited since APM deployed it" in text, text
     # Without deletion evidence nothing changes (#3701).

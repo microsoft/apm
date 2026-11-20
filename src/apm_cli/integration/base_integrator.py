@@ -749,6 +749,10 @@ class BaseIntegrator:
         )
         if identical:
             target_paths.append(target_path)
+            # A managed file already holding the final render is APM's bytes:
+            # record the receipt the skipped rewrite would have (#4184, #3701).
+            if managed_files and rel_path.replace("\\", "/") in managed_files:
+                self.note_rendered_write(target_path)
             return True, True
         if self.check_collision(
             target_path, rel_path, managed_files, force, diagnostics=diagnostics

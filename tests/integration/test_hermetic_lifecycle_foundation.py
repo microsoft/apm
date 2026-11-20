@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.integration.base_integrator import unproven_overwrite_message
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import (
@@ -435,6 +436,29 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         tampered = load_yaml(lock_path)
         tampered["dependencies"] = []
         dump_yaml(tampered, lock_path)
+        recovery, clean_audit = runner.run_sequence(
+            (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
+            expected_returncodes=(0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
+    elif mutation == "deployed-file":
+        # #4360: a plain install keeps the tampered file and exits 1; the
+        # printed remedy (delete the edited file, then install) restores it.
+        result, kept = runner.run_sequence(
+            (negative_args, tuple(recovery_args)),
+            expected_returncodes=(1, 1),
+            scenario_id=f"{scenario_id}-tamper-kept",
+            cwd=project_root,
+            env=environment,
+        )
+        kept_text = " ".join(kept.stderr.split())
+        assert unproven_overwrite_message(instruction_path, user_scope=False) in kept_text
+        assert (project_root / instruction_path).read_text(encoding="utf-8") == (
+            "# Mutated generated deployment\n"
+        )
+        (project_root / instruction_path).unlink()
         recovery, clean_audit = runner.run_sequence(
             (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
             expected_returncodes=(0, 0),
