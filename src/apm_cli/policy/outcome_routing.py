@@ -166,10 +166,16 @@ def classify_discovery_outcome(
         reason = None
         if fetch_failure_default == "block":
             hint = getattr(fetch_result, "discovery_hint", None)
+            err_text = (
+                getattr(fetch_result, "error", None)
+                or getattr(fetch_result, "fetch_error", None)
+                or outcome
+            )
+            cause = outcome_cause(outcome, source, err_text)
             reason = (
                 f"no enforceable org policy was resolved (outcome={outcome}) and "
                 "project apm.yml has policy.fetch_failure_default=block "
-                f"(source={source})" + (f". {hint}" if hint else "")
+                f"(source={source}). {cause}" + (f". {hint}" if hint else "")
             )
         return DiscoveryRoute(
             outcome,
@@ -197,6 +203,26 @@ def classify_discovery_outcome(
     else:
         reason = f"unrecognized policy discovery outcome {outcome!r} (source={source})"
     return DiscoveryRoute(outcome, _ALWAYS_BLOCK, None, block_reason=reason, unresolved=True)
+
+
+def outcome_cause(outcome: str, source: str | None, err_text: str | None) -> str:
+    """Why discovery resolved no usable policy, in the words every reader prints.
+
+    ``audit --ci`` prints it on its own line; a block under
+    ``fetch_failure_default=block`` appends it to the routed reason, so a
+    refusal always says why the org policy did not resolve (#1159).
+    """
+    src = source or "unknown"
+    if outcome == "no_git_remote":
+        return "Could not determine org from git remote"
+    if outcome == "absent":
+        return f"No org policy found at {src}"
+    if outcome == "empty":
+        return f"Org policy at {src} is present but empty"
+    # malformed / cache_miss_fetch_fail / garbage_response (and any
+    # `error` set on the result): preserve the legacy wording so existing
+    # consumers parsing the line keep working.
+    return f"Policy fetch failed: {err_text or outcome}"
 
 
 def route_discovery_outcome(

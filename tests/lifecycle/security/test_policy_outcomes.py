@@ -485,6 +485,15 @@ DENIED = r"denied by pattern"
 TRUST_BLOCK = r"Blocked by org policy: "
 # A stale cached policy that declares fetch_failure=block blocks audit as it blocks install.
 _STALE_BLOCK = TRUST_BLOCK + r"org policy refresh failed and the cached policy"
+# Every policy reader routes an unresolved outcome under the block knob the same way (#4259).
+_CHAIN_BLOCK = TRUST_BLOCK + r"org policy inheritance chain is incomplete"
+
+
+def _routed_block(outcome: str) -> tuple[str, ...]:
+    """The shared routing line of an unresolved *outcome* under ``fetch_failure_default=block``."""
+    return (TRUST_BLOCK, rf"\(outcome={outcome}\)", KNOB_BLOCK)
+
+
 SKILL = ".agents/skills/p-skill/SKILL.md"
 HOOK = ".github/hooks/p-exec-session.json"
 
@@ -795,6 +804,7 @@ SITE_SLICES["audit-ci"] = SiteSlice(
 # commands/approve.py -- approval loads the org policy best-effort.
 _APPROVE_UNRESOLVED = r"Org policy could not be resolved; approval is proceeding"
 _APPROVE_TWICE = "#4178 approve prints its org policy warning twice"
+_NOTHING_WRITTEN = r"Nothing was written"
 SITE_SLICES["approve"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm approve p-exec",
@@ -802,11 +812,17 @@ SITE_SLICES["approve"] = SiteSlice(
         "cache_miss_fetch_fail/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
         "cache_miss_fetch_fail/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
         "hash_mismatch": Expect(0, (r"Policy hash verification failed",), xfail=_APPROVE_TWICE),
-        "absent/block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "absent/block": Expect(
+            1, (*_routed_block("absent"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+        ),
         "absent/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "no_git_remote/block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "no_git_remote/block": Expect(
+            1, (*_routed_block("no_git_remote"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+        ),
         "no_git_remote/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "empty/block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "empty/block": Expect(
+            1, (*_routed_block("empty"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+        ),
         "empty/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "found": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "disabled": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
@@ -815,11 +831,13 @@ SITE_SLICES["approve"] = SiteSlice(
         "garbage_response/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
         "garbage_response/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
         "incomplete_chain": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "cached_stale/org-block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "cached_stale/org-block": Expect(
+            1, (_STALE_BLOCK, _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+        ),
         "cached_stale/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "cache=cold": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=True),
         "cache=warm-fresh": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=False),
-        "cache=stale<7d": Expect(0, forbids=(_APPROVE_UNRESOLVED,), xfail=_OFFLINE),
+        "cache=stale<7d": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "cache=stale>7d-or-expired": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
     },
 )
@@ -891,11 +909,11 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "cache_miss_fetch_fail/block": Expect(1, (KNOB_BLOCK,), present=(SKILL,)),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), present=(SKILL,)),
         "hash_mismatch": Expect(1, (HASH,), present=(SKILL,)),
-        "absent/block": Expect(1, (KNOB_BLOCK,), xfail=_SHORTCIRCUIT),
+        "absent/block": Expect(1, (KNOB_BLOCK,)),
         "absent/warn": Expect(0, present=(SKILL,)),
-        "no_git_remote/block": Expect(1, (KNOB_BLOCK,), xfail=_SHORTCIRCUIT),
+        "no_git_remote/block": Expect(1, (KNOB_BLOCK,)),
         "no_git_remote/warn": Expect(0, present=(SKILL,)),
-        "empty/block": Expect(1, (KNOB_BLOCK,), xfail=_SHORTCIRCUIT),
+        "empty/block": Expect(1, (KNOB_BLOCK,)),
         "empty/warn": Expect(0, present=(SKILL,)),
         "found": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
         "disabled": Expect(0, present=(SKILL,)),
@@ -904,7 +922,7 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "garbage_response/block": Expect(1, (KNOB_BLOCK,), present=(SKILL,)),
         "garbage_response/warn": Expect(0, (r"is not valid YAML",), present=(SKILL,)),
         "incomplete_chain": Expect(1, (r"inheritance chain is incomplete",), present=(SKILL,)),
-        "cached_stale/org-block": Expect(1, (r"fetch_failure=block",), xfail=_SHORTCIRCUIT),
+        "cached_stale/org-block": Expect(1, (r"fetch_failure=block",)),
         "cached_stale/warn": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
         "cache=cold": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
         "cache=warm-fresh": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
@@ -928,13 +946,30 @@ SITE_SLICES["mcp-admission(trust.py)"] = SiteSlice(
     arrange=_installed_approved_exec,
     command=lambda world: "apm audit --ci",
     classes={
-        "absent/block": Expect(1, (r"No org policy found", _CI_FAILED)),
-        "empty/block": Expect(1, (EMPTY, _CI_FAILED)),
-        "no_git_remote/block": Expect(1, (r"Could not determine org from git remote", _CI_FAILED)),
-        "malformed/block": Expect(1, (r"Invalid policy", _CI_FAILED)),
-        "cache_miss_fetch_fail/block": Expect(1, (r"HTTP 503", _CI_FAILED)),
-        "garbage_response/block": Expect(1, (r"is not a YAML mapping", _CI_FAILED)),
-        "incomplete_chain": Expect(1, (r"Policy chain incomplete",)),
+        # The deployed server's consent and drift replay route the outcome (#4259)
+        # and keep its cause, so the refusal still says why no policy resolved.
+        "absent/block": Expect(
+            1, (*_routed_block("absent"), r"No org policy found", _CHECK_FAILED)
+        ),
+        "empty/block": Expect(1, (*_routed_block("empty"), EMPTY, _CHECK_FAILED)),
+        "no_git_remote/block": Expect(
+            1,
+            (
+                *_routed_block("no_git_remote"),
+                r"Could not determine org from git remote",
+                _CHECK_FAILED,
+            ),
+        ),
+        "malformed/block": Expect(
+            1, (*_routed_block("malformed"), r"Invalid policy", _CHECK_FAILED)
+        ),
+        "cache_miss_fetch_fail/block": Expect(
+            1, (*_routed_block("cache_miss_fetch_fail"), r"HTTP 503", _CHECK_FAILED)
+        ),
+        "garbage_response/block": Expect(
+            1, (*_routed_block("garbage_response"), r"is not a YAML mapping", _CHECK_FAILED)
+        ),
+        "incomplete_chain": Expect(1, (_CHAIN_BLOCK, _CHECK_FAILED)),
         "malformed/warn": Expect(0, (_unavailable("malformed"), _CONSENT_OK)),
         "cache_miss_fetch_fail/warn": Expect(
             0, (_unavailable("cache_miss_fetch_fail"), _CONSENT_OK)
