@@ -782,9 +782,8 @@ class InstallService:
           ``generated_at`` and ``apm_version`` (Section 5.5).
         * **Deployed presence** of the resolved graph (*active_keys*) (#4043).
         * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
-          entry is re-verified through the verifier ``apm audit`` uses, so
-          ``install --frozen`` and ``audit --ci`` give one answer, catching a
-          kept user edit or an upgrade that re-renders a file (#3654).
+          entry is re-verified through audit's verifier, so ``install --frozen``
+          and ``audit --ci`` agree on kept user edits and re-renders (#3654).
 
         Native target files are outside the install transaction, so files
         already deployed stay on disk; only the lockfile write is withheld.
