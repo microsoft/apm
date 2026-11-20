@@ -273,6 +273,31 @@ class TestDiscoverScripts:
             entries = discover_scripts(project_root=str(project_dir))
         assert len(entries) == 2
 
+    def test_user_scope_manifest_is_loaded_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        apm_home = tmp_path / "apm-home"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        entries = discover_scripts(project_root=str(apm_home))
+        assert [(entry.bash, entry.source) for entry in entries] == [("echo user", "user")]
+
+    def test_user_scope_runner_skips_no_project_scripts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        apm_home = tmp_path / "apm-home"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        runner = build_runner_from_context(project_root=str(apm_home))
+        assert [entry.source for entry in runner._scripts] == ["user"]
+        assert runner._skipped_project_scripts == 0
+
 
 class TestLifecycleScriptRunner:
     def _make_event(self, event_name: str = "post-install") -> LifecycleEvent:
