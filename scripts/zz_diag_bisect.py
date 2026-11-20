@@ -1,42 +1,38 @@
-"""TEMPORARY diagnostic: find which earlier test node breaks the codex-pin victim on Windows."""
+"""TEMPORARY diagnostic: replay gw1 order on Windows and locate the codex-pin polluter."""
 
+import os
+import re
 import subprocess
 import sys
 
-VICTIM = (
-    "tests/unit/install/test_cached_codex_source_pin.py::"
-    "test_frozen_global_install_from_warm_cache_uses_locked_source_pin[locked-sha]"
-)
-POLLUTER_FILES = [
-    "tests/unit/install/phases/test_targets_phase_v2.py",
-    "tests/unit/install/test_bootstrap_preflight.py",
-]
-BASE = [sys.executable, "-m", "pytest", "-p", "no:randomly", "-p", "no:xdist", "-p", "no:cacheprovider", "-q"]
+ORDER = "scripts/zz_diag/gw1_prefix.txt"
+nodes = [l for l in open(ORDER, encoding="utf-8").read().splitlines() if l]
+files = list(dict.fromkeys(n.split("::")[0] for n in nodes))
+base = [sys.executable, "-m", "pytest", "-p", "no:randomly", "-p", "no:xdist", "-p", "no:cacheprovider",
+        "-q", "-p", "order_probe_plugin", "-o", "addopts=", "--maxfail=100000"]
+env = {**os.environ, "PYTHONPATH": os.pathsep.join(["scripts/zz_diag", os.environ.get("PYTHONPATH", "")]),
+       "DIAG_ORDER": ORDER}
 
 
-def run(*nodes: str) -> tuple[bool, str]:
-    r = subprocess.run([*BASE, *nodes], capture_output=True, text=True)
-    return r.returncode == 0, r.stdout[-3000:]
+def run(extra_env):
+    r = subprocess.run([*base, *files], env={**env, **extra_env}, capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    for line in out.splitlines():
+        if line.startswith("DIAG"):
+            print(line, flush=True)
+    m = re.search(r"DIAG FIRST-FAIL-AFTER (\S+)", out)
+    i = out.find("DIAG FIRST-FAIL-AFTER")
+    if i >= 0:
+        print(out[i:i + 800], flush=True)
+    print(out.strip().splitlines()[-1] if out.strip() else "", flush=True)
+    return m.group(1) if m else None
 
 
-def collect(path: str) -> list[str]:
-    r = subprocess.run([*BASE, "--collect-only", "-q", path], capture_output=True, text=True)
-    return [l for l in r.stdout.splitlines() if "::" in l]
-
-
-ok, _ = run(VICTIM)
-print(f"VICTIM ALONE: {'PASS' if ok else 'FAIL'}", flush=True)
-ok, out = run(*POLLUTER_FILES, VICTIM)
-print(f"TRIO: {'PASS' if ok else 'FAIL'}", flush=True)
-if not ok:
-    print(out)
-for path in POLLUTER_FILES:
-    ok, _ = run(path, VICTIM)
-    print(f"FILE {path} + victim: {'PASS' if ok else 'FAIL'}", flush=True)
-    if ok:
-        continue
-    for node in collect(path):
-        ok, out = run(node, VICTIM)
-        print(f"  NODE {node}: {'PASS' if ok else 'FAIL'}", flush=True)
-        if not ok:
-            print(out[-1500:], flush=True)
+print("STAGE 1: probe after each file", flush=True)
+hit = run({})
+if hit:
+    f = hit.split("::")[0]
+    print(f"STAGE 2: probe after each test in {f}", flush=True)
+    run({"DIAG_PROBE_EACH_IN": f})
+else:
+    print("NO FAILURE REPRODUCED IN SERIAL gw1 ORDER", flush=True)

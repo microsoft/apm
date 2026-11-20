@@ -3,13 +3,13 @@
 name: DIAG codex-pin bisect
 on:
   pull_request:
-    paths: [".github/workflows/zz-diag-codex-pin-bisect.yml", "scripts/zz_diag_bisect.py"]
+    paths: [".github/workflows/zz-diag-codex-pin-bisect.yml", "scripts/zz_diag_bisect.py", "scripts/zz_diag/**"]
 permissions:
   contents: read
 jobs:
   bisect:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
