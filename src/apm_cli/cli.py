@@ -71,6 +71,17 @@ class _LazyCommand(click.Command):
         super().__init__(name=name, help=help, short_help=short_help, hidden=hidden)
         self._module = module
         self._attr = attr
+        self._resolved: click.Command | None = None
+
+    def resolved(self) -> click.Command:
+        """Return the real command, importing it once.
+
+        The stub stays in the group's registry, so the root command table never
+        depends on which verbs earlier in-process invocations dispatched.
+        """
+        if self._resolved is None:
+            self._resolved = self.resolve()
+        return self._resolved
 
     def resolve(self) -> click.Command:
         """Import and return the real command object."""
@@ -404,9 +415,7 @@ class _OutputModeGroup(click.Group):
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         cmd = super().get_command(ctx, cmd_name)
         if isinstance(cmd, _LazyCommand):
-            resolved = cmd.resolve()
-            self.commands[cmd_name] = resolved
-            return resolved
+            return cmd.resolved()
         return cmd
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:

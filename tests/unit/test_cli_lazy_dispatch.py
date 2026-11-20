@@ -131,6 +131,20 @@ def test_every_root_verb_is_a_lazy_stub():
     assert set(_root_stubs()) == set(cli.commands)
 
 
+def test_dispatching_a_verb_keeps_the_root_registry_lazy():
+    """In-process dispatch must not swap stubs out of the shared root group."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import _LazyCommand, cli
+
+    result = CliRunner().invoke(cli, ["config", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert all(isinstance(cmd, _LazyCommand) for cmd in cli.commands.values())
+    stub = cli.commands["config"]
+    assert stub.resolved() is stub.resolved()
+
+
 def test_lazy_stub_short_help_matches_resolved_command():
     mismatches: list[str] = []
     for name, stub in _root_stubs().items():
