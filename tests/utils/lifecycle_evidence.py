@@ -494,6 +494,15 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^  \[i\] Auth-only attempt for ado host",
     ),
     KnownOutputCell(
+        "install-missing-required-package-warning-twice",
+        "I9",
+        "#4307",
+        _runs("install"),
+        r"required by org policy but not declared",
+        # The warning block lists one missing required package back to back.
+        output=r"^(    \+- \[[^\]\n]+\] required by org policy but not declared)\n\1$",
+    ),
+    KnownOutputCell(
         "install-frozen-trust-notice-repeats",
         "I9",
         "#4256",
