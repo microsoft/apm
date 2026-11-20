@@ -72,6 +72,15 @@ def _close_response(response: requests.Response, context: str) -> None:
         _debug(f"{context} response close failed: {exc}")
 
 
+def _backoff_sleep(seconds: float) -> None:
+    """Wait between resilient_get retries.
+
+    The single retry-wait seam: tests patch this instead of the process-wide
+    ``time.sleep``, which would also record sleeps from unrelated threads.
+    """
+    time.sleep(seconds)
+
+
 _ARTIFACTORY_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 
@@ -208,7 +217,7 @@ class DownloadDelegate:
                             f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
                         )
                         _close_response(response, "rate-limit retry")
-                        time.sleep(wait)
+                        _backoff_sleep(wait)
                     continue
 
                 if response.status_code == 503:
@@ -220,7 +229,7 @@ class DownloadDelegate:
                             f"(attempt {attempt + 1}/{max_retries})"
                         )
                         _close_response(response, "service-unavailable retry")
-                        time.sleep(wait)
+                        _backoff_sleep(wait)
                     continue
 
                 return response
@@ -232,7 +241,7 @@ class DownloadDelegate:
                         f"Connection error, retry in {wait:.1f}s "
                         f"(attempt {attempt + 1}/{max_retries})"
                     )
-                    time.sleep(wait)
+                    _backoff_sleep(wait)
             except requests.exceptions.Timeout as e:
                 last_exc = e
                 if attempt < max_retries - 1:
