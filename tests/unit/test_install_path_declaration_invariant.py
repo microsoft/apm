@@ -34,6 +34,8 @@ import yaml
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.primitives.discovery import get_dependency_declaration_order
 
+pytestmark = pytest.mark.component
+
 
 def _project_with_deps(tmp_path: Path, deps: list[str]) -> Path:
     """Write a minimal ``apm.yml`` declaring *deps* and return its dir."""

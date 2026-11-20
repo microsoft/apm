@@ -28,6 +28,8 @@ from apm_cli.core.lifecycle_scripts import (
 
 from .conftest import PYEXE, kill_pid, make_command_entry, pid_alive
 
+pytestmark = pytest.mark.component
+
 _GRANDCHILD = (
     "import os, sys, time\n"
     "with open(sys.argv[1], 'w') as f:\n"

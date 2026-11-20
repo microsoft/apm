@@ -11,6 +11,8 @@ import pytest
 from apm_cli.integration.skill_adoption import adoptable_skill_members, adoption_baselines
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 
 def _walk(source: Path):
     yield from os.walk(source, followlinks=False)

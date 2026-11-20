@@ -6,6 +6,8 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from apm_cli.agent_plugins import (
     MCP_SCHEMA_ID,
     PLUGIN_SCHEMA_ID,
@@ -18,6 +20,8 @@ from apm_cli.deps.package_validator import PackageValidator, stamp_plugin_versio
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.validation import PackageType, validate_apm_package
 from apm_cli.utils.yaml_io import dump_yaml
+
+pytestmark = pytest.mark.component
 
 
 def _write_plugin(root: Path, *, version: str | None = "1.2.3") -> None:

@@ -10,6 +10,8 @@ from __future__ import annotations
 import threading
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.utils.git_env import (
     GitConfigEntry,
     GitUrlRewriteProbeError,
@@ -17,6 +19,8 @@ from apm_cli.utils.git_env import (
     real_git_tls_config,
     reset_git_cache,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _snapshot(*entries: tuple[str, str]) -> _GitConfigSnapshot:

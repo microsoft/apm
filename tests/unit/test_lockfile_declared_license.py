@@ -9,7 +9,11 @@ is never stored as a sentinel.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
+
+pytestmark = pytest.mark.unit
 
 
 def test_declared_license_defaults_to_none():

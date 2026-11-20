@@ -27,6 +27,8 @@ from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.github_host import build_ssh_url, validate_ssh_user
 
+pytestmark = pytest.mark.unit
+
 
 class TestValidateSshUser:
     @pytest.mark.parametrize(

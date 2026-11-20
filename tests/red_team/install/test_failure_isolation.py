@@ -20,6 +20,8 @@ from apm_cli.core.lifecycle_scripts import (
 
 from .conftest import PYEXE, make_command_entry, touch_cmd
 
+pytestmark = pytest.mark.component
+
 
 def _event() -> LifecycleEvent:
     return LifecycleEvent.create(

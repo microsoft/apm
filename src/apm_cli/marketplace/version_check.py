@@ -19,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.marketplace.tag_pattern import render_tag
 from apm_cli.marketplace.yml_schema import MarketplaceConfig, PackageEntry
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -136,7 +137,7 @@ def _read_local_version(project_root: Path, rel_source: str) -> tuple[str | None
     version from the first standard ``plugin.json`` location.
     """
     package_root = project_root / rel_source
-    pkg_yml = package_root / "apm.yml"
+    pkg_yml = manifest_file(package_root)
     try:
         resolved_pkg_yml = ensure_path_within(pkg_yml, project_root)
     except PathTraversalError:

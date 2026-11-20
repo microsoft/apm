@@ -1,0 +1,105 @@
+# P03 Plugin init and publish to a marketplace, nightly (#4110). Schema: test_journeys.py.
+# The plugin is scaffolded into my-plugin/ under the world project, which is
+# the consumer of step 8 (its apm.yml targets copilot).
+schema: 1
+id: P03
+persona: producer
+title: Plugin init and publish to a marketplace
+docs:
+  - producer/publish-to-a-marketplace.mdx
+  - reference/cli/plugin.md
+  - reference/cli/marketplace.md
+  - reference/cli/publish.md
+steps:
+  - n: 1
+    run: [apm plugin init my-plugin --yes, "grep ^#.license: my-plugin/apm.yml"]
+    exit: 0
+    chdir: my-plugin
+    files: [apm.yml, plugin.json]
+    note: >-
+      the runner diffs the directory the step ends in (my-plugin/) against the one it
+      started in, so the delta reads apm.yml (changed) and plugin.json (added).
+    key_lines: ["[*] APM project initialized successfully!", "| plugin.json | Plugin metadata", "# license: MIT"]
+    forbidden_lines: ["[x]", "[!]"]
+  - n: 2
+    run: [apm pack]
+    exit: 0
+    files: ["build/my-plugin-0.1.0/*"]
+    note: >-
+      the index forbids warnings about scaffolded content; the one [!] line is the
+      missing-license warning that reference/cli/plugin.md and build-a-plugin.mdx
+      document for a fresh scaffold (license: is left commented on purpose).
+    key_lines:
+      - "[!] No 'license:' field in apm.yml"
+      - "[*] Packed 1 file(s) plus apm.lock.yaml -> build/my-plugin-0.1.0"
+    forbidden_lines: ["[x]", skipping, placeholder]
+  - n: 3
+    run: [apm experimental list]
+    exit: 0
+    key_lines: ["| canvas             | enabled", "verbose-version"]
+    forbidden_lines: [marketplace_authoring, marketplace-authoring, "[x]"]
+  - n: 4
+    run:
+      - apm marketplace init --owner acme-org
+      - apm marketplace package remove example-package --yes
+      - apm marketplace package add ./ --name my-plugin --version 0.1.0 --no-verify
+    exit: 0
+    files: [apm.yml]
+    note: >-
+      "apm marketplace init" scaffolds one placeholder entry (example-package) that
+      cannot resolve; the docs (Create the marketplace, step 2) remove it before
+      adding packages, so this step does too.
+    docs:
+      page: producer/publish-to-a-marketplace.mdx
+      commands: [apm marketplace package remove example-package --yes]
+    key_lines:
+      - "[+] Added 'marketplace:' block to apm.yml"
+      - "[+] Removed package 'example-package'"
+      - "[+] Added package 'my-plugin' from ./"
+    forbidden_lines: ["[x]", "[!]"]
+  - n: 5
+    run: [apm marketplace check, apm marketplace outdated]
+    exit: 0
+    docs:
+      page: producer/publish-to-a-marketplace.mdx
+      commands: [apm marketplace check]
+    key_lines: ["| [+]    | my-plugin |    [+]    |      [+]      |  [+]   | OK", "[+] All 1 entries OK"]
+    forbidden_lines: ["Git failed during ls-remote"]
+  - n: 6
+    run: [apm pack]
+    exit: 0
+    files: [.claude-plugin/marketplace.json, "build/my-plugin-0.1.0/*"]
+    docs:
+      page: producer/publish-to-a-marketplace.mdx
+      commands: [apm pack]
+    key_lines:
+      - "[*] Built marketplace.json [claude] (1 package(s)) -> <PROJECT>/.claude-plugin/marketplace.json"
+    forbidden_lines: ["[x]"]
+  - n: 7
+    run: [apm install]
+    exit: 0
+    files: []
+    chdir: ..
+    note: >-
+      the index expects "plugin skills deployed"; producer/build-a-plugin.mdx says apm
+      install inside the plugin repository deploys its dependencies, not its root
+      folders, and the scaffold has neither, so nothing changes.
+    key_lines: ["[i] No changes -- install state already up to date"]
+    forbidden_lines: ["[x]", "[!]"]
+  - n: 8
+    run: [apm marketplace add ./my-plugin/apm.yml --name alice-dev, apm install my-plugin@alice-dev]
+    exit: 0
+    note: >-
+      the consumer registers the plugin repository's live authoring catalog by path
+      (reference/cli/marketplace.md, Live local authoring catalogs) and installs by name.
+    key_lines:
+      - "[+] Marketplace 'alice-dev' registered (1 plugin)"
+      - "[+] <PROJECT>/my-plugin (local)"
+      - "[*] Installed 1 APM dependency in <DUR>."
+    forbidden_lines: ["[x]", "[!]"]
+known_cells:
+  - id: marketplace-outdated-local-source-ls-remote
+    law: FORBID
+    tracking: "#4201"
+    step: 5
+    match: "Git failed during ls-remote"

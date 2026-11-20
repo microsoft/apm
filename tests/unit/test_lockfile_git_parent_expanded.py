@@ -10,6 +10,8 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 def _expanded_parent_equivalent_ref() -> DependencyReference:
     """Simulate post-resolver ref: same shape as explicit ``git`` + ``path``."""

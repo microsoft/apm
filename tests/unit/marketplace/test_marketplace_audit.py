@@ -24,6 +24,8 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

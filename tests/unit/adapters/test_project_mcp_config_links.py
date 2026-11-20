@@ -13,6 +13,8 @@ from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.kiro import KiroClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 
+pytestmark = pytest.mark.component
+
 _SERVER = {"localsrv": {"command": "echo", "args": ["ok"]}}
 
 
