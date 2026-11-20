@@ -118,6 +118,10 @@ from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
 )
+from scripts.architecture_linter.checks.install_receipt_collection import (
+    GUARD_RECEIPT_COLLECTION,
+    check_receipt_collection,
+)
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
@@ -188,6 +192,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_CLEANUP_TARGET_ROOTS,
         "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
         check_cleanup_target_roots,
+    ),
+    _rule(
+        GUARD_RECEIPT_COLLECTION,
+        "Orphaned deployment receipts are collected only by the receipt owner.",
+        check_receipt_collection,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,

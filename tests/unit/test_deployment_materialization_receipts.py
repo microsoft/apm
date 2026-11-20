@@ -1035,3 +1035,37 @@ def test_write_outside_every_target_root_is_refused(
     stray.write_text("user\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Cannot record unverified materialization"):
         _session(root, lock).record({stray: compute_file_hash(stray)}, [TARGET], "pkg")
+
+
+def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monkeypatch) -> None:
+    """Only a receipt naming its own key for a root gone from a live parent goes (#4176)."""
+    import json as _json
+
+    from apm_cli.core import deployment_ledger
+
+    home = tmp_path / "apm-home"
+    receipts = home / "deployment-receipts"
+    receipts.mkdir(parents=True)
+    monkeypatch.setattr("apm_cli.core.scope.get_apm_home", lambda: home)
+    live = tmp_path / "live"
+    live.mkdir()
+
+    def receipt(root: Path, *, name: str | None = None) -> Path:
+        stem = name or deployment_ledger._receipt_key(root.as_posix(), "project")
+        path = receipts / f"{stem}.json"
+        path.write_text(_json.dumps({"root": root.as_posix(), "scope": "project"}))
+        return path
+
+    gone = receipt(tmp_path / "gone")
+    kept = {
+        "live": receipt(live),
+        "renamed": receipt(tmp_path / "other-gone", name="0" * 64),
+        "unmounted": receipt(tmp_path / "missing-volume" / "project"),
+    }
+    corrupt = receipts / f"{'1' * 64}.json"
+    corrupt.write_text("{not json")
+
+    assert deployment_ledger.collect_orphaned_receipts() == 1
+    assert not gone.exists()
+    assert all(path.exists() for path in kept.values()), kept
+    assert corrupt.exists()

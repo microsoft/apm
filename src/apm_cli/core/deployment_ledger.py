@@ -60,6 +60,52 @@ _LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
 # after a reboot or remount. Windows root identity is intentionally unchanged.
 _ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
+# Receipts examined per command; collection is incremental across commands.
+_RECEIPT_COLLECTION_LIMIT = 256
+
+
+def _receipt_key(root: str, scope: str) -> str:
+    """The receipt file stem for a project *root* (as recorded) and *scope*."""
+    return hashlib.sha256(f"{Path(root)}|{scope}".encode()).hexdigest()
+
+
+def collect_orphaned_receipts(limit: int = _RECEIPT_COLLECTION_LIMIT) -> int:
+    """Best effort: delete receipts whose recorded project root is gone (#4176).
+
+    A receipt goes only when its file name is the key of the root and scope it
+    records, that root is absolute and no longer exists, and the root's parent
+    directory does (so an unmounted volume never looks deleted). Any doubt
+    keeps the receipt; no error reaches the command. Returns the count removed.
+    """
+    from apm_cli.core.scope import get_apm_home
+
+    removed = 0
+    try:
+        directory = get_apm_home() / "deployment-receipts"
+        if directory.is_symlink() or not directory.is_dir():
+            return 0
+        for path in sorted(directory.glob("*.json"))[:limit]:
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                data = json.loads(path.read_text(encoding="utf-8"))
+                root, scope = data["root"], data["scope"]
+                if not isinstance(root, str) or not isinstance(scope, str):
+                    continue
+                recorded = Path(root)
+                if (
+                    path.stem == _receipt_key(root, scope)
+                    and recorded.is_absolute()
+                    and not os.path.lexists(recorded)
+                    and recorded.parent.is_dir()
+                ):
+                    path.unlink()
+                    removed += 1
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    except OSError:
+        return removed
+    return removed
 
 
 @dataclass(frozen=True)
@@ -95,7 +141,7 @@ class DeploymentMaterializationSession:
         self.scope = scope
         from apm_cli.core.scope import get_apm_home
 
-        key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
+        key = _receipt_key(self.root.as_posix(), scope.value)
         apm_home = get_apm_home()
         # Containment is anchored one level above APM_HOME (``$HOME`` by
         # default); for a shallow custom root the symlink check is the guard.
