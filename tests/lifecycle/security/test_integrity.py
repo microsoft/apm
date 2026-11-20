@@ -421,17 +421,16 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
             0, unchanged=(".agents/skills/p-skill",), check=_skill_hash_matches_disk
         ),
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        # A file whose bytes do not match its recorded hash, or that has no
-        # recorded hash, is not provably APM's: uninstall retains it and exits 1
-        # (commands/uninstall/cli.py _abort_if_retained_target_cleanup_paths,
-        # integration/cleanup.py expected_hash is None).
+        # uninstall.md: a removed package's file is deleted only with evidence
+        # that APM wrote its current bytes (a deployment receipt, or byte
+        # equality with the locked render); a lockfile hash alone is never
+        # evidence. An edited file is retained and uninstall exits 1; an edited
+        # or missing lock hash does not change the evidence, so cleanup proceeds.
         ("uninstall-prune", "disk-or-cache"): Expect(
             1, (_RETAINED, r"Retained user-edited file"), unchanged=_SKILL_STATE
         ),
-        ("uninstall-prune", "lock-edited"): Expect(
-            1, (_RETAINED, r"Retained user-edited file"), unchanged=_SKILL_STATE
-        ),
-        ("uninstall-prune", "missing-hash"): Expect(1, (_RETAINED,), unchanged=_SKILL_STATE),
+        ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
+        ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
         ("uninstall-prune", "upstream-or-proxy"): Expect(
             0, absent=(SKILL, LOCK), forbids=(_RETAINED,)
         ),
