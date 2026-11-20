@@ -97,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` no longer fails on a correct lock when `apm_modules` holds stale copies; it replays the locked packages as install does. (closes #3964, #3989)
 - `apm pack` on a plugin-only package prints the `target:`, `vscode` and `compilation.target` deprecation warnings like every other command. (closes #3965, #3989)
 - A multi-package `apm install` where one package fails to resolve or download now integrates nothing, so no untracked files are left behind. (closes #3874, #3989)
+- Plain `apm audit` reports an edited local-bundle file as drift, as `apm audit --ci` does; removing the last MCP server is reported as a change, not "No changes". (#3989)
 - `apm update` re-gates executables recorded while the gate was off once org policy turns it on, as `apm install` does. (closes #3990, #3989)
 - `apm update` retires an executable type whose approval was removed from a partially approved package; the lock records the approved types in `exec_allowed_types`. (closes #3991, #3989)
 - Native plugin approvals are portable: the `plugin:` pin covers file paths and bytes, not executable bits, so a pin made on macOS holds on Windows. (#3989)
