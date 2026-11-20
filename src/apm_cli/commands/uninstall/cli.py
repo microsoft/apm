@@ -301,6 +301,24 @@ def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
     )
 
 
+def _gate_denied_package_keys(
+    apm_package: Any, lockfile: Any, modules_dir: Any, deploy_root: Any, user_scope: bool
+) -> frozenset[str]:
+    """Survivors the org policy now denies, from the gate retirement owner (#4446)."""
+    from pathlib import Path
+
+    from ...install.exec_gate import gate_retirements
+    from ...install.lsp.integration import has_recorded_lsp_state
+
+    if apm_package is None or not has_recorded_lsp_state(lockfile):
+        return frozenset()
+
+    retirements = gate_retirements(
+        lockfile, Path(modules_dir), apm_package, Path(deploy_root), user_scope=user_scope
+    )
+    return frozenset(retirements.denied_packages) if retirements is not None else frozenset()
+
+
 def _cleanup_stale_lsp(
     *,
     apm_package: Any,
@@ -326,6 +344,9 @@ def _cleanup_stale_lsp(
         if apm_package is None and has_recorded_lsp_state(lockfile):
             apm_package = APMPackage.from_apm_yml(manifest_path)
         updated = reconcile_lsp_after_uninstall(
+            excluded_package_keys=_gate_denied_package_keys(
+                apm_package, lockfile, modules_dir, deploy_root, user_scope
+            ),
             apm_package=apm_package,
             lockfile=lockfile,
             lock_path=lockfile_path,
