@@ -172,11 +172,11 @@ class InstallService:
         this same error otherwise.
         """
         from apm_cli.adapters.client._remote_shapes import may_refuse_remote
-        from apm_cli.install.mcp.ownership import (
-            migrate_legacy_project_target_servers,
+        from apm_cli.install.mcp.native_entry import (
             native_mcp_entry_matches_declaration,
             native_mcp_entry_present,
         )
+        from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
         mcp_ownership = {
             target: set(names) for target, names in lockfile.mcp_target_servers.items()
