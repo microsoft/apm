@@ -320,7 +320,8 @@ def test_unrecorded_unicode_detect_strip_and_idempotent_audit(
         scenario_id="ci-no-drift-detects-unrecorded-unicode",
     )
     assert "content-integrity" in failed.stdout
-    assert f"unicode: {_UNRECORDED}" in failed.stdout
+    # Failed-check details follow their header to stderr (RA-004).
+    assert f"unicode: {_UNRECORDED}" in failed.stderr
     assert "No critical hidden Unicode or hash drift detected" not in failed.stdout
     assert "All checks passed" not in failed.stdout
     _assert_same_state(before_failure, _snapshot(lifecycle))
@@ -438,4 +439,4 @@ def test_recorded_path_outside_current_targets_retains_unicode_coverage(
         scenario_id="outside-current-targets-recorded",
     )
     assert "content-integrity" in recorded.stdout
-    assert f"unicode: {_OUTSIDE_CURRENT_TARGETS}" in recorded.stdout
+    assert f"unicode: {_OUTSIDE_CURRENT_TARGETS}" in recorded.stderr

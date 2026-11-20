@@ -160,7 +160,11 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
 
     audit = world.apm(project, "audit", "--ci", "--no-policy", expect=1)
     audit_text = " ".join(output(audit).split())
-    assert "1 local edit(s) to managed files that the next 'apm install' overwrites" in audit_text
+    # Two kept skill edits and one agent edit export; only the agent is overwritten.
+    assert (
+        "3 local edit(s) to managed files (1 of them the next 'apm install' overwrites)"
+        in audit_text
+    )
     assert LOCAL_EDITS_EXPORT.clause() in audit_text
     assert "apm export-patch" in audit_text
     assert RESTORE_EDITED_SKILL.bind(subject="the edited skill files").sentence() in audit_text

@@ -155,7 +155,8 @@ class SafeMCPInstaller:
 
     def _log_failure(self, server_ref: str):
         """Log failed server installation."""
-        self.logger.warning(f"  x {server_ref} installation failed")
+        # One line per runtime, so name it: the same server fails once per target.
+        self.logger.warning(f"  x {server_ref} installation failed for {self.runtime}")
 
     def _log_error(self, server_ref: str, error: Exception):
         """Log error during server installation."""

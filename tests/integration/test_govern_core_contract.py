@@ -806,7 +806,8 @@ def test_real_govern_core_contract(
     assert govern_receipt.consumer_audit["summary"]["failed"] == 0
     assert _checks(govern_receipt.consumer_audit)["dependency-content-hashes"]["passed"] is True
     assert govern_receipt.lockless_blocked_install.returncode == 1
-    assert "org policy requires integrity hashes" in govern_receipt.lockless_blocked_install.stdout
+    blocked = govern_receipt.lockless_blocked_install
+    assert "org policy requires integrity hashes" in blocked.stdout + blocked.stderr
     assert_unchanged(
         govern_receipt.lockless_before,
         govern_receipt.lockless_after_block,

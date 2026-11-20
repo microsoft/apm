@@ -897,9 +897,9 @@ class TestGateProjectScopedRuntimes:
             explicit_target=None,
         )
         assert result == []
-        out = capsys.readouterr().out
-        assert "Skipping all MCP config writes" in out
-        assert "apm.yml 'targets' field is invalid" in out
+        err = capsys.readouterr().err
+        assert "Skipping all MCP config writes" in err
+        assert "apm.yml 'targets' field is invalid" in err
 
     def test_explicit_target_csv_string_normalized(self, tmp_path):
         """Legacy `_wire_legacy_bundle_mcp_servers` CSV input must normalize first.

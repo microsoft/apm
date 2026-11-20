@@ -91,7 +91,9 @@ def test_transitive_preview_matches_install_without_mutation(
             "_local/child",
         }
         assert child_file.read_bytes() == child_bytes
-        assert "Installed 2 APM dependencies" in applied.stdout
+        # The preview left the installed state converged, so the install changes
+        # nothing (#4184).
+        assert "No changes -- install state already up to date" in applied.stdout
     else:
         assert not child_file.exists()
         assert not lock.dependencies

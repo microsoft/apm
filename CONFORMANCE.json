@@ -106,15 +106,18 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/test_lockfile.py::TestLockFile::test_to_yaml"
+      ],
       "conformance_class": "consumer",
       "id": "req-lk-001",
       "keyword": "MUST",
       "section": "5.1",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_valid_v2_passes_schema"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_valid_v2_passes_schema",
+        "tests/test_lockfile.py::TestLockFile::test_to_yaml"
       ]
     },
     {
@@ -296,15 +299,22 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/install/test_git_semver_locked_replay.py::TestDownloadStrategyReplaysLockedSemver::test_unchanged_constraint_replays_locked_tag",
+        "tests/unit/install/test_git_semver_locked_replay.py::TestDownloadStrategyReplaysLockedSemver::test_update_or_changed_constraint_does_not_replay[constraint-changed]",
+        "tests/unit/install/test_git_semver_locked_replay.py::TestDownloadStrategyReplaysLockedSemver::test_update_or_changed_constraint_does_not_replay[update]"
+      ],
       "conformance_class": "consumer",
       "id": "req-lk-009",
       "keyword": "MUST",
       "section": "5.6",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 4,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_records_registry_url"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_records_registry_url",
+        "tests/unit/install/test_git_semver_locked_replay.py::TestDownloadStrategyReplaysLockedSemver::test_unchanged_constraint_replays_locked_tag",
+        "tests/unit/install/test_git_semver_locked_replay.py::TestDownloadStrategyReplaysLockedSemver::test_update_or_changed_constraint_does_not_replay[constraint-changed]",
+        "tests/unit/install/test_git_semver_locked_replay.py::TestDownloadStrategyReplaysLockedSemver::test_update_or_changed_constraint_does_not_replay[update]"
       ]
     },
     {
@@ -826,15 +836,22 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/deps/test_apm_resolver_edge_cases.py::TestBuildDependencyTree::test_root_parent_repo_inheritance_raises",
+        "tests/unit/test_lockfile_git_parent_expanded.py::TestLockfileExpandedGitParent::test_to_dict_has_no_parent_sentinel",
+        "tests/unit/test_lockfile_git_parent_expanded.py::test_resolver_expands_parent_to_parent_coordinates"
+      ],
       "conformance_class": "consumer",
       "id": "req-mf-010",
       "keyword": "MUST",
       "section": "4.3.2",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 4,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_apm_source_short_form_string"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_apm_source_short_form_string",
+        "tests/unit/deps/test_apm_resolver_edge_cases.py::TestBuildDependencyTree::test_root_parent_repo_inheritance_raises",
+        "tests/unit/test_lockfile_git_parent_expanded.py::TestLockfileExpandedGitParent::test_to_dict_has_no_parent_sentinel",
+        "tests/unit/test_lockfile_git_parent_expanded.py::test_resolver_expands_parent_to_parent_coordinates"
       ]
     },
     {
@@ -917,15 +934,18 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/test_apm_yml_registries.py::TestRegistriesBlockValidation::test_non_http_url_rejected"
+      ],
       "conformance_class": "producer",
       "id": "req-mf-014",
       "keyword": "MUST",
       "section": "4.2.3",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_producer_rejects_non_http_registry_scheme"
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_rejects_non_http_registry_scheme",
+        "tests/unit/test_apm_yml_registries.py::TestRegistriesBlockValidation::test_non_http_url_rejected"
       ]
     },
     {
@@ -1367,27 +1387,39 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/integration/policy/test_compilation_target_policy_e2e.py::test_install_blocks_a_noncompliant_plural_declaration_before_writing",
+        "tests/integration/test_replacement_source_consumers.py::test_install_policy_gate_blocks_selected_source_before_publication[fork]",
+        "tests/integration/test_replacement_source_consumers.py::test_install_policy_gate_blocks_selected_source_before_publication[local]"
+      ],
       "conformance_class": "governance",
       "id": "req-pl-002",
       "keyword": "MUST",
       "section": "6.2",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 4,
       "tests": [
+        "tests/integration/policy/test_compilation_target_policy_e2e.py::test_install_blocks_a_noncompliant_plural_declaration_before_writing",
+        "tests/integration/test_replacement_source_consumers.py::test_install_policy_gate_blocks_selected_source_before_publication[fork]",
+        "tests/integration/test_replacement_source_consumers.py::test_install_policy_gate_blocks_selected_source_before_publication[local]",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_carries_apiversion_or_kind_key"
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/policy/test_chain_discovery_shared.py::TestMultiLevelExtendsChain::test_cycle_in_chain_raises",
+        "tests/unit/policy/test_chain_discovery_shared.py::TestMultiLevelExtendsChain::test_depth_limit_raises"
+      ],
       "conformance_class": "governance",
       "id": "req-pl-003",
       "keyword": "MUST",
       "section": "6.4",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 3,
       "tests": [
-        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_field_resolves_to_other_policy"
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_field_resolves_to_other_policy",
+        "tests/unit/policy/test_chain_discovery_shared.py::TestMultiLevelExtendsChain::test_cycle_in_chain_raises",
+        "tests/unit/policy/test_chain_discovery_shared.py::TestMultiLevelExtendsChain::test_depth_limit_raises"
       ]
     },
     {
@@ -1489,15 +1521,22 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block",
+        "tests/integration/test_architecture_outcome_guards.py::test_incomplete_policy_chain_always_fails_closed",
+        "tests/unit/policy/test_chain_discovery_shared.py::TestMultiLevelExtendsChain::test_partial_chain_fails_closed"
+      ],
       "conformance_class": "governance",
       "id": "req-pl-010",
       "keyword": "MUST",
       "section": "6.2",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 4,
       "tests": [
-        "tests/spec_conformance/test_policy_reqs.py::test_policy_apiversion_pinned_to_v0_1"
+        "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block",
+        "tests/integration/test_architecture_outcome_guards.py::test_incomplete_policy_chain_always_fails_closed",
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_apiversion_pinned_to_v0_1",
+        "tests/unit/policy/test_chain_discovery_shared.py::TestMultiLevelExtendsChain::test_partial_chain_fails_closed"
       ]
     },
     {
@@ -1719,15 +1758,18 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/primitives/test_discovery_parser.py::test_discovered_primitives_carry_local_or_dependency_attribution"
+      ],
       "conformance_class": "consumer",
       "id": "req-pr-001",
       "keyword": "MUST",
       "section": "8.2",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_loads_primitives_from_resolved_dep"
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_loads_primitives_from_resolved_dep",
+        "tests/unit/primitives/test_discovery_parser.py::test_discovered_primitives_carry_local_or_dependency_attribution"
       ]
     },
     {
@@ -1746,15 +1788,18 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/primitives/test_discovery_parser.py::test_first_declared_dependency_wins_over_name_order"
+      ],
       "conformance_class": "consumer",
       "id": "req-pr-003",
       "keyword": "MUST",
       "section": "8.3",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_rejects_primitive_collisions"
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_rejects_primitive_collisions",
+        "tests/unit/primitives/test_discovery_parser.py::test_first_declared_dependency_wins_over_name_order"
       ]
     },
     {
@@ -2035,15 +2080,30 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestLiteralTagRegressionTrap::test_literal_tag_v1_2_3_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_no_reference_returns_none",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_branch_name_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_caret_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_sha_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_tilde_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_wildcard_routes_to_semver"
+      ],
       "conformance_class": "consumer",
       "id": "req-rs-003",
       "keyword": "MUST",
       "section": "7.3",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 8,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_uses_pinned_version_when_present"
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_uses_pinned_version_when_present",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestLiteralTagRegressionTrap::test_literal_tag_v1_2_3_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_no_reference_returns_none",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_branch_name_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_caret_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_sha_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_tilde_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_wildcard_routes_to_semver"
       ]
     },
     {
@@ -2137,13 +2197,20 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_no_reference_returns_none",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_branch_name_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_caret_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_sha_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_tilde_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_wildcard_routes_to_semver"
+      ],
       "conformance_class": "consumer",
       "id": "req-rs-008",
       "keyword": "MUST",
       "section": "7.1",
-      "status": "text-only",
-      "test_count": 7,
+      "status": "active",
+      "test_count": 13,
       "tests": [
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[caret-0_0]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[caret-0_2]",
@@ -2151,7 +2218,13 @@
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[gte-range]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[or-union]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[tilde-0_x]",
-        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[tilde-1_2]"
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[tilde-1_2]",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_no_reference_returns_none",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_branch_name_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_caret_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_sha_does_not_route_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_tilde_range_routes_to_semver",
+        "tests/unit/models/test_dependency_reference_semver_routing.py::TestStringShorthandRouting::test_string_shorthand_with_wildcard_routes_to_semver"
       ]
     },
     {
@@ -2552,15 +2625,18 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/unit/test_auth_scoping_io.py::TestCloneWithFallbackEnv::test_insecure_http_dep_is_strict_by_default"
+      ],
       "conformance_class": "consumer",
       "id": "req-sc-008",
       "keyword": "SHOULD",
       "section": "10.3",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http",
+        "tests/unit/test_auth_scoping_io.py::TestCloneWithFallbackEnv::test_insecure_http_dep_is_strict_by_default"
       ]
     },
     {
@@ -2781,14 +2857,17 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/integration/test_skill_integration.py::TestSkillInstallIntegration::test_install_creates_correct_structure"
+      ],
       "conformance_class": "consumer",
       "id": "req-tg-003",
       "keyword": "MUST",
       "section": "8.5",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
+        "tests/integration/test_skill_integration.py::TestSkillInstallIntegration::test_install_creates_correct_structure",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_skills_to_agents_skills"
       ]
     },
@@ -3113,23 +3192,23 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 88,
+      "active": 97,
       "skipped": 3,
-      "text-only": 14,
+      "text-only": 5,
       "unbound": 0,
       "xfail": 10
     },
     "governance": {
-      "active": 16,
+      "active": 19,
       "skipped": 0,
-      "text-only": 4,
+      "text-only": 1,
       "unbound": 0,
       "xfail": 1
     },
     "producer": {
-      "active": 5,
+      "active": 6,
       "skipped": 0,
-      "text-only": 5,
+      "text-only": 4,
       "unbound": 0,
       "xfail": 2
     },

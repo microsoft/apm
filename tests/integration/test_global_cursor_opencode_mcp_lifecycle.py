@@ -257,9 +257,11 @@ def test_installed_global_mcp_refusal_preserves_owned_state(
         if unsafe == "unreadable":
             config.chmod(0o600)
     assert failed.returncode != 0, failed.stdout + failed.stderr
-    assert target in failed.stdout.lower()
-    assert "failed" in failed.stdout.lower()
-    assert "original install command" in failed.stdout
+    output = (failed.stdout + failed.stderr).lower()
+    assert target in output
+    assert "failed" in output
+    # The runtime failure summary is an error line: stderr (RA-004).
+    assert "original install command" in failed.stderr
     guidance = {
         "unreadable": "fix the file's permissions or encoding, or add this server manually",
         "invalid-map": "fix the file or add this server manually",

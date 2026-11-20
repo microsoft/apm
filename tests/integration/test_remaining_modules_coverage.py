@@ -696,7 +696,8 @@ class TestMaterialization:
             install_path=tmp_path,
             dep_key="owner/repo",
         )
-        assert m.deltas == {"installed": 1}
+        # A local copy is not a fetch; integration decides installed (#4184).
+        assert m.deltas == {"installed": 0}
 
     def test_custom_deltas(self, tmp_path: Path) -> None:
         """Materialization accepts custom deltas."""

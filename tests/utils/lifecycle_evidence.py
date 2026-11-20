@@ -422,7 +422,12 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4267",
         _runs("install"),
         r"\[!\] Policy: org:",
-        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
+        # The blocked-dependency summary is an error, so it may go to stderr;
+        # stdout then ends on the repeated banner of the MCP phase.
+        output=(
+            r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*"
+            r"(?:^  \[x\] \d+ dependenc\w* blocked by org policy|^\[!\] Policy: org:[^\n]*\n?\Z)"
+        ),
     ),
     KnownOutputCell(
         "approve-org-policy-warning-twice",
@@ -474,6 +479,9 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=(
             r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
             r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
+            # An unchanged target adopts its copy (#4184); the line still repeats.
+            r"|^  \|-- 1 hook\(s\) integrated \(1 adopted\) -> [^,\n]+, [^,\n]+\n"
+            r"  \|   Hook file integrated: "
         ),
     ),
     KnownOutputCell(

@@ -456,16 +456,15 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         )
 
     if mutation == "content-hash":
-        normalized_stdout = " ".join(result.stdout.split())
-        assert "Content hash mismatch" in normalized_stdout
-        assert f"expected sha256:{'0' * 64}" in normalized_stdout
-        assert "This may indicate a supply-chain attack." in normalized_stdout
-        dep_key = normalized_stdout.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
-        # The hint names the resolved lockfile path, which Rich may wrap.
-        compact = "".join(result.stdout.split())
-        assert f"removethe'{dep_key}'entryfrom" in compact, result.stdout
-        assert "apm.lock.yamlandrun'apminstall'" in compact, result.stdout
-        assert result.stderr == ""
+        # The refusal is an error line, so it goes to stderr (RA-004).
+        normalized_stderr = " ".join(result.stderr.split())
+        assert "Content hash mismatch" in normalized_stderr
+        assert f"expected sha256:{'0' * 64}" in normalized_stderr
+        assert "This may indicate a supply-chain attack." in normalized_stderr
+        dep_key = normalized_stderr.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
+        compact = "".join(result.stderr.split())
+        assert f"removethe'{dep_key}'entryfrom" in compact, result.stderr
+        assert "apm.lock.yaml,thenrun'apminstall'" in compact, result.stderr
     else:
         payload = json.loads(result.stdout)
         failed_checks = {check["name"]: check for check in payload["checks"] if not check["passed"]}
@@ -476,7 +475,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             assert set(failed_checks) == {"content-integrity", "drift"}
             assert instruction_path in failed_checks["content-integrity"]["details"][0]
             assert (
-                "'apm install' after deleting the drifted files"
+                "delete the edited files, then run 'apm install'"
                 in (failed_checks["content-integrity"]["message"])
             )
         elif mutation == "resolved-ref":

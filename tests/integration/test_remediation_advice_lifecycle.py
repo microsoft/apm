@@ -297,6 +297,20 @@ def _manifest_created(world: _World, result) -> None:
     assert world.consumer.manifest_path.is_file()
 
 
+def _bootstrap_offline(world: _World) -> None:
+    """Keep the printed ``apm install <org/repo>`` hermetic (#4143).
+
+    The fixture slug exists only through the git URL rewrite. A reachable
+    api.github.com answers 404 for it and validation refuses, so the GitHub
+    probe goes to a closed loopback proxy: the inconclusive probe falls back
+    to the rewritten git source, as on an offline runner.
+    """
+    (world.consumer.root / ".claude").mkdir()
+    for name in ("HTTPS_PROXY", "https_proxy"):
+        world.source.environment[name] = "http://127.0.0.1:9"
+    world.source.environment["NO_PROXY"] = world.source.environment["no_proxy"] = ""
+
+
 TEXT_PROOFS: tuple[_TextProof, ...] = (
     _TextProof(
         "project-manifest-missing",
@@ -393,7 +407,7 @@ TEXT_PROOFS: tuple[_TextProof, ...] = (
     _TextProof(
         "project-manifest-bootstrap",
         _bare_world,
-        lambda world: (world.consumer.root / ".claude").mkdir(),
+        _bootstrap_offline,
         lambda _world: ("install",),
         1,
         _manifest_created,
