@@ -4,7 +4,8 @@
   0,
   1,
   2,
-  3
+  3,
+  4
  ],
  "folds": {
   "tests/unit/commands/test_pack_phase3.py::TestPackCmdFlags::test_help_text_includes_all_key_flags": "tests/unit/commands/test_pack_cli_surface.py::TestPackCmdFlags::test_help_text_includes_all_key_flags",
@@ -39,10 +40,12 @@
   "step2: all 8 same-body groups touching scope paired a pure-logic unit test with a twin under tests/integration (outside scope); folded the unit copies into parametrized tests in the same unit class so behavior stays in the unit lane and the integration twins are left untouched",
   "step2: TestRenderFindingsTable empty/info cases now assert nothing is echoed or printed instead of only not raising; TestFormatTargetLabel none case now also covers label sources",
   "step3: 79 modules got one module-level pytestmark: component when the module uses tmp_path, tempfile, CliRunner, chdir, real file reads/writes or repo files; unit for the 3 pure-logic modules (test_build_id, test_find_reverse_index, compile/test_watch_target_forwarding)",
-  "step3: tests/unit/commands/test_approve_deny.py, test_experimental_command.py and test_install_context.py stay unclassified because open pull requests own them"
+  "step3: tests/unit/commands/test_approve_deny.py, test_experimental_command.py and test_install_context.py stay unclassified because open pull requests own them",
+  "step4: taxonomy_inventory_plugin.spawns_processes finds no process-spawning module in scope and no scope module lives under tests/integration; no moves needed"
  ],
  "counts_left": {
   "same_body_groups": 0,
-  "unclassified_modules": 3
+  "unclassified_modules": 3,
+  "placement_offenders": 0
  }
 }
