@@ -23648,16 +23648,16 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:823",
-    "src/apm_cli/install/services.py:1026"
+    "src/apm_cli/install/services.py:822",
+    "src/apm_cli/install/services.py:1025"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:680",
-    "src/apm_cli/install/exec_gate.py:681",
-    "src/apm_cli/install/exec_gate.py:684"
+    "src/apm_cli/install/exec_gate.py:685",
+    "src/apm_cli/install/exec_gate.py:686",
+    "src/apm_cli/install/exec_gate.py:689"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -23667,21 +23667,21 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:687",
-    "src/apm_cli/commands/compile/cli.py:721"
+    "src/apm_cli/commands/compile/cli.py:695",
+    "src/apm_cli/commands/compile/cli.py:729"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },
   "U2": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:255",
+    "src/apm_cli/commands/approve.py:262",
     "src/apm_cli/policy/install_preflight.py:218"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:814"
+    "src/apm_cli/core/deployment_ledger.py:815"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
@@ -23693,47 +23693,47 @@
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:171"
+    "src/apm_cli/commands/pack.py:177"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:37",
-    "src/apm_cli/commands/pack.py:38"
+    "src/apm_cli/commands/pack.py:43",
+    "src/apm_cli/commands/pack.py:44"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:938"
+    "src/apm_cli/commands/install.py:948"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1218",
-    "src/apm_cli/commands/install.py:982",
-    "src/apm_cli/commands/install.py:956",
+    "src/apm_cli/commands/install.py:1227",
+    "src/apm_cli/commands/install.py:992",
+    "src/apm_cli/commands/install.py:966",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
-    "src/apm_cli/commands/uninstall/engine.py:713",
-    "src/apm_cli/commands/uninstall/engine.py:877",
-    "src/apm_cli/commands/uninstall/engine.py:705",
-    "src/apm_cli/commands/update.py:486",
-    "src/apm_cli/commands/prune.py:210",
+    "src/apm_cli/commands/uninstall/engine.py:749",
+    "src/apm_cli/commands/uninstall/engine.py:912",
+    "src/apm_cli/commands/uninstall/engine.py:741",
+    "src/apm_cli/commands/update.py:490",
+    "src/apm_cli/commands/prune.py:219",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
    "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
   },
   "U9": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:282",
-    "src/apm_cli/commands/approve.py:286"
+    "src/apm_cli/commands/approve.py:289",
+    "src/apm_cli/commands/approve.py:293"
    ],
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
  "schema_version": 1,
- "sha256": "f842138693a73ebca63bdeb52a197b0183807dd27e891aebbccd28aeae9b2f26"
+ "sha256": "b2baa7421ed5f1ffa577122456e1fd2ff98c4bae528e30108728c2e5e7d5a3f0"
 }

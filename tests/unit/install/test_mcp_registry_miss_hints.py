@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.core.remediation import MCP_REGISTRY_ALTERNATIVE
 from apm_cli.integration.mcp_integrator_install import (
     CHOOSING_MCP_REGISTRY_DOCS_URL,
     _validate_registry_servers,
@@ -83,8 +84,7 @@ def test_default_registry_miss_hint_is_ordered_and_neutral(
     for name in server_names:
         expected.append(f'Search this registry: apm mcp search "{name}"')
         expected.append(
-            "Use another registry (replace <URL>): "
-            f'apm install --mcp "{name}" --registry <URL> --target claude'
+            MCP_REGISTRY_ALTERNATIVE.bind(server=name, retry=" --target claude").sentence()
         )
     expected.append("Or save it for every lookup: apm config set mcp-registry-url <URL>")
     expected.append(f"Choosing an MCP registry: {CHOOSING_MCP_REGISTRY_DOCS_URL}")

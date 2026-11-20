@@ -55,7 +55,7 @@ steps:
         - "  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/"
         - "[i] Added apm_modules/ to .gitignore"
         - "..."
-        - "[*] Installed 1 APM dependency in 0.6s."
+        - "[*] Updated local content in 0.6s."
     key_lines:
       - "[i] Targets: claude, copilot  (source: --target flag)"
       - "[+] <project root> (local)"

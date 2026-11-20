@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from apm_cli.core.remediation import HOOK_PLUGIN_ROOT_UNRESOLVED
 from apm_cli.integration.hook_command_paths import residual_plugin_root_has_path
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
@@ -20,6 +21,5 @@ def warn_unresolved_plugin_root(command: str, reference: str, package_name: str)
         return
     _rich_warning(
         f"Unresolved plugin-root reference in package '{package_label}': "
-        f"{safe_reference}. Ensure the quote marks match and wrap the complete "
-        "reference and path in balanced double quotes, then run apm install again."
+        f"{safe_reference}. {HOOK_PLUGIN_ROOT_UNRESOLVED.sentence()}"
     )

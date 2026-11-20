@@ -30,9 +30,10 @@ def _marketplaces_path() -> str:
 
 def _ensure_file() -> str:
     """Ensure the marketplaces file exists, creating it if needed."""
-    from ..config import ensure_config_exists
+    from ..config import CONFIG_DIR
 
-    ensure_config_exists()
+    # Only the directory: config.json is written by 'apm config set' alone.
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
     path = _marketplaces_path()
     if not os.path.exists(path):
         with open(path, "w", encoding="utf-8") as f:
@@ -50,9 +51,9 @@ def _invalidate_cache() -> None:
 def _marketplace_mutation():
     """Lock the complete cross-process load-modify-save transaction."""
     from ..cache.locking import shard_lock
-    from ..config import ensure_config_exists
+    from ..config import CONFIG_DIR
 
-    ensure_config_exists()
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
     path = Path(_marketplaces_path())
     with _mutation_lock, shard_lock(path):
         _invalidate_cache()

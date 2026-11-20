@@ -81,7 +81,7 @@ def set_markers() -> set[str]:
         sys.executable,
         "-m",
         "pytest",
-        "tests/spec_conformance",
+        "tests",
         "--collect-only",
         "-q",
         "-p",

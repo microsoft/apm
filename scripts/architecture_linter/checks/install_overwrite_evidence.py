@@ -40,7 +40,17 @@ _WRITERS = (
     "src/apm_cli/integration/command_integrator.py",
     "src/apm_cli/integration/agent_integrator.py",
 )
-_RAW_WRITES = frozenset({"write_text_lf", "write_text", "write_bytes", "copy2", "copyfile", "open"})
+_RAW_WRITES = frozenset(
+    {
+        "write_text_lf",
+        "write_text_if_changed",
+        "write_text",
+        "write_bytes",
+        "copy2",
+        "copyfile",
+        "open",
+    }
+)
 # The only writers that may skip the owner: leaves for direct callers or for
 # an in-module caller that asked the owner first. Every other writer asks.
 _LEAF_WRITERS = frozenset(

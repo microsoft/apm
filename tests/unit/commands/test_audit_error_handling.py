@@ -15,6 +15,7 @@ Targets the uncovered branches in:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -236,7 +237,9 @@ class TestRenderFindingsTable:
             _render_findings_table(findings, verbose=False)
         assert "WARNING    test.md 1:5  U+200B  Zero-width space" in "".join(capsys.readouterr())
 
-    def test_severity_ordering(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_severity_ordering(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Critical findings should appear before warnings in output."""
         findings = {
             "file.md": [
@@ -244,6 +247,8 @@ class TestRenderFindingsTable:
                 _make_finding("critical", line=1),
             ]
         }
+        # Critical lines go to stderr (RA-004); interleave both streams to keep order.
+        monkeypatch.setattr(sys, "stderr", sys.stdout)
         with patch("apm_cli.commands.audit._get_console", return_value=None):
             _render_findings_table(findings, verbose=True)
         out = "".join(capsys.readouterr())
@@ -468,6 +473,28 @@ class TestRichTableMarkupEscaping:
         assert "enforcement: warn" in warning.call_args.args[0]
         # No green "All N passed" next to a violation (#3994).
         success.assert_not_called()
+
+    def test_failed_check_details_follow_their_header_to_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Results stay on stdout; failed-check headers and details go to stderr (RA-004)."""
+        from apm_cli.commands.audit import _render_ci_results
+        from apm_cli.policy.models import CheckResult, CIAuditResult
+
+        detail = "Content hash mismatch for org/pkg"
+        result = CIAuditResult(
+            checks=[
+                CheckResult(name="lockfile-exists", passed=True, message="ok"),
+                CheckResult(name="skill-subset", passed=False, message="bad", details=[detail]),
+                CheckResult(name="drift", passed=False, message="bad", details=[detail]),
+            ]
+        )
+        _render_ci_results(result)
+        out, err = capsys.readouterr()
+        assert "lockfile-exists" in out
+        assert detail not in out
+        assert err.count(detail) == 2
+        assert err.index("skill-subset details:") < err.index(detail) < err.index("drift details:")
 
     def test_strip_preview_keeps_bracketed_path(self) -> None:
         console = self._console()

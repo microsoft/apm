@@ -1,0 +1,16 @@
+{
+  "files": {
+    "src/apm_cli/claude_plugins/registrar.py": 1,
+    "src/apm_cli/commands/approve.py": 1,
+    "src/apm_cli/commands/uninstall/cli.py": 1,
+    "src/apm_cli/commands/update.py": 1,
+    "src/apm_cli/install/frozen_retirement.py": 1,
+    "src/apm_cli/install/frozen_withdrawal.py": 4,
+    "src/apm_cli/install/outcome.py": 1,
+    "src/apm_cli/integration/cleanup.py": 2,
+    "src/apm_cli/marketplace/catalog_origin.py": 1,
+    "src/apm_cli/marketplace/version_pins.py": 1,
+    "src/apm_cli/policy/ci_checks.py": 1
+  },
+  "version": 1
+}

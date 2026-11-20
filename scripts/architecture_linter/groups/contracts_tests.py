@@ -12,6 +12,9 @@ from scripts.architecture_linter.checks.contracts_ci_shard_file_lists import (
     RULES as CI_SHARD_FILE_LIST_RULES,
 )
 from scripts.architecture_linter.checks.contracts_ci_topology import RULES as CI_TOPOLOGY_RULES
+from scripts.architecture_linter.checks.contracts_conformance_coverage import (
+    RULES as CONFORMANCE_COVERAGE_RULES,
+)
 from scripts.architecture_linter.checks.contracts_dependency_policy import RULES as POLICY_RULES
 from scripts.architecture_linter.checks.contracts_dependency_replacements import (
     RULES as REPLACEMENT_RULES,
@@ -29,6 +32,9 @@ from scripts.architecture_linter.checks.contracts_lockfile_generator import (
 )
 from scripts.architecture_linter.checks.contracts_lockfile_write_authority import (
     RULES as LOCKFILE_WRITE_AUTHORITY_RULES,
+)
+from scripts.architecture_linter.checks.contracts_remediation_advice import (
+    RULES as REMEDIATION_RULES,
 )
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
@@ -49,6 +55,8 @@ RULES = (
     *LIFECYCLE_SCRIPT_GATE_RULES,
     *LOCAL_PATH_ANCHOR_RULES,
     *UPDATE_PLAN_REF_RULES,
+    *REMEDIATION_RULES,
+    *CONFORMANCE_COVERAGE_RULES,
     *APPROVE_COMMAND_RULES,
     *CI_TOPOLOGY_RULES,
     *LINTER_CACHE_RULES,
