@@ -634,6 +634,10 @@ class TestUnpackRefusesExecutables:
             ".vscode/mcp.json",
             ".codex/config.toml",
             ".github/skills/tool/bin/tool",
+            ".agents/mcp_config.json",
+            ".kiro/settings/mcp.json",
+            ".claude/skills/apm-lsp/.claude-plugin/plugin.json",
+            ".github/lsp.json",
         ],
     )
     @pytest.mark.parametrize("dry_run", [False, True])
@@ -655,6 +659,16 @@ class TestUnpackRefusesExecutables:
         output.mkdir()
 
         with pytest.raises(ValueError, match="bin executable"):
+            unpack_bundle(bundle, output)
+
+    def test_file_listed_with_its_directory_is_counted_once(self, tmp_path):
+        bundle = _build_bundle_dir(
+            tmp_path, [".github/skills/tool/", ".github/skills/tool/bin/run"]
+        )
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match=r"Refusing to unpack 1 executable file"):
             unpack_bundle(bundle, output)
 
     def test_non_executable_content_still_unpacks(self, tmp_path):

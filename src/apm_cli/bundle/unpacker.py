@@ -1,5 +1,6 @@
 """Bundle unpacker  -- extracts and verifies APM bundles."""
 
+import functools
 import os
 import shutil
 import tempfile
@@ -337,23 +338,53 @@ def _validated_unpack_destinations(
     return destinations
 
 
-# Basenames of target config files that register hooks, MCP or LSP servers.
+# Basenames that only name hook, MCP or LSP server configuration, at any depth
+# (``.kiro/settings/mcp.json``, ``.agents/mcp_config.json``).
 _EXECUTABLE_CONFIG_NAMES = frozenset(
     {
         "hooks.json",
+        "apm-hooks.json",
         "mcp.json",
         ".mcp.json",
+        "mcp_config.json",
         "lsp.json",
         ".lsp.json",
-        "settings.json",
-        "settings.local.json",
-        "config.toml",
+        "lsp-config.json",
         "opencode.json",
         "opencode.jsonc",
     }
 )
+# Client settings files that can register hooks or servers; they sit at the
+# project root or directly under a client root (``.claude/settings.json``).
+_CLIENT_SETTINGS_NAMES = frozenset(
+    {
+        "settings.json",
+        "settings.local.json",
+        "config.toml",
+        "config.yaml",
+        ".claude.json",
+    }
+)
 # Directory segments whose files are hook resources or bin executables.
 _EXECUTABLE_DIR_NAMES = frozenset({"hooks", "bin"})
+
+
+@functools.lru_cache(maxsize=1)
+def _lsp_config_paths() -> frozenset[str]:
+    """Project-scope LSP config paths, as the LSP integrator writes them."""
+    from ..integration.lsp_integrator import _LSP_TARGET_SPECS
+
+    return frozenset(
+        "/".join(spec.project_relative_path).lower() for spec in _LSP_TARGET_SPECS.values()
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _plugin_manifest_paths() -> tuple[str, ...]:
+    """Plugin manifest paths; a manifest can declare hooks, MCP and LSP servers."""
+    from ..core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
+
+    return tuple(path.lower() for path in PLUGIN_ECOSYSTEM_PATHS.values())
 
 
 def executable_content_kind(rel_path: str) -> str | None:
@@ -365,9 +396,14 @@ def executable_content_kind(rel_path: str) -> str | None:
         return None
     if is_canvas_bundle_path(rel_path):
         return "canvas extension"
-    # Target config files sit at the project root or directly under a
-    # client root (``.claude/settings.json``, ``.vscode/mcp.json``).
-    if len(parts) <= 2 and parts[-1].lower() in _EXECUTABLE_CONFIG_NAMES:
+    name = parts[-1].lower()
+    joined = "/".join(parts).lower()
+    if (
+        name in _EXECUTABLE_CONFIG_NAMES
+        or (len(parts) <= 2 and name in _CLIENT_SETTINGS_NAMES)
+        or joined in _lsp_config_paths()
+        or any(joined == m or joined.endswith("/" + m) for m in _plugin_manifest_paths())
+    ):
         return "hook, MCP or LSP configuration"
     for seg in parts[:-1]:
         if seg.lower() in _EXECUTABLE_DIR_NAMES:
@@ -377,15 +413,15 @@ def executable_content_kind(rel_path: str) -> str | None:
 
 def _bundle_file_paths(rel_paths: list[str], source_dir: Path) -> list[str]:
     """Expand directory entries into the files a copy would write."""
-    expanded: list[str] = []
+    expanded: dict[str, None] = {}
     for rel in rel_paths:
-        expanded.append(rel)
+        expanded[rel] = None
         src = source_dir / rel
         if src.is_dir() and not src.is_symlink():
             for walk_root, _dirs, files in os.walk(src):
                 base = Path(rel) / Path(walk_root).relative_to(src)
-                expanded.extend((base / name).as_posix() for name in files)
-    return expanded
+                expanded.update(dict.fromkeys((base / name).as_posix() for name in files))
+    return list(expanded)
 
 
 def _refuse_executable_content(rel_paths: list[str], source_dir: Path, bundle_path: Path) -> None:
