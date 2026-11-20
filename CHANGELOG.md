@@ -143,6 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
 - Orphan previews in `apm install --dry-run` and `apm uninstall --dry-run` now match the real run; every command's orphan removal comes from one owner. (#4021)
 - A targeted `apm install` keeps both a repository and its virtual child when the child stays locked; the outcome no longer varies between runs. (closes #4060, #4063)
+- Cleanup keeps files unless a local receipt or the locked version's render proves APM deployed them; a lockfile hash alone no longer deletes them. (closes #3701, #4049)
 
 ### Security
 
