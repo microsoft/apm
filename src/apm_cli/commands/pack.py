@@ -18,6 +18,8 @@ from ..core.build_orchestrator import (
 )
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
+from ..install.locking import serialized_lifecycle_unless
 
 MARKETPLACE_DOCS_URL = (
     "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
@@ -946,9 +948,15 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
+@serialized_lifecycle_unless("dry_run")
+@lockfile_writer(LockfileWriter.UNPACK)
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
-    logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
+    from ..core.command_logger import InstallLogger
+    from ..install.bundle_admission import apm_bundle_admission, record_unpacked_files
+    from ..install.errors import InstallFailureAlreadyRendered, PolicyViolationError
+
+    logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
     logger.warning(
         "'apm unpack' is deprecated and will be removed in a future release. "
         "Repack with the default plugin format and use 'apm install <bundle-path>'.",
@@ -962,6 +970,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             skip_verify=skip_verify,
             dry_run=dry_run,
             force=force,
+            admit=apm_bundle_admission(Path(output), logger, dry_run=dry_run),
         )
 
         # Surface bundle metadata and warn on target mismatch
@@ -1004,7 +1013,15 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
                 )
             verified_msg = " (verified)" if result.verified else ""
             logger.success(f"Unpacked {len(result.files)} file(s){verified_msg}")
+        record_unpacked_files(Path(output), result.written_files, logger)
+        logger.render_summary()
 
+    except PolicyViolationError as exc:
+        logger.refusal(str(exc))
+        logger.render_summary()
+        sys.exit(1)
+    except InstallFailureAlreadyRendered:
+        sys.exit(1)
     except (FileNotFoundError, ValueError) as exc:
         logger.error(str(exc))
         sys.exit(1)

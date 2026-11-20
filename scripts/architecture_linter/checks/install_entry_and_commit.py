@@ -59,12 +59,12 @@ _MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
 _MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
 _SERVICE_INTEGRATION = "src/apm_cli/install/service_integration.py"
 # Closed, shrink-only list of org-policy preflight sites outside the policy
-# package. Local bundle leaves it when it routes through the pipeline.
+# package. Bundle admission leaves it when bundles route through the pipeline.
 _POLICY_PREFLIGHT_SITES = frozenset(
     {
         _ENTRY_OWNER,
         _COMMIT_GATE,
-        "src/apm_cli/install/local_bundle_handler.py",
+        "src/apm_cli/install/bundle_admission.py",
     }
 )
 # install --mcp judges its server through the commit gate and refuses it as

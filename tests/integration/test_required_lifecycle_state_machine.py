@@ -67,6 +67,7 @@ _GLOBAL_AUDIT_RULES = frozenset(
         "deployed-files-present",
         "deployment-ledger-owners",
         "drift",
+        "hook-approval-pins",
         "includes-consent",
         "local-bundle-hooks",
         "lockfile-exists",

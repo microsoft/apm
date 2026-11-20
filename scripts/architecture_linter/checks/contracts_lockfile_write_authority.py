@@ -41,11 +41,13 @@ WRITER_ENTRY_POINTS = (
     ("src/apm_cli/commands/uninstall/cli.py", "uninstall", "UNINSTALL"),
     ("src/apm_cli/commands/prune.py", "prune", "PRUNE"),
     ("src/apm_cli/commands/compile/cli.py", "_run_compilation", "COMPILE"),
+    ("src/apm_cli/commands/pack.py", "unpack_cmd", "UNPACK"),
 )
 
 # Every function that hands a lockfile to LockFile.write/save (innermost def).
 COMMIT_SITES = frozenset(
     {
+        ("src/apm_cli/install/bundle_admission.py", "record_unpacked_files"),
         ("src/apm_cli/commands/prune.py", "prune"),
         ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),
         ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),

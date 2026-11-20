@@ -59,7 +59,8 @@ class LockfileWriter(StrEnum):
 
     ``apm mcp install`` forwards to ``apm install --mcp`` (``INSTALL_MCP``);
     ``apm deps update`` is an ``UPDATE``; ``apm lock`` runs the install
-    service in lockfile-only mode under ``LOCK``.
+    service in lockfile-only mode under ``LOCK``; ``apm unpack`` records the
+    files it wrote under ``UNPACK``.
     """
 
     INSTALL = "install"
@@ -70,6 +71,7 @@ class LockfileWriter(StrEnum):
     UNINSTALL = "uninstall"
     PRUNE = "prune"
     COMPILE = "compile"
+    UNPACK = "unpack"
 
 
 class _Removed:

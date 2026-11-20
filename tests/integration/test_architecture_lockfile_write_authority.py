@@ -20,6 +20,7 @@ _RULE_ID = "contracts-tooling-lockfile-write-authority"
 # Shrink-only: a new lockfile commit site needs this baseline to grow, in review.
 _COMMIT_SITE_BASELINE = frozenset(
     {
+        ("src/apm_cli/install/bundle_admission.py", "record_unpacked_files"),
         ("src/apm_cli/commands/prune.py", "prune"),
         ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),
         ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),

@@ -754,6 +754,14 @@ def run(ctx: InstallContext) -> None:
                 logger=ctx.logger,
                 active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
             )
+            # Hook approval pins are re-checked through the trust owner before
+            # any hook deploys or retires, as audit --ci checks them (#4188).
+            InstallService.enforce_frozen_hook_pins(
+                ctx.existing_lockfile,
+                apm_modules_dir,
+                getattr(effective_allow_map(ctx), "trust_context", None)
+                or getattr(ctx, "exec_trust_ctx", None),
+            )
         from apm_cli.install.commit_gate import check_before_deploy
 
         check_before_deploy(ctx)
