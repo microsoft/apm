@@ -46,9 +46,14 @@ def golden_ids(*, every: bool = False) -> list[str]:
     ]
 
 
-def record(ids: list[str], directory: Path) -> int:
-    env = dict(os.environ, **{"APM_JOURNEY_RECORD_DIR": str(directory)})
-    command = [
+# Record mode writes O1 transcripts instead of comparing them, so no O1 receipt
+# can be earned; the receipt ratchet (tests/lifecycle/conftest.py) stays off.
+RECEIPT_PLUGIN = "lifecycle-receipts"
+
+
+def record_command(ids: list[str]) -> list[str]:
+    """The pytest command that records *ids* (receipt ratchet disabled)."""
+    return [
         sys.executable,
         "-m",
         "pytest",
@@ -57,11 +62,17 @@ def record(ids: list[str], directory: Path) -> int:
         "0",
         "-p",
         "no:cacheprovider",
+        "-p",
+        f"no:{RECEIPT_PLUGIN}",
         "-q",
         "-k",
         " or ".join(ids),
     ]
-    return subprocess.run(command, cwd=REPO, env=env, check=False).returncode
+
+
+def record(ids: list[str], directory: Path) -> int:
+    env = dict(os.environ, **{"APM_JOURNEY_RECORD_DIR": str(directory)})
+    return subprocess.run(record_command(ids), cwd=REPO, env=env, check=False).returncode
 
 
 def review(directory: Path, ids: list[str], *, write: bool) -> tuple[int, int]:
