@@ -52,6 +52,7 @@ import json
 import os
 import shutil
 import statistics
+import time
 import types
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -64,6 +65,12 @@ from scripts.architecture_linter.checks.tree_index import TreeIndex
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.inventory import EXCLUDED_ROOTS
 from scripts.architecture_linter.models import Rule, Violation
+from scripts.architecture_linter.session_cache import linter_session
+from tests.integration.test_architecture_owner_rule_mutations import (
+    EXECUTABLE_MUTATIONS,
+    MutationCase,
+    _mutate,
+)
 
 from .conftest import PERF_ENABLED
 
@@ -561,3 +568,36 @@ def test_real_six_group_catalog_wall_time_scales_below_fifteen_x(
         )
     assert incremental_n_work > 0
     assert incremental_ten_n_work / incremental_n_work < _MAX_REAL_CATALOG_RATIO
+
+
+# ---------------------------------------------------------------------------
+# Section D: session-cached owner mutation matrix at N and 2N cases (#4119).
+# Non-gating scaling evidence: reported by the Architecture Scaling job.
+# ---------------------------------------------------------------------------
+_MATRIX_SMALL_N = 20
+_MAX_MATRIX_RATIO = 2.2
+
+
+def _cached_matrix_seconds(cases: Sequence[MutationCase], prewarm_rule_ids: Sequence[str]) -> float:
+    """Time `cases` in one session after paying every cold parse up front."""
+    with linter_session():
+        for rule_id in prewarm_rule_ids:
+            runner.run_selected_rules(ROOT, (rule_id,))
+        started = time.perf_counter()
+        for case in cases:
+            runner.run_selected_rules(
+                ROOT, (case.rule_id,), source_overrides={case.path: _mutate(case)}
+            )
+        return time.perf_counter() - started
+
+
+def test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n() -> None:
+    """Warm mutation cases cost linear time: 2N cases stay within 2.2x of N."""
+    cases = EXECUTABLE_MUTATIONS[: 2 * _MATRIX_SMALL_N]
+    rule_ids = tuple(dict.fromkeys(case.rule_id for case in cases))
+    small = _cached_matrix_seconds(cases[:_MATRIX_SMALL_N], rule_ids)
+    large = _cached_matrix_seconds(cases, rule_ids)
+    print(
+        f"mutation matrix N={_MATRIX_SMALL_N} {small:.2f}s 2N {large:.2f}s ratio {large / small:.2f}"
+    )
+    assert large / small <= _MAX_MATRIX_RATIO
