@@ -23630,7 +23630,7 @@
   "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
   "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
   "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
-  "generated_cover-17-local-bundle-refusals.yaml": "fa2fb9ff70cb5b3b8caea7de2936bd3884dfcd447fa52b611b5d877b42773d96"
+  "generated_cover-17-local-bundle-refusals.yaml": "1ab5035a669a1ebe463eb541d3b6da7e78b01cb98ec924a591a9033f4038208a"
  },
  "rules": {
   "E1": {
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "bfdda02992b618d708db7793fb454e64b8a3b8cb0f54225a2f6998686386cebc"
+ "sha256": "9d832fe785f7361f4a8ad9cdbccda25e3613aadfcd560bb9d45a3021180b5dd4"
 }
