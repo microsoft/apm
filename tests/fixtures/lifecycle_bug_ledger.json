@@ -2418,7 +2418,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_repository_not_found_lifecycle.py::test_inaccessible_repository_names_host_and_credential_source",
-        "tests/unit/core/test_auth_phase3.py::TestDescribeCredentialTried::test_names_the_resolved_source_not_the_value",
+        "tests/unit/core/test_auth_validation.py::TestDescribeCredentialTried::test_names_the_resolved_source_not_the_value",
         "tests/unit/test_install_command.py::TestValidationFailureReasonMessages::test_validation_failure_without_verbose_includes_verbose_hint"
       ]
     },
@@ -2495,7 +2495,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_audit_drift_exit_contract_lifecycle.py::test_plain_audit_drift_line_severity_matches_exit_code",
-        "tests/unit/install/test_drift.py::test_render_text_advisory_drift_never_prints_error_header"
+        "tests/unit/install/test_drift_pure_helpers.py::test_render_text_advisory_drift_never_prints_error_header"
       ]
     },
     {
@@ -2544,7 +2544,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_failed_marketplace_install_writes_no_ref_pin",
-        "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+        "tests/integration/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
       ]
     },
     {
@@ -2562,20 +2562,6 @@
       ]
     },
     {
-      "issue": 4196,
-      "fixed_in": "0.37.0",
-      "summary": "The frozen MCP check selected target runtimes through the announcing resolver before the install run announced them again, so install --frozen printed its 'Targeting ...' line twice.",
-      "failure_modes": [
-        "observation"
-      ],
-      "properties": [
-        "outcome.status_matches_state"
-      ],
-      "regression_tests": [
-        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once"
-      ]
-    },
-    {
       "issue": 4198,
       "fixed_in": "0.37.0",
       "summary": "apm install <pkg> after apm init --discover --apply left the declared local dependency out of apm.lock.yaml and reported an identical pre-existing skill as integrated instead of adopted.",
@@ -2589,7 +2575,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_brownfield_lifecycle.py::test_install_package_locks_declared_local_dependency_and_reports_adoption",
-        "tests/unit/install/test_dry_run_graph.py::test_unlocked_local_dependencies_complete_a_partial_install"
+        "tests/unit/install/test_package_selection.py::test_unlocked_local_dependencies_complete_a_partial_install"
       ]
     },
     {
@@ -2625,8 +2611,8 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref",
-        "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_honors_shorthand_fragment_ref",
-        "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_keeps_hash_in_local_paths"
+        "tests/unit/marketplace/test_registration_fragment_ref.py::test_registration_source_honors_shorthand_fragment_ref",
+        "tests/unit/marketplace/test_registration_fragment_ref.py::test_registration_source_keeps_hash_in_local_paths"
       ]
     },
     {
@@ -2812,7 +2798,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin",
-        "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+        "tests/integration/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
       ]
     },
     {

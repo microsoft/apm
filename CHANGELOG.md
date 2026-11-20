@@ -63,7 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install <bundle>` names the destination folders it deployed into, as package installs do (#4217)
 - `apm uninstall`, `apm prune` and target-removal installs list each deployed path they delete, and the cleanup count matches the listed paths (#4217)
 - `apm install --frozen` and cold lockfile replays print the package header as `<name> #<ref> @<sha>`, without repeating the locked commit (#4217)
-- `apm install --frozen` with MCP servers prints its MCP targeting line once instead of twice, at project and user scope (#4217)
 - Installing a dependency whose repository the host answers 404 for now reports `Repository <owner/repo> not found on <host>` once, with `Run 'apm uninstall <owner/repo>'`, instead of a network error. (#4217)
 - `apm install --frozen` replays a lockfile written through `PROXY_REGISTRY_URL` for tag and branch refs, verifying the proxy route, ref and locked content hash (#4217)
 - With registries disabled, `apm install` names the `$APM_HOME` file that configures registries instead of blaming apm.yml, and prints `Run 'apm experimental enable registries'` (#4217)

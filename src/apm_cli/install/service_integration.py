@@ -120,8 +120,8 @@ def run_service_integrations(  # noqa: PLR0913
         from apm_cli.integration.lsp_integrator import LSPIntegrator
         from apm_cli.integration.mcp_integrator import MCPIntegrator
         from apm_cli.integration.mcp_integrator_install import (
+            _resolve_target_runtimes,
             mcp_servers_for_runtime,
-            select_target_runtimes_quietly,
         )
 
         prepared_mcp = prepare_mcp_integration(
@@ -142,7 +142,7 @@ def run_service_integrations(  # noqa: PLR0913
             claude_native_keys=claude_native_keys,
         )
         mcp_targets = (
-            select_target_runtimes_quietly(
+            _resolve_target_runtimes(
                 runtime=ctx.runtime,
                 exclude=ctx.exclude,
                 apm_config=apm_config,
@@ -151,7 +151,9 @@ def run_service_integrations(  # noqa: PLR0913
                 explicit_target=selected_target,
                 target_decision=target_decision,
                 scope=ctx.scope,
+                logger=ctx.logger,
                 verbose=ctx.verbose,
+                console=None,
             )
             if should_install_mcp and prepared_mcp.dependencies
             else []

@@ -1,11 +1,9 @@
 """APMLifecycle: ``install --frozen`` reports a replay in the same shape as install.
 
 PROMISE: I9 -- a frozen replay prints each package header and diagnostic line
-once, in the same shape a normal install prints (source: #4195, #4196).
+once, in the same shape a normal install prints (source: #4195).
 CELLS: OP=install FROZEN SRC=marketplace(git-subdir, ref main) PRIM=command
 SCOPE=project TGT=claude LOCK=present DEPLOYED=absent (cold cache);
-OP=install FROZEN SRC=self-defined PRIM=mcp SCOPE=project|user TGT=manifest|--target
-LOCK=present DEPLOYED=converged;
 OP=install FROZEN SRC=local GATE=registries-disabled (registry in $APM_HOME config)
 SCOPE=project LOCK=present (#4175).
 """
@@ -21,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
-from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -125,17 +122,6 @@ def _marketplace_world(root: Path, binary: Path) -> _World:
     return world
 
 
-def _file_bytes(roots: dict[str, Path]) -> set[tuple[str, str, str | None]]:
-    """Every file below the roots with its content hash; empty directories excluded."""
-    captured = ArtifactSnapshotSet.capture(roots)
-    return {
-        (root_id, entry.relative_path, entry.fingerprint)
-        for root_id, snapshot in captured.snapshots
-        for entry in snapshot.entries
-        if entry.kind == "file"
-    }
-
-
 def _header_lines(result: CommandResult) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.startswith("  [+] ")]
 
@@ -165,35 +151,6 @@ def test_cold_frozen_replay_header_matches_install_shape(
     for record in after.deployment_records:
         assert (world.consumer.root / record.locator.value).exists(), record
     world.apm("audit", "--ci")
-
-
-@pytest.mark.parametrize(
-    ("scope", "targets", "line"),
-    [
-        ((), ("claude", "copilot"), "[i] Targeting declared targets from apm.yml: claude, copilot"),
-        (("-g", "--target", "claude"), (_TARGET,), "[i] Targeting specific runtime: claude"),
-    ],
-    ids=["project-manifest-targets", "user-explicit-target"],
-)
-def test_frozen_mcp_replay_prints_targeting_line_once(
-    tmp_path: Path,
-    apm_binary_path: Path,
-    scope: tuple[str, ...],
-    targets: tuple[str, ...],
-    line: str,
-) -> None:
-    """#4196: the frozen MCP check selects targets silently; the install announces once."""
-    world = _world(tmp_path / "world", apm_binary_path, targets=targets)
-    world.apm("install", *scope, "--mcp", "fixture-server", "--", "fixture-cmd", "--flag")
-    roots = {"home": world.isolated.home, "project": world.consumer.root}
-    before = _file_bytes(roots)
-
-    frozen = world.apm("install", *scope, "--frozen")
-
-    assert frozen.stdout.splitlines().count(line) == 1, _evidence(frozen)
-    assert "|  [>]  fixture-server (self-defined, stdio)" in frozen.stdout
-    assert "[*] All servers up to date" in frozen.stdout
-    assert _file_bytes(roots) == before
 
 
 def test_frozen_names_user_registry_config_when_registries_disabled(

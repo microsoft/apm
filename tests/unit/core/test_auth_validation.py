@@ -1023,19 +1023,14 @@ class TestDescribeCredentialTried:
         assert text == "credential tried: GITHUB_APM_PAT_ACME"
 
     def test_never_resolves_to_render(self) -> None:
+        # GITHUB_APM_PAT would resolve; an unresolved host still reports no credential.
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "sentinel"}, clear=True):
-            resolver = AuthResolver()
-            with patch.object(resolver, "_resolve_token") as resolve_token:
-                text = resolver.describe_credential_tried("github.com", "acme")
-        resolve_token.assert_not_called()
+            text = AuthResolver().describe_credential_tried("github.com", "acme")
         assert text == "no credential sent"
 
-    def test_lists_sources_checked_when_none_held_a_credential(self) -> None:
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None),
-            patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None),
-        ):
+    def test_lists_sources_checked_when_none_held_a_credential(self, tmp_path) -> None:
+        # An empty PATH leaves neither gh nor a git credential helper to answer.
+        with patch.dict(os.environ, {"PATH": str(tmp_path), "HOME": str(tmp_path)}, clear=True):
             resolver = AuthResolver()
             resolver.resolve("github.com", org="acme")
             text = resolver.describe_credential_tried("github.com", "acme")

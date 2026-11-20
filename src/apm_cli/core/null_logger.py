@@ -10,8 +10,6 @@ and ``LSPIntegrator`` methods.  It is NOT a drop-in replacement for the full
 functions.
 """
 
-from typing import Any
-
 from apm_cli.utils.console import (
     _rich_echo,
     _rich_error,
@@ -94,12 +92,3 @@ class NullCommandLogger:
     def package_inline_warning(self, message: str):
         """Discard inline warnings (verbose is always False)."""
         pass
-
-
-class SilentLogger:
-    """Discard every logger call while a pre-check repeats a decision the run announces."""
-
-    verbose = False
-
-    def __getattr__(self, _name: str) -> Any:
-        return lambda *_args, **_kwargs: None
