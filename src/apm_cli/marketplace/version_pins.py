@@ -67,9 +67,9 @@ def _pins_path(pins_dir: str | None = None) -> str:
     if pins_dir is not None:
         return os.path.join(pins_dir, _PINS_FILENAME)
 
-    from ..config import CONFIG_DIR
+    from ..core.scope import get_apm_home
 
-    return os.path.join(CONFIG_DIR, "cache", "marketplace", _PINS_FILENAME)
+    return os.path.join(os.fspath(get_apm_home()), "cache", "marketplace", _PINS_FILENAME)
 
 
 def _pin_key(marketplace_name: str, plugin_name: str, version: str = "") -> str:
@@ -274,15 +274,17 @@ def enforce_ref_pin(
     ref: str,
     version: str = "",
     pins_dir: str | None = None,
+    *,
+    accept_change: bool = False,
 ) -> None:
     """Refuse a ref that contradicts the recorded pin; otherwise stage it.
 
-    The recorded pin never moves here: a contradicting ref raises
-    :class:`RefPinMismatchError`, and a new or matching ref is staged for the
-    open install attempt, which writes it only when it commits (#4400).
+    A contradicting ref raises :class:`RefPinMismatchError` unless
+    *accept_change* is set, which only an explicit ``apm update`` of that
+    plugin does. A staged ref is written only when the install commits (#4400).
     """
     previous_ref = check_ref_pin(marketplace_name, plugin_name, ref, version, pins_dir)
-    if previous_ref is not None:
+    if previous_ref is not None and not accept_change:
         key = _pin_key(marketplace_name, plugin_name, version)
         raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
     stage_ref_pin(marketplace_name, plugin_name, ref, version)

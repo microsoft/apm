@@ -708,6 +708,8 @@ class APMDependencyResolver:
             version_spec=dep_ref.marketplace_version_spec,
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
+            accept_ref_change=bool(self._update_refs)
+            and (self._update_keys is None or dep_ref.get_unique_key() in self._update_keys),
         )
         admit_marketplace_resolution(resolution)
         resolved = (
