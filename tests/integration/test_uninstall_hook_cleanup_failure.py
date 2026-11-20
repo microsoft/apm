@@ -7,7 +7,9 @@ import pytest
 from click.testing import CliRunner, Result
 
 from apm_cli.commands.uninstall.cli import uninstall
-from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_ledger import (
+    DeploymentLedgerCodec,
+)
 from apm_cli.core.deployment_state import (
     DeploymentLedger,
     DeploymentLocator,
@@ -17,16 +19,24 @@ from apm_cli.core.deployment_state import (
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml
+from tests.utils.deployment_evidence import seed_receipts
 
 pytestmark = pytest.mark.component
 
 
 def _prepare_hook_install(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     *,
     hook_content: str = '{"version": 1}\n',
 ) -> tuple[str, Path]:
-    """Create one lock-backed Copilot hook installation."""
+    """Create one lock-backed Copilot hook installation.
+
+    As on the machine that installed it, the hook carries a local deployment
+    receipt: cleanup deletes a lockfile-listed file only with deployment
+    evidence (req-lk-024, #3701). The locked package is not fetchable here,
+    so no render of it is available.
+    """
     package = "owner/installed"
     hook_path = ".github/hooks/installed-hooks.json"
     hook_file = tmp_path / hook_path
@@ -61,6 +71,8 @@ def _prepare_hook_install(
         deployment_ledger=DeploymentLedger(records={locator.key: record}),
         _deployments_present=True,
     ).write(tmp_path / "apm.lock.yaml")
+    seed_receipts(tmp_path, [hook_file], target="copilot", owner=dependency_key)
+    monkeypatch.setattr("apm_cli.integration.cleanup._render_locked", lambda *_a, **_k: None)
     return package, hook_file
 
 
@@ -94,7 +106,7 @@ def test_uninstall_reports_real_managed_hook_unlink_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A HookIntegrator unlink failure reaches the CLI as a nonzero outcome."""
-    package, hook_file = _prepare_hook_install(tmp_path)
+    package, hook_file = _prepare_hook_install(tmp_path, monkeypatch)
     original_unlink = Path.unlink
     failure_active = False
 
@@ -124,7 +136,7 @@ def test_uninstall_preserves_hook_replaced_after_provenance_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A user replacement racing cleanup fails the final provenance gate."""
-    package, hook_file = _prepare_hook_install(tmp_path)
+    package, hook_file = _prepare_hook_install(tmp_path, monkeypatch)
     user_content = '{"user": "replacement"}\n'
 
     def replace_hook_after_preflight(*_args, **_kwargs) -> int:
@@ -147,7 +159,7 @@ def test_uninstall_preserves_symlink_replaced_after_provenance_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A user symlink racing cleanup must pass through the provenance gate."""
-    package, hook_file = _prepare_hook_install(tmp_path, hook_content="")
+    package, hook_file = _prepare_hook_install(tmp_path, monkeypatch, hook_content="")
     outside_file = tmp_path / "user-hook.json"
     user_content = '{"user": "outside"}\n'
     outside_file.write_text(user_content, encoding="ascii")
@@ -173,7 +185,7 @@ def test_uninstall_reports_integration_cleanup_exception_nonzero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An integration exception is actionable and never reports success."""
-    package, _hook_file = _prepare_hook_install(tmp_path)
+    package, _hook_file = _prepare_hook_install(tmp_path, monkeypatch)
 
     def fail_integration_cleanup(*_args, **_kwargs) -> None:
         raise OSError("sensitive internal detail")

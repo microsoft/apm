@@ -33,6 +33,7 @@ def test_collision_loser_does_not_delete_winner_file(tmp_path: Path) -> None:
         existing_lockfile=prior,
         targets=[SimpleNamespace(name="claude", root_dir=".claude", primitives={})],
         project_root=tmp_path,
+        apm_dir=tmp_path,
         diagnostics=SimpleNamespace(
             count_for_package=lambda *args, **kwargs: 0,
             warning=lambda *args, **kwargs: None,

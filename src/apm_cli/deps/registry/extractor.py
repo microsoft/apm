@@ -12,9 +12,10 @@ Two archive formats are supported, dispatched by Content-Type from
   and ``apm publish``)
 - ``application/gzip`` -- gzipped tar (legacy; packages published before the zip default)
 
-The ``extract_archive`` dispatcher picks the right path and applies the same
-security gates to both: no absolute paths, no path traversal, no symlinks or
-hardlinks. The hash is checked against the raw bytes regardless of format —
+The ``extract_archive`` dispatcher picks the right path; both formats go
+through the shared archive-limits owner in ``apm_cli.utils.archive``
+(entry-count and uncompressed-size caps; no absolute paths, path traversal,
+links, special files or duplicate entries). The hash is checked against the raw bytes regardless of format —
 a wrong-format guess produces a clean error, not a security issue.
 
 Layout: archives are extracted into ``apm_modules/{owner}/{repo}/`` (the same
@@ -24,13 +25,12 @@ shape the Git resolver produces after ``git clone``).
 from __future__ import annotations
 
 import hashlib
-import os
 import tarfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from apm_cli.utils.archive import safe_extract_zip
+from apm_cli.utils.archive import safe_extract_tar, safe_extract_zip
 
 
 class HashMismatchError(Exception):
@@ -54,8 +54,6 @@ class _ArchiveFormat:
     content_types: tuple[str, ...]
     magic: bytes
 
-
-_READ_CHUNK_SIZE = 64 * 1024
 
 _TAR_GZIP_FORMAT = _ArchiveFormat(
     label="tar+gzip",
@@ -125,61 +123,9 @@ def verify_sha256(data: bytes, expected_digest: str) -> str:
     return actual
 
 
-def _safe_member_path(member_name: str, dest_root: Path) -> Path | None:
-    """Return the absolute extraction path for *member_name* if safe.
-
-    Rejects:
-    - Absolute paths (``/etc/passwd``)
-    - Path traversal via ``..`` segments
-    - Symlink-style escapes (caller should also reject symlinks via type check)
-
-    Returns ``None`` if the member should be skipped (empty name).
-    """
-    if not member_name or member_name in (".", "/"):
-        return None
-    # Tarball member names use forward slashes regardless of platform; reject
-    # anything that looks like an absolute path on either side.
-    if member_name.startswith(("/", "\\")) or (len(member_name) >= 2 and member_name[1] == ":"):
-        raise UnsafeTarballError(f"absolute path in tarball: {member_name!r}")
-    candidate = (dest_root / member_name).resolve()
-    dest_resolved = dest_root.resolve()
-    try:
-        candidate.relative_to(dest_resolved)
-    except ValueError as exc:
-        raise UnsafeTarballError(f"tarball entry {member_name!r} escapes extraction root") from exc
-    return candidate
-
-
 def _safe_extract(tar: tarfile.TarFile, dest_root: Path) -> None:
-    """Extract *tar* into *dest_root* with traversal/symlink rejection."""
-    dest_root.mkdir(parents=True, exist_ok=True)
-    for member in tar.getmembers():
-        # Reject device files, FIFOs, symlinks, hard links — keep extraction
-        # to plain files and dirs only. Symlinks are rejected because they
-        # are the simplest path-traversal vector inside a tarball.
-        if member.isdev() or member.issym() or member.islnk():
-            raise UnsafeTarballError(f"unsupported tarball entry type: {member.name!r}")
-        target = _safe_member_path(member.name, dest_root)
-        if target is None:
-            continue
-        if member.isdir():
-            target.mkdir(parents=True, exist_ok=True)
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Stream the file contents through tarfile's extractor, but write to
-        # the verified path explicitly so we never call extract() with the
-        # raw member name (which is what would honor a symlink).
-        src = tar.extractfile(member)
-        if src is None:
-            continue
-        with open(target, "wb") as fh:
-            while True:
-                chunk = src.read(_READ_CHUNK_SIZE)
-                if not chunk:
-                    break
-                fh.write(chunk)
-        # Preserve mode bits but drop setuid/setgid/sticky for safety.
-        os.chmod(target, member.mode & 0o755)
+    """Extract *tar* into *dest_root* with the shared archive limits."""
+    safe_extract_tar(tar, dest_root, error_type=UnsafeTarballError)
 
 
 def extract_tarball(
