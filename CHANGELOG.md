@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
+- Internal: PR checks run the full Windows unit suite (3 shards), the same selection main push runs. (closes #4115)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 
 ### Fixed
@@ -64,7 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm init --apply` implies `--discover`, and `apm plugin init` scaffolds a commented `license:` line without choosing a license. (closes #3994, #4004)
 - Tables and panels render in ASCII, and `apm marketplace browse` lists full install names instead of a truncated table. (closes #3994, #4004)
 - `--frozen` help describes its hash check, `audit --policy` is no longer marked experimental, `apm --help` drops `apm run`, and the unpinned warning credits the lockfile and suggests a semver range (`#^1.0.0`) to track releases. (closes #3994, #4004)
-- Internal: PR checks run the full Windows unit suite (3 shards), the same selection main push runs. (closes #4115)
 
 ### Removed
 
