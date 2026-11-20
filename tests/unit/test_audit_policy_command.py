@@ -107,7 +107,8 @@ class TestCiWithPolicyFlag:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        # Advisories go to stderr (#4453); the JSON document is stdout alone.
+        data = json.loads(result.stdout)
         # Baseline: up to 7 checks, Policy: 17 checks -> total > 7 when
         # policy evaluation actually ran.  Asserting > 7 (not > 6) catches
         # the regression where only baseline checks are returned.
