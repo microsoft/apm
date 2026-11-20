@@ -455,6 +455,108 @@ RUNTIME_MISSING = _entry(
 
 
 # -- W3: G4 ---------------------------------------------------------
+# Advice printed by security/, core/, deps/, models/ and shared helpers.
+
+EXECUTABLES_UNTRUSTED = _entry(
+    "executables-untrusted",
+    "apm approve {package}",
+    "trust its executables",
+    before="confirm with 'apm policy explain {package}' that policy permits it",
+)
+EXECUTABLES_IDENTITY_UNLOCKED = _entry(
+    "executables-identity-unlocked",
+    "apm install",
+    "record the package identity in apm.lock.yaml",
+    then="approve {subject}",
+)
+EXECUTABLE_PIN_INVALID = _entry(
+    "executable-pin-invalid",
+    "apm approve {package}",
+    "record a valid pin",
+    before="remove {entry} from apm.yml",
+)
+HIDDEN_CHARACTERS_FLAGGED = _entry(
+    "hidden-characters-flagged", "apm audit --strip", "remove the flagged hidden characters"
+)
+DEPLOYMENT_OWNERS_INVALID = _entry(
+    "deployment-owners-invalid",
+    "apm prune",
+    "repair the invalid deployment owners",
+    then="rerun 'apm audit'",
+)
+LOCKED_REFS_PINNED = _entry("locked-refs-pinned", "apm update", "resolve the latest refs")
+DRY_RUN_PLAN_INCOMPLETE = _entry(
+    "dry-run-plan-incomplete", "apm install", "resolve and install the full plan"
+)
+GITHUB_AUTH_FIRST_ENABLED = _entry(
+    "github-auth-first-enabled",
+    "apm config unset github-auth-first",
+    "restore anonymous-first access to github.com",
+)
+AGENT_PLUGIN_OUTPUT_EMPTY = _entry(
+    "agent-plugin-output-empty",
+    "apm pack --claude-plugin",
+    "produce the historical Claude plugin layout",
+)
+PLUGIN_MCP_OWNERSHIP_UNKNOWN = _entry(
+    "plugin-mcp-ownership-unknown",
+    "apm pack",
+    "include the root .mcp.json in the plugin",
+    before="fix or delete apm.lock.yaml and run 'apm install'",
+)
+IMMUTABLE_REFS_CONFLICT = _entry(
+    "immutable-refs-conflict",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    before="align the requested refs in the root or parent manifests to the same commit",
+)
+FROZEN_LOCKFILE_STALE = _entry(
+    "frozen-lockfile-stale",
+    "apm install",
+    "update apm.lock.yaml to match apm.yml",
+    then="commit apm.lock.yaml",
+)
+PROTOCOL_FALLBACK_DISALLOWED = _entry(
+    "protocol-fallback-disallowed",
+    "apm config set allow-protocol-fallback true",
+    "allow cross-protocol fallback (not recommended)",
+)
+DEPENDENCY_ALIAS_INVALID = _entry(
+    "dependency-alias-invalid",
+    "apm install",
+    "install the dependency under the new alias",
+    before="set its alias in apm.yml to {suggestion}",
+)
+PACKAGE_DIRECTORIES_COLLIDE = _entry(
+    "package-directories-collide",
+    "apm install",
+    "materialize the intended package",
+    before="inspect the colliding directories under apm_modules/ and keep only the intended one",
+)
+ADO_COORDINATES_MISMATCHED = _entry(
+    "ado-coordinates-mismatched",
+    "apm install <original-ado-url>",
+    "regenerate its state from the original Azure DevOps URL",
+)
+REGISTRY_TOKEN_IN_MANIFEST = _entry(
+    "registry-token-in-manifest",
+    "apm config set registry.{name}.token <value>",
+    "store the token outside apm.yml",
+    before="remove 'token' from the {name} registry in apm.yml",
+)
+CATALOG_SELECTION_MOVED = _entry(
+    "catalog-selection-moved", "apm update {package}", "move to the catalog's selection"
+)
+LLM_TLS_BOOTSTRAP_MISSING = _entry(
+    "llm-tls-bootstrap-missing",
+    "apm runtime setup llm",
+    "install the OS-trust bootstrap into the llm venv",
+    before="use Python 3.10+ or set PIP_CERT to your proxy CA bundle",
+)
+LOCAL_FILES_UNMANAGED = _entry(
+    "local-files-unmanaged", "apm install --force", "overwrite them with the package files"
+)
+COMPILE_DRY_RUN = _entry("compile-dry-run", "apm compile", "write the compiled files")
 
 # -- end W3: G4 ---------------------------------------------------------
 

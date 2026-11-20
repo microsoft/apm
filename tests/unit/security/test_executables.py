@@ -766,7 +766,7 @@ class TestFilterLspFailClosed:
             "only if policy permits."
         ]
         assert "LSP server 'pyright' from 'evil/package'" in logger.verbose[0]
-        assert "if policy permits" in logger.verbose[0]
+        assert "that policy permits it" in logger.verbose[0]
 
     def test_approval_is_bound_to_declarer_not_server_name(self) -> None:
         approved = _FakeMcpDep(
@@ -796,7 +796,7 @@ class TestFilterLspFailClosed:
         result = filter_lsp_by_allow_executables([dependency], {}, logger)
 
         assert result == []
-        assert "regenerate apm.lock.yaml" in logger.verbose[0]
+        assert "record the package identity in apm.lock.yaml" in logger.verbose[0]
 
     def test_multiple_unlocked_declarers_get_plural_recovery_guidance(self) -> None:
         dependencies = [
@@ -828,7 +828,7 @@ class TestFilterLspFailClosed:
         assert result == []
         warning = logger.warnings[0]
         assert "policy explain owner/locked" in warning
-        assert "regenerate apm.lock.yaml" in warning
+        assert "record the package identity in apm.lock.yaml" in warning
 
 
 @pytest.mark.parametrize(
