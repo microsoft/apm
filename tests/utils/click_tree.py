@@ -29,8 +29,12 @@ def root_group() -> click.Group:
 
 
 def _subcommand(group: click.Group, name: str) -> click.Command | None:
+    """Return the subcommand *name*; a removed-command stub that raises is absent."""
     with click.Context(group, info_name=group.name) as ctx:
-        return group.get_command(ctx, name)
+        try:
+            return group.get_command(ctx, name)
+        except click.ClickException:
+            return None
 
 
 def iter_commands(
@@ -92,6 +96,8 @@ def resolve(argv: Sequence[str], group: click.Group | None = None) -> Resolution
         command = child
     if isinstance(command, click.Group) and not path and not tokens:
         return Resolution((), command, None, ())
+    if command.context_settings.get("ignore_unknown_options"):
+        return Resolution(tuple(path), command, None, ())
     known = _option_names(command)
     unknown = tuple(
         token
