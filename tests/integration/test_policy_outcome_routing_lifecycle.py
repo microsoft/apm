@@ -30,6 +30,7 @@ from tests.utils.local_gitlab_policy_https_fixture import (
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
+    pytest.mark.promise("P-OWN-policy-outcome-routing"),
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,

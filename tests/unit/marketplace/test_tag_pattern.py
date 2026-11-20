@@ -16,6 +16,8 @@ from apm_cli.marketplace.tag_pattern import (
     validate_tag_pattern,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # render_tag
 # ---------------------------------------------------------------------------

@@ -35,6 +35,11 @@ from tests.unit.registry.test_resolver_e2e_http import (
     _running_server,
 )
 
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("req-ext-001", "req-lk-007", "req-lk-010", "req-lk-013", "req-lk-014"),
+]
+
 _REPO = "acme/widget"
 _REFS = [
     RemoteRef(name="refs/heads/main", sha="0" * 40),

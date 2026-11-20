@@ -1,0 +1,95 @@
+# J04 Add one skill from a skill bundle, nightly (#4110). Schema: test_journeys.py.
+# Twin: vercel-labs/agent-skills (twins_consumer_a.py): no apm.yml, no semver tags.
+schema: 1
+id: J04
+persona: consumer
+title: Add one skill from a skill bundle
+docs: [getting-started/coming-from.md]
+world:
+  project: empty
+  setup: ["apm init -y --target copilot,claude"]
+steps:
+  - n: 1
+    run: [apm install vercel-labs/agent-skills --skill deploy-to-vercel]
+    exit: 0
+    docs:
+      page: getting-started/coming-from.md
+      commands: [apm install vercel-labs/agent-skills --skill deploy-to-vercel]
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - .gitignore
+      - apm_modules/
+      - .agents/skills/deploy-to-vercel/SKILL.md
+      - .claude/skills/deploy-to-vercel/SKILL.md
+    key_lines:
+      - "[+] vercel-labs/agent-skills #main @<SHA8>"
+      - "|-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/"
+      - "1 dependency unpinned: vercel-labs/agent-skills"
+    forbidden_lines:
+      - "|-- Skill integrated ->"
+      - Skipped inactive experimental resolver
+  - n: 2
+    run: [apm install vercel-labs/agent-skills --skill preview]
+    exit: 0
+    note: the skills list in apm.yml becomes the union [deploy-to-vercel, preview]
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - .agents/skills/preview/SKILL.md
+      - .claude/skills/preview/SKILL.md
+    key_lines: ["|-- 2 skill(s) integrated -> .agents/skills/, .claude/skills/"]
+  - n: 3
+    run: [apm install vercel-labs/agent-skills --skill nope]
+    exit: 1
+    note: the failed selection restores apm.yml and changes nothing on disk
+    files: []
+    key_lines:
+      - "[i] apm.yml restored to its previous state."
+      - "Available: composition-patterns, deploy-to-vercel, preview, react-best-practices, web-design-guidelines."
+      - "No install transaction changes were committed."
+    remediate:
+      - {advice: apm install vercel-labs/agent-skills --skill preview}
+    rerun: [apm install vercel-labs/agent-skills --skill preview]
+  - n: 4
+    run: ["apm install vercel-labs/agent-skills --skill '*'"]
+    exit: 0
+    note: --skill '*' returns to every skill and drops the skills list from apm.yml
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - .agents/skills/composition-patterns/SKILL.md
+      - .agents/skills/react-best-practices/SKILL.md
+      - .agents/skills/web-design-guidelines/SKILL.md
+      - .claude/skills/composition-patterns/SKILL.md
+      - .claude/skills/react-best-practices/SKILL.md
+      - .claude/skills/web-design-guidelines/SKILL.md
+    key_lines: ["|-- 5 skill(s) integrated -> .agents/skills/, .claude/skills/"]
+  - n: 5
+    run: [apm uninstall vercel-labs/agent-skills]
+    exit: 0
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - apm_modules/
+      - .agents/skills/*/SKILL.md
+      - .claude/skills/*/SKILL.md
+    key_lines:
+      - "[i] Cleaned 20 stale deployed files for vercel-labs/agent-skills"
+      - "[i] Removed vercel-labs/agent-skills from dependencies.apm in apm.yml"
+known_cells:
+  - id: skill-bundle-integrated-twice
+    law: FORBID
+    tracking: "#4207"
+    step: 1
+    match: "Skill integrated ->"
+  - id: skill-miss-no-runnable-advice
+    law: O8
+    tracking: "#4206"
+    step: 3
+    match: "is not printed"
+  - id: uninstall-cleanup-unannounced
+    law: O6
+    tracking: "#4193"
+    step: 5
+    match: "skills/.+/SKILL.md changed but no output line announces it"

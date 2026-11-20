@@ -18,6 +18,8 @@ from apm_cli.deps.package_validator import PackageValidator
 from apm_cli.models.apm_package import APMPackage, ValidationResult
 from apm_cli.models.validation import PackageType
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

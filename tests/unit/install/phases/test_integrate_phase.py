@@ -12,6 +12,8 @@ import pytest
 from apm_cli.install.phases.integrate import _check_cowork_caps
 from apm_cli.integration.targets import KNOWN_TARGETS
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------

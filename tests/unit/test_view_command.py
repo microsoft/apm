@@ -14,6 +14,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
+pytestmark = pytest.mark.component
+
 # ------------------------------------------------------------------
 # Rich-fallback helper (same approach as test_deps_list_tree_info.py)
 # ------------------------------------------------------------------

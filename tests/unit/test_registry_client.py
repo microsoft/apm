@@ -7,10 +7,13 @@ import warnings
 from unittest import mock
 from urllib.parse import urlparse
 
+import pytest
 import requests
 
 from apm_cli.registry.client import SimpleRegistryClient
 from apm_cli.utils import github_host
+
+pytestmark = pytest.mark.unit
 
 
 def _streamed_response(payload, status=200):

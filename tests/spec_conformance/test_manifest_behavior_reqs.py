@@ -24,6 +24,21 @@ from apm_cli.policy.project_config import (
 )
 from apm_cli.utils.github_host import manifest_default_host_scope
 
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "req-mf-002",
+        "req-mf-003",
+        "req-mf-004",
+        "req-mf-005",
+        "req-mf-007",
+        "req-mf-009",
+        "req-mf-015",
+        "req-mf-017",
+        "req-mf-018",
+    ),
+]
+
 _V01_SCHEMA = "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json"
 
 

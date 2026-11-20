@@ -69,6 +69,8 @@ from tests.unit.install.test_dry_run_graph import _preview
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
 from tests.utils.local_package import LocalPackageFactory
 
+pytestmark = pytest.mark.component
+
 # --- req-rs-001..014 ---------------------------------------------------
 
 

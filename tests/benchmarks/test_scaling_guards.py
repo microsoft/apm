@@ -31,6 +31,8 @@ from apm_cli.models.dependency.replacement import (
     parse_replace_block,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

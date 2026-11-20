@@ -2,8 +2,12 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
+
+pytestmark = pytest.mark.unit
 
 
 def test_carry_forward_resolved_tag_for_unchanged_sha() -> None:
