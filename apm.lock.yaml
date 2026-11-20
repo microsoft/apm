@@ -2979,7 +2979,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:369758becf9cd94d153f137226e6508118f56ef0a880b25aae41d00bc139d8fa
+  content_hash: sha256:0fd1d562f95bc0491fe2748417c60f5be35ed2b016757fc148421fcbb9f0ca9f
 - kind: project-relative
   target: copilot
   value: .github/instructions/architecture.instructions.md
@@ -3006,7 +3006,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:62b6cde27b243cc42c94cc74b56a8a8b2258ed552d1e2326201874a3f1b485b3
+  content_hash: sha256:63178d8c3384274d3a2337cf7ad14f89c74a32fa308388a96d0a80627dbf5fe4
 - kind: project-relative
   target: copilot
   value: .github/instructions/cli.instructions.md
@@ -3511,10 +3511,10 @@ local_deployed_file_hashes:
   .github/agents/spec-swagger-editor.agent.md: sha256:4ef74b972d475ff5dd9f42e31f077300a118d1f22ac6761513877d2b8e1b54da
   .github/agents/spec-tag-architect.agent.md: sha256:1f3b95bcf2f34d3fd81bfa4fd9ef39a49ffff91fc6aaab9244abb0399c2d6da0
   .github/agents/supply-chain-security-expert.agent.md: sha256:cd79bc0c60ab0d8ea375420b3932c6616314629d4e668d468f4dc4af51d252fe
-  .github/agents/test-coverage-expert.agent.md: sha256:369758becf9cd94d153f137226e6508118f56ef0a880b25aae41d00bc139d8fa
+  .github/agents/test-coverage-expert.agent.md: sha256:0fd1d562f95bc0491fe2748417c60f5be35ed2b016757fc148421fcbb9f0ca9f
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
   .github/instructions/changelog.instructions.md: sha256:575bafcc313df6387b5724ae002858bd0d0020aee10eeb780a057f53eedf0dac
-  .github/instructions/cicd.instructions.md: sha256:62b6cde27b243cc42c94cc74b56a8a8b2258ed552d1e2326201874a3f1b485b3
+  .github/instructions/cicd.instructions.md: sha256:63178d8c3384274d3a2337cf7ad14f89c74a32fa308388a96d0a80627dbf5fe4
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
