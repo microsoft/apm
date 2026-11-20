@@ -128,6 +128,29 @@ class TestEffectiveDependencySelection:
         assert bundle.skill_subset == ["alpha", "beta"]
         assert other.skill_subset == ["keep"]
 
+    def test_implicit_local_dependency_ignores_cli_overlay(self):
+        """A partial install's implicit local dep keeps its persisted selection (#4198)."""
+        dep_ref = SimpleNamespace(
+            skill_subset=["review"], target_subset=None, get_unique_key=lambda: "./kit"
+        )
+        ctx = SimpleNamespace(
+            skill_subset_from_cli=True,
+            skill_subset=("alpha",),
+            implicit_local_keys=frozenset({"./kit"}),
+        )
+        assert effective_dependency_selection(dep_ref, ctx) == (("review",), None, None)
+
+    def test_named_dependency_still_gets_cli_overlay_beside_implicit_locals(self):
+        dep_ref = SimpleNamespace(
+            skill_subset=None, target_subset=None, get_unique_key=lambda: "owner/bundle"
+        )
+        ctx = SimpleNamespace(
+            skill_subset_from_cli=True,
+            skill_subset=("alpha",),
+            implicit_local_keys=frozenset({"./kit"}),
+        )
+        assert effective_dependency_selection(dep_ref, ctx) == (("alpha",), None, None)
+
     def test_first_party_content_has_no_selection(self):
         ctx = SimpleNamespace(skill_subset_from_cli=True, skill_subset=("beta",))
         assert effective_dependency_selection(None, ctx) == (None, None, None)
@@ -386,3 +409,25 @@ class TestAdditiveSkillDeployment:
         assert r.exit_code == 0, r.output
         # Whole bundle removed from disk -- deployed_files held the full union.
         assert _deployed_skill_names(project) == set()
+
+
+class TestUnavailableSkillRetryHint:
+    """The --skill recovery command repeats the failed install's scope and target."""
+
+    def test_retry_hint_keeps_global_scope_and_explicit_target(self):
+        from apm_cli.install.outcome import require_requested_components
+
+        diagnostics = MagicMock()
+        ok = require_requested_components(
+            diagnostics,
+            option="--skill",
+            component="skill",
+            requested=("nope",),
+            available=("alpha",),
+            package="owner/bundle",
+            install_spec="owner/bundle",
+            retry_args=("--target", "claude", "--global"),
+        )
+        assert ok is False
+        message = diagnostics.error.call_args.args[0]
+        assert "Run 'apm install owner/bundle --skill alpha --target claude --global'" in message

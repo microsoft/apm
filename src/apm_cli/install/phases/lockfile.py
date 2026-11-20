@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_dependency_selection
+from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.phases.lockfile_cache_pins import (
     sync_cache_pin_markers,
     sync_cache_pin_markers_from_disk,
@@ -512,7 +512,9 @@ class LockfileBuilder:
         if not self.ctx.skill_subset:
             return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
-            if locked_dep.package_type == "skill_bundle":
+            if locked_dep.package_type == "skill_bundle" and not is_implicit_local(
+                locked_dep, self.ctx
+            ):
                 # Record what was deployed: the same owner the deploy used (#3760).
                 merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
                 try:
