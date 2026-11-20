@@ -24,8 +24,8 @@ def confirm_update_plan(
     (#3532, #4168). An update exists to rewrite the lockfile: even an
     unchanged dependency plan can change the deployment ledger (for example
     new targets), so an update refuses regardless of its plan. An install
-    refuses when its dependency plan changes the lockfile; an unchanged
-    install still reads through it. Returns ``False`` when the caller
+    refuses when it adds or removes a dependency; an unchanged install still
+    reads through it. Returns ``False`` when the caller
     declined the plan.
     """
     if plan_callback is not None:
@@ -45,8 +45,15 @@ def confirm_update_plan(
 
     if lockfile is None:
         return True
+    # An install without --update re-resolves locked dependencies to the
+    # same lock rows; adding or removing a dependency changes the lockfile.
     would_mutate = (
-        plan_callback is not None or build_resolved_update_plan(ctx, lockfile).has_changes
+        ctx.update_refs
+        or plan_callback is not None
+        or any(
+            entry.action in {"add", "remove"}
+            for entry in build_resolved_update_plan(ctx, lockfile).entries
+        )
     )
     refuse_lockfile_before_mutation(
         lockfile, get_lockfile_path(ctx.apm_dir), would_mutate=would_mutate

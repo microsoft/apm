@@ -557,8 +557,7 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4334",
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
-        # A perf line repeats anywhere; the restriction line only back to back.
-        output=r"^\s*(\[i\] perf: [^\n]*)$.*^\s*\1$|^\s*(Package target restriction[^\n]*)\n\s*\2$",
+        output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
