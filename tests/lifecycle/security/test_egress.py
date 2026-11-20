@@ -42,6 +42,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 
@@ -186,10 +187,11 @@ def _policy_remote(world: World, host: HostSlice) -> None:
 
 
 def _is_policy(request: ScriptedRequest) -> bool:
-    path = request.path
+    path = unquote(request.path)
     return (
         path.endswith(f"/{POLICY_REPO}/contents/apm-policy.yml")
-        or "/contents/apm-policy.yml" in path
+        # Contents API, GitLab repository files and the generic host's file routes.
+        or "apm-policy.yml" in path
         # Azure DevOps Items API: the file path travels in the query string.
         or ("/_apis/git/repositories/" in path and path.endswith("/items"))
     )
