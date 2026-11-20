@@ -63,6 +63,8 @@ for _user_root_variable in ("CODEX_HOME", "COPILOT_HOME", "CLAUDE_CONFIG_DIR", "
     os.environ.pop(_user_root_variable, None)
 # A developer's APM_HOME must not redirect user-scope metadata during tests.
 os.environ.pop("APM_HOME", None)
+# A runner's CI makes `apm install` frozen (req-lk-018); tests that need it set it.
+os.environ.pop("CI", None)
 
 
 def _hermetic_home(_cls=Path) -> Path:

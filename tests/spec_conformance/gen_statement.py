@@ -30,7 +30,7 @@ from tests.spec_conformance._manifest import (
 )
 from tests.spec_conformance._test_kind import BEHAVIORAL
 
-STATUSES = ("active", "skipped", "xfail", "text-only", "unbound")
+STATUSES = ("active", "partial", "skipped", "xfail", "text-only", "unbound")
 
 CONFORMANCE_JSON = REPO_ROOT / "CONFORMANCE.json"
 CONFORMANCE_MD = REPO_ROOT / "CONFORMANCE.md"
@@ -65,6 +65,15 @@ STAGED_REPLACEMENT_RECOVERY = (
     "denials. Actual non-admin Windows acceptance is established separately by the "
     "native lifecycle job, not inferred from collection or portable tests."
 )
+
+
+# Requirements APM implements only in part. An otherwise active requirement
+# is reported `partial` with this scope statement.
+PARTIAL_CONFORMANCE = {
+    "req-lk-018": (
+        "default frozen in CI when a lockfile exists; without a lockfile, resolve normally"
+    ),
+}
 
 
 def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
@@ -174,6 +183,9 @@ def build_json() -> dict:
             entry["oracle"] = r.oracle
         if r.id in waivers:
             entry["waivers"] = sorted(waivers[r.id])
+        if entry["status"] == "active" and r.id in PARTIAL_CONFORMANCE:
+            entry["status"] = "partial"
+            entry["partial"] = PARTIAL_CONFORMANCE[r.id]
         entries.append(entry)
     by_class = {c: defaultdict(int) for c in ALLOWED_CLASSES}
     for e in entries:
@@ -195,13 +207,13 @@ def build_json() -> dict:
 
 def _md_class_summary(summary: dict) -> str:
     lines = []
-    lines.append("| Class | Active | Skipped | Xfail | Text-only | Unbound |")
-    lines.append("|-------|-------:|--------:|------:|----------:|--------:|")
+    lines.append("| Class | Active | Partial | Skipped | Xfail | Text-only | Unbound |")
+    lines.append("|-------|-------:|--------:|--------:|------:|----------:|--------:|")
     for c in ALLOWED_CLASSES:
         s = summary[c]
         lines.append(
-            f"| {c.capitalize()} | {s['active']} | {s['skipped']} | {s['xfail']} "
-            f"| {s['text-only']} | {s['unbound']} |"
+            f"| {c.capitalize()} | {s['active']} | {s['partial']} | {s['skipped']} "
+            f"| {s['xfail']} | {s['text-only']} | {s['unbound']} |"
         )
     return "\n".join(lines)
 
@@ -225,7 +237,9 @@ def build_md(doc: dict) -> str:
         "coverage; a requirement with only such tests is `status=text-only`. "
         "A requirement marked `status=skipped` carries a written "
         "waiver below; this is debt, not coverage. A requirement with "
-        "`status=xfail` is asserted-but-known-broken.\n\n"
+        "`status=xfail` is asserted-but-known-broken. A requirement marked "
+        "`status=partial` is exercised behaviorally but implemented only to "
+        "the extent its entry under Partial conformance states.\n\n"
         "## Conformance classes\n\n"
         "The coverage summary counts a class as tested only through "
         "behavioral tests. The Registry class (req-rg-001) is bound to a "
@@ -288,7 +302,12 @@ def build_md(doc: dict) -> str:
                 waivers_section.append(f"- {w}")
             waivers_section.append("")
     waivers_md = "\n".join(waivers_section) + "\n"
-    return preamble + scope_section + summary_section + table + waivers_md
+    partial_section = ["## Partial conformance\n"]
+    for e in doc["requirements"]:
+        if "partial" in e:
+            partial_section.extend([f"### {e['id']}", f"- {e['partial']}", ""])
+    partial_md = "\n".join(partial_section) + "\n"
+    return preamble + scope_section + summary_section + table + partial_md + waivers_md
 
 
 def _is_ascii(text: str) -> bool:

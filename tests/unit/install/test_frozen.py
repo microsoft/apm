@@ -15,7 +15,7 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile, suppress_lockfile_writes
 from apm_cli.install.errors import FrozenInstallError, frozen_install_tip
 from apm_cli.install.request import InstallRequest
-from apm_cli.install.service import InstallService, _outermost
+from apm_cli.install.service import InstallService, _outermost, resolve_frozen
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -810,3 +810,49 @@ class TestOutermost:
             ".claude/skills/b",
             ".claude/skills/bc",
         ]
+
+
+class TestResolveFrozen:
+    """req-lk-018: a truthy CI replays an existing lockfile unless the invocation is non-frozen."""
+
+    @staticmethod
+    def _root(tmp_path: Path, *, locked: bool) -> str:
+        if locked:
+            (tmp_path / "apm.lock.yaml").write_text("lockfile_version: '1'\n")
+        return str(tmp_path)
+
+    @pytest.mark.parametrize("ci", ["true", "1", "TRUE", "yes"])
+    def test_truthy_ci_with_lockfile_selects_frozen(self, tmp_path: Path, ci: str) -> None:
+        root = self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, False, False, root, environ={"CI": ci}) is True
+
+    def test_truthy_ci_without_lockfile_stays_non_frozen(self, tmp_path: Path) -> None:
+        root = self._root(tmp_path, locked=False)
+        assert resolve_frozen(None, False, False, root, environ={"CI": "true"}) is False
+
+    @pytest.mark.parametrize("environ", [{}, {"CI": ""}, {"CI": "0"}, {"CI": "False"}])
+    def test_absent_or_falsy_ci_stays_non_frozen(
+        self, tmp_path: Path, environ: dict[str, str]
+    ) -> None:
+        root = self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, False, False, root, environ=environ) is False
+
+    def test_project_scope_reads_the_working_directory_lockfile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert resolve_frozen(None, False, False, None, environ={"CI": "1"}) is False
+        self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, False, False, None, environ={"CI": "1"}) is True
+
+    @pytest.mark.parametrize("flag", [True, False])
+    @pytest.mark.parametrize("locked", [True, False])
+    def test_explicit_flag_wins_over_ci(self, tmp_path: Path, flag: bool, locked: bool) -> None:
+        root = self._root(tmp_path, locked=locked)
+        assert resolve_frozen(flag, False, False, root, environ={"CI": "true"}) is flag
+        assert resolve_frozen(flag, False, False, root, environ={}) is flag
+
+    @pytest.mark.parametrize("intent", [True, ("org/pkg",), "server"])
+    def test_resolve_intent_stays_non_frozen_under_ci(self, tmp_path: Path, intent: object) -> None:
+        root = self._root(tmp_path, locked=True)
+        assert resolve_frozen(None, intent, False, root, environ={"CI": "true"}) is False

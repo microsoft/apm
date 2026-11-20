@@ -3860,6 +3860,21 @@
       ]
     },
     {
+      "issue": 4292,
+      "fixed_in": "Unreleased",
+      "summary": "apm install runs as --frozen when CI is truthy (present and not empty, 0 or false) and the scope's apm.lock.yaml exists, per OpenAPM req-lk-018; without a lockfile it resolves and writes one. --no-frozen, --update, --refresh, positional packages and --mcp stay non-frozen.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["lockfile.frozen_preserves_bytes", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/install/test_frozen.py::TestResolveFrozen::test_truthy_ci_with_lockfile_selects_frozen",
+        "tests/unit/install/test_frozen.py::TestResolveFrozen::test_truthy_ci_without_lockfile_stays_non_frozen",
+        "tests/unit/install/test_frozen.py::TestResolveFrozen::test_absent_or_falsy_ci_stays_non_frozen",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_without_lockfile_resolves_and_writes_it"
+      ]
+    },
+    {
       "issue": 4293,
       "fixed_in": "0.37.0",
       "summary": "A cold install --frozen of a tag-pinned git dependency printed the locked full commit as the ref ('#<SHA40> @<SHA8>') instead of the declared tag ('#v1.0.0 @<SHA8>').",
