@@ -74,6 +74,10 @@ from scripts.architecture_linter.checks.install_locked_copy_validity import (
 from scripts.architecture_linter.checks.install_locked_copy_validity import (
     check_locked_copy_validity,
 )
+from scripts.architecture_linter.checks.install_lockfile_required import (
+    GUARD_LOCKFILE_REQUIRED,
+    check_lockfile_required,
+)
 from scripts.architecture_linter.checks.install_lsp_capability_gate import (
     GUARD_LSP_CAPABILITY_GATE,
     check_lsp_capability_gate,
@@ -171,6 +175,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_LOCKFILE_REQUIRED,
+        "Frozen install and audit share one answer to whether a lockfile is required.",
+        check_lockfile_required,
+    ),
     _rule(
         _GUARD_BUNDLE_STAGING,
         "Local bundle compile staging is lockfile-proven input, never a deployment claim.",

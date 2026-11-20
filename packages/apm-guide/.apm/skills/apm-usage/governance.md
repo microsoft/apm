@@ -467,7 +467,7 @@ Identity casing compares GitHub and registry owner/repository prefixes case-inse
 
 These checks run without a policy file:
 
-- `lockfile-exists` -- apm.lock.yaml present
+- `lockfile-exists` -- apm.lock.yaml present when APM, MCP or LSP dependencies are declared
 - `ref-consistency` -- dependency refs match lockfile
 - `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `deployed-files-present` -- all deployed files exist

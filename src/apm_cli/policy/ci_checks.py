@@ -64,7 +64,9 @@ def _check_lockfile_exists(
             message="No apm.yml found -- nothing to check",
         )
 
-    has_deps = manifest.has_any_apm_dependencies() or bool(manifest.get_all_mcp_dependencies())
+    from ..install.plan import manifest_requires_lockfile
+
+    has_deps = manifest_requires_lockfile(manifest)
     lockfile_path = get_lockfile_path(project_root)
 
     # Local-only repos may declare no remote/MCP deps but still have a

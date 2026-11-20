@@ -652,6 +652,7 @@ install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
 install-deployment-lock-parent-placement
 install-deployment-locked-copy-validity
+install-deployment-lockfile-required
 install-deployment-package-content-hash
 install-deployment-skill-layout
 install-deployment-skill-preflight

@@ -401,6 +401,7 @@ class InstallService:
         from apm_cli.install.plan import (
             lockfile_satisfies_manifest,
             lockfile_satisfies_replacements,
+            manifest_requires_lockfile,
         )
 
         lockfile_path = _frozen_lockfile_path(request)
@@ -411,6 +412,11 @@ class InstallService:
         )
 
         if not lockfile_path.exists():
+            manifest = request.apm_package
+            if manifest is not None and not manifest_requires_lockfile(manifest):
+                # Nothing declared: install writes no lockfile, so this state
+                # is already converged and --frozen replays it as a no-op.
+                return
             raise FrozenInstallError(missing_message, tip="")
 
         try:
@@ -757,7 +763,7 @@ class InstallService:
         # same assumption.
         lockfile_path = _frozen_lockfile_path(request)
         committed = LockFile.read(lockfile_path)
-        if committed is None:  # pragma: no cover -- enforce_frozen ran first
+        if committed is None:  # nothing declared, nothing locked (#4050)
             return
         # DeploymentLedgerCodec owns the deployed-files vocabulary (see
         # `scripts/lint-architecture-boundaries.sh`); ask it directly rather
@@ -816,7 +822,7 @@ class InstallService:
 
         lockfile_path = _frozen_lockfile_path(request)
         committed = committed or LockFile.read(lockfile_path)
-        if committed is None:  # pragma: no cover -- enforce_frozen ran first
+        if committed is None:  # nothing declared, nothing locked (#4050)
             return
         deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
         drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)

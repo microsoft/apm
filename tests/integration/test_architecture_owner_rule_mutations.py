@@ -1765,6 +1765,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Integrate re-derives apm_modules copy validity outside drift.locked_copy_proof.",
     ),
     MutationCase(
+        guard_id="install-deployment-lockfile-required",
+        rule_id="install-deployment-lockfile-required",
+        path="src/apm_cli/policy/ci_checks.py",
+        old="    has_deps = manifest_requires_lockfile(manifest)\n",
+        new=(
+            "    has_deps = manifest.has_any_apm_dependencies() or bool(\n"
+            "        manifest.get_all_mcp_dependencies()\n"
+            "    )\n"
+        ),
+        intent="audit --ci re-derives whether a lockfile is required, so it can disagree with --frozen.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-capability-gate",
         rule_id="install-deployment-lsp-capability-gate",
         path="src/apm_cli/install/phases/integrate.py",
