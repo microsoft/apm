@@ -3,9 +3,9 @@
 Runs AFTER ``resolve.run(ctx)`` (so ``ctx.deps_to_install`` is populated)
 and BEFORE ``targets.run(ctx)`` (so denied deps never reach integration).
 
-Discovery outcomes (plan section B, 9-outcome matrix):
-  found, absent, cached_stale, cache_miss_fetch_fail, malformed,
-  disabled, garbage_response, no_git_remote, empty
+Discovery outcomes are the closed set
+``policy.outcome_routing.POLICY_DISCOVERY_OUTCOMES``; the routing owner
+decides how each is handled.
 
 Target-aware compilation checks are NOT performed here -- they run
 AFTER the targets phase when the effective target is known
@@ -51,7 +51,7 @@ def run(ctx: InstallContext) -> None:
     source = fetch_result.source
 
     # ------------------------------------------------------------------
-    # 2. Route outcome through the shared 9-outcome table.
+    # 2. Route outcome through the policy-outcome routing owner.
     # Logging + fail-closed gating live in one place
     # (``policy/outcome_routing.py``) so this phase and the
     # ``install --mcp`` / ``install --dry-run`` preflight stay aligned.
