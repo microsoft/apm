@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
+- `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 - Internal: unit tests no longer inherit console routing, config or environment left by an earlier test on the same worker; a per-test leak detector fails the test that leaks. (#4226)
 - `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
@@ -149,6 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
 - Orphan previews in `apm install --dry-run` and `apm uninstall --dry-run` now match the real run; every command's orphan removal comes from one owner. (#4021)
 - A targeted `apm install` keeps both a repository and its virtual child when the child stays locked; the outcome no longer varies between runs. (closes #4060, #4063)
+- `apm install` reports pinned hooks denied by org policy or `apm deny --user` as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4044, #4055)
 
 ### Security
 
