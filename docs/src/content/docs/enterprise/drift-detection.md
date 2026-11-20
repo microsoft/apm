@@ -64,8 +64,9 @@ apm audit --ci
 
 ```text frame="none"
 ...
-| [x]      | content-integrity        | 1 file(s) with hash drift -- run 'apm install' to restore  |
-|          |                          | drifted files                                              |
+| [x]      | content-integrity        | 1 file(s) with hash drift -- run 'apm install' after       |
+|          |                          | deleting the drifted files (plain install keeps local      |
+|          |                          | edits)                                                     |
 | [x]      | drift                    | drift detected: 1 file(s):                                 |
 |          |                          | .claude/skills/style-checker/SKILL.md                      |
 ...
@@ -77,13 +78,12 @@ apm audit --ci
     - .claude/skills/style-checker/SKILL.md  [microsoft/apm-sample-package]
 
   [i] 1 local edit(s) to managed files; run 'apm export-patch' to export them as upstream patches before the next install overwrites them
-  [i] Run 'apm install' to re-sync deployed files with the lockfile.
+  [i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
 ```
 
-Despite that hint, plain `apm install` keeps a hand-edited file and warns; `apm install --force`
-puts the locked version back. `apm audit --ci` exits 1 on drift. Plain `apm audit` reports the same drift and exits 0,
+Plain `apm install` keeps a hand-edited file and warns, so restore it the way the hint says. For files a local bundle deployed, delete them and reinstall that bundle with `apm install <bundle-path>`. `apm audit --ci` exits 1 on drift. Plain `apm audit` reports the same drift and exits 0,
 unless the org policy sets `security.audit.fail_on_drift: true`. `apm install --frozen`
-also fails when a deployed file differs from its locked hash.
+also fails, before writing anything, when a deployed file differs from its locked hash.
 
 What the replay reports:
 
@@ -148,7 +148,11 @@ apm lock export --format cyclonedx -o sbom.json
 
 `--format spdx` writes SPDX 2.3 instead of CycloneDX 1.5. The inventory lists one
 component per locked package, with its name, version, the commit it resolved to and the
-license its `apm.yml` declares. The export reads `apm.lock.yaml` and nothing else: no
+license its `apm.yml` declares. Each component carries a package URL
+(`pkg:github/<owner>/<repo>@<commit>` for GitHub, typed for GitLab and Bitbucket,
+`pkg:generic` for other hosts, with `#<subpath>` for a package inside a repository) and the
+lockfile's SHA-256 content hash (CycloneDX `hashes`, SPDX `checksums`), labelled
+`apm-package-tree-sha256`: APM's package tree hash, not an archive digest. The export reads `apm.lock.yaml` and nothing else: no
 network, no re-hashing. Pass `--timestamp` or set `SOURCE_DATE_EPOCH` for byte-identical output in
 release pipelines.
 

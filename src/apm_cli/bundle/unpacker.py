@@ -189,7 +189,14 @@ def unpack_bundle(
                     if not dep_file_map[_k]:
                         del dep_file_map[_k]
 
-        # 3. Verify completeness
+        # 3. Verify completeness. A plugin bundle (root plugin.json, the
+        # default 'apm pack' output) is not a deployment layout (#3994).
+        if (source_dir / "plugin.json").is_file():
+            raise ValueError(
+                "This is a plugin-format bundle (the default 'apm pack' output); "
+                "install it with 'apm install <bundle-path>'. 'apm unpack' reads only "
+                "bundles packed with '--format apm'."
+            )
         verified = True
         if not skip_verify:
             missing = [f for f in unique_files if not (source_dir / f).exists()]

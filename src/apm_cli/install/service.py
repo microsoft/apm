@@ -213,6 +213,9 @@ class InstallService:
         # transitive requirements as locked package manifests become available.
         if request.frozen:
             self.enforce_frozen(request)
+            # req-lk-017: judge the committed bytes before any integrator can
+            # rewrite or keep them, so every primitive type answers alike.
+            self._enforce_frozen_deployed_hashes(request, deployed=False)
 
         runner = self._build_script_runner(request)
         event = self._build_event("pre-install", request)
@@ -737,7 +740,6 @@ class InstallService:
         from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
-        from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
 
         # Re-read rather than reuse the copy `enforce_frozen` loaded: this
         # judges what is on disk now.  `--frozen` is a CI primitive with a
@@ -783,10 +785,51 @@ class InstallService:
                 tip=_FROZEN_REPAIR_TIP,
             )
 
-        deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
+        InstallService._enforce_frozen_deployed_hashes(request, committed, deployed=True)
+
+    @staticmethod
+    def _enforce_frozen_deployed_hashes(
+        request: InstallRequest, committed: LockFile | None = None, *, deployed: bool
+    ) -> None:
+        """Fail a frozen install whose deployed bytes differ from the lock (req-lk-017).
+
+        Runs twice through the verifier ``apm audit`` uses.  Before the
+        pipeline (*deployed* False) it judges the committed bytes, so a local
+        edit fails the same way whether the primitive's integrator would keep
+        it (skills) or rewrite it (instructions, agents, commands).  After
+        deployment it catches an APM upgrade that renders a locked file
+        differently (#3654).
+        """
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.local_edits import restore_locked_content_hint
+        from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
+
+        lockfile_path = _frozen_lockfile_path(request)
+        committed = committed or LockFile.read(lockfile_path)
+        if committed is None:  # pragma: no cover -- enforce_frozen ran first
+            return
+        deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
         drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)
+        if not deployed and drifted:
+            # Stale APM output (receipt-proven) is replaced, then re-verified.
+            from apm_cli.install.local_edits import unedited_apm_output
+
+            stale = unedited_apm_output(deploy_root, user_scope, committed, targets, drifted)
+            drifted = [drift for drift in drifted if drift.path not in stale]
         if not drifted and not unresolved:
             return
+        if deployed:
+            tip = (
+                _FROZEN_REPAIR_TIP
+                + " To keep local edits, run 'apm export-patch' or move them aside first."
+            )
+        else:
+            tip = (
+                "Tip: nothing was deployed. "
+                f"{restore_locked_content_hint('the listed files')}. To keep local "
+                "edits, run 'apm export-patch' or move them aside first."
+            )
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
             reasons=[
@@ -796,8 +839,7 @@ class InstallService:
                 ),
                 *(f"  - {path}: unsafe or unresolved deployed path" for path in sorted(unresolved)),
             ],
-            tip=_FROZEN_REPAIR_TIP
-            + " To keep local edits, run 'apm export-patch' or move them aside first.",
+            tip=tip,
         )
 
 

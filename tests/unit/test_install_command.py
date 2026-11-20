@@ -1237,7 +1237,7 @@ class TestInstallGlobalFlag:
             os.chdir(str(repo_root))
 
     def test_global_flag_shows_scope_info(self):
-        """--global flag should display user scope info message and unsupported target warning."""
+        """--global shows user scope info, without warnings about unselected targets."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 os.chdir(tmp_dir)
@@ -1248,8 +1248,8 @@ class TestInstallGlobalFlag:
                     result = self.runner.invoke(cli, ["install", "--global"])
                 assert result.exit_code == 1
                 assert "user scope" in result.output.lower() or "~/.apm/" in result.output
-                # Should warn about unsupported targets
-                assert "cursor" in result.output.lower()
+                # No target is selected yet, so no unrelated-target warning (#3994).
+                assert "user scope does not deploy" not in result.output.lower()
             finally:
                 os.chdir(self.original_dir)
 
@@ -1267,8 +1267,8 @@ class TestInstallGlobalFlag:
                 assert (fake_home / ".apm" / "apm_modules").is_dir()
                 assert result.exit_code == 1  # No packages or manifest provided
                 assert "user scope" in result.output.lower() or "~/.apm/" in result.output
-                # Should warn about unsupported targets
-                assert "cursor" in result.output.lower()
+                # No target is selected yet, so no unrelated-target warning (#3994).
+                assert "user scope does not deploy" not in result.output.lower()
             finally:
                 os.chdir(self.original_dir)
 
@@ -1684,7 +1684,8 @@ class TestAllowInsecureFlag:
         assert "use --allow-insecure for http:// packages" in normalized
         assert "--allow-insecure-host HOSTNAME" in result.output
         assert "Git source, ref, host provider, transport, and MCP config state" in normalized
-        assert "Use 'apm audit' for on-disk integrity." in normalized
+        assert "deployed files do not match the hashes it records" in normalized
+        assert "Use 'apm audit' for on-disk integrity." not in normalized
 
     def test_allow_insecure_host_rejects_non_hostname(self):
         """The explicit transitive host option only accepts bare hostnames."""

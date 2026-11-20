@@ -100,6 +100,18 @@ class TestFindCommandBasic:
         # stderr is mixed into output in Click 8.x
         assert "[x]" in result.output
 
+    def test_lookup_errors_go_to_stderr_not_the_data_stream(self):
+        """stdout carries package names only (#3994)."""
+        lf = _make_lockfile_with_git()
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("apm.lock.yaml", "w", encoding="utf-8") as f:
+                f.write(lf.to_yaml())
+            result = runner.invoke(cli, ["find", "CLAUDE.md"])
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "compiled by 'apm compile'" in " ".join(result.stderr.split())
+
     def test_source_flag_oci_origin(self):
         lf = _make_lockfile_with_oci()
         runner = CliRunner()

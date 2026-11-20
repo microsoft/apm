@@ -23,7 +23,7 @@ content. Global uninstalls also remove the Claude plugin declarations APM made.
 
 | Argument | Description |
 |---|---|
-| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. |
+| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. A local bundle installed with `apm install <bundle>` is not in `apm.yml`; uninstall refuses it and says so. An MCP server name is refused with the route that removes it: delete it under `dependencies.mcp` and run `apm install`, or uninstall the package that brings it in; a server from a local bundle cannot be uninstalled yet ([#3887](https://github.com/microsoft/apm/issues/3887)). |
 
 ## Options
 

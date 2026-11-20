@@ -325,7 +325,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
-            for dep in lockfile.dependencies.values():
+            for dep in lockfile.get_package_dependencies():
                 # Local slots and explicit aliases retain their logical lockfile identity.
                 if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
@@ -576,7 +576,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             show_header=True,
             header_style="bold cyan",
         )
-        table.add_column("Package", style="bold white")
+        table.add_column("Package", style="bold white", overflow="fold")
         table.add_column("Version", style="yellow")
         table.add_column("Source", style="blue")
         if insecure_only:
@@ -697,10 +697,10 @@ def list_packages(global_, show_all, insecure_only):
         # Import Rich components with fallback
         import shutil
 
-        from rich.console import Console
+        from apm_cli.utils.console import new_console
 
         term_width = shutil.get_terminal_size((120, 24)).columns
-        console = Console(width=max(120, term_width))
+        console = new_console(width=max(120, term_width))
         has_rich = True
     except ImportError:
         has_rich = False
@@ -885,10 +885,11 @@ def tree(global_):
 
     try:
         # Import Rich components with fallback
-        from rich.console import Console
         from rich.tree import Tree
 
-        console = Console()
+        from apm_cli.utils.console import new_console
+
+        console = new_console()
         has_rich = True
     except ImportError:
         has_rich = False

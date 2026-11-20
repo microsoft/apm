@@ -7,8 +7,10 @@ from apm_cli.utils.console — no new output primitives.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
 from apm_cli.models.results import InstallDisposition
@@ -253,8 +255,16 @@ class InstallLogger(CommandLogger):
     full install (all deps from apm.yml). Adjusts messages accordingly.
     """
 
-    def __init__(self, verbose: bool = False, dry_run: bool = False, partial: bool = False):
-        super().__init__("install", verbose=verbose, dry_run=dry_run)
+    def __init__(
+        self,
+        verbose: bool = False,
+        dry_run: bool = False,
+        partial: bool = False,
+        *,
+        command: str = "install",
+    ):
+        # ``apm update`` reuses this logger; ``command`` keeps hints true for it.
+        super().__init__(command, verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
         self._dry_run_apm_update_count = 0
@@ -492,6 +502,9 @@ class InstallLogger(CommandLogger):
             cached: Whether this was a cache hit.
             ref_suffix: DEPRECATED — legacy callers still pass this.
         """
+        if ref and dep_name.endswith(f"#{ref}"):
+            # The header appends the ref itself; never print it twice.
+            dep_name = dep_name[: -len(ref) - 1]
         msg = f"  [+] {dep_name}"
         if ref_suffix:
             # Legacy path — pass-through until all callers are migrated
@@ -505,7 +518,28 @@ class InstallLogger(CommandLogger):
                 msg += f" @{sha}"
             if cached:
                 msg += " (cached)"
-        _rich_echo(msg, color="green")
+        self._emit_or_hold(partial(_rich_echo, msg, color="green"))
+
+    @contextmanager
+    def held_package_header(self) -> Iterator[list[Callable[[], None]]]:
+        """Hold one package's header lines until its integration output starts.
+
+        Install acquires every package before deploying any, so a header
+        printed at acquisition would stack above another package's tree.
+        """
+        held: list[Callable[[], None]] = []
+        self._held_header = held
+        try:
+            yield held
+        finally:
+            self._held_header = None
+
+    def _emit_or_hold(self, emit: Callable[[], None]) -> None:
+        held = getattr(self, "_held_header", None)
+        if held is None:
+            emit()
+        else:
+            held.append(emit)
 
     def download_failed(self, dep_name: str, error: str):
         """Log a download failure."""
@@ -531,13 +565,13 @@ class InstallLogger(CommandLogger):
         if not self.verbose:
             return
         type_str = f" ({token_type})" if token_type else ""
-        _rich_echo(f"    Auth: {source}{type_str}", color="dim")
+        self._emit_or_hold(partial(_rich_echo, f"    Auth: {source}{type_str}", color="dim"))
 
     def package_type_info(self, type_label: str):
         """Log detected package type (verbose only). 4-space indent."""
         if not self.verbose:
             return
-        _rich_echo(f"    Package type: {type_label}", color="dim")
+        self._emit_or_hold(partial(_rich_echo, f"    Package type: {type_label}", color="dim"))
 
     # --- Performance diagnostics (perf #1433) ---
 
@@ -899,7 +933,12 @@ class InstallLogger(CommandLogger):
                 _rich_echo(
                     "  "
                     + self._policy_reason_blocked(
-                        dep_ref, source, remedy=remedy, declared_by=declared_by, rule=rule
+                        dep_ref,
+                        source,
+                        remedy=remedy,
+                        declared_by=declared_by,
+                        rule=rule,
+                        command=self.command,
                     ),
                     color="dim",
                     err=True,
@@ -930,11 +969,23 @@ class InstallLogger(CommandLogger):
         )
 
     @staticmethod
-    def _policy_reason_unreachable(source: str) -> str:
+    def _policy_bypass_hint(command: str) -> str:
+        """One-off bypass the *command* actually accepts (#3994).
+
+        ``apm install`` has ``--no-policy``; other commands (``apm update``)
+        only honour a one-shot ``APM_POLICY_DISABLE=1`` prefix, which must
+        never be exported where it would disable policy for a whole CI job.
+        """
+        if command == "install":
+            return "use `--no-policy` for one-off bypass"
+        return f"bypass once with `APM_POLICY_DISABLE=1 apm {command}` (never export it in CI)"
+
+    @staticmethod
+    def _policy_reason_unreachable(source: str, *, command: str = "install") -> str:
         """Actionable reason for unreachable policy source."""
         return (
             f"Policy source {source} is unreachable "
-            "-- retry, check VPN/firewall, or use `--no-policy` to bypass"
+            f"-- retry, check VPN/firewall, or {InstallLogger._policy_bypass_hint(command)}"
         )
 
     @staticmethod
@@ -950,6 +1001,7 @@ class InstallLogger(CommandLogger):
         remedy: PolicyRemedy | None = None,
         declared_by: str | None = None,
         rule: str | None = None,
+        command: str = "install",
     ) -> str:
         """Actionable reason for a blocked dependency.
 
@@ -972,7 +1024,7 @@ class InstallLogger(CommandLogger):
         return (
             f"Blocked by org policy at {source}{rule_part} "
             f"-- {edit}contact admin to update policy, "
-            "or use `--no-policy` for one-off bypass"
+            f"or {InstallLogger._policy_bypass_hint(command)}"
         )
 
     # --- Install summary ---

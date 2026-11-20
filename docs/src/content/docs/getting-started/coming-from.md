@@ -14,7 +14,7 @@ Copilot, Claude Code, Cursor and others). APM adds a manifest (`apm.yml`) and a 
 | `npx skills add owner/repo` | `apm install owner/repo` |
 | Claude Code `/plugin marketplace add` and `/plugin install` | `apm marketplace add owner/repo`, then `apm install name@marketplace` |
 | `gh skill install owner/repo skill --pin v1.2.0` | `apm install owner/repo/skills/skill#v1.2.0` |
-| Skills copied into `.github/` or `.claude/` | `apm init --discover`, then `apm init --discover --apply` |
+| Skills copied into `.github/` or `.claude/` | `apm init --discover`, then `apm init --apply` |
 | A hand-edited `.mcp.json` | `apm install --mcp NAME` |
 
 Every command below assumes an `apm.yml` that names your harnesses. If you have none, start with
@@ -33,7 +33,8 @@ apm install vercel-labs/agent-skills --skill deploy-to-vercel
 `--skill` installs one skill from a collection; repeat it for more, or pass `--skill '*'` to
 return to all of them. APM writes the selection to `apm.yml`, so a bare `apm install` on
 another machine installs the same subset. Without a `#` ref, APM tracks the default branch and
-warns `1 dependency unpinned`; add a tag or commit SHA. Skill lookup on
+warns `1 dependency unpinned`. The lockfile still pins the resolved commit; to
+track releases on `apm update`, add a semver range such as `#^1.0.0` (a tag like `#v1.0.0` stays put). Skill lookup on
 [skills.sh](https://skills.sh) keeps working: find there, install with APM.
 
 ## From Claude Code plugin marketplaces
@@ -90,7 +91,7 @@ apm init --discover
 Then add the references to `apm.yml` and install. In a script, add `--yes` to confirm:
 
 ```bash frame="terminal"
-apm init --discover --apply
+apm init --apply
 apm install
 ```
 

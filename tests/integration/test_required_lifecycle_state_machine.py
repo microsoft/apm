@@ -3052,7 +3052,8 @@ def _exercise_global_revision_commands(
         command_cwd=manifest_path.parent,
         expected_returncode=1,
     )
-    assert "is not tracked by any installed package" in " ".join(found.stdout.split()), (
+    # apm find keeps stdout for package names; errors go to stderr (#3994).
+    assert "is not tracked by any installed package" in " ".join(found.stderr.split()), (
         _result_evidence(found)
     )
     _assert_same_state(installed, capture())

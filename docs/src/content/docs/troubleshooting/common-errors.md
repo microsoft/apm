@@ -124,12 +124,14 @@ See also: [Install failures](../install-failures/)
 
 ```
 [!] Drift detected: N file(s)
-[i] Run 'apm install' to re-sync deployed files with the lockfile.
+[i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
 ```
+
+When some files are missing or unrecorded instead, APM prints `Run 'apm install' to re-sync deployed files with the lockfile.`
 
 Cause: deployed primitive files in the project differ from the content recorded in `apm.lock.yaml`. Either the files were edited locally, or the lockfile was updated without re-running install.
 
-Fix: run `apm install` to re-deploy from the cache. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
+Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them, rerun `apm install`, and commit the result. `apm install --force` also restores them, but it overwrites every local edit and deploys despite critical security findings. Files a local bundle deployed (shown as `[local-bundle]`) come back only from the bundle: delete them and rerun `apm install <bundle-path>`. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
 
 For `unmanaged-conflict`, the file is yours, not a managed edit: install skipped
 it (or refused the skill plan). Rename the conflicting local file or skill, or
@@ -274,7 +276,7 @@ Fix: restore the exact value the message names (keep the `:-.` default), or rena
 
 ### `Compilation completed but produced no output files`
 
-Printed when compile produces zero output.
+Printed when compile produces zero output although the project has primitives. A project with no instructions at all prints `No instructions to compile -- nothing written.` instead, and a Claude project served by `.claude/rules/` prints only that `CLAUDE.md` was not needed.
 
 Cause: no primitives in the project (or filtered subset) match the active target's compilation rules. Common causes: wrong `--target`, missing frontmatter, glob filter matched nothing, or org policy stripped everything.
 

@@ -651,6 +651,29 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     return synthesize_apm_yml_from_plugin(plugin_path, manifest)
 
 
+def _missing_component_message(
+    plugin_name: str, field: str, declared_path: str, plugin_path: Path
+) -> str:
+    """Explain a declared-but-missing component to consumers and authors alike.
+
+    The usual consumer cause is upstream: a marketplace entry whose source
+    path is the folder holding plugin.json rather than the plugin root. A
+    staged resolution path means nothing to the user, so it is not shown.
+    """
+    from ..utils.staging_guard import STAGING_DIR_NAME
+
+    staged = STAGING_DIR_NAME in plugin_path.parts
+    root = "its plugin root" if staged else f"plugin root '{plugin_path}'"
+    return (
+        f"Plugin '{plugin_name}' declares '{field}' component path '{declared_path}', "
+        f"which does not exist in {root}. Component paths resolve from the plugin "
+        "root, not from the folder that holds plugin.json, so a marketplace entry "
+        "whose source path is a manifest folder (for example '.github/plugin') "
+        "fails this way. Report it to the plugin publisher; if you author the "
+        "plugin, add the component or remove the declaration from plugin.json."
+    )
+
+
 def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, Any]) -> None:
     """Fail when a plugin manifest declares a component that cannot be resolved."""
     plugin_name = str(manifest.get("name") or plugin_path.name)
@@ -681,9 +704,7 @@ def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, An
             if resolved.exists() and not candidate.is_symlink():
                 continue
             raise DeclaredPluginComponentError(
-                f"Plugin '{plugin_name}' declares missing '{field}' component path "
-                f"'{declared_path}' in plugin root '{plugin_path}'. "
-                "Add the component or remove the declaration from plugin.json, then reinstall."
+                _missing_component_message(plugin_name, field, declared_path, plugin_path)
             )
 
 

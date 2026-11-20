@@ -251,8 +251,12 @@ def run_mcp_install(  # noqa: PLR0913
                     retry_args=retry_args,
                 )
             except Exception as exc:
+                from ...registry.client import RegistryEgressRefusedError
+
                 detail = str(exc)
-                if detail.startswith("Could not reach MCP registry"):
+                if isinstance(exc, RegistryEgressRefusedError) or detail.startswith(
+                    "Could not reach MCP registry"
+                ):
                     logger.error(f"{detail} No state was changed.")
                     raise InstallFailureAlreadyRendered(detail) from None
                 if detail.startswith("Cannot install ") and "missing server" in detail:

@@ -630,8 +630,12 @@ class TestPromptExecutableApproval:
             prompt_executable_approval([decl])
         out = capsys.readouterr().out
         assert "allowExecutables" not in out
-        assert "apm approve --recommended" in out
+        # No org set configured: the bulk command would find nothing (#3994).
+        assert "apm approve --recommended" not in out
         assert "apm policy explain" in out
+        with pytest.raises(SystemExit):
+            prompt_executable_approval([decl], recommend=("owner/pkg",))
+        assert "apm approve --recommended" in capsys.readouterr().out
 
 
 class TestAliasDeprecationWarning:

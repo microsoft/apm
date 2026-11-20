@@ -93,6 +93,16 @@ class ClientFactory:
         return key in _ROOT_MCP_JSON_CLIENTS
 
     @staticmethod
+    def user_wide_config_display(client_type: str) -> str | None:
+        """User-wide config a project install of *client_type* writes, if any.
+
+        Read-only: no adapter is built. ``None`` when the runtime keeps a
+        workspace config or APM does not know it.
+        """
+        adapter = _MCP_CLIENT_REGISTRY.get(client_type.lower())
+        return getattr(adapter, "user_wide_config_display", None)
+
+    @staticmethod
     def supported_clients() -> frozenset[str]:
         """Return the set of MCP client target names supported by APM.
 

@@ -75,7 +75,6 @@ Reset one flag (when `NAME` is given) or all flags (when omitted) to registry de
 | `copilot-cowork` | Enables Microsoft 365 Copilot Cowork skill deployment via OneDrive. | `apm install --target copilot-cowork --global` |
 | `copilot-app` | Deploys prompts as workflows into the GitHub Copilot desktop App. Workflows arrive disabled; enable them from the Copilot app's Workflows tab. | `apm install --target copilot-app` |
 | `grok-cloud` | Deploys skills to xAI Grok Cloud. | `apm install --target grok-cloud` |
-| `marketplace-authoring` | Still registered but gates nothing: marketplace authoring commands are available without it. | `apm marketplace --help` |
 | `registries` | Enables REST-based APM package registries in `apm.yml` and `$APM_HOME/config.json`. | `apm install` (with `registries:` configured) |
 | `canvas` | Ships Copilot CLI canvas extensions from `.apm/extensions/` bundles. | `apm install` |
 | `external-scanners` | Enables third-party SARIF scanner ingestion in `apm audit` (`--external`, `--external-llm`, `--external-args`), the `external.<name>.{llm,args}` config keys, and `security.audit.scanners` policy governance. | `apm audit --external skillspector` |

@@ -81,6 +81,17 @@ class TestUnpackBundle:
 
         assert result.verified
 
+    def test_unpack_names_a_plugin_bundle_instead_of_missing_files(self, tmp_path):
+        """The default plugin layout is routed to 'apm install' (#3994)."""
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        (bundle / ".github" / "agents" / "a.md").unlink()
+        (bundle / "plugin.json").write_text("{}", encoding="utf-8")
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match=r"plugin-format bundle.*apm install"):
+            unpack_bundle(bundle, output)
+
     def test_unpack_verify_missing_file(self, tmp_path):
         deployed = [".github/agents/a.md", ".github/agents/missing.md"]
         bundle_dir = tmp_path / "bundle" / "test-pkg-1.0.0"

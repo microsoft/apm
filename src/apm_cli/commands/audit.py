@@ -34,6 +34,7 @@ from ..utils.console import (
     _rich_echo,
     _rich_error,
     _rich_success,
+    _rich_warning,
 )
 from ..utils.diagnostics import printable_ascii_text
 
@@ -519,6 +520,18 @@ def _preview_strip(
     return affected
 
 
+def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
+    """Summarize a passing run; warn-mode violations are not a clean pass (#3994)."""
+    warned = sum(1 for check in ci_result.checks if check.warned)
+    if not warned:
+        _rich_success(f"{STATUS_SYMBOLS['success']} All {total} check(s) passed")
+        return
+    _rich_warning(
+        f"{total} check(s) passed; {warned} {'reports' if warned == 1 else 'report'} violations under "
+        "'enforcement: warn' and fail once the policy switches to block."
+    )
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -543,7 +556,9 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             for check in ci_result.checks:
                 # Text, not markup: Rich would parse "[x]" as a tag (#3845).
                 status = (
-                    Text(STATUS_SYMBOLS["check"], style="green")
+                    Text(STATUS_SYMBOLS["warning"], style="yellow")
+                    if check.warned
+                    else Text(STATUS_SYMBOLS["check"], style="green")
                     if check.passed
                     else Text(STATUS_SYMBOLS["cross"], style="red")
                 )
@@ -552,13 +567,13 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             console.print()
             console.print(table)
 
-            # Show details for failed checks
-            for check in ci_result.failed_checks:
-                if check.details:
+            # Show details for failed and warned checks
+            for check in ci_result.checks:
+                if check.details and (check.warned or not check.passed):
                     console.print()
                     _rich_echo(
                         f"  {check.name} details:",
-                        color="red",
+                        color="yellow" if check.warned else "red",
                         bold=True,
                     )
                     for detail in check.details:
@@ -567,7 +582,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             console.print()
             summary = ci_result.to_json()["summary"]
             if ci_result.passed:
-                _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
+                _report_passed(ci_result, summary["total"])
             else:
                 _rich_error(
                     f"{STATUS_SYMBOLS['error']} {summary['failed']} of "
@@ -587,15 +602,17 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     for check in ci_result.checks:
         symbol = STATUS_SYMBOLS["check"] if check.passed else STATUS_SYMBOLS["cross"]
         color = "green" if check.passed else "red"
+        if check.warned:
+            symbol, color = STATUS_SYMBOLS["warning"], "yellow"
         _rich_echo(printable_ascii_text(f"  {symbol} {check.name}: {check.message}"), color=color)
-        if not check.passed and check.details:
+        if (check.warned or not check.passed) and check.details:
             for detail in check.details:
                 _rich_echo(f"      - {printable_ascii_text(detail)}", color="dim")
 
     _rich_echo("")
     summary = ci_result.to_json()["summary"]
     if ci_result.passed:
-        _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
+        _report_passed(ci_result, summary["total"])
     else:
         _rich_error(
             f"{STATUS_SYMBOLS['error']} {summary['failed']} of {summary['total']} check(s) failed"
@@ -794,6 +811,7 @@ def _audit_ci_gate(
                             message=check.message
                             + (" (enforcement: warn)" if not check.passed else ""),
                             details=check.details,
+                            warned=not check.passed,
                         )
                     )
 
@@ -1396,10 +1414,7 @@ def _audit_content_scan(
     "--policy",
     "policy_source",
     default=None,
-    help=(
-        f"Policy source. {POLICY_SOURCE_FORMS_HELP} "
-        "Used with --ci for policy checks. [experimental]"
-    ),
+    help=f"Policy source. {POLICY_SOURCE_FORMS_HELP} Used with --ci for policy checks.",
 )
 @click.option(
     "--no-cache",
