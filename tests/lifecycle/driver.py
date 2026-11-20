@@ -29,6 +29,9 @@ _USER_SCOPE_FLAGS = {
     "update": "--global",
     "uninstall": "--global",
     "deps": "--global",
+    "lock": "--global",
+    "compile": "--global",
+    "outdated": "--global",
     "approve": "--user",
     "deny": "--user",
 }
