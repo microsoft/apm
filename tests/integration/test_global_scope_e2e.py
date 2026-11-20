@@ -857,8 +857,8 @@ class TestGlobalUninstallLifecycle:
         assert lockfile_path.read_bytes() == lockfile_before
         assert survivor_materialized.is_dir()
         assert survivor_source.read_bytes() == survivor_source_before
-        # Package deletion precedes target cleanup; ownership, not content, survives.
-        assert not removed_materialized.exists()
+        # The evidence preflight refuses before package deletion (#3701).
+        assert removed_materialized.exists()
 
         if resolution == "restore":
             removed_file.write_bytes(managed_bytes)

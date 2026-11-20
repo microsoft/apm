@@ -181,7 +181,7 @@ def test_cursor_rules_installed_lifecycle(
     assert snapshot() == before
     assert style.exists()
     assert collision.read_text(encoding="utf-8") == _USER_COLLISION
-    assert not (target_root / "agents/reviewer.md").exists()
+    assert (target_root / "agents/reviewer.md").exists()
     assert user_rule.read_text(encoding="utf-8") == _USER_RULE
     assert edited.read_text(encoding="utf-8") == "USER_EDITED_MANAGED_RULE\n"
     saved_edit = rules / "saved-edit.mdc"

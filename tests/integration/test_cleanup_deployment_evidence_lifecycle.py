@@ -285,9 +285,8 @@ def test_uninstall_refusal_changes_nothing_and_its_remedy_runs(
     """Without deletion evidence uninstall exits 1 and changes nothing (#3701).
 
     The refusal names every file and why, and prints runnable remedies. The
-    remedy is executed: install once with access to the source, then
-    uninstall; a user edit is never deleted and survives the documented
-    manual step (move it aside).
+    remedy is executed as printed: move the edited file aside, install once
+    with access to the source, then uninstall; the user's edit survives.
     """
     world = _world(tmp_path, apm_binary_path)
     clone = world.clone()
@@ -305,23 +304,16 @@ def test_uninstall_refusal_changes_nothing_and_its_remedy_runs(
     assert "Uninstall refused" in refused, refused
     for relative in _DEPLOYED:
         assert f"{relative}: {_NO_EVIDENCE}" in refused, refused
-    assert "Run 'apm install' once with access to the package source" in refused, refused
+    assert "Move aside any listed file that holds your edits" in refused, refused
+    assert "once with access to the package source" in refused, refused
     assert "move each listed file aside or delete it" in refused, refused
 
-    # Remedy (a): with the source reachable again, install once, then uninstall.
-    world.restore_source()
-    world.apm(clone, "install", "--no-policy")
-    assert (clone / _INSTRUCTION).read_bytes() == user_bytes
-    before = _snapshot(clone)
-    edited = world.apm(clone, "uninstall", _DEP, expect=1)
-    assert _snapshot(clone) == before, "a refused uninstall must change nothing"
-    assert f"{_INSTRUCTION}: edited since APM deployed it" in edited, edited
-    for relative in (_PROMPT, _AGENT, _HOOK):
-        assert relative not in edited, edited
-
-    # The documented manual step for an edited file: move it aside.
+    # Remedy (a), executed as printed: move the edited file aside, install once
+    # with the source reachable, then uninstall.
     aside = world.isolated.work_root / "mine.instructions.md"
     shutil.move(str(clone / _INSTRUCTION), aside)
+    world.restore_source()
+    world.apm(clone, "install", "--no-policy")
     world.apm(clone, "uninstall", _DEP)
     assert aside.read_bytes() == user_bytes
     for relative in _DEPLOYED:
