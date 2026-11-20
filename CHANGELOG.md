@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm marketplace add OWNER/REPO#ref` and `HOST/OWNER/REPO#ref` register the named ref instead of tracking `main` (#4217)
 - `apm pack --format apm` now includes skills deployed under `.agents/skills/` for Copilot, Cursor, Gemini and OpenCode projects instead of packing an empty bundle. (#4217)
 - `apm lock` keeps the recorded `exec_status` of packages whose executables await approval, so `apm lock` and `apm install` no longer rewrite each other's lockfile (#4217)
+- An inaccessible repository now names the host and the credential source tried (never its value) and ends with `Run 'apm install --verbose <package>'`, whose output shows that source. (#4217)
+- `apm install <bundle>` names the destination folders it deployed into, as package installs do (#4217)
+- `apm uninstall`, `apm prune` and target-removal installs list each deployed path they delete, and the cleanup count matches the listed paths (#4217)
+- `apm install --frozen` and cold lockfile replays print the package header as `<name> #<ref> @<sha>`, without repeating the locked commit (#4217)
+- `apm install --frozen` with MCP servers prints its MCP targeting line once instead of twice, at project and user scope (#4217)
+- Installing a dependency whose repository the host answers 404 for now reports `Repository <owner/repo> not found on <host>` once, with `Run 'apm uninstall <owner/repo>'`, instead of a network error. (#4217)
 
 ## [0.37.0] - 2026-11-20
 

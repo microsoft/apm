@@ -559,6 +559,24 @@
       ]
     },
     {
+      "issue": 4174,
+      "fixed_in": "0.37.0",
+      "summary": "An install of an inaccessible repository on a configured host did not name the credential source tried, and its advice ('run with --verbose') was not a runnable command and its verbose form named no source.",
+      "failure_modes": [
+        "auth",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "auth.credentials_isolated",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_repository_not_found_lifecycle.py::test_inaccessible_repository_names_host_and_credential_source",
+        "tests/unit/core/test_auth_phase3.py::TestDescribeCredentialTried"
+      ]
+    },
+    {
       "issue": 4190,
       "fixed_in": "0.37.0",
       "summary": "apm install --mcp and apm uninstall printed the absolute apm.yml path while every other command printed project-relative paths.",
@@ -591,6 +609,39 @@
       ]
     },
     {
+      "issue": 4192,
+      "fixed_in": "0.37.0",
+      "summary": "Local bundle install printed only 'Installed N file(s) from local bundle' and never named the folders it wrote to.",
+      "failure_modes": [
+        "outcome",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_summary_destinations_lifecycle.py::test_local_bundle_install_names_destination_folders"
+      ]
+    },
+    {
+      "issue": 4193,
+      "fixed_in": "0.37.0",
+      "summary": "Uninstall, prune and target-removal cleanup deleted deployed files without naming them, and the reported count also counted skill directories alongside their members.",
+      "failure_modes": [
+        "observation",
+        "cleanup"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_stale_cleanup_diagnostics.py::test_removal_commands_name_each_deleted_path",
+        "tests/integration/test_stale_cleanup_diagnostics.py::test_cleanup_output_names_dependency",
+        "tests/unit/test_command_logger.py::TestCommandLogger::test_stale_cleanup_names_each_removed_path"
+      ]
+    },
+    {
       "issue": 4194,
       "fixed_in": "0.37.0",
       "summary": "A marketplace install that failed and reported no committed transaction changes still wrote the plugin ref pin to APM_HOME cache/marketplace/version-pins.json, because the resolver recorded pins before the install committed.",
@@ -604,6 +655,54 @@
       "regression_tests": [
         "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_failed_marketplace_install_writes_no_ref_pin",
         "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+      ]
+    },
+    {
+      "issue": 4195,
+      "fixed_in": "0.37.0",
+      "summary": "A cold lockfile replay printed the package header with the locked full commit as the ref, so a frozen install showed '<name>#main #<SHA40> @<SHA8>' instead of the install shape '<name> #main @<SHA8>'.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_frozen_replay_output_lifecycle.py::test_cold_frozen_replay_header_matches_install_shape"
+      ]
+    },
+    {
+      "issue": 4196,
+      "fixed_in": "0.37.0",
+      "summary": "The frozen MCP check selected target runtimes through the announcing resolver before the install run announced them again, so install --frozen printed its 'Targeting ...' line twice.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once[project-manifest-targets]",
+        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once[user-explicit-target]"
+      ]
+    },
+    {
+      "issue": 4199,
+      "fixed_in": "0.37.0",
+      "summary": "A declared dependency whose repository returned 404 was reported as a network error (or an auth failure) with protocol-fallback advice, printed twice under --verbose, and with no runnable next step.",
+      "failure_modes": [
+        "observation",
+        "outcome",
+        "auth"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_repository_not_found_lifecycle.py::test_missing_declared_repository_is_not_found_with_runnable_next_step",
+        "tests/unit/core/test_auth_outcome.py::test_repository_not_found_is_neither_network_nor_auth",
+        "tests/unit/core/test_auth_outcome.py::test_public_github_anonymous_git_404_may_hide_a_private_repository"
       ]
     },
     {
