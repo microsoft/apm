@@ -364,25 +364,15 @@ def test_dependency_target_narrowing_keeps_cleanup_and_lock_scope_aligned(
     assert lock_path.read_bytes() == settled
     scenario.run("audit", "--ci", "--format", "json")
     uninstall = ("uninstall", *(("-g",) if user_scope else ()), owner)
-    refused = scenario.runner.run(
-        uninstall,
-        scenario_id="dependency-target-narrowing-protected-uninstall",
-        cwd=scenario.project,
-        env=scenario.environment.subprocess_env(),
-    )
-    assert refused.returncode == 1, (refused.command, refused.stdout, refused.stderr)
-    assert "Resolve or remove the listed files" in refused.stdout
-    assert untracked.read_bytes() == b"Untracked personal content.\n"
-    saved_personal = scenario.deploy_root / "personal.txt"
-    untracked.rename(saved_personal)
     removed = scenario.runner.run(
         uninstall,
         scenario_id="dependency-target-narrowing-uninstall",
         cwd=scenario.project,
         env=scenario.environment.subprocess_env(),
     )
+    # The user's file in the removed package's skill directory stays (#4162).
     assert removed.returncode == 0, (removed.command, removed.stdout, removed.stderr)
-    assert saved_personal.read_bytes() == b"Untracked personal content.\n"
+    assert untracked.read_bytes() == b"Untracked personal content.\n"
     assert all(
         (scenario.deploy_root / value).read_bytes() == data for value, data in sibling_bytes.items()
     )
