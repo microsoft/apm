@@ -175,7 +175,7 @@ A Claude Code plugin directory under `--output`. Contains:
   - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
   - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
 - A merged `hooks.json` from the producer's own hooks. When present, root `plugin.json` and `.claude-plugin/plugin.json` declare `"hooks": "./hooks.json"` for native Claude discovery. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
-- Referenced first-party hook scripts and selected sibling assets, with plugin-root command paths rewritten to their packed locations. A `./` script reference is resolved as `apm install` resolves it (hook file directory first, then package root) and anchored on the installed plugin root, for example `"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`, so it runs from any working directory. Missing, excluded, symlinked, escaping or collision-displaced resources fail before replacing an existing bundle. Packing never executes scripts; see [Hook resources in Claude plugin bundles](../../../producer/build-a-plugin/).
+- Referenced first-party hook scripts and selected sibling assets, with plugin-root command paths rewritten to their packed locations. A `./` script reference is resolved as `apm install` resolves it (hook file directory first, then package root) and anchored on the installed plugin root, for example `"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`, so it runs from any working directory. Missing, excluded, symlinked, escaping or collision-displaced resources fail before replacing an existing bundle. Packing never executes scripts; see [Hook resources in Claude plugin bundles](../../../producer/pack-a-bundle/#hook-resources-in-claude-plugin-bundles).
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 
@@ -200,7 +200,7 @@ legacy Claude client format.
 LSP configuration gets its own guidance in the same error, since neither bundle format carries it: configure LSP servers directly in the target client instead.
 
 :::note[Installing what you packed]
-Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it without locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer loads the projection live; older clients may create private copies outside APM ownership. Non-Copilot targets remain outside this native route -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/install-plugins/).
+Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it without locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer loads the projection live; older clients may create private copies outside APM ownership. Non-Copilot targets remain outside this native route -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 
 ### APM bundle (`--format apm`)
@@ -332,6 +332,6 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 
 - [`apm unpack`](../unpack/) -- inverse, deprecated; prefer `apm install <bundle>`.
 - [`apm install`](../install/) -- consumer side; installs a packed bundle directory, `.zip`, or `.tar.gz`.
-- [Pack a bundle (producer guide)](../../../producer/build-a-plugin/) -- task-oriented walkthrough.
+- [Pack a bundle (producer guide)](../../../producer/pack-a-bundle/) -- task-oriented walkthrough.
 - [Publish to a marketplace](../../../producer/publish-to-a-marketplace/) -- end-to-end marketplace flow.
 - [Lockfile spec](../../lockfile-spec/) -- `pack:` metadata and `bundle_files` schema.

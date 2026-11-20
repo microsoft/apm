@@ -21,7 +21,7 @@ apm runtime COMMAND [ARGS] [OPTIONS]
 
 It does not install APM packages and does not deploy primitives. For that, see [`apm install`](../install/). For the `scripts:` block these runtimes execute, see the [quickstart](../../../quickstart/).
 
-A runtime here is the AI CLI itself (`copilot`, `codex`, `llm`, `gemini`) -- the program that consumes the prompts and skills APM deploys. For the broader concept of harness targets that receive primitives, see [Primitives and targets](../../targets-matrix/).
+A runtime here is the AI CLI itself (`copilot`, `codex`, `llm`, `gemini`) -- the program that consumes the prompts and skills APM deploys. For the broader concept of harness targets that receive primitives, see [Primitives and targets](../../../concepts/primitives-and-targets/).
 
 Workflow runtime adapters enforce wall-clock deadlines while output streams:
 600 seconds for Copilot and 300 seconds for Codex. On expiry, APM terminates
@@ -128,4 +128,4 @@ apm runtime remove gemini -y
 - [`apm install`](../install/) -- install APM packages and deploy primitives to harness targets.
 - [`apm run`](../run/) -- execute a script from `apm.yml` using the active runtime.
 - [Quickstart](../../../quickstart/) -- end-to-end first run including `apm runtime setup`.
-- [Primitives and targets](../../targets-matrix/) -- how harnesses consume the primitives APM deploys.
+- [Primitives and targets](../../../concepts/primitives-and-targets/) -- how harnesses consume the primitives APM deploys.

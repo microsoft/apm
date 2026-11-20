@@ -80,7 +80,7 @@ package resources there. Keep the directory available for as long as those
 consumers need it.
 :::
 
-For [CI workflows](../../consumer/run-in-ci/), check out the committed manifest
+For [CI workflows](../../integrations/ci-cd/), check out the committed manifest
 and lockfile, then run `apm install --frozen` to restore the locked dependency
 graph. Discard a disposable workspace only after all dependent operations,
 native agent sessions, and other consumers have finished.
@@ -427,7 +427,7 @@ or Git semver evidence select `"2"`; otherwise the writer uses `"1"`.
 Removing the `replace` block and running a normal install restores that ordinary
 selection. Keeping `replace: []` retains the candidate opt-in and version `"3"`.
 
-For the registry workflow this enables, see the [Registries guide](../registries/).
+For the registry workflow this enables, see the [Registries guide](../../guides/registries/).
 
 ## Pack section
 

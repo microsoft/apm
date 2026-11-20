@@ -226,7 +226,7 @@ Discovery is non-recursive; arbitrary directories are not packages.
 follow the selected targets and existing executable approval rules. Claude
 and Codex use their native configuration files; Copilot uses `.github/hooks/`.
 Installation does not execute the hooks. See
-[hook authoring](../../producer/write-primitives/#hooks-and-commands)
+[hook authoring](../../producer/author-primitives/hooks-and-commands/)
 for command paths, resource selection, and target restrictions.
 
 `apm install` restores the locked revision; `apm update` refreshes it.
@@ -294,7 +294,7 @@ remove the key to restore discovery.
 
 **Marketplace version checks:** a local Plugin collection may omit `apm.yml`.
 For `apm pack --check-versions`, APM uses `plugin.json`'s `version` only when
-`apm.yml` is absent. See [Versioning strategies](../../producer/release-a-version/)
+`apm.yml` is absent. See [Versioning strategies](../../producer/versioning-strategies/)
 for manifest precedence, failure behavior, and a plugin-only example.
 
 Declared component paths are requirements, not hints. If an `agents`,
@@ -329,7 +329,7 @@ live directory marketplace. APM does not require or inspect a Copilot binary
 during install. Stable Copilot CLI 1.0.81 or newer is the supported runtime for
 loading the generated projection.
 Copilot loads the unit from APM's bytes -- it never copies it. See
-[Install Agent Plugins for Copilot](../../consumer/install-plugins/).
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 :::caution[Runtime compatibility and other targets]
 Any target set that excludes Copilot refuses this native install rather than
@@ -353,7 +353,7 @@ See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
 
 ## See also
 
-- [Your First Package](../../producer/create-a-package/) -- hands-on
+- [Your First Package](../../getting-started/first-package/) -- hands-on
   walkthrough for scaffolding and publishing.
 - [`apm install`](../cli/install/) and [`apm pack`](../cli/pack/) -- install,
   package, and validation options.

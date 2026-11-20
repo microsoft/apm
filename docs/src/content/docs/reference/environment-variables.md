@@ -11,7 +11,7 @@ For CLI flags that pair with these variables, see the [reference index](./). For
 
 ## Authentication
 
-PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../../getting-started/authentication/) for the resolution chain and [Security model](../../enterprise/security/) for token scoping.
+PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../../consumer/authentication/) for the resolution chain and [Security model](../../enterprise/security/) for token scoping.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|

@@ -216,5 +216,5 @@ to stderr pointing at the replacement command (`apm plugin init` or
 - [`apm install`](../install/) -- next step: install dependencies and
   deploy to targets.
 - [Quickstart](../../../quickstart/) -- guided first project.
-- [Concepts: package anatomy](../../../producer/create-a-package/) --
+- [Concepts: package anatomy](../../../concepts/package-anatomy/) --
   what goes in `apm.yml`.
