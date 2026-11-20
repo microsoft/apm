@@ -114,7 +114,9 @@ def test_session_parses_each_file_content_at_most_once_over_full_matrix() -> Non
     runs += [(case, None) for case in _REPLAYED_CASES]
     with linter_session() as session:
         for case, overrides in runs:
-            run_selected_rules(ROOT, (case.rule_id,), source_overrides=overrides)
+            report = run_selected_rules(ROOT, (case.rule_id,), source_overrides=overrides)
+            if overrides is not None:
+                assert report.exit_code != 0, f"{case.guard_id}: cached run missed its mutation"
             reparsed = sorted(key[0] for key, count in session.fact_builds.items() if count > 1)
             assert not reparsed, f"{case.guard_id}: session re-parsed {reparsed[:10]}"
 
