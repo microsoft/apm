@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` accepts unchanged skills after a branch or worktree switch, keeps skill files it does not rewrite, and names the recovery when it refuses. (#4258)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)

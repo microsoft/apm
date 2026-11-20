@@ -667,3 +667,44 @@ def test_synced_removal_retires_receipts_in_the_evidence_scope(
 
     assert result.deleted == [rel]
     assert retired == [user_scope]
+
+
+@pytest.mark.parametrize("stale", ["member", "directory"])
+def test_member_this_install_kept_is_retained_despite_evidence(
+    project_root, diagnostics, stale: str
+) -> None:
+    """#4230: a declared member the integrator left unwritten is never cleaned as stale."""
+    from apm_cli.integration.cleanup import DeploymentEvidence
+
+    member = ".agents/skills/x/references/a.md"
+    target = _make_managed_file(project_root, member, "reference a\n")
+    _make_managed_file(project_root, ".agents/skills/x/SKILL.md", "x\n")
+    receipts = {target.resolve().as_posix(): compute_file_hash(target)}
+    paths = [member] if stale == "member" else [".agents/skills/x/", member]
+
+    def evidence(kept: tuple[str, ...]) -> DeploymentEvidence:
+        return DeploymentEvidence(
+            deploy_root=project_root, receipts=receipts, render=None, kept=kept
+        )
+
+    result = remove_stale_deployed_files(
+        paths,
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence((member,)),
+    )
+    assert result.deleted == []
+    assert sorted(result.retained) == sorted(paths)
+    assert target.read_text(encoding="utf-8") == "reference a\n"
+
+    control = remove_stale_deployed_files(
+        [member],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence(()),
+    )
+    assert control.deleted == [member]

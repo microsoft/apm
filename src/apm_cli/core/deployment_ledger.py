@@ -107,6 +107,7 @@ class DeploymentMaterializationSession:
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
         self._written: dict[str, str] = {}
+        self._kept: set[str] = set()
         self._dirty = False
         self._claims: dict[str, list[DeploymentRecord]] = {}
         if lockfile is not None:
@@ -295,12 +296,31 @@ class DeploymentMaterializationSession:
             if (content_hash := self._records[key].content_hash) is not None
         }
 
-    def has_receipt(self, path: Path) -> bool:
-        """Return whether any receipt, trusted or not, exists for this physical path."""
-        return path.resolve().as_posix() in self._physical_keys
+    def receipt_held(self, path: Path) -> bool:
+        """Return whether *path* still holds the bytes this installation receipted there."""
+        record = self._records.get(self._physical_keys.get(path.resolve().as_posix(), ""))
+        return record is not None and self._holds(path, record)
+
+    def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
+        """Record a declared member this run deliberately left on disk unwritten."""
+        from apm_cli.install.deployed_paths import deployed_path_entry
+
+        self._kept.add(deployed_path_entry(path, self.root, targets))
+
+    def kept_values(self) -> frozenset[str]:
+        """Return lock values of declared members this run kept; cleanup retains them."""
+        return frozenset(self._kept)
 
     def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
-        """Return a prior rendered hash only for a currently authorized physical member."""
+        """Return a prior rendered hash only for a currently authorized physical member.
+
+        A receipt is trusted only when it is bound to the current lock claim
+        (same owner and claim signature) and either the file still holds the
+        receipted bytes or the lock records the receipted hash for the path.
+        A receipt written under another checkout's lock therefore never
+        vouches for, or refuses, different bytes now on disk. The lock can
+        only withdraw trust here; it never grants it.
+        """
         return self._trusted_hash(path, targets, self._locator)
 
     def overwrite_authorized(
@@ -356,7 +376,20 @@ class DeploymentMaterializationSession:
             or self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]
         ):
             return None
+        claimed = {claim.content_hash for claim in self._claims[value]} - {None}
+        if record.content_hash not in claimed and not self._holds(path, record):
+            return None
         return record.content_hash
+
+    @staticmethod
+    def _holds(path: Path, record: DeploymentRecord) -> bool:
+        """Return whether *path* still holds exactly the receipted bytes."""
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            return path.is_file() and compute_file_hash(path) == record.content_hash
+        except OSError:
+            return False
 
     def _claim_signature(self, value: str) -> str:
         """Bind to canonical ownership metadata, independently of the actual adapter writer."""

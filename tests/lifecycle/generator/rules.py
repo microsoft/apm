@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 663, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 696, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "

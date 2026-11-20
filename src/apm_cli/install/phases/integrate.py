@@ -645,6 +645,14 @@ def _keep_prior_entries(ctx: InstallContext, kept: list[tuple[str, Path]]) -> No
         ctx.kept_overwrites.append((owner, entry))
 
 
+def _kept_skill_values(ctx: InstallContext) -> frozenset[str]:
+    """Return declared skill members this batch left on disk; cleanup retains them."""
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+
+    skill = (getattr(ctx, "integrators", None) or {}).get("skill")
+    return skill.kept_values() if isinstance(skill, SkillIntegrator) else frozenset()
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the sequential integration phase.
 
@@ -876,6 +884,7 @@ def run(ctx: InstallContext) -> None:
     ctx.total_commands_integrated = total_commands_integrated
     ctx.total_hooks_integrated = total_hooks_integrated
     ctx.total_links_resolved = total_links_resolved
+    ctx.kept_deployed_values = _kept_skill_values(ctx)
 
     # ------------------------------------------------------------------
     # Amendment 7: cowork 50-skill / 1 MB cap check (warn-only).

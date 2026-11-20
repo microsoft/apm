@@ -80,9 +80,17 @@ class DeploymentEvidence:
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
+        kept: Iterable[str] = (),
     ) -> None:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
+        self._kept = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
+        # Every ancestor directory of a kept member, so each lookup stays O(1).
+        self._kept_parents = frozenset(
+            "/".join(parts[:index])
+            for parts in (value.split("/") for value in self._kept)
+            for index in range(1, len(parts))
+        )
         self._receipts = dict(receipts)
         self._render = render
         self._owners = dict(owners or {})
@@ -103,12 +111,14 @@ class DeploymentEvidence:
         lockfile: LockFile | None,
         lockfile_root: Path,
         diagnostics,
+        kept: Iterable[str] = (),
     ) -> DeploymentEvidence:
         """Load this installation's receipts and bind a lazy render of *lockfile*.
 
         *lockfile* must be the lock before this transition (the versions whose
         files may be deleted); *lockfile_root* is the directory holding it.
-        Invalid receipt state authorizes nothing and is reported.
+        Invalid receipt state authorizes nothing and is reported. *kept* names
+        the members this install declared but left on disk; they are retained.
         """
         from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
         from apm_cli.core.scope import InstallScope
@@ -121,7 +131,11 @@ class DeploymentEvidence:
             receipts = {}
         if lockfile is None or not lockfile.dependencies:
             return cls(
-                deploy_root=deploy_root, receipts=receipts, render=None, user_scope=user_scope
+                deploy_root=deploy_root,
+                receipts=receipts,
+                render=None,
+                user_scope=user_scope,
+                kept=kept,
             )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
         locked = copy.deepcopy(lockfile)
@@ -139,6 +153,7 @@ class DeploymentEvidence:
             render=render,
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
+            kept=kept,
         )
 
     def add_rendered(self, rendered: Mapping[Path, str]) -> None:
@@ -160,6 +175,11 @@ class DeploymentEvidence:
             if rendered is not None and compute_file_hash(physical) == rendered:
                 return True
         return False
+
+    def kept(self, value: str) -> bool:
+        """Return whether this install kept *value*, or a member under that directory."""
+        value = value.replace("\\", "/").rstrip("/")
+        return value in self._kept or value in self._kept_parents
 
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.
@@ -374,6 +394,10 @@ class CleanupResult:
     """Paths that raised during ``unlink``/``rmtree`` and should be
     retained in ``deployed_files`` for retry on the next install."""
 
+    kept: list[str] = field(default_factory=list)
+    """Paths this install still declares but left on disk unwritten (a refused
+    or skipped member); never stale, so their lockfile entries carry forward."""
+
     skipped_user_edit: list[str] = field(default_factory=list)
     """Paths skipped because the on-disk content no longer matches the
     hash APM recorded at deploy time -- treated as user-edited."""
@@ -411,6 +435,7 @@ class CleanupResult:
         return list(
             dict.fromkeys(
                 [
+                    *self.kept,
                     *self.failed,
                     *self.skipped_user_edit,
                     *self.skipped_unmanaged,
@@ -705,6 +730,10 @@ def remove_stale_deployed_files(
     _cowork_resolve_errors: int = 0
 
     for stale_path in _stale_list:
+        # A member this install declares but did not rewrite is not stale.
+        if evidence.kept(stale_path):
+            result.kept.append(stale_path)
+            continue
         # -- Cowork:// paths ---------------------------------------
         # Handled BEFORE validate_deploy_path because that method
         # hard-rejects cowork:// when the OneDrive root is unavailable

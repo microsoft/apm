@@ -439,8 +439,21 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
-    def _skill_member_skipped(self, _path: Path) -> None:
+    def install_user_scope(self) -> bool:
+        """Return whether the active materialization session deploys at user scope."""
+        scope = getattr(self._materialization_session, "scope", None)
+        return getattr(scope, "value", None) == "user"
+
+    def kept_values(self) -> frozenset[str]:
+        """Return lock values of declared skill members this batch left unwritten."""
+        session = self._materialization_session
+        return session.kept_values() if session is not None else frozenset()
+
+    def _skill_member_skipped(self, path: Path) -> None:
         self._skill_can_complete = False
+        # A declared member left on disk is kept, never cleaned as stale.
+        if self._materialization_session is not None and self._skill_targets:
+            self._materialization_session.keep(path, self._skill_targets)
 
     def _skill_materialization_complete(self, project_root: Path) -> bool:
         """Require positive discovery and every admitted source at every physical target."""
@@ -524,7 +537,7 @@ class SkillIntegrator(BaseIntegrator):
             is_managed=managed,
             recorded_hashes=hashes,
             baseline_hash=(
-                (lambda path: session.baseline(path, targets) or adopted.get(path))
+                (lambda path: adopted.get(path) or session.baseline(path, targets))
                 if session is not None
                 else None
             ),
