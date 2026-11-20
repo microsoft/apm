@@ -198,7 +198,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
-    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    @patch("shutil.which", return_value=None)
     def test_user_scope_skips_workspace_only_runtimes(
         self, mock_which, mock_vscode, mock_install_rt, mock_ops_cls
     ):
@@ -241,7 +241,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=True)
-    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/copilot")
+    @patch("shutil.which", return_value="/usr/bin/copilot")
     def test_project_scope_includes_all_runtimes(
         self, mock_which, mock_vscode, mock_install_rt, mock_ops_cls
     ):

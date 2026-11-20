@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce bounded no-growth ceilings for two assertion-quality forms."""
+"""Enforce bounded no-growth ceilings for assertion-quality forms."""
 
 from __future__ import annotations
 
@@ -19,11 +19,87 @@ from test_file_inventory import tracked_python_paths
 
 RULE_AQ001 = "AQ001_constant_assertion"
 RULE_AQ002 = "AQ002_broad_pytest_raises"
-RULES = (RULE_AQ001, RULE_AQ002)
+RULE_AQ005 = "AQ005_global_patch_through_namespace"
+RULES = (RULE_AQ001, RULE_AQ002, RULE_AQ005)
+_STDLIB_MODULES = frozenset(sys.stdlib_module_names)
+_DIAGNOSTICS = {
+    RULE_AQ001: (
+        "constant assertion does not test behavior",
+        "replace it with an assertion over observed output or state",
+    ),
+    RULE_AQ002: (
+        "pytest.raises catches Exception or BaseException",
+        "assert the narrow exception type raised by this scenario",
+    ),
+    RULE_AQ005: (
+        "patch target reaches a process-global stdlib attribute through another "
+        "module's namespace, so the mock also sees every other thread",
+        "patch an owner seam, or the stdlib target itself (e.g. 'time.sleep') when "
+        "global scope is intended and no threads are involved",
+    ),
+}
+
+
+def _is_patch(node: ast.expr) -> bool:
+    return (isinstance(node, ast.Name) and node.id == "patch") or (
+        isinstance(node, ast.Attribute) and node.attr == "patch"
+    )
+
+
+def _patch_target(node: ast.Call) -> str | None:
+    """The dotted target of patch()/patch.dict()/patch.multiple()/monkeypatch.setattr()."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        name, owner = func.id, None
+    elif isinstance(func, ast.Attribute):
+        name, owner = func.attr, func.value
+    else:
+        return None
+    patches = (
+        name == "patch" and (owner is None or isinstance(owner, (ast.Name, ast.Attribute)))
+    ) or (name in {"dict", "multiple"} and owner is not None and _is_patch(owner))
+    sets = name == "setattr" and isinstance(owner, ast.Name) and owner.id == "monkeypatch"
+    if not (patches or sets):
+        return None
+    target = node.args[0] if node.args else None
+    if target is None:
+        target = next(
+            (keyword.value for keyword in node.keywords if keyword.arg in {"target", "in_dict"}),
+            None,
+        )
+    if isinstance(target, ast.Constant) and isinstance(target.value, str):
+        return target.value
+    return None
+
+
+def _project_module(root: Path, dotted: str) -> bool:
+    relative = Path(*dotted.split("."))
+    return any(
+        (base / relative).with_suffix(".py").is_file()
+        or (base / relative / "__init__.py").is_file()
+        for base in (root / "src", root)
+    )
+
+
+def global_patch_through_namespace(root: Path, target: str) -> bool:
+    """True for '<project module>.<stdlib module>.<attr>' (e.g. 'pkg.mod.time.sleep').
+
+    Such a target patches the process-global stdlib attribute, not the
+    project module's, so the mock records calls from every thread.
+    """
+    parts = target.split(".")
+    for index in range(1, len(parts) - 1):
+        if (
+            parts[index] in _STDLIB_MODULES
+            and _project_module(root, ".".join(parts[:index]))
+            and not _project_module(root, ".".join(parts[: index + 1]))
+        ):
+            return True
+    return False
 
 
 def scan(root: Path) -> dict[str, dict[str, list[int]]]:
-    """Locate only AQ001 constant assertions and AQ002 broad pytest.raises."""
+    """Locate AQ001 constant assertions, AQ002 broad pytest.raises and AQ005 patches."""
     observed: dict[str, defaultdict[str, list[int]]] = {rule: defaultdict(list) for rule in RULES}
     for path in tracked_python_paths(
         root,
@@ -49,6 +125,10 @@ def scan(root: Path) -> dict[str, dict[str, list[int]]]:
                 and node.args[0].id in {"Exception", "BaseException"}
             ):
                 observed[RULE_AQ002][relative].append(node.lineno)
+            if isinstance(node, ast.Call):
+                target = _patch_target(node)
+                if target is not None and global_patch_through_namespace(root, target):
+                    observed[RULE_AQ005][relative].append(node.lineno)
     return {
         rule: {path: sorted(lines) for path, lines in sorted(observed[rule].items())}
         for rule in RULES
@@ -69,12 +149,7 @@ def compare(
             current = len(lines)
             ceiling = allowed[rule].get(path, 0)
             if current > ceiling:
-                if rule == RULE_AQ001:
-                    problem = "constant assertion does not test behavior"
-                    remedy = "replace it with an assertion over observed output or state"
-                else:
-                    problem = "pytest.raises catches Exception or BaseException"
-                    remedy = "assert the narrow exception type raised by this scenario"
+                problem, remedy = _DIAGNOSTICS[rule]
                 locations = ", ".join(f"{path}:{line}" for line in lines)
                 growth.append(
                     f"{locations}: {rule}: {problem} "
@@ -88,7 +163,7 @@ def compare(
 def main(argv: list[str] | None = None) -> int:
     """Check the baseline, or tighten it when only reductions are observed."""
     parser = argparse.ArgumentParser(
-        description="Check AQ001/AQ002 assertion-quality no-growth ceilings."
+        description="Check AQ001/AQ002/AQ005 assertion-quality no-growth ceilings."
     )
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--baseline", type=Path)
@@ -135,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_rules = payload["rules"]
     if not isinstance(raw_rules, dict) or set(raw_rules) != set(RULES):
         print(
-            "[x] invalid assertion-quality baseline: both named rules are required",
+            "[x] invalid assertion-quality baseline: every named rule is required",
             file=sys.stderr,
         )
         return 2
@@ -217,7 +292,11 @@ def main(argv: list[str] | None = None) -> int:
 
     aq001_total = sum(len(lines) for lines in observed[RULE_AQ001].values())
     aq002_total = sum(len(lines) for lines in observed[RULE_AQ002].values())
-    print(f"[+] assertion-quality ratchet clean: AQ001={aq001_total}, AQ002={aq002_total}")
+    aq005_total = sum(len(lines) for lines in observed[RULE_AQ005].values())
+    print(
+        f"[+] assertion-quality ratchet clean: AQ001={aq001_total}, AQ002={aq002_total}, "
+        f"AQ005={aq005_total}"
+    )
     return 0
 
 
