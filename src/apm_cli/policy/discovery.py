@@ -1036,23 +1036,18 @@ def _auto_discover(
                 masked_private_hint = _masked_private_policy_hint(org, candidate_repo)
             continue
 
-        if result.outcome == "cache_miss_fetch_fail" and not (is_ado or is_gitlab_hostname(host)):
-            from apm_cli.policy._cached_candidates import cached_later_candidate
+        if not (is_ado or is_gitlab_hostname(host)):
+            from apm_cli.policy import _cached_candidates as resolved
 
-            # Offline, an earlier candidate that was absent when the policy was
-            # cached cannot hide the last-known policy (#4456).
-            later = [f"{org}/{repo}" for repo in candidates[index + 1 :]]
-            if host and host != "github.com":
-                later = [f"{host}/{ref}" for ref in later]
-            fallback = cached_later_candidate(
-                result,
-                later,
-                project_root,
-                expected_hash=expected_hash,
-                skip=no_cache or cache_only,
-            )
-            if fallback is not None:
+            # A recorded resolution lets an unreachable candidate that was absent
+            # when the policy was cached fall through to that policy (#4456).
+            refs = resolved.candidate_refs(org, host, candidates)
+            may_use_cache = not (no_cache or cache_only)
+            if may_use_cache and (
+                fallback := resolved.after_failure(result, refs, index, project_root, expected_hash)
+            ):
                 return fallback
+            resolved.record(result, refs, index, project_root)
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
         if result.outcome == "cache_miss_fetch_fail" and _rejected_pinned_cache(
