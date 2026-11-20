@@ -69,9 +69,10 @@ def check_executable_approval(
         )
 
     approved = package_type_approvals(allow_executables, candidate_keys)
-    # Pinned hook items admit per file at the source plan (hook_file_admission).
+    # Pinned hook items admit per file at the source plan (hook_file_admission);
+    # a package none of whose hook files matches its pin deploys no hooks.
     approved[EXEC_TYPE_HOOKS] = approved[EXEC_TYPE_HOOKS] or hooks_package_admissible(
-        allow_executables, tuple(candidate_keys)
+        allow_executables, tuple(candidate_keys), package_info
     )
     hooks_ok = approved[EXEC_TYPE_HOOKS]
     bin_ok = approved[EXEC_TYPE_BIN]
@@ -163,7 +164,7 @@ def _native_approval(
         closed_exec_map,
         scan_package_executables,
     )
-    from apm_cli.security.trust import REASON_DENIED, admit_native_plugin
+    from apm_cli.security.trust import REASON_DENIED, admit_native_plugin, native_declaration
 
     install = Path(package_info.install_path)
     verdict = admit_native_plugin(
@@ -171,14 +172,18 @@ def _native_approval(
         candidate_keys,
         install,
         transitive=_is_transitive(package_info, ctx),
-        extra_types=native_declared_types(package_info),
         one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),
     )
     if ctx is not None:
         if not verdict.allowed:
             ctx.blocked_executables.append(
                 replace(
-                    scan_package_executables(install, package_name, "", approval_identity=pkg_key),
+                    native_declaration(
+                        scan_package_executables(
+                            install, package_name, "", approval_identity=pkg_key
+                        ),
+                        install,
+                    ),
                     install_path=str(install),
                 )
             )
@@ -202,20 +207,6 @@ def _is_transitive(package_info: Any, ctx: InstallContext | None) -> bool:
         return False
     depth = getattr(tree.get_node(dep_ref.get_unique_key()), "depth", 1)
     return isinstance(depth, int) and depth > 1
-
-
-def native_declared_types(package_info: Any) -> tuple[str, ...]:
-    """Exec types a native plugin's IR or manifest declares beyond its files."""
-    from apm_cli.install.native_plugin_admission import agent_plugin_exec_types
-    from apm_cli.security.executables import EXEC_TYPE_HOOKS, EXEC_TYPE_MCP
-
-    types = list(agent_plugin_exec_types(package_info))
-    manifest = getattr(getattr(package_info, "package", None), "codex_plugin", None)
-    if getattr(manifest, "has_mcp", False):
-        types.append(EXEC_TYPE_MCP)
-    if getattr(manifest, "has_hooks", False):
-        types.append(EXEC_TYPE_HOOKS)
-    return tuple(dict.fromkeys(types))
 
 
 def native_install(package_info: Any) -> bool:
@@ -292,7 +283,6 @@ def native_plugin_verdict(
         keys,
         Path(package_info.install_path),
         transitive=_is_transitive(package_info, ctx),
-        extra_types=native_declared_types(package_info),
         one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),
     )
 
@@ -348,7 +338,7 @@ def current_exec_decision(
     install = Path(package_info.install_path)
     native = native_install(package_info)
     if native:
-        exec_types = native_plugin_exec_types(install, native_declared_types(package_info))
+        exec_types = native_plugin_exec_types(install)
     else:
         exec_types = scan_package_executables(
             install, package_name, "", approval_identity=pkg_key
@@ -709,3 +699,53 @@ class ReplayExecAllowMap:
                 return authorized_exec_map(AUTHORIZED_REPLAY)
         self._resolve()
         return self._map
+
+
+def locked_hook_pin_mismatches(
+    lockfile: Any, modules_dir: Path, trust_ctx: Any
+) -> builtins.list[Any]:
+    """Locked hook files whose pinned approval no longer admits them (#4188).
+
+    ``apm install --frozen`` and ``apm audit --ci`` both route here, and each
+    lock row is judged by the trust owner
+    (:func:`~apm_cli.security.trust.recorded_hook_pin_mismatches`), so the two
+    commands reach one verdict. *trust_ctx* may be a provider, called once and
+    only when a locked package deploys hook files. A package not materialized
+    under *modules_dir* is left to the checks that report it.
+    """
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import TRUST_ABSENT, _strip_version
+    from apm_cli.security.trust import recorded_hook_pin_mismatches
+
+    if trust_ctx is None or lockfile is None:
+        return []
+    resolved: builtins.list[Any] = []
+
+    def _ctx() -> Any:
+        if not resolved:
+            resolved.append(trust_ctx() if callable(trust_ctx) else trust_ctx)
+        return resolved[0]
+
+    found: builtins.list[Any] = []
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.exec_status == TRUST_ABSENT:
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        try:
+            package_info = _build_package_info(dep, install_path)
+        except (OSError, ValueError):
+            continue
+        pkg_key = resolve_package_key(package_info, dep.get_unique_key())
+        found.extend(
+            recorded_hook_pin_mismatches(
+                _ctx,
+                tuple(_candidate_keys(pkg_key)),
+                install_path,
+                package=_strip_version(pkg_key),
+                recorded_status=dep.exec_status,
+                recorded_allowed=tuple(dep.exec_allowed_types or ()),
+            )
+        )
+    return found

@@ -39,7 +39,9 @@ Print the value of `KEY`. With no argument, prints the user config summary: effe
 
 ### `apm config list`
 
-Alias for `apm config get` with no argument; produces the same user config summary.
+Alias for `apm config get` with no argument; produces the same user config summary. With the `registries` flag enabled, the summary also lists each configured `registry.<name>` entry.
+
+Credential values are never printed. A stored token shows as `******** (set)` (or `Not set`), URLs are shown without embedded `user:password@` credentials and with query values masked, and values of credential flags such as `--api-key` show as `[REDACTED]`. There is no flag to reveal a stored token; read `$APM_HOME/config.json` directly if you need it.
 
 :::note
 Familiar with `npm config list` or `git config --list`? `apm config list` is the equivalent.
@@ -243,6 +245,7 @@ apm config set registry.corp-main.url https://artifactory.corp.example.com/artif
 apm config set registry.corp-main.token eyJ...
 apm config set registry.corp-main.default true
 apm config get registry.corp-main.url
+apm config get registry.corp-main.token    # registry.corp-main.token: ******** (set)
 apm config get registry.corp-main.default
 apm config unset registry.corp-main.token
 ```

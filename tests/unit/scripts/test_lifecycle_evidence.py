@@ -90,7 +90,7 @@ def _sample() -> tuple[dict[str, Any], dict[str, Any]]:
 def test_immutable_witnesses_and_current_inventory() -> None:
     """Pin obligations independently of both implementation constants and ledger rows."""
     required = "tests/integration/test_required_lifecycle_state_machine.py::"
-    generated = "tests/integration/test_generated_lifecycle_state_machine.py::"
+    generated = "tests/lifecycle/machines/test_m_spine.py::"
     expected = {
         required + "test_required_global_audit_rule_matrix_for_external_roots[False]",
         required + "test_required_global_audit_rule_matrix_for_external_roots[True]",
@@ -1270,6 +1270,14 @@ def _cli(args: tuple[str, ...], stdout: str = "", stderr: str = "", code: int = 
         (("install",), "[!] Skipped x\n[+] b\n[!] Skipped x\n", "", 0, "I9: stdout repeats a"),
         (("install",), "[+] p\n  |-- 1 skill\n  [i] n\n  |-- 1 skill\n", "", 0, "I9: stdout"),
         (("install",), "[i] t\n  [+] p\n  [+] q\n  [+] p\n", "", 0, "I9: stdout repeats a"),
+        (
+            ("install",),
+            "[!] Policy: org:a/b (cached, fetched 3s ago)\n[+] p\n"
+            "[!] Policy: org:a/b (cached, fetched 4s ago)\n",
+            "",
+            0,
+            "I9: stdout repeats a diagnostic: '[!] Policy: org:a/b (cached, fetched <AGE> ago)'",
+        ),
         (
             ("install",),
             "[!] Policy off. This\ndoes not\n[i] x\n[!] Policy off. This\ndoes not\n",

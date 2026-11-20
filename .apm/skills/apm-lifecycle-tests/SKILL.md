@@ -113,7 +113,7 @@ unexplained, not automatically deletable.
 | Situation | Today (no `tests/lifecycle/`) | Target family |
 |---|---|---|
 | one cell, fixed steps | `ApmLifecycleRunner` test or parametrize case in the matching `tests/integration/*lifecycle*.py` | replay row in `tests/lifecycle/replay/rows/*.yaml` |
-| transition that must hold from many states | case in `test_required_lifecycle_state_machine.py` or rule in `test_generated_lifecycle_state_machine.py` | state-machine rule, where the family provides machines (verify with `ls`) |
+| transition that must hold from many states | case in `test_required_lifecycle_state_machine.py` or rule in `tests/lifecycle/machines/test_m_spine.py` | state-machine rule, where the family provides machines (verify with `ls`) |
 | history, ownership of unmanaged assets, platform, failure phase, cache, graph or version, concurrency | scenario on a `_*_kit.py` world | planned scenario suite; today's harness until present |
 | trust, policy outcomes, integrity, egress, origin, credentials | table-driven E2E with egress log or snapshot-absence oracle | planned security table; today's harness until present |
 | docs golden path or user-visible transcript | real-CLI journey with every printed hint executed | planned journey step + golden; today's harness until present |
@@ -147,8 +147,8 @@ Start from `assets/templates.md`. Mandatory properties:
   when `--no-policy` is the behavior under test.
 - Apply I1-I9 after every mutating step. Read `references/oracles.md`
   when writing the assertions.
-- Module-level `pytestmark` with one behavioral marker (`e2e`) plus
-  scheduling and prerequisite markers.
+- Module markers: follow "Test module markers (tm006)" in
+  `.apm/instructions/tests.instructions.md`.
 
 ### Step 5 -- run red
 

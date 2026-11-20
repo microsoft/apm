@@ -323,6 +323,7 @@ class LifecycleEvidencePlugin:
 # ---------------------------------------------------------------------------
 
 _TRACEBACK = "Traceback (most recent call last)"
+_POLICY_CACHE_AGE = re.compile(r"fetched \d+[smhd] ago")
 _STATUS_PREFIXES = ("[+]", "[!]", "[x]", "[i]", "[*]", "[>]")
 _TREE_PREFIXES = ("|--", "+--", "`--", "\\--")
 # The narrowest console width Rich wraps at when stdout is not a terminal.
@@ -382,6 +383,11 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
     return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
 
 
+_FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runtimes?)|Skipped targets without MCP support)"
+_POLICY_PHASE_BANNER = (
+    r"Policy enforcement disabled by --no-policy|Org policy at \S+ is present but empty"
+)
+
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
@@ -394,12 +400,13 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A\Z",
     ),
     KnownOutputCell(
-        "install-no-policy-warning-per-phase",
+        "install-policy-banner-per-phase",
         "I9",
         "#4241",
-        _runs("install", "--no-policy"),
-        r"Policy enforcement disabled by --no-policy",
-        output=r"^  \[\+\] .*^\+- MCP Servers",
+        _runs("install"),
+        _POLICY_PHASE_BANNER,
+        # The APM and MCP phases each print the policy banner (--no-policy or an empty org policy).
+        output=rf"^\[!\] (?:{_POLICY_PHASE_BANNER}).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
         "install-org-policy-banner-per-phase",
@@ -429,18 +436,19 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "approve-org-policy-warning-twice",
         "I9",
         "#4178",
-        # 'apm approve <package>' prints it twice; '--recommended' prints it once.
-        lambda args, _scenario: _command_name(args) == "approve" and "--recommended" not in args,
+        _runs("approve"),
         r"\[!\] (Org policy not applied|Using stale cached org policy)",
-        output=r"^\[!\] (Org policy not applied|Using stale cached org policy)",
+        # Only runs that print the same warning line twice (a single warning is correct).
+        output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
     ),
     KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
         "#4196",
         _runs("install", "--frozen"),
-        r"\[i\] Targeting (declared targets?|specific runtimes?)",
-        output=r"^\+- MCP Servers",
+        _FROZEN_MCP_TARGETING,
+        # Auto-detected targets print no targeting line, so there is nothing to repeat.
+        output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
     ),
     KnownOutputCell(
         "uninstall-unattributed-survivor-lines",
@@ -518,12 +526,101 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^((?:E2E test mode|CI environment) detected)\n\1$",
     ),
     KnownOutputCell(
+        "install-missing-required-package-warning-twice",
+        "I9",
+        "#4307",
+        _runs("install"),
+        r"required by org policy but not declared",
+        # The warning block lists one missing required package back to back.
+        output=r"^(    \+- \[[^\]\n]+\] required by org policy but not declared)\n\1$",
+    ),
+    KnownOutputCell(
+        "self-update-installer-color-codes",
+        "I6",
+        "#4308",
+        _runs("self-update"),
+        r"stdout has characters outside printable ASCII \['0x1b'\]",
+        # self-update passes the installer's output through; install.sh always colors it.
+        output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
+    ),
+    KnownOutputCell(
+        "install-echoes-non-ascii-path",
+        "I6",
+        "#4330",
+        _runs("install"),
+        r"stdout has characters outside printable ASCII",
+        output=r"[^\x00-\x7f]",
+    ),
+    KnownOutputCell(
+        "uninstall-duplicate-declaration-lines",
+        "I9",
+        "#4331",
+        _runs("uninstall"),
+        r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
+        output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "install-adapter-unreadable-config-warning-twice",
+        "I9",
+        "#4332",
+        _runs("install"),
+        r"stderr repeats a line: 'WARNING apm_cli\.adapters\.client\.\w+ Could not read",
+        output=r"as a JSON object -- skipping config write",
+    ),
+    KnownOutputCell(
+        "update-deny-all-lifecycle-notice-repeats",
+        "I9",
+        "#4333",
+        _runs("update"),
+        r"Lifecycle scripts suppressed by org policy",
+        output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "install-verbose-diagnostics-repeat",
+        "I9",
+        "#4334",
+        _runs("install", "--verbose"),
+        r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
+        output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "install-hook-summary-line-twice",
+        "I9",
+        "#4336",
+        _runs("install"),
+        r"repeats a line: '\|   \w+: runs ",
+        # Not the per-target shape #4243 owns.
+        output=(
+            r"\A(?!.*(?:^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, "
+            r"\.windsurf/hooks\.json$|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n"
+            r"  \|   Hook file integrated: ))"
+            r".*^\s*(\|   \w+: runs [^\n]*)$.*^\s*\1$"
+        ),
+    ),
+    KnownOutputCell(
+        "install-frozen-parked-mcp-notice-per-phase",
+        "I9",
+        "#4299",
+        _runs("install", "--frozen"),
+        r"Parked MCP server",
+        output=r"^\s*(\[!\] Parked MCP server [^\n]*)$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "pack-plugin-manifest-notes-twice",
+        "I9",
+        "#4291",
+        _runs("pack"),
+        r"repeats a diagnostic: '(\[i\]'|\[!\] Secrets withheld from plugin\.json)",
+        output=r"^\s*(\[i\]|\[!\] Secrets withheld from plugin\.json[^\n]*)\s*$.*^\s*\1\s*$",
+    ),
+    KnownOutputCell(
         "install-frozen-trust-notice-repeats",
         "I9",
         "#4256",
         _runs("install", "--frozen"),
         r"Trusting direct dependency MCP",
-        output=r"^\[i\] Trusting direct dependency MCP",
+        # Only runs that print the same trust notice twice (one notice is correct).
+        output=r"^(\[i\] Trusting direct dependency MCP[^\n]*)$.*^\1$",
     ),
 )
 
@@ -630,7 +727,8 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
     found: list[OutputViolation] = []
     if _TRACEBACK in text:
         found.append(OutputViolation("I9", f"{stream} has a Python traceback"))
-    lines = _logical_lines(text)
+    # A cached-policy age ticks between phases; the same banner must still compare equal.
+    lines = [_POLICY_CACHE_AGE.sub("fetched <AGE> ago", line) for line in _logical_lines(text)]
     # Rules and table borders legitimately repeat; diagnostics carry words.
     consecutive = dict.fromkeys(
         first.strip()

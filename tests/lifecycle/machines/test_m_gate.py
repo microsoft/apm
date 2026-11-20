@@ -30,7 +30,12 @@ from tests.lifecycle.snapshot import restore_tree
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I4", "P-INV-I7"),
+]
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "gate_cell_obligations.json"
 MUTANT_PATH = Path(__file__).parents[2] / "fixtures" / "gate_mutants" / "skip_approval_check.py"
@@ -43,6 +48,11 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("install", "frozen"),
     ("audit_ci", False),
     ("decide", "hook", "approve"),
+    # Refusals witness I7 for approve-deny, uninstall and update (#4133).
+    ("decide_nothing", "approve"),
+    ("decide_nothing", "deny"),
+    ("uninstall", "plugin"),
+    ("update_package", "plugin"),
     ("declare", "hook"),
     ("declare", "lsp"),
     ("declare", "plugin"),
@@ -55,6 +65,10 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("install", "plain"),
     ("install", "frozen"),
     ("audit_ci", True),
+    # Approving the plugin now takes effect (#4042); revoke it so update and
+    # deny still meet the plugin while its approval is pending.
+    ("decide", "plugin", "revoke"),
+    ("install", "plain"),
     ("update",),
     ("uninstall", "lsp"),
     ("declare", "lsp"),
@@ -81,6 +95,8 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("audit_ci", False),
     ("uninstall", "lsp"),
     ("declare", "plugin"),
+    ("uninstall", "plugin"),
+    ("update_package", "plugin"),
     ("prune",),
     ("uninstall", "hook"),
     ("install", "plain"),

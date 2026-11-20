@@ -1,7 +1,9 @@
 """Behavioral receipts for OpenAPM resolution requirements (req-rs-*).
 
-req-rg-001 (registry server immutability) has no receipt here: APM ships
-no registry server, only the consumer side.
+Not testable against this implementation (no receipt here):
+req-rg-001 -- registry server immutability; APM ships no registry server.
+req-pr-004 -- tag/version alignment is a producer rule; APM has no consumer check.
+req-pr-005 -- advisory tag-signing SHOULD; v0.1 consumers verify nothing.
 """
 
 from __future__ import annotations
@@ -24,6 +26,11 @@ from tests.unit.registry.test_resolver_e2e_http import (
     _make_dep,
     _running_server,
 )
+
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("req-rg-001", "req-rs-004", "req-rs-005", "req-rs-006", "req-rs-009"),
+]
 
 # --- req-rs-004: semver range drift is character equality -----------------
 
