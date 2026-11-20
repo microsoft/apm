@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.core.command_logger import CommandLogger
+
 pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
@@ -52,7 +54,7 @@ def _make_result(
 class TestHandleGlobalFlag:
     """Tests for _handle_global_flag()."""
 
-    def test_no_apm_modules_returns_error(self, tmp_path):
+    def test_no_apm_modules_returns_error(self, tmp_path, capsys):
         """apm_modules missing -> returns 1 and prints error."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -60,7 +62,7 @@ class TestHandleGlobalFlag:
         source_root.mkdir()
         # apm_modules does NOT exist
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with patch(
             "apm_cli.core.scope.get_apm_dir",
@@ -69,10 +71,10 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        logger.error.assert_called_once()
-        assert "apm_modules not found" in str(logger.error.call_args).lower()
+        out = " ".join(capsys.readouterr().out.split())
+        assert out.count("[x] User-scope apm_modules not found") == 1
 
-    def test_success_written_status(self, tmp_path):
+    def test_success_written_status(self, tmp_path, capsys):
         """Result with 'written' status -> prints [+] and returns 0."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -83,7 +85,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "written")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -98,10 +100,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        calls_str = str(logger.success.call_args_list)
-        assert "[+]" in calls_str or "claude" in calls_str.lower()
+        out = " ".join(capsys.readouterr().out.split())
+        assert "claude: wrote" in out
+        assert "Compiled 1 user-scope root context file(s)." in out
 
-    def test_success_would_write_status(self, tmp_path):
+    def test_success_would_write_status(self, tmp_path, capsys):
         """Result with 'would-write' status -> prints [*] and returns 0."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -112,7 +115,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "would-write")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -127,10 +130,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=True, logger=logger)
 
         assert rc == 0
-        calls_str = str(logger.info.call_args_list)
-        assert "[*]" in calls_str or "would" in calls_str.lower()
+        out = " ".join(capsys.readouterr().out.split())
+        assert "claude: would write" in out
+        assert "Would compile 1 user-scope root context file(s)." in out
 
-    def test_success_unchanged_status(self, tmp_path):
+    def test_success_unchanged_status(self, tmp_path, capsys):
         """Result with 'unchanged' status -> returns 0 without default detail."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -141,7 +145,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "unchanged")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -156,11 +160,10 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.info.assert_called_once_with(
-            "No user-scope root context files changed.", symbol="info"
-        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert out == "[i] No user-scope root context files changed."
 
-    def test_success_skipped_no_instructions(self, tmp_path):
+    def test_success_skipped_no_instructions(self, tmp_path, capsys):
         """Result with 'skipped-no-instructions' -> returns 0 without default detail."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -171,7 +174,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", None, "skipped-no-instructions")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -186,9 +189,8 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.info.assert_called_once_with(
-            "No user-scope root context files changed.", symbol="info"
-        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert out == "[i] No user-scope root context files changed."
 
     def test_success_skipped_hand_authored(self, tmp_path):
         """Result with 'skipped-hand-authored' -> prints [i] and returns 0."""
@@ -223,7 +225,7 @@ class TestHandleGlobalFlag:
             symbol="info",
         )
 
-    def test_error_status_returns_1(self, tmp_path):
+    def test_error_status_returns_1(self, tmp_path, capsys):
         """Result with 'error:...' status -> prints [x] and returns 1."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -234,7 +236,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "error:disk full")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -249,9 +251,10 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        logger.error.assert_called()
+        out = " ".join(capsys.readouterr().out.split())
+        assert "[x] claude: disk full" in out
 
-    def test_critical_security_result_returns_1(self, tmp_path):
+    def test_critical_security_result_returns_1(self, tmp_path, capsys):
         """Critical security result -> returns 1 even when status is written."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -269,7 +272,7 @@ class TestHandleGlobalFlag:
             )
         ]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         with (
             patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
             patch(
@@ -280,8 +283,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
+        out = " ".join(capsys.readouterr().out.split())
+        assert "claude: wrote" in out
+        assert "Compiled" not in out
 
-    def test_multiple_results_mixed_status(self, tmp_path):
+    def test_multiple_results_mixed_status(self, tmp_path, capsys):
         """Multiple results with different status values."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -295,7 +301,7 @@ class TestHandleGlobalFlag:
             _make_result("vscode", str(tmp_path / ".vscode/AGENTS.md"), "unchanged"),
         ]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -310,9 +316,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.success.assert_called()
+        out = " ".join(capsys.readouterr().out.split())
+        assert "claude: wrote" in out
+        assert "Compiled 1 user-scope root context file(s); 1 unchanged." in out
 
-    def test_no_results_returns_success(self, tmp_path):
+    def test_no_results_returns_success(self, tmp_path, capsys):
         """Empty results list -> returns 0."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -323,7 +331,7 @@ class TestHandleGlobalFlag:
 
         results = []
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -338,7 +346,8 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.info.assert_called_once()
+        out = " ".join(capsys.readouterr().out.split())
+        assert out.count("No user-scope targets produced output") == 1
 
 
 # ---------------------------------------------------------------------------
