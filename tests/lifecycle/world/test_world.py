@@ -8,6 +8,7 @@ expected failures naming their tracking issue.
 
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import statistics
@@ -25,12 +26,17 @@ from tests.lifecycle.world import (
     World,
     apm_home_outside_home,
     clone,
+    login_azure,
     registry,
+    use_ado_pat,
     use_policy,
     use_registry,
 )
 from tests.lifecycle.world.packages import GIT_PUBLISHED, LSP_SERVER, MCP_SERVER, PACKAGE_NAMES
 from tests.lifecycle.world.services import (
+    ADO_BEARER,
+    ADO_HOST,
+    ADO_PAT,
     API_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
@@ -456,6 +462,72 @@ def test_registry_refuses_a_request_without_its_token(lifecycle_world: World) ->
     statuses = {e["status"] for e in world.services.egress_log() if e["host"] == registry.HOST}
     assert statuses == {401}, world.services.egress_log()
     assert not (world.project / ".agents/skills/p-skill").exists()
+
+
+# -- Azure DevOps auth and Items API --------------------------------------------
+
+
+def _ado_statuses(world: World) -> set[int]:
+    return {e["status"] for e in world.services.egress_log() if e["host"] == ADO_HOST}
+
+
+def test_ado_auth_required_refuses_an_anonymous_install(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    world.services.require_ado_auth()
+    result = driver.run(world, ["install", f"{world.services.host_alias('ado')}/p-skill"])
+    assert result.returncode != 0, result.stdout
+    assert 401 in _ado_statuses(world), world.services.egress_log()
+    assert not (world.project / ".agents/skills/p-skill").exists()
+
+
+@pytest.mark.parametrize("credential", ["pat", "az"])
+def test_ado_auth_required_accepts_the_world_credential(
+    lifecycle_world: World, credential: str
+) -> None:
+    world = lifecycle_world
+    world.services.require_ado_auth()
+    if credential == "pat":
+        use_ado_pat(world)
+    else:
+        login_azure(world)
+    _ok(world, ["install", f"{world.services.host_alias('ado')}/p-skill"])
+    _assert_surfaces(world, "p-skill", "project")
+    assert _hosts(world) == {ADO_HOST}, world.services.egress_log()
+    presented = world.services.proxy.hosts_receiving
+    if credential == "pat":
+        assert presented(base64.b64encode(f":{ADO_PAT}".encode()).decode()) | presented(
+            base64.b64encode(f"x:{ADO_PAT}".encode()).decode()
+        ) == {ADO_HOST}
+    else:
+        assert presented(ADO_BEARER) == {ADO_HOST}
+        calls = (Path(world.env["AZURE_CONFIG_DIR"]) / AZ_CALL_LOG).read_text("utf-8")
+        assert '"get-access-token"' in calls
+
+
+def test_ado_auth_mode_is_reset_for_the_next_world(
+    lifecycle_template: World, tmp_path: Path
+) -> None:
+    lifecycle_template.services.require_ado_auth()
+    world = clone(lifecycle_template, tmp_path / "next")
+    world.services.reset()
+    assert world.services.ado_auth_required is False
+
+
+def test_ado_policy_is_read_through_the_items_api(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    world.services.require_ado_auth()
+    use_ado_pat(world)
+    use_policy(world, "deny-pkg", host="ado")
+    result = driver.run(world, ["install", world.packages["p-exec"].spec])
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert "denied by pattern" in output, output
+    items = [
+        e
+        for e in world.services.egress_log()
+        if e["host"] == ADO_HOST and "/_apis/git/repositories/apm-policy/items" in e["path"]
+    ]
+    assert items and items[0]["status"] == 200, world.services.egress_log()
 
 
 _POLICY_EXIT = {
