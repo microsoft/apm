@@ -25,7 +25,7 @@ pytestmark = pytest.mark.component
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path("src/apm_cli/deps/download_strategies.py")
-UNIT_CONTRACT = "tests/unit/deps/test_gitlab_sparse_transport_contract.py"
+POLICY_CONTRACT = "tests/integration/test_gitlab_sparse_transport_policy.py"
 GIT_CONTRACT = "tests/integration/test_gitlab_sparse_transport_contract.py"
 
 
@@ -72,7 +72,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "download_gitlab_file",
         "if rest_eligible:",
         "if True:",
-        f"{UNIT_CONTRACT}::test_strict_ssh_failure_never_rest[with-pat]",
+        f"{POLICY_CONTRACT}::test_strict_ssh_failure_never_rest[with-pat]",
         "P3 strict SSH",
     ),
     Mutation(
@@ -104,7 +104,7 @@ MUTATIONS: tuple[Mutation, ...] = (
             auth_mode,
         )""",
         "return (dep_ref.host or default_host(), dep_ref.repo_url, ref, dep_ref.port)",
-        f"{UNIT_CONTRACT}::test_prepared_identity_separates_checkouts[user]",
+        f"{POLICY_CONTRACT}::test_prepared_identity_separates_checkouts[user]",
         "P10 distinct prepared identities must not reuse a checkout",
     ),
     Mutation(
@@ -112,7 +112,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "_git_file_transport_key",
         "            normalize_repo_url(effective_url),\n",
         "",
-        f"{UNIT_CONTRACT}::test_prepared_identity_separates_checkouts[effective-mirror]",
+        f"{POLICY_CONTRACT}::test_prepared_identity_separates_checkouts[effective-mirror]",
         "P10 distinct prepared identities must not reuse a checkout",
     ),
     Mutation(
@@ -120,7 +120,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "_git_file_transport_key",
         "            auth_mode,\n",
         "",
-        f"{UNIT_CONTRACT}::test_prepared_identity_separates_checkouts[auth-mode]",
+        f"{POLICY_CONTRACT}::test_prepared_identity_separates_checkouts[auth-mode]",
         "P10 distinct prepared identities must not reuse a checkout",
     ),
     Mutation(
@@ -128,7 +128,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "download_gitlab_file",
         "except GitFileTransportError as exc:",
         "except (GitFileTransportError, ValueError) as exc:",
-        f"{UNIT_CONTRACT}::test_non_transport_failures_are_terminal[failure3]",
+        f"{POLICY_CONTRACT}::test_non_transport_failures_are_terminal[failure3]",
         "P6 non-transport failures must remain terminal",
     ),
     Mutation(
@@ -136,7 +136,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "download_gitlab_file",
         "except GitFileTransportError as exc:",
         "except (GitFileTransportError, OSError) as exc:",
-        f"{UNIT_CONTRACT}::test_non_transport_failures_are_terminal[failure1]",
+        f"{POLICY_CONTRACT}::test_non_transport_failures_are_terminal[failure1]",
         "P6 non-transport failures must remain terminal",
     ),
     Mutation(
@@ -160,7 +160,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "download_gitlab_file",
         "                and previous_attempt is not None\n",
         "                and False\n",
-        f"{UNIT_CONTRACT}::test_protocol_switch_warning_matches_executed_attempts[True-True-ssh]",
+        f"{POLICY_CONTRACT}::test_protocol_switch_warning_matches_executed_attempts[True-True-ssh]",
         "P11 warn exactly when the executed protocol changes",
     ),
 )
@@ -207,7 +207,7 @@ def _copy_candidate(destination: Path) -> None:
         # Read by the root conftest's state-leak detector (tests/utils/state_leaks.py).
         "tests/fixtures/test_state_leak_baseline.json",
         "tests/integration/conftest.py",
-        UNIT_CONTRACT,
+        POLICY_CONTRACT,
         GIT_CONTRACT,
     ):
         target = destination / relative

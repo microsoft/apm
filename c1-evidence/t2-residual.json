@@ -16,12 +16,14 @@
     "codex empty-string: 3 tests in tests/test_codex_empty_string_and_defaults.py had identical bodies to tests/test_empty_string_and_defaults.py but a fixture without registry 'required' flags; folded that context into the surviving tests via indirect parametrize of github_mcp_server_data (declared_required / implicit_required) and deleted the copies",
     "git_remote_ops: unit test shared a body with forbidden tests/spec_conformance/test_resolution_reqs.py but used different inputs; differentiated only the unit copy by parametrizing a valid-record prefix (alone / after_valid), so a malformed record is also proven rejected after a valid one",
     "placement: git mv tests/unit/cache/test_git_env.py and test_git_symlink_config.py to tests/integration/ (already component); updated path references in ci.yml, docs integration-testing.md, scripts/windows_native_symlink_probe_entry.py, tests/unit/test_windows_native_symlink_probe.py, tests/integration/test_windows_native_symlink.py, tests/integration/test_windows_compat_gate_workflow.py",
-    "test_git_env: 3 failures (scales_linearly[git|gh], crlf_host) reproduce identically on origin/c1/train2 before the move; environment-related, not caused by the move"
+    "test_git_env: 3 failures (scales_linearly[git|gh], crlf_host) reproduce identically on origin/c1/train2 before the move; environment-related, not caused by the move",
+    "placement: git mv tests/unit/install/test_cached_codex_source_pin.py to tests/integration/ (repo-root parents[3] -> parents[2]); tests/unit/deps/test_gitlab_sparse_transport_contract.py moved as tests/integration/test_gitlab_sparse_transport_policy.py because tests/integration already has a different module with that file name; mutation harness constant renamed UNIT_CONTRACT -> POLICY_CONTRACT",
+    "placement kept: tests/unit/cache/test_git_cache_recency.py is cited by node id in forbidden tests/fixtures/lifecycle_bug_ledger.json; tests/unit/scripts/test_check_complexity_ratchet.py and test_check_test_assertions.py declare RATCHET_TEST_SCOPE=fixture and forbidden tests/quality/test_ci_topology.py requires fixture ratchet tests under tests/unit/scripts (and hardcodes the test_check_test_assertions.py path); moving any of them would break a forbidden file"
   ],
   "counts_left": {
     "same_body_groups": 0,
     "unclassified_modules": 0,
-    "placement_offenders": 5,
+    "placement_offenders": 3,
     "weak_tests": 0
   }
 }

@@ -41,7 +41,7 @@ _PIN_ERROR = "Invalid original Codex source pin"
 _CLIENT_REACHED = "stub: Codex client reached after source-pin validation"
 # Set in the child interpreter that actually runs the scenario.
 _FRESH_PROCESS_ENV = "APM_TEST_CODEX_PIN_FRESH_PROCESS"
-_ROOT = Path(__file__).resolve().parents[3]
+_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _rerun_in_fresh_process(request: pytest.FixtureRequest) -> None:
