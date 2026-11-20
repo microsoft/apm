@@ -12,11 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
+- Faster CLI startup: `apm --help` and every verb load command modules and GitPython only when needed (`apm --help` imports 332 modules instead of 767); help text and exit codes are unchanged. (#4118)
+- Internal: architecture-linter mutation tests share one session cache, so each file is walked and parsed once instead of once per case; findings are unchanged. (closes #4119, #4150)
 - Internal: PRs get a required Blast Radius Slice check (#4117) that runs only the integration tests covering the changed source, from a nightly coverage map and the owner registry, and runs the full suite when the map is missing or stale, a change is unowned, the slice is empty or the test harness changed. (#4150)
 
 ### Fixed
 
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
+- `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
 
 ## [0.37.0] - 2026-11-20
 

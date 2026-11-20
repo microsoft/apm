@@ -134,6 +134,20 @@
       ]
     },
     {
+      "id": "architecture-linter-performance",
+      "decision": "Session-scoped reuse of the architecture linter inventory, owner registry and content-keyed file facts; findings identical with and without reuse",
+      "owner": "scripts/architecture_linter/session_cache.py (LinterSession) consumed by facts.py FactsProvider.file_facts and runner.py _run",
+      "selectors": [
+        "scripts/architecture_linter/facts.py",
+        "scripts/architecture_linter/runner.py",
+        "scripts/architecture_linter/session_cache.py"
+      ],
+      "guards": [
+        "contracts-tooling-linter-cache-content-key",
+        "contracts-tooling-linter-cache-parse-once"
+      ]
+    },
+    {
       "id": "generated-content-footer-wording",
       "decision": "Generated-content footer ownership wording",
       "owner": "compilation/footer.py (build_generation_footer)",
