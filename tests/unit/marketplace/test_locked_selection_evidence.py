@@ -114,6 +114,24 @@ def test_registry_row_is_locked_evidence_without_a_commit(
     assert lockfile_satisfies_manifest(lock, [declaration])[0] is valid
 
 
+@pytest.mark.parametrize(
+    ("spec", "changes", "reason"),
+    [
+        (
+            "^1.0.0",
+            {"resolved_hash": None},
+            "missing locked registry version, URL or hash evidence",
+        ),
+        ("^2.0.0", {}, "manifest version '^2.0.0' != lockfile registry version '1.2.3'"),
+    ],
+)
+def test_registry_row_refusal_names_its_reason(
+    spec: str, changes: dict[str, object], reason: str
+) -> None:
+    """An unusable registry row says why: missing pin evidence or a moved selector."""
+    assert marketplace_ref_mismatch(_selection(spec), _registry_locked(**changes)) == reason
+
+
 def _selection_without_version() -> DependencyReference:
     return DependencyReference.parse_from_dict({"name": "tool", "marketplace": "catalog"})
 
