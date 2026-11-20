@@ -118,6 +118,29 @@ def test_restore_undoes_every_tracked_leak(tmp_path: Path, monkeypatch: pytest.M
     assert console._console_stderr is False
 
 
+def test_wholesale_environ_replacement_is_caught_and_restored() -> None:
+    """Swapping ``os.environ`` for a copied dict must not hide a new variable."""
+    original = os.environ
+    before = state_leaks.take_snapshot()
+    try:
+        replaced = dict(original)
+        replaced["APM_LEAK_PROBE"] = "1"
+        os.environ = replaced  # noqa: B003 -- the object itself is under test
+
+        assert state_leaks.leaked_keys(before, state_leaks.take_snapshot()) == [
+            state_leaks.ENVIRON_REPLACED,
+            "env:APM_LEAK_PROBE",
+        ]
+
+        state_leaks.restore(before)
+
+        assert os.environ is original
+        assert "APM_LEAK_PROBE" not in os.environ
+        assert state_leaks.leaked_keys(before, state_leaks.take_snapshot()) == []
+    finally:
+        os.environ = original  # noqa: B003 -- the object itself is under test
+
+
 @pytest.mark.parametrize(
     ("leaks", "baseline", "expected"),
     [

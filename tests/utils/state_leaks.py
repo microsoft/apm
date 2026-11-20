@@ -7,7 +7,9 @@ later test read empty stdout: a ``--format json`` CLI call left console output
 routed to stderr for the rest of the worker.
 
 Snapshots stay cheap: one ``os.environ`` dict copy, ``os.getcwd()`` and a few
-module attribute identities. Nothing is deep-copied.
+module attribute identities. Nothing is deep-copied. The environment is read
+live on every snapshot, so a test that swaps ``os.environ`` for another mapping
+is caught and the original object is put back.
 """
 
 from __future__ import annotations
@@ -32,11 +34,13 @@ EXCLUDED_ROOTS = ("tests/integration/", "tests/benchmarks/")
 IGNORED_ENV = frozenset({"PYTEST_CURRENT_TEST"})
 # ``os.environ`` keeps its entries encoded in ``_data`` (bytes on POSIX,
 # upper-cased str on Windows); copying that dict is several times cheaper
-# than decoding every entry through ``dict(os.environ)``.
-_ENV_DATA = getattr(os.environ, "_data", None)
-_IGNORED_RAW = frozenset(
-    os.environ.encodekey(name) if hasattr(os.environ, "encodekey") else name for name in IGNORED_ENV
-)
+# than decoding every entry through ``dict(os.environ)``. A replacement mapping
+# has no ``_data``, so its entries are encoded the same way before comparing.
+_ORIGINAL_ENVIRON = os.environ
+_ENCODE_KEY = getattr(_ORIGINAL_ENVIRON, "encodekey", None)
+_ENCODE_VALUE = getattr(_ORIGINAL_ENVIRON, "encodevalue", None)
+_IGNORED_RAW = frozenset(_ENCODE_KEY(name) if _ENCODE_KEY else name for name in IGNORED_ENV)
+ENVIRON_REPLACED = "os.environ"
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,8 @@ class Snapshot:
     env: dict
     cwd: str | None
     values: dict[str, object]
+    # The ``os.environ`` object itself; None when the caller built the snapshot by hand.
+    environ: object = None
 
 
 def take_snapshot() -> Snapshot:
@@ -87,11 +93,28 @@ def take_snapshot() -> Snapshot:
         )
         for tracked in TRACKED_GLOBALS
     }
-    return Snapshot(_env_copy(), cwd, values)
+    return Snapshot(_env_copy(), cwd, values, os.environ)
+
+
+def _encoded(encode: object, item: object) -> object:
+    if encode is None or not isinstance(item, str):
+        return item
+    try:
+        return encode(item)
+    except (TypeError, ValueError, UnicodeError):
+        return item
 
 
 def _env_copy() -> dict:
-    env = dict(_ENV_DATA) if isinstance(_ENV_DATA, dict) else dict(os.environ)
+    environ = os.environ
+    data = getattr(environ, "_data", None)
+    if isinstance(data, dict):
+        env = dict(data)
+    else:
+        env = {
+            _encoded(_ENCODE_KEY, name): _encoded(_ENCODE_VALUE, value)
+            for name, value in environ.items()
+        }
     for name in _IGNORED_RAW:
         env.pop(name, None)
     return env
@@ -108,6 +131,12 @@ def _unchanged(old: object, new: object) -> bool:
 def leaked_keys(before: Snapshot, after: Snapshot) -> list[str]:
     """Name every piece of tracked state that differs after the test."""
     leaks: list[str] = []
+    if (
+        before.environ is not None
+        and after.environ is not None
+        and before.environ is not after.environ
+    ):
+        leaks.append(ENVIRON_REPLACED)
     if before.env != after.env:
         leaks.extend(
             f"env:{_text(name)}"
@@ -126,6 +155,8 @@ def leaked_keys(before: Snapshot, after: Snapshot) -> list[str]:
 
 def restore(snapshot: Snapshot) -> None:
     """Put back the snapshotted state so a leak cannot reach the next test."""
+    if snapshot.environ is not None and os.environ is not snapshot.environ:
+        os.environ = snapshot.environ  # noqa: B003 -- put the original object back
     if _env_copy() != snapshot.env:
         current = {_text(name) for name in _env_copy()}
         wanted = {_text(name): _text(value) for name, value in snapshot.env.items()}
