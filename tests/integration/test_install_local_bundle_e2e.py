@@ -971,8 +971,14 @@ class TestLocalBundleHashFormatCrossFlow:
         comparison always failed (bare hex vs ``sha256:<hex>``), so
         every bundle-deployed file was permanently classified as
         user-edited and stale-cleanup was a no-op.
+
+        Under req-lk-024 a lockfile hash alone never authorizes deletion
+        (#3701): the oracle models the deploying machine's receipts with the
+        digests the bundle install recorded, so cleanup still compares the
+        recorded format against ``compute_file_hash``. Without evidence the
+        same files are kept.
         """
-        from apm_cli.integration.cleanup import remove_stale_deployed_files
+        from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
         bundle = _make_plugin_bundle(tmp_path / "src")
@@ -987,9 +993,26 @@ class TestLocalBundleHashFormatCrossFlow:
         deployed_hashes = dict(data.get("local_deployed_file_hashes") or {})
         assert deployed_files and deployed_hashes
 
+        # A lockfile hash alone keeps every file (req-lk-024).
+        unproven = remove_stale_deployed_files(
+            deployed_files,
+            project,
+            dep_key="<local-bundle-test>",
+            targets=None,
+            diagnostics=DiagnosticCollector(),
+            recorded_hashes=deployed_hashes,
+            evidence=DeploymentEvidence.none(project),
+        )
+        assert not unproven.deleted
+        assert all((project / path).exists() for path in deployed_files)
+
         # Pretend every file is now stale and ask cleanup to remove them.
         # The provenance gate should pass (file is unchanged), so cleanup
         # actually deletes them -- not skip them as "user-edited".
+        receipts = {
+            (project / path).resolve().as_posix(): digest
+            for path, digest in deployed_hashes.items()
+        }
         diagnostics = DiagnosticCollector()
         cleanup_result = remove_stale_deployed_files(
             deployed_files,
@@ -998,6 +1021,7 @@ class TestLocalBundleHashFormatCrossFlow:
             targets=None,
             diagnostics=diagnostics,
             recorded_hashes=deployed_hashes,
+            evidence=DeploymentEvidence(deploy_root=project, receipts=receipts, render=None),
         )
 
         assert not cleanup_result.skipped_user_edit, (

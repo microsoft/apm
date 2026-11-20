@@ -13,6 +13,14 @@ on:
     branches: [ main ]
     types: [ checks_requested ]
 
+# Superseded pushes to a PR cancel their in-flight run so they stop spending
+# the shared Actions API quota. Push, merge_group and schedule runs are never
+# grouped or cancelled: each run keeps its own group, so every SHA keeps its
+# evidence.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -409,7 +417,8 @@ jobs:
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
           tests/quality/test_lifecycle_bug_ledger.py \
-          tests/quality/test_ci_topology.py
+          tests/quality/test_ci_topology.py \
+          tests/quality/test_journey_index.py
 
   test-architecture-scaling:
     name: Architecture Scaling (Linux)
