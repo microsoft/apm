@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ...bundle.local_bundle import looks_like_local_bundle
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile, lockfile_parent_identity
@@ -858,6 +859,12 @@ def _validate_uninstall_packages(
                     f"{display_label} could not be mapped to one declared local dependency. "
                     "Run 'apm install' to regenerate apm.lock.yaml, or use one exact "
                     "path from apm.yml."
+                )
+            elif is_local and looks_like_local_bundle(Path(package)):
+                logger.error(
+                    f"'{Path(package).name}' is a local bundle. Bundles "
+                    "installed with 'apm install <bundle>' are not recorded in apm.yml, "
+                    "and 'apm uninstall' cannot remove local-bundle content yet."
                 )
             elif is_local:
                 logger.error(

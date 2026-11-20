@@ -960,7 +960,8 @@ class InstallLogger(CommandLogger):
         """Actionable reason for unreachable policy source."""
         return (
             f"Policy source {source} is unreachable "
-            "-- retry, check VPN/firewall, or use `--no-policy` to bypass"
+            "-- retry, check VPN/firewall, or bypass once with `--no-policy` "
+            "(install) or `APM_POLICY_DISABLE=1`"
         )
 
     @staticmethod
@@ -998,7 +999,7 @@ class InstallLogger(CommandLogger):
         return (
             f"Blocked by org policy at {source}{rule_part} "
             f"-- {edit}contact admin to update policy, "
-            "or use `--no-policy` for one-off bypass"
+            "or bypass once with `--no-policy` (install) or `APM_POLICY_DISABLE=1`"
         )
 
     # --- Install summary ---

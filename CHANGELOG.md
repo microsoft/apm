@@ -133,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` output prints each package header above its own files with the ref once, and drops the spurious `bin/` skip and inactive-resolver lines. (closes #3994, #4004)
 - `apm install` adopts an unmanaged skill directory identical to what it would deploy instead of skipping it, so `apm audit` reports no drift. (closes #3994, #4004)
 - Codex `marketplace.json` records full `https://` source URLs, and a plugin declaring a missing component names the likely upstream cause. (closes #3994, #4004)
+- Copy-paste hints work as printed: `apm pack` shares `./build/...`, plugin next steps lock before packing, `apm approve <pkg>` never wraps, bulk trust is offered only when an org set exists, policy blocks name `APM_POLICY_DISABLE=1`, and uninstalling a local bundle states that bundles cannot be uninstalled. (closes #3994, #4004)
+- `apm pack --json` reports the built bundle, `apm outdated` wraps long package names instead of clipping them, and `apm init` lists the `apm config set target` default in its target precedence comment. (closes #3994, #4004)
 
 ### Security
 

@@ -620,7 +620,8 @@ def outdated(global_, verbose, parallel_checks):
             "Package",
             style="white",
             min_width=20,
-            overflow="fold" if has_replacements else "ellipsis",
+            # Fold, never clip: the name is what users copy into apm update.
+            overflow="fold",
         )
         table.add_column("Current", style="white", min_width=1 if has_replacements else 10)
         if show_wanted:

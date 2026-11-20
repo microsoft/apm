@@ -146,6 +146,20 @@ class TestValidateUninstallPackages:
         )
         assert "org/repo" in not_found
 
+    def test_local_bundle_states_the_limitation(self, tmp_path, monkeypatch):
+        """A bundle path is not sent to 'apm deps list' for a key (#3994)."""
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        (tmp_path / "project-1.0.0.zip").write_bytes(b"PK")
+        monkeypatch.chdir(tmp_path)
+        logger = _make_logger()
+        _removed, not_found = _validate_uninstall_packages(["./project-1.0.0.zip"], [], logger)
+        assert not_found == ["./project-1.0.0.zip"]
+        message = logger.error.call_args.args[0]
+        assert "'project-1.0.0.zip' is a local bundle" in message
+        assert "cannot remove local-bundle content" in message
+        assert "deps list" not in message
+
     def test_marketplace_resolved_none_adds_to_not_found(self):
         from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
 

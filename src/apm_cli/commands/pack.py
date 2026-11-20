@@ -639,6 +639,11 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 )
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
+            elif sub.kind is OutputKind.BUNDLE and sub.payload is not None:
+                envelope["bundle"] = {
+                    "path": Path(sub.payload.bundle_path).as_posix(),
+                    "files": list(sub.payload.files),
+                }
         if drift_metadata_enrichment is not None:
             envelope["metadata_enrichment"] = drift_metadata_enrichment.to_json_dict()
             metadata_warnings = set(drift_metadata_enrichment.warnings)

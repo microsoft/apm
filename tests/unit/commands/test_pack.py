@@ -400,6 +400,22 @@ class TestPackReleaseGatesIntegration:
         assert data["version_alignment"] is None
         assert data["drift"] is None
 
+    def test_json_envelope_reports_the_bundle(self, tmp_path: Path, monkeypatch) -> None:
+        """A successful bundle build is not reported as "bundle": null (#3994)."""
+        import json as _json
+
+        from apm_cli.bundle.packer import PackResult
+        from apm_cli.core.build_orchestrator import BuildResult, OutputKind, ProducerResult
+
+        _scaffold(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        bundle = PackResult(bundle_path=tmp_path / "build" / "pkg-1.0.0", files=["a.md"])
+        built = BuildResult(producer_results=[ProducerResult(OutputKind.BUNDLE, payload=bundle)])
+        monkeypatch.setattr("apm_cli.commands.pack.BuildOrchestrator.run", lambda *_a, **_k: built)
+        result = CliRunner().invoke(pack_cmd, ["--offline", "--json"])
+        data = _json.loads(result.output)
+        assert data["bundle"] == {"path": bundle.bundle_path.as_posix(), "files": ["a.md"]}
+
     def test_check_versions_only_payload_shape(self, tmp_path: Path, monkeypatch) -> None:
         import json as _json
 
