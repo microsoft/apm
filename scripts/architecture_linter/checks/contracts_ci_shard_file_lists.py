@@ -6,7 +6,9 @@ A sharded pytest command that collects whole roots and deselects (the node
 level ``--shard-index`` plugin, pytest-split ``--splits``) is a second
 selection authority. The drift guard in ``tests/quality/test_ci_topology.py``
 compares every job's file lists with a full collect on the same SHA; this
-rule keeps that comparison wired.
+rule keeps that comparison wired. ci-integration.yml is out of scope: its
+merge-time lanes shard through the build-release planner, guarded by
+``contracts-tooling-ci-merge-time-topology``.
 """
 
 from __future__ import annotations
@@ -21,7 +23,6 @@ DRIFT_GUARD = "tests/quality/test_ci_topology.py"
 WORKFLOWS = (
     ".github/workflows/ci.yml",
     ".github/workflows/build-release.yml",
-    ".github/workflows/ci-integration.yml",
 )
 EMITTER = "scripts.ci_sharding files"
 REQUIRED: dict[str, tuple[str, ...]] = {
