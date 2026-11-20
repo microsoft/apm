@@ -25,8 +25,7 @@ and ``check_obligation`` credits the id with the credential-carrying egress,
 its allowed and forbidden hosts and a scan of every file under the project,
 HOME and cache for the sentinels.
 
-Unregistered, missing world support: ADO ``api-probe`` (an ADO install sends
-only git requests); ``helper`` on the generic host (no generic git host is
+Unregistered, missing world support: ``helper`` on the generic host (no generic git host is
 served); the E1 and EP rows with REDIRECT=same-origin or cross-origin and
 PROXY_ONLY=1 (the world proxy cannot yet script a redirect or an unproxied
 route). A row whose id carries PROXY_ONLY=0 also proves the proxy refused no
@@ -206,7 +205,11 @@ class Operation:
 
 OPERATIONS: Mapping[str, Operation] = {
     "clone": Operation(lambda w, h: ["install", h.spec], _is_git),
-    "api-probe": Operation(lambda w, h: ["install", h.spec], _is_api),
+    "api-probe": Operation(
+        lambda w, h: ["install", h.api_spec or h.spec],
+        _is_api,
+        lambda w, h: h.api_setup(w) if h.api_setup else None,
+    ),
     "marketplace-fetch": Operation(lambda w, h: ["marketplace", "add", f"{h.base}/marketplace"]),
     "policy-fetch": Operation(lambda w, h: ["policy", "status"], _is_policy, _policy_remote),
     "mcp-registry": Operation(lambda w, h: ["install", "--mcp", REGISTRY_SERVER]),
