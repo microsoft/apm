@@ -172,6 +172,7 @@
       "selectors": [
         "src/apm_cli/deps/lockfile.py",
         "src/apm_cli/deps/lockfile_extensions.py",
+        "src/apm_cli/deps/lockfile_version_remedy.py",
         "src/apm_cli/models/extension_keys.py"
       ],
       "guards": [
