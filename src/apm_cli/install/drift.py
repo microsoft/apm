@@ -390,15 +390,11 @@ def _materialize_install_path(
             f"scratch replay resolved {lock_dep.repo_url} to "
             f"{resolved_reference.resolved_commit}, expected {lock_dep.resolved_commit}"
         )
-    dep_key = lock_dep.get_unique_key()
+    key = lock_dep.get_unique_key()
     if locked_content_mismatch(
-        dep_key, lock_dep, candidate, lockfile=lockfile, package_info=package_info
+        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info
     ):
-        raise DirectDependencyError(
-            locked_content_failure(
-                dep_key, project_root, lock_dep, candidate, package_info=package_info
-            )
-        )
+        raise DirectDependencyError(locked_content_failure(key, project_root, lock_dep, candidate))
     return candidate
 
 
