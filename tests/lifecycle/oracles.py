@@ -508,26 +508,28 @@ def _i8_exit_code(
 
 
 def _i9_no_noise(before, after, result: CommandResult | None, model, op) -> list[Violation] | None:
+    """One violation per distinct duplicated line, so a cell for one cause never hides another."""
     del before, after, model, op
     if result is None:
         return None
     lines = [line.rstrip() for line in result.stdout.splitlines() if line.strip()]
     found = []
-    for first, second in itertools.pairwise(lines):
-        if first == second:
-            found.append(Violation("I9", f"identical consecutive line: {first.strip()!r}"))
-            break
+    consecutive = dict.fromkeys(
+        first.strip() for first, second in itertools.pairwise(lines) if first == second
+    )
+    found.extend(Violation("I9", f"identical consecutive line: {line!r}") for line in consecutive)
     # Each package block ("[+] <package>") reports its own integrations, so the
     # same line under two packages is not noise; twice in one block is.
     seen: set[str] = set()
+    repeated: dict[str, None] = {}
     for line in lines:
         if line.lstrip().startswith("[+]"):
             seen = set()
         elif "integrated" in line:
-            if line.strip() in seen:
-                found.append(Violation("I9", "duplicate 'integrated' line"))
-                break
+            if line.strip() in seen and line.strip() not in consecutive:
+                repeated[line.strip()] = None
             seen.add(line.strip())
+    found.extend(Violation("I9", f"duplicate 'integrated' line: {line!r}") for line in repeated)
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
         if "Traceback (most recent call last)" in text:
             found.append(Violation("I9", f"{stream} has a Python traceback"))

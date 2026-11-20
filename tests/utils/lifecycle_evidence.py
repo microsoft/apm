@@ -443,18 +443,24 @@ def _logical_lines(text: str) -> list[str]:
 
 
 def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
+    """One I9 violation per distinct duplicated line (one per cause), plus tracebacks."""
     found: list[OutputViolation] = []
     if _TRACEBACK in text:
         found.append(OutputViolation("I9", f"{stream} has a Python traceback"))
     lines = _logical_lines(text)
-    for first, second in itertools.pairwise(lines):
-        # Rules and table borders legitimately repeat; diagnostics carry words.
-        if first == second and any(c.isalnum() for c in first):
-            found.append(OutputViolation("I9", f"{stream} repeats a line: {first.strip()!r}"))
-            break
+    # Rules and table borders legitimately repeat; diagnostics carry words.
+    consecutive = dict.fromkeys(
+        first.strip()
+        for first, second in itertools.pairwise(lines)
+        if first == second and any(c.isalnum() for c in first)
+    )
+    found.extend(
+        OutputViolation("I9", f"{stream} repeats a line: {line!r}") for line in consecutive
+    )
     # A top-level status line opens a block; indented status and tree lines are
     # compared only within their block, because per-package blocks repeat them.
     seen: set[tuple[int, str]] = set()
+    repeated: dict[str, None] = {}
     block = 0
     for line in lines:
         stripped = line.strip()
@@ -470,10 +476,12 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
             key = (block, stripped)
         else:
             continue
-        if key in seen:
-            found.append(OutputViolation("I9", f"{stream} repeats a diagnostic: {stripped!r}"))
-            break
+        if key in seen and stripped not in consecutive:
+            repeated[stripped] = None
         seen.add(key)
+    found.extend(
+        OutputViolation("I9", f"{stream} repeats a diagnostic: {line!r}") for line in repeated
+    )
     return found
 
 

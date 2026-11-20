@@ -41,6 +41,7 @@ from tests.utils.lifecycle_evidence import (
     _physical_roots,
     check_cli_output,
     expect_output_violation,
+    output_violations,
     snapshot,
 )
 
@@ -1341,3 +1342,17 @@ def test_expect_output_violation_suspends_only_the_named_laws() -> None:
         check_cli_output(("install",), crash)
     with pytest.raises(ValueError, match="reason"), expect_output_violation("I9", reason=" "):
         pass
+
+
+def test_output_oracle_reports_one_violation_per_duplicated_cause() -> None:
+    stdout = "[!] Policy off\n[i] a\n[!] Policy off\n[i] Targeting x\n[i] Targeting x\n"
+    found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
+    assert found == [
+        "stdout repeats a line: '[i] Targeting x'",
+        "stdout repeats a diagnostic: '[!] Policy off'",
+    ]
+    policy_cell = KnownOutputCell(
+        "policy-twice", "I9", "#1", lambda args, _scenario: True, "Policy off"
+    )
+    with pytest.raises(OutputOracleError, match=r"I9: stdout repeats a line: '\[i\] Targeting x'"):
+        check_cli_output(("install",), _cli(("install",), stdout), known_cells=(policy_cell,))
