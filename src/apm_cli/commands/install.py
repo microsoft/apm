@@ -1747,9 +1747,11 @@ def _install_apm_packages(ctx, outcome):
 
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
 
-    if ctx.frozen is True:
+    from apm_cli.install.service import InstallService
+
+    frozen_disposition = InstallService.frozen_disposition(ctx)
+    if frozen_disposition.replay:
         from apm_cli.install.request import InstallRequest
-        from apm_cli.install.service import InstallService
 
         InstallService.enforce_frozen(
             InstallRequest(
@@ -1909,7 +1911,7 @@ def _install_apm_packages(ctx, outcome):
                 audit_override=ctx.audit_override,
                 legacy_skill_paths=ctx.legacy_skill_paths,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
-                frozen=ctx.frozen,
+                frozen=frozen_disposition.replay,
                 plan_callback=ctx.plan_callback,
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
@@ -2006,6 +2008,7 @@ def _install_apm_packages(ctx, outcome):
             claude_native_keys=(
                 install_result.claude_native_keys if install_result is not None else frozenset()
             ),
+            frozen_disposition=frozen_disposition,
         )
     except PolicyBlockError:
         logger.refusal(
