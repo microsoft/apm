@@ -396,7 +396,7 @@ def test_bin_deploys_under_the_whole_plugin_approval_and_bin_policy(tmp_path: Pa
     admitted = _plan(info, admit=_admit(info, approved), skip_bin=False)
     assert admitted.parked is None and admitted.approved_pin == pin
     unapproved = _plan(info, admit=_admit(info, {}), skip_bin=False)
-    _parked(unapproved, "not approved", "&& apm approve --pending")
+    _parked(unapproved, "not approved", "apm approve -g --pending")
     denied = _plan(info, admit=_admit(info, approved), skip_bin=False, bin_denied="bin_deploy.deny")
     _parked(denied, "bin_deploy.deny", "bin/")
     _parked(_plan(info, admit=_admit(info, approved), skip_bin=True), "bin/", "--trust-bin")

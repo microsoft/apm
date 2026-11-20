@@ -39,8 +39,10 @@ def _admit(root: Path, **overrides):
 
 
 def test_native_admission_never_silently_reduces_unapproved_mcp(tmp_path):
-    with pytest.raises(CodexNativeError, match=r"executables\.allow"):
-        _admit(tmp_path, approvals={})
+    """Unapproved MCP parks the whole bundle (#4154); replay still refuses it."""
+    assert _admit(tmp_path, approvals={}).parked is True
+    with pytest.raises(CodexNativeError, match=r"apm approve -g owner/example"):
+        _admit(tmp_path, approvals={}, read_only=True)
 
 
 def test_native_admission_requires_whole_bundle_and_user_scope(tmp_path):
@@ -52,8 +54,9 @@ def test_native_admission_requires_whole_bundle_and_user_scope(tmp_path):
 
 def test_native_admission_gates_hidden_native_root_executables(tmp_path):
     (tmp_path / "hooks").mkdir()
+    assert _admit(tmp_path).parked is True
     with pytest.raises(CodexNativeError, match=r"executables\.allow"):
-        _admit(tmp_path)
+        _admit(tmp_path, read_only=True)
 
 
 def test_native_admission_keeps_canonical_identity(tmp_path):
@@ -234,3 +237,24 @@ def test_final_native_phase_refuses_retained_loose_files(
     assert ".codex/skills/example/SKILL.md" in str(error.value)
     assert "apm install -g --target codex" in str(error.value)
     assert loose.read_bytes() == original
+
+
+def test_parked_bundle_already_reported_gets_no_second_notice(tmp_path):
+    """A deny the trust owner named is not re-reported as unapproved (#4154)."""
+    from types import SimpleNamespace
+
+    from apm_cli.codex_plugins.admission import finalize_codex_native
+
+    warned: list[str] = []
+    diagnostics = SimpleNamespace(warn=lambda message, **_: warned.append(message))
+    ctx = SimpleNamespace(scope=InstallScope.USER, diagnostics=diagnostics, codex_native_plugins={})
+    plan = _admit(tmp_path, approvals={}, parked_reported=True)
+    assert plan.parked and plan.parked_reported
+    assert finalize_codex_native({}, plan, None, None, ctx, None) == {}
+    assert warned == [] and ctx.codex_native_plugins == {}
+    plain = _admit(tmp_path, approvals={})
+    finalize_codex_native({}, plain, None, None, ctx, None)
+    assert len(warned) == 1 and "apm approve -g owner/example" in warned[0]
+    # Replay still refuses the same bundle outright, reported or not.
+    with pytest.raises(CodexNativeError, match=r"executables\.allow"):
+        _admit(tmp_path, approvals={}, read_only=True, parked_reported=True)
