@@ -35,13 +35,6 @@ _XFAIL = {
         for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
     },
 }
-_BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
-_XFAIL.update(
-    {
-        f"G|bundle-install|{change}|mcp": _BUNDLE_KEEPS
-        for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
-    }
-)
 # A bundle approval pins the whole bundle digest: a changed definition reads as
 # a bundle that is not approved yet.
 _ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this exact bundle"}
