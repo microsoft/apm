@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Protocol
 
+from apm_cli.core.remediation import FROZEN_LOCKFILE_STALE, IMMUTABLE_REFS_CONFLICT
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import (
     GitReferenceType,
@@ -97,13 +98,11 @@ class ImmutableRequirements:
         self, first_chain: str, first_commit: str, chain: str, commit: str, key: str
     ) -> None:
         if first_commit != commit:
-            mode_hint = " without --frozen" if self._frozen else ""
             raise ImmutableRequirementError(
                 f"Cannot resolve {key}: incompatible immutable requirements.\n"
                 f"  {first_chain} (commit {first_commit})\n"
                 f"  {chain} (commit {commit})\n"
-                "Align the requested refs in the root or parent manifests to the same "
-                f"commit, then run 'apm install'{mode_hint} to regenerate apm.lock.yaml."
+                f"{IMMUTABLE_REFS_CONFLICT.sentence()}"
             )
 
     def _check_locked(self, requirement: _Requirement) -> None:
@@ -112,18 +111,18 @@ class ImmutableRequirements:
         if locked is None:
             raise ImmutableRequirementError(
                 f"--frozen: {requirement.chain} is missing from apm.lock.yaml. "
-                "Run 'apm install' without --frozen to regenerate the lockfile."
+                f"{FROZEN_LOCKFILE_STALE.sentence()}"
             )
         if not locked.matches_replacement(dep):
             raise ImmutableRequirementError(
                 f"--frozen: selected replacement source for {dep.get_unique_key()} "
-                "does not match apm.lock.yaml. Run 'apm install' without --frozen."
+                f"does not match apm.lock.yaml. {FROZEN_LOCKFILE_STALE.sentence()}"
             )
         locked_commit = locked.resolved_commit
         if not is_full_revision_pin(locked_commit):
             raise ImmutableRequirementError(
                 f"--frozen: apm.lock.yaml has no verifiable commit for {requirement.chain}. "
-                "Run 'apm install' without --frozen to regenerate the lockfile."
+                f"{FROZEN_LOCKFILE_STALE.sentence()}"
             )
         ref_type, ref = parse_git_reference(dep.reference)
         locked_chain = f"apm.lock.yaml -> {dep.get_unique_key()}@{locked.resolved_ref or 'HEAD'}"

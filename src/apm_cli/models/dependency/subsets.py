@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
+from apm_cli.core.remediation import LOCKFILE_RECORDS_INCONSISTENT
 from apm_cli.utils.path_security import validate_path_segments
 
 # Typed hook for #3203: exclude-mode selections will join this vocabulary.
@@ -462,7 +463,7 @@ class SkillTargetSelection:
         ):
             raise ValueError(
                 f"{SUBSET_PAIRINGS_LOCK_FIELD} disagree with skill_subset/target_subset; "
-                "run 'apm install' to regenerate the lockfile"
+                f"{LOCKFILE_RECORDS_INCONSISTENT.clause()}"
             )
         return selection
 

@@ -6,6 +6,7 @@ import re
 from collections.abc import Collection
 from typing import Any
 
+from ...core.remediation import DEPENDENCY_ALIAS_INVALID
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from .subsets import parse_skill_subset, parse_target_subset
 
@@ -42,7 +43,7 @@ def parse_alias_override(raw: object) -> str | None:
     except PathTraversalError:
         raise ValueError(
             f"Invalid dependency alias {alias!r}: '.' and '..' are reserved directory names. "
-            "Set alias to a name such as 'my-skill.v2' in apm.yml and rerun apm install."
+            + DEPENDENCY_ALIAS_INVALID.bind(suggestion="a name such as 'my-skill.v2'").sentence()
         ) from None
     return alias
 

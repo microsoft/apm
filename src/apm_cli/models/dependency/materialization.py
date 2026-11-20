@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
+from ...core.remediation import DEPENDENCY_ALIAS_INVALID, PACKAGE_DIRECTORIES_COLLIDE
 from ...utils.github_host import default_host
 from ...utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .object_fields import parse_alias_override
@@ -60,6 +61,7 @@ class _NativeMaterializationPathReader:
 
 
 _NATIVE_READER = _NativeMaterializationPathReader()
+_ALIAS_SEPARATE_DIRECTORY = DEPENDENCY_ALIAS_INVALID.bind(suggestion="a separate package directory")
 
 
 @dataclass(frozen=True)
@@ -124,13 +126,13 @@ def build_materialization_path(
         except PathTraversalError as exc:
             raise PathTraversalError(
                 f"Invalid dependency alias {alias!r}: unsafe destination {result}. "
-                "Inspect the alias path without removing its target, choose a separate "
-                "package directory, and rerun apm install."
+                "Inspect the alias path without removing its target. "
+                + _ALIAS_SEPARATE_DIRECTORY.sentence()
             ) from exc
         if resolved == ensure_path_within(apm_modules_dir, apm_modules_dir):
             raise PathTraversalError(
                 f"Invalid dependency alias {alias!r}: destination resolves to apm_modules itself. "
-                "Choose a separate package directory and rerun apm install."
+                + _ALIAS_SEPARATE_DIRECTORY.sentence()
             )
         return result
 
@@ -390,8 +392,7 @@ def find_case_equivalent_materialization_path(
             rendered = ", ".join(match.as_posix() for match in matches)
             raise MaterializationPathCollisionError(
                 "Found multiple package directories for one dependency: "
-                f"{rendered}. Inspect the duplicates under apm_modules/, "
-                "keep the intended package, and run 'apm install' again."
+                f"{rendered}. {PACKAGE_DIRECTORIES_COLLIDE.sentence()}"
             )
         return apm_modules_dir.joinpath(*matches[0].parts) if matches else None
 
@@ -411,8 +412,7 @@ def find_case_equivalent_materialization_path(
             rendered = ", ".join(str(match) for match in matches)
             raise MaterializationPathCollisionError(
                 "Found multiple package directories for one dependency: "
-                f"{rendered}. Inspect the duplicates under apm_modules/, "
-                "keep the intended package, and run 'apm install' again."
+                f"{rendered}. {PACKAGE_DIRECTORIES_COLLIDE.sentence()}"
             )
         if not matches:
             return None
@@ -475,8 +475,7 @@ def _relocate_case_components(
                 if index == leaf:
                     raise MaterializationPathCollisionError(
                         "Package directory casing collides between "
-                        f"{source} and {target}. Inspect both directories, "
-                        "keep the intended package, and run 'apm install' again."
+                        f"{source} and {target}. {PACKAGE_DIRECTORIES_COLLIDE.sentence()}"
                     )
                 source_parent, target_parent = source, target
                 continue
