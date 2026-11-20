@@ -8,10 +8,12 @@ released afterwards (source: .apm/architecture/owners/install-deployment.json,
 src/apm_cli/install/locking.py).
 PROMISE: P-INV-I1..I9 -- the laws hold for each writer and after the pair.
 
-The holder is always an ``install`` (the one command that, under the lock,
-runs ``git remote get-url origin`` for policy discovery). A one-shot ``git``
-shim on PATH parks the holder there until the test releases it, so the
-overlap is deterministic: the contender starts while the holder owns the
+The holder is always an ``install``. At project scope it parks on the one
+call it makes under the lock, ``git remote get-url origin`` for policy
+discovery, through a one-shot ``git`` shim on PATH. User scope has no git
+remote and makes no such call, so there the holder parks in a one-shot
+``pre-install`` lifecycle script of the user manifest, which also runs under
+the lock. Either way the overlap is deterministic: the contender starts while the holder owns the
 lock, must still be running ``_BLOCKED_WINDOW`` seconds after its imports
 (the shim sees its ``git version``), and must report that it waited. The contenders cover install, update, uninstall,
 approve, deny and a self-update setting (``config set self-update.channel``,
@@ -35,6 +37,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import pytest
 import yaml
@@ -93,9 +96,10 @@ class PairRow:
 
 
 class _Park:
-    """A one-shot git shim: the first ``git remote get-url`` waits for a release file."""
+    """One-shot park: the first ``git remote get-url`` (project scope) or the first
+    user-manifest ``pre-install`` script (user scope) waits for a release file."""
 
-    def __init__(self, world) -> None:
+    def __init__(self, world, user_manifest: Path | None = None) -> None:
         self.world = world
         self.dir = world.root / "park-shim"
         self.dir.mkdir()
@@ -121,6 +125,19 @@ class _Park:
         self.saved_path = world.env["PATH"]
         world.env["PATH"] = os.pathsep.join((str(self.dir), self.saved_path))
         self.armed.write_text("", encoding="ascii")
+        self.user_manifest = user_manifest
+        if user_manifest is not None:
+            park = (
+                f'if mv "{self.armed}" "{self.armed}.taken" 2>/dev/null; then '
+                f': > "{self.ready}"; i=0; '
+                f'while [ ! -e "{self.release}" ] && [ "$i" -lt 1200 ]; '
+                "do sleep 0.05; i=$((i+1)); done; fi"
+            )
+            data = yaml.safe_load(user_manifest.read_text(encoding="utf-8"))
+            data["lifecycle"] = {
+                "pre-install": [{"type": "command", "bash": park, "timeout_sec": 120}]
+            }
+            user_manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
 
     def wait_parked(self, holder: _Run) -> None:
         deadline = time.monotonic() + _PARK_TIMEOUT
@@ -144,6 +161,14 @@ class _Park:
     def close(self) -> None:
         self.release.write_text("", encoding="ascii")
         self.world.env["PATH"] = self.saved_path
+
+    def disarm(self) -> None:
+        """Drop the park script from the user manifest (an input edit)."""
+        if self.user_manifest is None:
+            return
+        data = yaml.safe_load(self.user_manifest.read_text(encoding="utf-8"))
+        data.pop("lifecycle", None)
+        self.user_manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
 class _Run:
@@ -215,8 +240,9 @@ def run_pair(scenario: Scenario, holder: Writer, contender: Writer) -> tuple[Ste
     )
     req_contender, final, final_roots = _plan(scenario, after_holder, holder_roots, contender_args)
 
+    user_manifest = scenario.manifest_root / "apm.yml" if holder.scope == "user" else None
+    park = _Park(world, user_manifest)
     before = scenario.observe()
-    park = _Park(world)
     try:
         first = _Run(world, holder_args, holder.scope)
         park.wait_parked(first)
@@ -228,6 +254,7 @@ def run_pair(scenario: Scenario, holder: Writer, contender: Writer) -> tuple[Ste
     finally:
         park.close()
     after = scenario.observe()
+    park.disarm()
 
     # Serialization: the contender waited for the holder and said so.
     assert blocked, f"contender finished while the holder held the lock:\n{second.output()}"

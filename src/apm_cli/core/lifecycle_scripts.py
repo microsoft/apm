@@ -446,6 +446,17 @@ def _get_project_apm_yml(project_root: str | None = None) -> Path:
     return manifest_file(root)
 
 
+def _is_project_tier(project_yml: Path) -> bool:
+    """Whether *project_yml* is a project manifest rather than the user-scope one.
+
+    At user scope the command's manifest is ``$APM_HOME/apm.yml``, which the
+    user tier already loads; it is not a second, project tier.
+    """
+    from apm_cli.core.scope import is_user_scope_root
+
+    return not is_user_scope_root(project_yml.parent)
+
+
 def _load_scripts_from_dir(
     directory: Path,
     source: str,
@@ -472,7 +483,7 @@ def discover_scripts(
     """
     scripts = _discover_non_project_scripts(project_root)
     project_yml = _get_project_apm_yml(project_root)
-    if project_yml.is_file():
+    if project_yml.is_file() and _is_project_tier(project_yml):
         scripts.extend(parse_apm_yml_lifecycle(project_yml, "project"))
     return scripts
 
@@ -649,7 +660,7 @@ def build_runner_from_context(
     project_entries: list[ScriptEntry] = []
     project_fp: str | None = None
     try:
-        if project_yml.is_file():
+        if project_yml.is_file() and _is_project_tier(project_yml):
             project_entries, project_fp = parse_apm_yml_lifecycle_with_fingerprint(
                 project_yml, "project"
             )
