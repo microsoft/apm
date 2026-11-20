@@ -148,6 +148,7 @@ from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
+from apm_cli.policy.install_preflight import identity_policy_scope
 from apm_cli.policy.outcome_routing import discover_trust_policy
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
@@ -285,6 +286,7 @@ def _resolve_package_references(
     Returns the validation outcomes, manifest entries, and change state.
     """
     from ..install.registry_wiring import should_skip_github_probe_for_dep, validate_registry_ref
+    from ..policy.install_preflight import active_identity_policy, identity_policy_denial
 
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
@@ -443,7 +445,11 @@ def _resolve_package_references(
         verbose = bool(logger and logger.verbose)
         # Registry routing is authoritative: it validates its own version
         # selectors before git semver eligibility can defer the raw-ref probe.
-        if existing_source_is_registry or should_skip_github_probe_for_dep(
+        if identity_policy_denial(dep_ref, active_identity_policy()) is not None:
+            # Org policy refuses this identity: never contact its source; the
+            # install's policy gate reports the refusal.
+            package_accessible = True
+        elif existing_source_is_registry or should_skip_github_probe_for_dep(
             dep_ref, default_registry
         ):
             ref_ok, ref_err = validate_registry_ref(dep_ref)
@@ -524,6 +530,13 @@ def _resolve_package_references(
         _apm_yml_entries,
         dependencies_changed,
     )
+
+
+def _validate_and_add_under_identity_policy(no_policy, *args, **kwargs):
+    """Validate packages while a blocking org policy refuses denied identities unprobed."""
+    manifest_path = kwargs.get("manifest_path") or manifest_file(Path("."))
+    with identity_policy_scope(manifest_path.parent, no_policy=no_policy):
+        return _validate_and_add_packages_to_apm_yml(*args, **kwargs)
 
 
 def _validate_and_add_packages_to_apm_yml(
@@ -1517,7 +1530,8 @@ def install(  # noqa: PLR0913
         reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
         outcome = None
         if packages:
-            _validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
+            _validated_packages, outcome = _validate_and_add_under_identity_policy(
+                no_policy,
                 packages,
                 dry_run,
                 dev=dev,
