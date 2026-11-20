@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 498, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 513, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 731, '"--global"'),
     "compile": Ev(_COMPILE, 1391, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 102, '"--global"'),

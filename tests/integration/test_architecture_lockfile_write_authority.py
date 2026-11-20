@@ -62,8 +62,8 @@ _SUB_CHECK_MUTATIONS = (
     (
         "3-staging-route",
         "src/apm_cli/deps/lockfile.py",
-        "        staged = has_staged_lockfile(path)\n",
-        "        staged = None\n",
+        "        if (staged := has_staged_lockfile(path)) is not None:",
+        "        if (staged := None) is not None:",
         "read must call has_staged_lockfile",
     ),
     (

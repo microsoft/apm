@@ -193,11 +193,7 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
 
 
 def _same_document(current: str | None, serialized: str) -> bool:
-    """Whether the *current* lockfile text holds exactly the data *serialized* would write.
-
-    Only formatting may differ; a legacy layout the writer would migrate is a
-    different document and is rewritten.
-    """
+    """Whether *current* holds the data *serialized* would write; only formatting may differ."""
     from ..utils.yaml_io import load_yaml_str
 
     try:
@@ -1837,11 +1833,12 @@ class LockFile:
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None when the file does not exist."""
+        from ..core.deployment_ledger import DeploymentLedgerCodec
         from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
 
-        staged = has_staged_lockfile(path)
-        if staged is not None:  # a writer scope staged (or removed) this lockfile
-            return cls.from_yaml(staged_lockfile_text(path)) if staged else None
+        if (staged := has_staged_lockfile(path)) is not None:  # staged (or removed) by a writer
+            lock = cls.from_yaml(staged_lockfile_text(path)) if staged else None
+            return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
         if not path.exists() and not path.is_symlink():
             return None
         try:
@@ -1857,8 +1854,6 @@ class LockFile:
 
         # An explicit ``apm_version: null`` is unverifiable, unlike an absent one.
         warn_if_newer(path, "null" if lock._apm_version_null else lock.apm_version)
-        from ..core.deployment_ledger import DeploymentLedgerCodec
-
         return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
 
     @classmethod
