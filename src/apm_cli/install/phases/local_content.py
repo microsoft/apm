@@ -39,6 +39,7 @@ from pathlib import Path
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.virtual_file import materialize_virtual_file_package, virtual_file_subdirectory
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
@@ -154,7 +155,7 @@ def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> L
         local = selected.resolve(strict=True)
         if local.is_dir():
             if (
-                (local / "apm.yml").exists()
+                manifest_file(local).exists()
                 or (local / "SKILL.md").exists()
                 or find_plugin_json(local, include_codex=True) is not None
                 or has_marketplace_deployable_manifest(dep_ref)

@@ -128,9 +128,7 @@ class _DownloaderContext(Protocol):
         repo_url_base: str,
         *,
         use_ssh: bool = ...,
-        dep_ref: DependencyReference | None = ...,
-        token: str | None = ...,
-        auth_scheme: str = ...,
+        dep_ref: DependencyReference,
     ) -> str: ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
 
@@ -214,7 +212,6 @@ class CloneEngine:
                 repo_url_base,
                 use_ssh=candidate_uses_ssh,
                 dep_ref=dep_ref,
-                token="",
             )
             if dep_ref is not None
             else None
@@ -361,8 +358,6 @@ class CloneEngine:
                     repo_url_base,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
-                    auth_scheme="basic",
                 )
                 _clone(winning_url, git_env, target_path)
 
@@ -404,8 +399,6 @@ class CloneEngine:
                         repo_url_base,
                         use_ssh=use_ssh,
                         dep_ref=dep_ref,
-                        token="",
-                        auth_scheme=dep_auth_scheme if attempt.use_token else "basic",
                     )
                 except Exception as e:
                     last_error = e

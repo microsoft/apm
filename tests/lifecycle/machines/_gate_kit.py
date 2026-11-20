@@ -430,9 +430,12 @@ class GateMachine(RuleBasedStateMachine):
         )
 
     def gate_state(self, surface: str) -> str:
-        if self.policy == "org-deny-all":
+        # User scope has no git remote and is not governed by org policy
+        # (#4087): a policy seeded at HOME's remote must change nothing.
+        policy = self.policy if self.scope == "project" else "none"
+        if policy == "org-deny-all":
             return "org-deny-all"
-        if self.policy == "org-deny" and surface == "hook":
+        if policy == "org-deny" and surface == "hook":
             return "org-deny"
         decision = self.store_state.get(surface)
         return {"allow": "allow", "deny": "deny"}.get(decision or "", "pending")

@@ -92,8 +92,11 @@ def enforce_mcp_policy(
     )
     if not subjects and effective_target is None:
         return
+    from apm_cli.core.scope import manifest_root
+
     run_policy_preflight(
-        project_root=project_root,
+        # Org policy is discovered from the scope manifest ($APM_HOME under -g).
+        project_root=manifest_root(project_root, user_scope=user_scope),
         mcp_deps=subjects,
         mcp_brought_in_by=brought_in_by,
         no_policy=no_policy,

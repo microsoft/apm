@@ -159,7 +159,8 @@ class TestResolveDownloadStrategy:
         assert not skip_download
         logger.progress.assert_called()
 
-    def test_registry_enforce_only_skips_cached(self, tmp_path: Path) -> None:
+    def test_registry_enforce_only_skips_cached(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         from apm_cli.install.phases.integrate import _resolve_download_strategy
 
         ctx = _make_ctx(tmp_path)

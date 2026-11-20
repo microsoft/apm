@@ -8,6 +8,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
     GitLsRemoteError,
@@ -20,7 +22,7 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 def _yml_path() -> Path:
     """Return the active marketplace authoring config path in CWD."""
     cwd = Path.cwd()
-    apm_path = cwd / "apm.yml"
+    apm_path = manifest_file(cwd)
     legacy_path = cwd / "marketplace.yml"
 
     if _has_marketplace_block(apm_path):
@@ -33,7 +35,7 @@ def _yml_path() -> Path:
 def _ensure_yml_exists(logger: CommandLogger) -> Path:
     """Return the yml path or exit with guidance if it does not exist."""
     cwd = Path.cwd()
-    apm_path = cwd / "apm.yml"
+    apm_path = manifest_file(cwd)
     legacy_path = cwd / "marketplace.yml"
 
     if _has_marketplace_block(apm_path) and legacy_path.exists():
