@@ -43,7 +43,7 @@ pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX git shim"),
 ]
 
-_UPDATE = ("install", "--update", "--target", "copilot", "--no-policy")
+_UPDATE = ("install", "--update", "--target", "copilot")
 _RELEASE_HOST = "releases.example.invalid"
 _RELEASE_ENV = {"APM_RELEASE_METADATA_URL": f"https://{_RELEASE_HOST}/apm/latest.json"}
 
