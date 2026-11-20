@@ -1169,7 +1169,10 @@ def _assert_merge_group_full_lifecycle_path() -> None:
     assert step["env"][LIFECYCLE_SMOKE_E2E_ENV] == LIFECYCLE_SMOKE_E2E_VALUE
     assert "uv run ./scripts/test-integration.sh" in step["run"]
     script = MERGE_GROUP_INTEGRATION_SCRIPT.read_text(encoding="utf-8")
-    assert "pytest tests/integration/ -v" in script
+    # Without PYTEST_TARGETS the script runs the whole root; the merge group
+    # passes each shard's file list (guarded by the shard file-list drift test).
+    assert "target_args=(${PYTEST_TARGETS:-tests/integration/})" in script
+    assert 'python -m pytest "${target_args[@]}" -v' in script
 
 
 def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
