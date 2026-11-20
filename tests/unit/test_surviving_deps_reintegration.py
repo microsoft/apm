@@ -24,6 +24,7 @@ from apm_cli.models.apm_package import (
     surviving_dependency_refs_for_reintegration,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+from tests.utils.deployment_evidence import receipted_evidence
 
 pytestmark = [pytest.mark.unit]
 
@@ -115,6 +116,7 @@ def test_uninstall_warns_when_managed_hook_fails_containment(
         logger,
         user_scope=True,
         lockfile=LockFile(),
+        evidence=None,
     )
 
     assert logger.warning.call_args_list == [
@@ -325,6 +327,7 @@ def test_uninstall_phase2_reintegrates_transitive_hooks(
         set(),
         logger,
         lockfile=survivors,
+        evidence=None,
     )
 
     sidecar = tmp_path / ".claude" / "apm-hooks.json"
@@ -369,6 +372,7 @@ def test_uninstall_reintegration_blocks_hostile_nested_skill_before_target_write
         set(),
         MagicMock(),
         lockfile=lockfile,
+        evidence=None,
     )
 
     assert not (tmp_path / ".agents" / "skills" / "hostile").exists()
@@ -414,6 +418,7 @@ def test_uninstall_reintegration_preserves_user_scope_and_denies_bin_trust(
         MagicMock(),
         lockfile=lockfile,
         user_scope=True,
+        evidence=None,
     )
 
     from apm_cli.core.scope import InstallScope
@@ -495,6 +500,7 @@ def test_uninstall_survivor_rebuild_honors_package_target_restriction(
         set(),
         MagicMock(),
         lockfile=survivors,
+        evidence=None,
     )
 
     claude_sidecar = json.loads((tmp_path / ".claude/apm-hooks.json").read_text(encoding="utf-8"))
@@ -557,9 +563,11 @@ def test_uninstall_keeps_each_survivor_in_its_recorded_skill_layout(
     _sync_integrations_after_uninstall(
         APMPackage.from_apm_yml(tmp_path / "apm.yml"),
         tmp_path,
-        {f"{removed_root}/gone"},
+        {f"{removed_root}/gone", f"{removed_root}/gone/SKILL.md"},
         MagicMock(),
         lockfile=survivors,
+        # The removed skill was deployed by APM on this machine (#3701).
+        evidence=receipted_evidence(tmp_path / removed_root / "gone", deploy_root=tmp_path),
     )
 
     assert not (tmp_path / removed_root / "gone").exists()
@@ -608,6 +616,7 @@ def test_uninstall_rejects_invalid_survivor_before_wiping_hooks(
             set(),
             MagicMock(),
             lockfile=survivors,
+            evidence=None,
         )
 
     assert config.read_bytes() == config_bytes
@@ -691,6 +700,7 @@ def test_uninstall_rejects_undeployable_survivor_hooks_before_wiping(
             set(),
             MagicMock(),
             lockfile=survivors,
+            evidence=None,
         )
 
     assert {path: path.read_bytes() for path in known_good} == known_good
@@ -733,6 +743,7 @@ def test_uninstall_reports_survivor_hook_refusal_as_incomplete(tmp_path: Path) -
             modules_dir=tmp_path / "apm_modules",
             deployed_file_hashes={},
             default_counts={"hooks": 0},
+            evidence=None,
         )
 
     assert error is refusal
@@ -765,6 +776,7 @@ def test_uninstall_reports_org_policy_block_with_next_step(tmp_path: Path) -> No
             modules_dir=tmp_path / "apm_modules",
             deployed_file_hashes={},
             default_counts={"hooks": 0},
+            evidence=None,
         )
 
     assert error is refusal

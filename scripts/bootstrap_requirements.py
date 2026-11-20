@@ -20,7 +20,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPEC_PATH = REPO_ROOT / "docs" / "src" / "content" / "docs" / "specs" / "openapm-v0.1.md"
 MANIFEST_PATH = (
-    REPO_ROOT / "docs" / "public" / "specs" / "manifests" / "openapm-v0.1.requirements.yml"
+    REPO_ROOT
+    / "docs"
+    / "public"
+    / "specs"
+    / "manifests"
+    / "openapm-v0.1.requirements.yml"
 )
 
 ROW_RE = re.compile(
@@ -100,13 +105,13 @@ HEADER = """\
 
 def emit_manifest(rows: list[dict]) -> str:
     lines: list[str] = [HEADER]
-    lines.append('requirements_format_version: "1"')
-    lines.append('spec_version: "v0.1"')
+    lines.append("requirements_format_version: \"1\"")
+    lines.append("spec_version: \"v0.1\"")
     lines.append("requirements:")
     for row in rows:
         lines.append(f"  - id: {row['id']}")
         lines.append(f"    keyword: {row['keyword']}")
-        lines.append(f'    section: "{row["section"]}"')
+        lines.append(f"    section: \"{row['section']}\"")
         lines.append(f"    conformance_class: {row['conformance_class']}")
     lines.append("")  # trailing newline
     return "\n".join(lines)

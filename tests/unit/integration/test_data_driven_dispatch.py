@@ -21,6 +21,7 @@ from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ------------------------------------------------------------------
 # Helpers
@@ -469,6 +470,7 @@ class TestSyntheticTargetProfile:
             apm_package,
             self.root,
             managed_files=managed,
+            evidence=receipted_evidence(self.root),
         )
 
         # The .newcode files should be removed
