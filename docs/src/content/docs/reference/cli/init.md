@@ -26,10 +26,8 @@ does not copy, translate, or execute their content. Add `--apply` (or `--write`)
 to merge missing local package references into `apm.yml`; `--apply` implies
 `--discover`.
 
-The legacy `--plugin` and `--marketplace` flags (which scaffold a
-plugin or marketplace authoring block alongside `apm.yml`) are
-deprecated but still accepted; use [`apm plugin init`](../plugin/)
-and [`apm marketplace init`](../marketplace/) instead.
+To scaffold a plugin, use [`apm plugin init`](../plugin/); to add a
+marketplace authoring block, use [`apm marketplace init`](../marketplace/).
 
 ## Arguments
 
@@ -46,8 +44,6 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `--format text\|json\|yaml` | `text` | Select discovery report format. Used with `--discover`. |
 | `--apply`, `--write` | off | Run discovery, then create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Implies `--discover`. Requires consent unless `--yes` is set. |
 | `-g`, `--global` | off | Discover user-scope packages. Applied local references use installer-compatible absolute or home-rooted paths, not project-relative paths. |
-| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name: 1-64 lowercase letters, digits, dots, or hyphens; must start and end with a letter or digit, with no `..` or `--`. |
-| `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
 | `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and the explicit-only `hermes` and `grok-bot`; `all` expands the default stable set. |
 | `--name` | directory name | Project name written to `apm.yml` for in-place init. Same rules as `PROJECT_NAME`. Ignored, with a warning, when `PROJECT_NAME` is given. |
 | `--description` | auto-detected | Project description written to `apm.yml`. |
@@ -139,9 +135,7 @@ the author and target harness remain responsible for compliance.
 
 ## Behavior
 
-- **Plain init files created:** `apm.yml` always. `plugin.json` when `--plugin` is
-  set. The `marketplace:` block is appended to `apm.yml` when
-  `--marketplace` is set.
+- **Plain init files created:** `apm.yml` only.
 - **Auto-detected fields:**
   - `name` -- from `PROJECT_NAME` or the current directory name. Falls back
     to `my-project` if the derived name is invalid (filesystem roots and
@@ -197,15 +191,14 @@ the author and target harness remain responsible for compliance.
   Invalid option combinations, including `--discover --target` and
   `--discover` with a metadata flag, exit `2`.
 
-## Deprecations
+## Removed flags
 
-The `--plugin` and `--marketplace` flags are deprecated but remain
-functional for compatibility. Each invocation prints a one-line warning
-to stderr pointing at the replacement command (`apm plugin init` or
-`apm marketplace init`). Migrate to:
+`apm init --plugin` and `apm init --marketplace` were removed in 0.37.
+Both exit `2` without writing anything and name the replacement:
 
-- [`apm plugin init`](../plugin/) -- replaces `apm init --plugin`.
-- [`apm marketplace init`](../marketplace/) -- replaces
+- [`apm plugin init`](../plugin/) replaces `apm init --plugin`, including
+  `--version`, `--author` and `--description`.
+- [`apm marketplace init`](../marketplace/) replaces
   `apm init --marketplace`.
 
 ## Related

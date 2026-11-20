@@ -125,17 +125,9 @@ def _option_targets_or_exit(target_flag, logger):
 @click.option(
     "--yes", "-y", is_flag=True, help="Skip interactive prompts and use auto-detected defaults"
 )
-@click.option(
-    "--plugin",
-    is_flag=True,
-    help="(deprecated) Use 'apm plugin init' instead. Scaffolds plugin.json + apm.yml.",
-)
-@click.option(
-    "--marketplace",
-    "marketplace_flag",
-    is_flag=True,
-    help="(deprecated) Use 'apm marketplace init' instead. Seeds a marketplace block.",
-)
+# Removed in 0.37 (#4073): hidden stubs that name the replacement and exit 2.
+@click.option("--plugin", is_flag=True, hidden=True)
+@click.option("--marketplace", "marketplace_flag", is_flag=True, hidden=True)
 @click.option(
     "--target",
     "target_flag",
@@ -152,7 +144,7 @@ def _option_targets_or_exit(target_flag, logger):
 @click.option(
     "--version",
     default=None,
-    help="Project version (default: 1.0.0, or 0.1.0 with --plugin --yes)",
+    help="Project version (default: 1.0.0)",
 )
 @click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
@@ -186,25 +178,17 @@ def init(
     can produce a finished manifest. Outside --yes they seed the prompt
     defaults rather than being discarded.
 
-    Producers: prefer 'apm plugin init' (plugin scaffold) or
-    'apm marketplace init' (marketplace block). The --plugin and
-    --marketplace flags on 'apm init' are kept for backward
-    compatibility and will be removed in v0.16.
+    Producers: use 'apm plugin init' (plugin scaffold) or
+    'apm marketplace init' (marketplace block).
     """
+    _refuse_removed_init_flags(plugin=plugin, marketplace=marketplace_flag)
     if write:
         discover_flag = True
     if discover_flag:
         metadata_flags = (name, description, version, author)
-        if (
-            project_name
-            or plugin
-            or marketplace_flag
-            or target_flag
-            or any(flag is not None for flag in metadata_flags)
-        ):
+        if project_name or target_flag or any(flag is not None for flag in metadata_flags):
             raise click.UsageError(
-                "--discover cannot scaffold a name/plugin/marketplace, set project "
-                "metadata, or select targets."
+                "--discover cannot scaffold a name, set project metadata, or select targets."
             )
         run_discover(
             write=write, output_format=output_format, global_=global_, yes=yes, verbose=verbose
@@ -216,8 +200,6 @@ def init(
         ctx,
         project_name,
         yes,
-        plugin,
-        marketplace_flag,
         target_flag,
         verbose,
         name=name,
@@ -227,12 +209,25 @@ def init(
     )
 
 
+def _refuse_removed_init_flags(*, plugin: bool, marketplace: bool) -> None:
+    """Refuse the flags removed in 0.37, naming the replacement (#4073)."""
+    replacements = (
+        ("--plugin", "apm plugin init", plugin),
+        ("--marketplace", "apm marketplace init", marketplace),
+    )
+    for flag, command, used in replacements:
+        if used:
+            click.echo(
+                f"[x] 'apm init {flag}' was removed in 0.37. Run: {command}",
+                err=True,
+            )
+            raise SystemExit(2)
+
+
 def _init_scaffold(
     ctx,
     project_name,
     yes,
-    plugin,
-    marketplace_flag,
     target_flag,
     verbose,
     *,
@@ -242,25 +237,10 @@ def _init_scaffold(
     author: str | None = None,
 ):
     """Keep the pre-existing init flow serialized, outside read-only discovery."""
-    # Soft deprecation warnings -- legacy flags still work.
-    if plugin:
-        click.echo(
-            "[!] 'apm init --plugin' is deprecated. Run: apm plugin init",
-            err=True,
-        )
-        click.echo("    Legacy flag will be removed in v0.16.", err=True)
-    if marketplace_flag:
-        click.echo(
-            "[!] 'apm init --marketplace' is deprecated. Run: apm marketplace init",
-            err=True,
-        )
-        click.echo("    Legacy flag will be removed in v0.16.", err=True)
-
     _perform_init(
         project_name=project_name,
         yes=yes,
-        plugin=plugin,
-        marketplace_flag=marketplace_flag,
+        plugin=False,
         target_flag=target_flag,
         name=name,
         description=description,
@@ -276,7 +256,6 @@ def _perform_init(
     project_name,
     yes,
     plugin,
-    marketplace_flag,
     target_flag,
     verbose,
     name: str | None = None,
@@ -464,27 +443,6 @@ def _perform_init(
             if plugin:
                 _create_plugin_json(config, mode=effective_plugin_mode)
 
-        # Append marketplace authoring block when requested.
-        if marketplace_flag:
-            from ..marketplace.init_template import render_marketplace_block
-
-            apm_yml_path = Path.cwd() / APM_YML_FILENAME
-            try:
-                existing = apm_yml_path.read_text(encoding="utf-8")
-                if not existing.endswith("\n"):
-                    existing += "\n"
-                # Owner is intentionally left to the template default
-                # (acme-org placeholder). Deriving it from the project
-                # name produced misleading https://github.com/<project>
-                # URLs; the user is expected to edit the placeholder.
-                block = render_marketplace_block()
-                apm_yml_path.write_text(existing + "\n" + block, encoding="utf-8")
-            except OSError as exc:
-                logger.warning(
-                    f"Failed to append marketplace block to apm.yml: {exc}",
-                    symbol="warning",
-                )
-
         logger.success("APM project initialized successfully!")
 
         # Display created file info
@@ -515,8 +473,6 @@ def _perform_init(
         #   * ``apm init`` (consumer)  teaches the noun-verb namespace
         #     (apm plugin init / apm marketplace init).
         #   * ``apm plugin init``      shows plugin-author next steps.
-        #   * ``apm init --marketplace`` (deprecated) reuses plugin guidance
-        #     when --plugin was also supplied; otherwise consumer guidance.
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
