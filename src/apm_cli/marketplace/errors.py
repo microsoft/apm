@@ -96,28 +96,37 @@ class MarketplaceOriginConflictError(MarketplaceError):
     def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
         import shlex
 
+        from ..utils.diagnostics import printable_ascii_text
         from .source_identity import parse_marketplace_source
 
         self.marketplace_name = marketplace_name
         self.plugin_name = plugin_name
         self.locked_origin = locked
         self.current_origin = current
+        # The locked origin is lock-file data: render it as printable ASCII and
+        # advise restoring the lock before re-registering what it names.
+        shown_locked = printable_ascii_text(locked)
+        shown_current = printable_ascii_text(current)
         try:
+            if shown_locked != locked:
+                raise ValueError(locked)
             parse_marketplace_source(locked)
         except ValueError:
-            restore = (
-                "To keep the locked marketplace, register its origin again with "
+            keep = (
+                "Otherwise, verify the locked source, then register it again with "
                 f"'apm marketplace add' under the name {marketplace_name!r}."
             )
         else:
-            restore = MARKETPLACE_ORIGIN_RESTORE.bind(
+            remedy = MARKETPLACE_ORIGIN_RESTORE.bind(
                 source=shlex.quote(locked), name=shlex.quote(marketplace_name)
-            ).sentence()
+            )
+            keep = f"Otherwise, {remedy.clause()}."
         switch = MARKETPLACE_ORIGIN_SWITCH.bind(plugin=repr(plugin_name)).clause()
         super().__init__(
-            f"marketplace {marketplace_name!r} now points at {current}, but apm.lock.yaml "
-            f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
-            f"To switch marketplaces on purpose, {switch}."
+            f"marketplace {marketplace_name!r} now points at {shown_current}, but apm.lock.yaml "
+            f"recorded {plugin_name!r} from {shown_locked}. Nothing was changed. "
+            "If apm.lock.yaml was not changed on purpose, restore it from version control. "
+            f"{keep} To switch marketplaces on purpose, {switch}."
         )
 
 

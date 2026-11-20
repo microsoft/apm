@@ -297,6 +297,9 @@ def test_update_restores_or_refuses_altered_marketplace_provenance(
     else:
         assert "[x]" in _output(update), _output(update)
         assert lock_path.read_bytes() == altered
+    if (field, edit) == ("source_url", "tamper"):
+        # A tampered origin is advised as a lock to restore, not a source to re-register.
+        assert "restore it from version control" in _output(update), _output(update)
     # Paired probe: install --frozen and audit --ci agree on the resulting state.
     frozen = run("install", "--frozen", "--target", "codex", "--parallel-downloads", "0")
     audit = run("audit", "--ci", "--no-policy")

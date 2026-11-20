@@ -93,6 +93,15 @@ def test_conflict_remediation_quotes_the_locked_origin() -> None:
     assert "run: apm marketplace add" not in unsafe or "'https://x/$(rm)'" in unsafe
 
 
+def test_conflict_advice_restores_the_lock_first_and_renders_origins_as_ascii() -> None:
+    message = str(MarketplaceOriginConflictError("company", "plugin", _A, _B))
+    restore = message.index("restore it from version control")
+    assert restore < message.index("verify that source first, then run 'apm marketplace add")
+    escaped = str(MarketplaceOriginConflictError("company", "plugin", "https://x/\x1b[31m", "\x07"))
+    assert escaped.isascii() and "\x1b" not in escaped and "\x07" not in escaped
+    assert "apm marketplace add https://x" not in escaped
+
+
 def test_row_level_check_refuses_a_rebound_alias_and_accepts_legacy_rows(registered) -> None:
     """``apm outdated`` checks the row it already holds through the same owner (#3959)."""
     registered(_B)
