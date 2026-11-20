@@ -157,16 +157,20 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
     check_skills_root_derivation,
 )
 from scripts.architecture_linter.checks.install_trust_integrity import (
+    GUARD_BUNDLE_ADMISSION,
     GUARD_BUNDLE_USER_SCOPE_ROOT,
     GUARD_LOCAL_BUNDLE_HOOK_TRUST,
     GUARD_TRUST_POLICY_OUTCOME,
     GUARD_UNPACK_EXECUTABLES,
     GUARD_UPDATE_CONTENT_INTEGRITY,
+    GUARD_UPDATE_REGISTRY_INTEGRITY,
+    check_bundle_admission_owner,
     check_bundle_user_scope_root,
     check_local_bundle_hook_trust,
     check_trust_policy_outcome,
     check_unpack_executable_refusal,
     check_update_content_integrity,
+    check_update_registry_integrity,
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
@@ -220,6 +224,11 @@ RULES: tuple[Rule, ...] = (
         check_update_content_integrity,
     ),
     _rule(
+        GUARD_UPDATE_REGISTRY_INTEGRITY,
+        "apm update verifies an unchanged registry version against its locked hash.",
+        check_update_registry_integrity,
+    ),
+    _rule(
         GUARD_BUNDLE_USER_SCOPE_ROOT,
         "apm install -g <bundle> keeps its lock and grants under APM_HOME.",
         check_bundle_user_scope_root,
@@ -233,6 +242,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_UNPACK_EXECUTABLES,
         "apm unpack refuses executable content before any write.",
         check_unpack_executable_refusal,
+    ),
+    _rule(
+        GUARD_BUNDLE_ADMISSION,
+        "Every bundle deploy entry point admits and records through the shared bundle owners.",
+        check_bundle_admission_owner,
     ),
     _rule(
         _GUARD_SINGLE_FILE,

@@ -1911,8 +1911,9 @@
       "keyword": "MUST",
       "section": "10.14",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_hook_pin_parity_reqs.py::test_frozen_install_and_audit_agree_on_a_hook_approval_pin",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_resolve_executable_trust_through_deny_wins_precedence",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_frozen_install_reaches_the_install_verdict"
       ]
