@@ -1302,6 +1302,7 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
         (("deps", "list"), "+------+\n|  a   |\n+------+\n+------+\n", 0, _APM),
         (("install",), "[>] Resolving \n/tmp/work/a...\n[>] Resolving \n/tmp/work/b...\n", 0, _APM),
         (("audit", "--json"), '{"ok": true}\n', 3, ("/opt/bin/apm",)),
+        (("audit", "--format", "json", "--output", "r.json"), "[+] wrote r.json\n", 0, _APM),
         (("audit", "--json"), "", 2, _APM),
         (
             ("--version",),
@@ -1388,3 +1389,18 @@ def test_known_output_cells_are_well_formed() -> None:
         assert re.fullmatch(r"#[1-9][0-9]*", cell.issue), cell.id
         re.compile(cell.message)
         re.compile(cell.output)
+
+
+def test_output_oracle_does_not_join_a_plain_line_after_a_short_status_line() -> None:
+    stdout = "[!] Policy off.\nPhase: gate\n[i] a\n[!] Policy off.\nPhase: mcp\n"
+    found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
+    assert found == ["stdout repeats a diagnostic: '[!] Policy off.'"]
+
+
+def test_output_oracle_allows_non_ascii_characters_of_the_test_own_path() -> None:
+    world = Path("/tmp/iso w\u00f6rld \u00e9/work")
+    echo = CommandResult((*_APM, "install"), 0, f"[*] Updated {world}/apm.yml\n", "", world)
+    check_cli_output(("install",), echo)
+    product = CommandResult((*_APM, "install"), 0, "[+] done \u2713\n", "", world)
+    with pytest.raises(OutputOracleError, match=r"I6: stdout has characters outside"):
+        check_cli_output(("install",), product)
