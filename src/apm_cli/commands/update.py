@@ -530,11 +530,28 @@ def _parked_local_bundles(scope: Any, apm_package: Any) -> list[tuple[str, tuple
     ]
 
 
+def _no_ref_change_summary(exec_reconciled: bool, provenance_restored: bool) -> str:
+    """The success line of an update that reconciled state without moving a ref."""
+    if exec_reconciled:
+        return "Reconciled executables without changing refs."
+    if provenance_restored:
+        return "Recorded restored marketplace provenance without changing refs."
+    return "Restored dependency cache without changing refs."
+
+
 def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
-    """Re-verify locked marketplace provenance before planning; fail closed (#4228)."""
-    from apm_cli.marketplace.catalog_origin import reverify_locked_provenance
+    """Re-verify locked marketplace provenance before planning; fail closed (#4228).
+
+    Returns ``(lockfile, restored)``: the lockfile with restored rows applied
+    in memory, and their provenance for the lockfile phase. The update's one
+    lockfile write records it (``LockfileBuilder`` via
+    ``marketplace_provenance``, #4430); a failed update writes nothing.
+    """
+    from apm_cli.marketplace.catalog_origin import locked_provenance, reverify_locked_provenance
     from apm_cli.marketplace.errors import MarketplaceError
 
+    rows = lockfile.dependencies if lockfile is not None else {}
+    before = {key: locked_provenance(dep) for key, dep in rows.items()}
     try:
         restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
     except MarketplaceError as exc:
@@ -542,12 +559,11 @@ def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
         sys.exit(1)
     for row in restored:
         logger.info(f"Restored marketplace provenance for {row} from its catalog.")
-    if restored and not dry_run:
-        from apm_cli.deps.lockfile_write_authority import provisional_lockfile_writes
-
-        with provisional_lockfile_writes():
-            lockfile.write(lock_path)
-    return lockfile
+    return lockfile, {
+        key: current
+        for key, dep in rows.items()
+        if (current := locked_provenance(dep)) != before.get(key)
+    }
 
 
 @click.command(
@@ -939,7 +955,7 @@ def _run_dep_update_locked(
                     "Executables approvals changed since the last install; "
                     "reconciling deployed executables."
                 )
-            elif not _cache_rehydration_required:
+            elif not _cache_rehydration_required and not _restored_provenance:
                 retained_count = len(revision_pin_resolution.skips)
                 if retained_count:
                     noun = "pin" if retained_count == 1 else "pins"
@@ -992,7 +1008,9 @@ def _run_dep_update_locked(
     _modules_dir = get_modules_dir(scope)
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
-    _existing_lock = _reverified_lock(LockFile.read(_lock_path), _lock_path, logger, dry_run)
+    _existing_lock, _restored_provenance = _reverified_lock(
+        LockFile.read(_lock_path), _lock_path, logger, dry_run
+    )
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
@@ -1021,6 +1039,7 @@ def _run_dep_update_locked(
             parallel_downloads=parallel_downloads,
             logger=logger,
             plan_callback=_plan_callback,
+            marketplace_provenance=_restored_provenance or None,
             target=target,
             legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
@@ -1143,9 +1162,7 @@ def _run_dep_update_locked(
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif plan_state.cache_rehydration_requested and installed:
             logger.success(
-                "Reconciled executables without changing refs."
-                if _exec_reconcile_required
-                else "Restored dependency cache without changing refs.",
+                _no_ref_change_summary(_exec_reconcile_required, bool(_restored_provenance)),
                 symbol="check",
             )
         elif revision_pin_updates:
