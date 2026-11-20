@@ -91,6 +91,8 @@ def _row_document(row: covering.Row) -> dict[str, object]:
             fields["exit"] = step.exit
         if step.message is not None:
             fields["message"] = step.message
+        if step.known is not None:
+            fields["known"] = {"tracking": step.known[0], "fixed": step.known[1]}
         if step.cells:
             fields["cells"] = list(step.cells)
             if step.unchanged:
@@ -164,6 +166,13 @@ def generate() -> tuple[str, dict[str, str]]:
     witness = {
         cell: WITNESS.format(row.id) for row in rows for step in row.steps for cell in step.cells
     }
+    known_rows = {
+        cell: (WITNESS.format(row.id), step.known[0])
+        for row in rows
+        for step in row.steps
+        if step.known
+        for cell in step.fixed
+    }
     machines = machine_witnesses(space.obligations)
     scenarios = scenario_witnesses(
         space.obligations, {key: lane_for(entry) for key, entry in space.obligations.items()}
@@ -173,7 +182,10 @@ def generate() -> tuple[str, dict[str, str]]:
         entry = space.obligations[key]
         record: dict[str, object] = {"family": entry.family, "strength": entry.strength}
         machine = machines.get(key)
-        if key in witness:
+        if key in known_rows:
+            statuses[key], lanes[key] = "known-failing", OWN_LANE
+            record["witness"], record["tracking"] = known_rows[key]
+        elif key in witness:
             statuses[key], lanes[key] = "required", OWN_LANE
             record["witness"] = witness[key]
         elif machine is not None:

@@ -88,6 +88,9 @@ class CoveringReplay(RowReplay):
         # ``unchanged`` evidence still prove it wrote nothing.
         self._refusal = isinstance(step, Mapping) and "exit" in step
         cells = step.get("cells", ()) if isinstance(step, Mapping) else ()
+        if isinstance(step, Mapping) and "known" in step:
+            self._known_step(step)
+            return
         if not cells:
             super().step(step)
             return
@@ -104,6 +107,23 @@ class CoveringReplay(RowReplay):
         for cell in cells:
             credit(cell, before, after, self.last, unchanged, scope=self.row.scope)
             self.credited.append(cell)
+
+    def _known_step(self, step: Mapping[str, object]) -> None:
+        """A strict known cell: the defect's message still shows, the fixed output does not.
+
+        It earns no receipt. When the fixed output appears the cell fails, so
+        the expectation and its known-failing status must be removed.
+        """
+        known = step["known"]
+        super().step(step)
+        output = f"{self.last.stdout}\n{self.last.stderr}"
+        assert not re.search(known["fixed"], output), (
+            f"strict known cell {known['tracking']}: {step['run']!r} now prints the fixed "
+            "output; remove the known cell"
+        )
+        assert re.search(step["message"], output), (
+            f"strict known cell {known['tracking']}: {step['run']!r} changed its output:\n{output}"
+        )
 
     def _requested(self, args: tuple[str, ...]):
         """``install --mcp`` declares a server and a refusal is a new request: neither repeats."""

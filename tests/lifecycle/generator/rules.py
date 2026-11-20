@@ -317,6 +317,12 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
     LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
 }
+# Refusal rule cells whose current message is a defect: (tracking issue, a regex
+# the fixed output matches). The cell is known-failing until that output appears.
+RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {
+    # The message says there is nothing to update while a local bundle is installed.
+    LOCAL_BUNDLE_REFUSALS["update"]: ("#4318", r"p-exec"),
+}
 
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {

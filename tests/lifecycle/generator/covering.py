@@ -30,6 +30,7 @@ from tests.lifecycle.generator.factors import (
 from tests.lifecycle.generator.rules import (
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
+    RULE_CELL_KNOWN,
     RULE_CELL_REFUSALS,
     UNINSTALL_MCP_REFUSALS,
 )
@@ -80,6 +81,7 @@ class Step:
     fixed: tuple[str, ...] = ()  # refusal and rule cells this step witnesses
     unchanged: tuple[str, ...] = ()
     message: str | None = None  # pinned refusal message (a regex over the output)
+    known: tuple[str, str] | None = None  # (tracking issue, regex of the fixed output)
     cells: tuple[str, ...] = ()  # credited cells, filled by ``cover``
 
 
@@ -564,14 +566,16 @@ _NOT_A_CATALOG = "https://github.com/lifecycle/p-skill"
 
 def _refusal(line: str, op: str, cell: str) -> Step:
     exit_code, message = RULE_CELL_REFUSALS[cell]
+    known = RULE_CELL_KNOWN.get(cell)
     return Step(
         line,
         op,
         exit=exit_code,
         fixed=(cell,),
         unchanged=EVERYTHING,
-        cells=(cell,),
+        cells=() if known else (cell,),
         message=message,
+        known=known,
     )
 
 
