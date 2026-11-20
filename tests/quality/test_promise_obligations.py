@@ -429,5 +429,9 @@ def test_generated_witnesses_match_the_collected_tables_and_journeys() -> None:
         check=False,
         timeout=300,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "[+] up to date:" in result.stdout, result.stdout
+    fix = (
+        "generated_obligations.json is stale: run "
+        "`python -m tests.lifecycle.witnesses --write` and commit generated_obligations.json"
+    )
+    assert result.returncode == 0, f"{fix}\n{result.stdout}{result.stderr}"
+    assert "[+] up to date:" in result.stdout, f"{fix}\n{result.stdout}"
