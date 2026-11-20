@@ -51,6 +51,7 @@
     "P-OWN-cached-policy-shape": "architecture owner (contracts-tooling.json): Cached policy shape and the APM_POLICY_DISABLE switch reader",
     "P-OWN-catalog-only-marketplace-manifest": "architecture owner (marketplace-plugins.json): Catalog-only marketplace manifest materialization",
     "P-OWN-ci-audit-scratch-materialization": "architecture owner (install-deployment.json): CI audit scratch materialization and whether a workspace needs live package materialization",
+    "P-OWN-ci-validation-topology": "architecture owner (contracts-tooling.json): Merge-time validation topology: which merge_group jobs produce every merge-gate.yml merge_group EXPECTED_CHECKS name, how ci-integration.yml shards the merge-time integration corpus, and the alarm that fails when main moves without a merge_group run",
     "P-OWN-claude-mcp-config-paths": "architecture owner (hooks-integrations.json): Claude user-scope MCP config path",
     "P-OWN-claude-native-plugin-registration": "architecture owner (marketplace-plugins.json): Intact Claude plugin admission, lockfile-derived native ownership (native_plugin records), deployment to ~/.agents/plugins, and settings-only declaration through the shared native settings writer without any vendor CLI",
     "P-OWN-cli-startup-import-budget": "architecture owner (core-runtime.json): CLI startup (apm --help / --version) imports no command module and no GitPython; root verbs register as lazy stubs and deps exports resolve lazily",
