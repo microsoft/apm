@@ -857,7 +857,7 @@ class TestExecuteRuntimeCommandResolution:
     def setup_method(self):
         self.runner = ScriptRunner()
 
-    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=r"C:\npm\copilot.cmd")
     def test_resolves_executable(self, mock_find_runtime, mock_run):
         """The executable should be resolved via find_runtime_binary on all platforms."""
@@ -871,7 +871,7 @@ class TestExecuteRuntimeCommandResolution:
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == r"C:\npm\copilot.cmd"
 
-    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
     def test_keeps_original_when_find_returns_none(self, mock_find_runtime, mock_run):
         """If find_runtime_binary can't find it, keep the original name."""
@@ -882,7 +882,7 @@ class TestExecuteRuntimeCommandResolution:
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == "copilot"
 
-    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
     def test_resolves_on_non_windows(self, mock_find_runtime, mock_run):
         """find_runtime_binary should be called on all platforms, not just Windows."""

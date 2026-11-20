@@ -615,7 +615,7 @@ class TestErrorHandling:
 
             with (
                 patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
-                patch("apm_cli.deps.github_downloader.time.sleep"),
+                patch("apm_cli.deps.download_strategies._backoff_sleep"),
             ):
                 mock_get.return_value = mock_response_403
 
@@ -641,7 +641,7 @@ class TestErrorHandling:
 
             with (
                 patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
-                patch("apm_cli.deps.github_downloader.time.sleep"),
+                patch("apm_cli.deps.download_strategies._backoff_sleep"),
             ):
                 mock_get.return_value = mock_response_403
 
@@ -686,7 +686,7 @@ class TestErrorHandling:
 
             with (
                 patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
-                patch("apm_cli.deps.github_downloader.time.sleep"),
+                patch("apm_cli.deps.download_strategies._backoff_sleep"),
             ):
                 mock_get.side_effect = [mock_response_403, mock_response_200]
 
