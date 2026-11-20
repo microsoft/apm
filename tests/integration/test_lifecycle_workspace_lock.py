@@ -264,8 +264,12 @@ def test_install_serializes_other_lifecycle_commands(
     expected_install_exit = 1 if "--frozen" in install_args else 0
     assert install.returncode == expected_install_exit, (install_stdout, install_stderr)
     assert contender.returncode in {0, 1}, (contender_stdout, contender_stderr)
-    if contender_args[0] == "deny":
-        assert "missing:" in manifest.read_text(encoding="ascii")
+    if contender_args[0] in {"approve", "deny"}:
+        # A decision that matches no installed package is refused and recorded
+        # nowhere (#4189), after the contender waited for the install's lock.
+        assert contender.returncode == 1, (contender_stdout, contender_stderr)
+        assert "missing: not found in installed packages" in contender_stdout + contender_stderr
+        assert manifest.read_text(encoding="ascii") == original_manifest
     elif contender_args[:2] == ("lifecycle", "init"):
         assert "lifecycle:" in manifest.read_text(encoding="ascii")
     elif contender_args[:2] == ("marketplace", "init"):
