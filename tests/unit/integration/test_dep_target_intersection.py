@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core import remediation
 from apm_cli.core.errors import ConflictingTargetsError
 from apm_cli.hook_contract import HookContractError
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
@@ -300,7 +301,7 @@ def test_reconcile_failure_diagnostic_names_target_and_config(tmp_path: Path) ->
     warning = diagnostics.by_category()[CATEGORY_WARNING][0]
     assert warning.message == "Could not fully reconcile hooks excluded by target restrictions"
     assert warning.detail == (
-        "targets: [cursor]; configs: [.cursor/hooks.json]; run apm install again"
+        f"targets: [cursor]; configs: [.cursor/hooks.json]; {remediation.RETRY_INSTALL.clause()}"
     )
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core import remediation
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.policy.ci_checks import (
     _check_config_consistency,
@@ -998,8 +999,8 @@ class TestConfigConsistency:
         result = _check_config_consistency(manifest, lock)
         assert not result.passed
         assert any("my-server" in d and "differs" in d for d in result.details)
-        assert "repeat 'apm install' with the intended selection" in result.message
-        assert "'--only apm' for skills-only" in result.message
+        assert remediation.MCP_CONFIG_MISMATCH.clause() in result.message
+        assert result.remediations == (remediation.MCP_CONFIG_MISMATCH,)
 
     def test_genuine_orphan_mcp_still_flagged(self, tmp_path):
         """Provenance must not mask a real orphan (server absent from manifest

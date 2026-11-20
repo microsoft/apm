@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core import remediation
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.errors import FrozenInstallError, frozen_install_tip
@@ -87,7 +88,7 @@ def test_frozen_recovery_preserves_selected_install_scope(
     reasons: list[str], lock_state: str
 ) -> None:
     tip = frozen_install_tip(FrozenInstallError("Cannot replay", reasons=reasons))
-    assert "rerun 'apm install' without --frozen" in tip
+    assert remediation.REPAIR_LOCK_STATE.bind(lock_state=lock_state).clause() in tip
     assert lock_state in tip
     assert "--root DIR or --global" in tip
     assert "apm update" not in tip

@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import RECORD_DEPLOYED_FILES
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._target_compile_kit import Scenario, output, write, write_package
@@ -51,7 +52,7 @@ _OLD_RENDERINGS = {
         '[ext](https://example.com/x.md) and [anchor](#top)."\n'
     ),
 }
-_REMEDY = "Rerun 'apm install' without --frozen"
+_REMEDY = RECORD_DEPLOYED_FILES.sentence()
 
 
 def _git(cwd: Path, env: dict[str, str], *args: str) -> str:

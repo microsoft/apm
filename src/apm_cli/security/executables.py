@@ -851,7 +851,7 @@ def prompt_executable_approval(
             provenance = "(transitive)" if decl.is_transitive else "(direct)"
             _rich_echo(f"  {decl.package_key} {provenance}: {decl.summary_line()}")
         _rich_echo("")
-        _rich_info(trust_remedy("<package>", recommend), symbol="info")
+        _rich_info(trust_remedy("<package>", recommend), symbol="info", soft_wrap=True)
         sys.exit(1)
 
     # Interactive: prompt per-package

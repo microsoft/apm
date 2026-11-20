@@ -529,6 +529,37 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 3994,
+      "fixed_in": "0.37.0",
+      "summary": "Drift advice offered a plain 'apm install', which keeps a locally edited managed file, as the restore; install --frozen help omitted its deployed-hash check; init --apply demanded --discover.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/install/test_local_edit_hint.py::TestDriftTextHint::test_modified_findings_add_export_hint",
+        "tests/integration/test_remediation_proofs_drift.py::test_drift_restore_edited",
+        "tests/unit/test_install_command.py::TestAllowInsecureFlag::test_install_help_describes_transport_and_frozen_identity",
+        "tests/unit/test_init_command.py::TestInitMetadataFlags::test_apply_implies_discover",
+        "tests/integration/test_architecture_owner_rule_mutations.py::test_owner_rule_catches_its_guard_mutation"
+      ]
+    },
+    {
+      "issue": 4090,
+      "fixed_in": "0.37.0",
+      "summary": "Remediation advice was free text with no proof it cleared the reported state; executing each advised command found frozen, managed-path and cache-clean advice that did not.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/core/test_remediation_catalog.py::test_every_catalog_entry_has_exactly_one_executed_proof",
+        "tests/integration/test_remediation_advice_lifecycle.py::test_audit_remediation_clears_the_reported_check",
+        "tests/integration/test_remediation_proofs_audit.py::test_audit_check_remediation_clears_the_reported_check",
+        "tests/integration/test_remediation_proofs_drift.py::test_drift_resync_clears_kind",
+        "tests/integration/test_remediation_proofs_drift.py::test_drift_unrecorded",
+        "tests/integration/test_remediation_proofs_drift.py::test_drift_resync_after_conflict",
+        "tests/integration/test_remediation_proofs_frozen.py::test_frozen_refresh_lock",
+        "tests/integration/test_remediation_proofs_install.py::test_clean_download_cache"
+      ]
     }
   ],
   "lifecycle_contracts": [

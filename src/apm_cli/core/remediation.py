@@ -231,6 +231,7 @@ RESTORE_MANAGED_PATHS = _entry(
     "restore-managed-paths",
     "apm install",
     "restore the unsafe or unresolved managed paths",
+    before="remove each listed path that is a symlink or not a regular file",
     clears="managed deployed paths are unsafe or unresolved",
 )
 REBUILD_LOCAL_GRAPH = _entry(
@@ -301,6 +302,7 @@ CONFIGURE_REGISTRY = _entry(
     "configure-registry",
     "apm config set registry.{name}.url <url>",
     "configure the required registry",
+    before="run 'apm experimental enable registries'",
     clears="a policy-required registry is not configured",
 )
 REGENERATE_CONTENT_HASHES = _entry(
@@ -311,8 +313,8 @@ REGENERATE_CONTENT_HASHES = _entry(
 )
 POLICY_FULL_REPORT = _entry(
     "policy-full-report",
-    "apm audit --ci",
-    "see the full policy report",
+    "apm install --dry-run --verbose <same-arguments>",
+    "list every policy violation without installing",
     clears="only part of the policy report was shown",
 )
 UPDATE_REFS = _entry(
@@ -388,7 +390,7 @@ FROZEN_REFRESH_LOCK = _entry(
     "apm install",
     "refresh apm.lock.yaml",
     before="update apm.yml",
-    then="retry the frozen install",
+    then="retry as 'apm install --frozen', without packages or --mcp",
     clears="a frozen install was asked to change apm.yml",
 )
 ACCEPT_LOCAL_CHANGE = _entry(
@@ -438,7 +440,7 @@ REPAIR_LOCK_STATE = _entry(
 )
 TRUST_BIN = _entry(
     "trust-bin",
-    "apm install --trust-bin {package}",
+    "apm install --global --trust-bin {package}",
     "deploy its bin/ executables",
     clears="a package's bin/ executables were not deployed",
 )
@@ -468,7 +470,7 @@ PRUNE_PACKAGE_COPIES = _entry(
 )
 READMIT_CODEX_PLUGINS = _entry(
     "readmit-codex-plugins",
-    "apm install",
+    "apm install -g --target codex",
     "re-admit the Codex plugins",
     before="review the executable approvals",
     clears="Codex admission differs from the saved approval state",
@@ -569,7 +571,7 @@ REINSTALL_USER_PACKAGE = _entry(
 )
 CLEAN_DOWNLOAD_CACHE = _entry(
     "clean-download-cache",
-    "apm cache clean",
+    "apm cache clean --yes",
     "drop the cached copy",
     then="retry",
     clears="downloaded content differs from its locked hash",

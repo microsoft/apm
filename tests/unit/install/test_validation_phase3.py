@@ -24,6 +24,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from apm_cli.core import remediation
+
 # ---------------------------------------------------------------------------
 # _is_tls_failure
 # ---------------------------------------------------------------------------
@@ -156,7 +158,9 @@ class TestLocalPathFailureReason:
         reason = _local_path_failure_reason(dep)
         assert reason == (
             f"Local package path does not exist: {dep.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            + remediation.RERUN_AFTER_FIX.bind(
+                fix="restore the source or correct the dependency path"
+            ).sentence()
         )
 
     def test_path_is_file_not_dir_returns_message(self, tmp_path: Path) -> None:

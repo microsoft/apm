@@ -145,16 +145,16 @@ See also: [Install failures](../install-failures/)
 ```
 [x] Content hash mismatch for <owner>/<repo>: expected <sha>, got <sha>.
 The downloaded content differs from the lockfile record. This may
-indicate a supply-chain attack. Run 'apm cache clean' and retry. To accept
-the new content, remove the '<owner>/<repo>' entry from <project>/apm.lock.yaml
-and run 'apm install'.
+indicate a supply-chain attack. Run 'apm cache clean --yes' to drop the cached
+copy, then retry. Remove the '<owner>/<repo>' entry from <project>/apm.lock.yaml,
+then run 'apm install' to accept the new content.
 ```
 
 At user scope the hint names `$APM_HOME/apm.lock.yaml` and `apm install -g`.
 
 Cause: the bytes APM downloaded for a locked dependency do not match the `content_hash` recorded in `apm.lock.yaml`. Usually a force-pushed tag, a mutated branch, or a tampered mirror. Older APM versions on Windows also recorded CRLF hashes when Git's host settings (`core.autocrlf=true`, or `core.eol`, which defaults to CRLF on Windows, for `.gitattributes` `text=auto` files) expanded LF-committed files. Current APM pins `core.autocrlf=false` and `core.eol=lf` on its dependency checkouts and rematerializes older cache shards, but `--frozen` cannot rewrite a lockfile that already stored that CRLF hash.
 
-Fix: investigate the upstream package before accepting. For a stale cache, run `apm cache clean` and retry. If the new content is legitimate, remove the dependency's entry from the lockfile the hint names, run `apm install`, and review the SHA and `content_hash` diff before committing. `apm update` does not accept new content for an unchanged commit (see [`apm update`](../../reference/cli/update/)). The same entry-removal flow regenerates a CRLF hash recorded by a pre-fix Windows CLI; bare `apm lock` does not rewrite it.
+Fix: investigate the upstream package before accepting. For a stale cache, run `apm cache clean --yes` and retry. If the new content is legitimate, remove the dependency's entry from the lockfile the hint names, run `apm install`, and review the SHA and `content_hash` diff before committing. `apm update` does not accept new content for an unchanged commit (see [`apm update`](../../reference/cli/update/)). The same entry-removal flow regenerates a CRLF hash recorded by a pre-fix Windows CLI; bare `apm lock` does not rewrite it.
 
 See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 

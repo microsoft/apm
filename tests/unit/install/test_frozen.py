@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core import remediation
 from apm_cli.deps.lockfile import LockedDependency, LockFile, suppress_lockfile_writes
 from apm_cli.install.errors import FrozenInstallError, frozen_install_tip
 from apm_cli.install.request import InstallRequest
@@ -602,7 +603,7 @@ class TestEnforceFrozenNoRewrite:
         assert exc.value.reasons == [
             "  - .claude/skills/b is deployed by this install but not recorded in apm.lock.yaml"
         ]
-        assert "without --frozen" in exc.value.tip
+        assert remediation.RECORD_DEPLOYED_FILES.sentence() in exc.value.tip
 
     def test_dropped_claims_alone_do_not_fail(self, tmp_path: Path):
         """A narrower install (target filter, --only, removed dep) is tolerated.
@@ -665,7 +666,7 @@ class TestEnforceFrozenDeployedHashes:
         assert exc.value.reasons == [
             f"  - {self._SKILL}: expected sha256:{'0' * 64}, observed {observed}"
         ]
-        assert "without --frozen" in exc.value.tip
+        assert remediation.RECORD_DEPLOYED_FILES.sentence() in exc.value.tip
         assert "apm export-patch" in exc.value.tip
 
     def test_matching_deployed_file_passes(self, tmp_path: Path):

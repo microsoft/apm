@@ -27,6 +27,7 @@ import pytest
 import requests
 
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.remediation import RERUN_AFTER_FIX
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.integration.prompt_integrator import (
@@ -1312,7 +1313,9 @@ class TestLocalPathFailureReason:
         reason = _local_path_failure_reason(dep_ref)
         assert reason == (
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            + RERUN_AFTER_FIX.bind(
+                fix="restore the source or correct the dependency path"
+            ).sentence()
         )
 
     def test_path_is_a_file_not_directory(self, tmp_path: Path) -> None:

@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.core.command_logger import InstallLogger
+from apm_cli.core.remediation import POLICY_FULL_REPORT
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.install_preflight import (
     PolicyBlockError,
@@ -652,8 +653,8 @@ class TestDryRunNoiseCap:
         tail_lines = [m for m in warning_msgs if "and 1 more would be blocked" in m]
         assert len(tail_lines) == 1, f"Expected 1 tail line, got {len(tail_lines)}: {tail_lines}"
 
-        # Tail mentions apm audit
-        assert any("apm audit" in m for m in tail_lines)
+        # Tail names the remediation that lists every violation
+        assert any(POLICY_FULL_REPORT.sentence() in m for m in tail_lines)
 
     def test_five_denied_no_tail(self):
         """5 denied deps -> 5 lines + NO tail line."""
@@ -754,8 +755,8 @@ class TestDryRunNoiseCap:
         )
         assert len([m for m in warn_msgs if "and 5 more policy warnings" in m]) == 1
 
-    def test_tail_wording_is_ascii_and_mentions_apm_audit(self):
-        """Tail lines are pure ASCII and mention 'apm audit'."""
+    def test_tail_wording_is_ascii_and_names_the_full_report_remediation(self):
+        """Tail lines are pure ASCII and name the full-report remediation."""
         policy = ApmPolicy(enforcement="block")
         fetch_result = _make_fetch_result(policy=policy)
         logger = _mock_logger()
@@ -786,7 +787,6 @@ class TestDryRunNoiseCap:
         tail = tail_lines[0]
         # ASCII only
         assert all(ord(ch) < 128 for ch in tail), f"Tail line contains non-ASCII: {tail!r}"
-        # Mentions apm audit
-        assert "apm audit" in tail
+        assert POLICY_FULL_REPORT.sentence() in tail
         # Correct overflow count (8 - 5 = 3)
         assert "and 3 more" in tail

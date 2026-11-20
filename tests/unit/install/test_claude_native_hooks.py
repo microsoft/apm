@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+from apm_cli.core import remediation
 from apm_cli.core.scope import InstallScope
 from apm_cli.install.context import InstallContext
 from apm_cli.install.deployment_plan import prepare_package_deployment
@@ -215,7 +216,7 @@ def test_loose_hook_refusal_names_the_package_and_both_steps(tmp_path: Path) -> 
     with pytest.raises(ClaudeNativePluginError) as error:
         _integrate(tmp_path, info)
     assert "Cannot switch owner/hooks to native Claude" in str(error.value)
-    assert "Run: apm uninstall --global owner/hooks && apm install --global owner/hooks" in str(
+    assert remediation.REINSTALL_USER_PACKAGE.bind(package="owner/hooks").sentence() in str(
         error.value
     )
 

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from apm_cli.core.remediation import TRUST_BIN
 from apm_cli.core.scope import InstallScope
 from apm_cli.install.exec_gate import log_bin_status
 from apm_cli.install.services import (
@@ -246,7 +247,7 @@ def test_log_bin_status_not_trusted() -> None:
     log_bin_status(skill_result, "", "pkg", SimpleNamespace(name="pkg"), lines.append)
 
     assert lines == [
-        "  |-- bin/ executables skipped (not trusted). Run 'apm install --trust-bin pkg' to deploy."
+        f"  |-- bin/ executables skipped (not trusted). {TRUST_BIN.bind(package='pkg').sentence()}"
     ]
 
 
@@ -279,7 +280,7 @@ def test_log_bin_status_explains_uninstall_retrust() -> None:
 
     assert lines == [
         "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-        "Run 'apm install --trust-bin pkg' to restore them."
+        f"{TRUST_BIN.bind(package='pkg').sentence()}"
     ]
 
 

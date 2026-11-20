@@ -515,13 +515,13 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         remedy = trust_remedy(first, recommend)
         if ctx.logger:
             ctx.logger.warning(msg, symbol="warning")
-            ctx.logger.info(remedy, symbol="info")
+            ctx.logger.info(remedy, symbol="info", soft_wrap=True)
         else:
             from apm_cli.core.command_logger import CommandLogger
 
             logger = CommandLogger("install")
             logger.warning(msg, symbol="warning")
-            logger.info(remedy, symbol="info")
+            logger.info(remedy, symbol="info", soft_wrap=True)
         return
 
     from apm_cli.security.executables import (
@@ -570,6 +570,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             f"{TRUST_AND_DEPLOY.bind(package=first).sentence()}  |  "
             f"{EXPLAIN_POLICY.bind(package=first).sentence()}",
             symbol="info",
+            soft_wrap=True,
         )
 
 

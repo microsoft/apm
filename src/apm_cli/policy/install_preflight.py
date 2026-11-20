@@ -188,10 +188,13 @@ def run_policy_preflight(
                     else:
                         warn_lines.append(line)
 
+            # --verbose lifts the cap; the overflow advice reruns with it.
+            limit = None if getattr(logger, "verbose", False) is True else _DRY_RUN_PREVIEW_LIMIT
+
             # Emit block bucket (capped)
-            for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+            for dep_ref, detail in block_lines[:limit]:
                 logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
-            overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
+            overflow = len(block_lines) - (limit or len(block_lines))
             if overflow > 0:
                 logger.warning(
                     f"... and {overflow} more would be blocked by policy. "
@@ -199,9 +202,9 @@ def run_policy_preflight(
                 )
 
             # Emit warn bucket (capped)
-            for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+            for dep_ref, detail in warn_lines[:limit]:
                 logger.warning(f"Policy warning: {dep_ref} -- {detail}")
-            overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
+            overflow = len(warn_lines) - (limit or len(warn_lines))
             if overflow > 0:
                 logger.warning(
                     f"... and {overflow} more policy warnings. {POLICY_FULL_REPORT.sentence()}"

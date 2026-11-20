@@ -4,6 +4,7 @@ from unittest.mock import Mock, call
 
 import pytest
 
+from apm_cli.core import remediation
 from apm_cli.core.command_logger import InstallLogger
 from apm_cli.deps.lockfile import LockfileConflictError, LockfileFormatError
 from apm_cli.install.errors import (
@@ -33,8 +34,7 @@ def test_install_conflict_message_remains_canonical(tmp_path):
     [
         (
             None,
-            "Tip: rerun 'apm install' without --frozen to create or repair package lock state, "
-            "retaining the original options, including --root DIR or --global if specified.",
+            f"Tip: {remediation.REPAIR_LOCK_STATE.bind(lock_state='package lock state').clause()}.",
         ),
         ("", None),
         ("Keep the explicit remedy.", "Keep the explicit remedy."),

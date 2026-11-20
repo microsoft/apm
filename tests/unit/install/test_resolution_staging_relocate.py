@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core import remediation
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 
 
@@ -173,7 +174,7 @@ def test_relocate_path_reports_disappeared_source(tmp_path: Path) -> None:
     modules.mkdir()
     staging = ResolutionStagingSession(modules)
 
-    with pytest.raises(FileNotFoundError, match="Run 'apm install' again"):
+    with pytest.raises(FileNotFoundError, match=re.escape(remediation.RETRY_INSTALL.sentence())):
         staging.relocate_path(modules / "missing", modules / "Missing")
 
 

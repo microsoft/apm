@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core import remediation
 from apm_cli.core.scope import InstallScope
 from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
 from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
@@ -94,7 +95,7 @@ def test_grok_cloud_disabled_flag_emits_enable_hint(
 
     ctx.logger.progress.assert_called_once_with(
         "The 'grok-cloud' target requires an experimental flag. "
-        "Run: apm experimental enable grok-cloud",
+        + remediation.ENABLE_EXPERIMENTAL.bind(flag="grok-cloud").sentence(),
         symbol="info",
     )
 

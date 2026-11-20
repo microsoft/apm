@@ -67,7 +67,7 @@ class TestLocalEditHint:
         text = local_edit_hint(2)
         assert text.startswith("2 local edit(s) to managed files;")
         assert "run 'apm export-patch'" in text
-        assert "before the next install overwrites them" in text
+        assert "before an install overwrites them" in text
         assert text.isascii()
 
     def test_install_wording_names_this_install(self) -> None:
@@ -181,7 +181,7 @@ class TestDriftTextHint:
             [DriftFinding(path=".claude/agents/a.md", kind="modified", package="local-bundle")]
         )
         flat = " ".join(out.split())
-        assert "reinstall the bundle that deployed them ('apm install <bundle-path>')" in flat
+        assert "run 'apm install <bundle-path>' to reinstall the bundle that deployed them" in flat
         assert "rerun 'apm install'," not in flat
 
     def test_local_path_package_findings_get_no_hint(self, tmp_path: Path) -> None:

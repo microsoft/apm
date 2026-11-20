@@ -26,6 +26,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.core.remediation import RERUN_AFTER_FIX
+
 # ---------------------------------------------------------------------------
 # Shared fixtures / constants
 # ---------------------------------------------------------------------------
@@ -1702,7 +1704,9 @@ class TestLocalPathFailureReason:
         result = _local_path_failure_reason(dep_ref)
         assert result == (
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            + RERUN_AFTER_FIX.bind(
+                fix="restore the source or correct the dependency path"
+            ).sentence()
         )
 
     def test_file_path_returns_reason(self, tmp_path: Path) -> None:
