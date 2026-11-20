@@ -1,0 +1,49 @@
+{
+ "partition": "unit remaining subpackages",
+ "steps_done": [
+  1,
+  2,
+  3,
+  4,
+  5
+ ],
+ "folds": {
+  "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_case_insensitive": "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_canonical_signals_match",
+  "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_ado_work_item_codes_are_not_http_auth": "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_non_auth_errors_dont_match",
+  "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_https_proxy_in_subprocess_env": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env",
+  "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_http_proxy_in_subprocess_env": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env",
+  "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_no_proxy_in_subprocess_env": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env",
+  "tests/unit/cache/test_git_env.py::TestGitSubprocessEnv::test_preserves_https_proxy": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env"
+ },
+ "decisions": [
+  "step1: D5 report listed 2 in-scope copies (export/test_purl.py, primitives/test_discovery_walk.py); deleted the copies, kept the listed twins",
+  "step2: folded same-file clones in utils/test_github_host_predicate.py into the surviving parametrized tests (case variants into canonical signals, ADO work-item codes into non-auth errors)",
+  "step2: folded proxy env passthrough (HTTPS/HTTP/NO_PROXY) into one parametrized test in cache/test_proxy_compat.py; removed the HTTPS twin from cache/test_git_env.py",
+  "step2: cross-partition groups kept: utils/test_paths.py (3 portable_relpath groups) and registry/test_compat_matrix.py identity test have twins in tests/unit root (unit-root-small partition); in-scope copy is kept as the surviving owner so the root partition can delete its copy without a double deletion",
+  "step2: 2 groups among tests/unit/scripts/test_architecture_*.py (test_allowlist_is_not_stale, test_real_tree_is_clean / test_head_is_clean) kept: test_architecture_* files are protected by hard rule",
+  "pre-existing failures on base in cache/test_git_env.py (test_modern_windows_missing_lookup_scales_linearly[git|gh], TestUncachedFallbackLineEndings::test_locked_sha_checks_out_from_a_crlf_host) are unchanged by this branch",
+  "step3: 68 modules marked (16 unit, 52 component); component when the module or its fixtures touch the filesystem (tmp_path, tempfile, golden files on disk), uses CliRunner, or spawns processes",
+  "step3: 7 modules left unclassified because they are protected: tests/unit/scripts/test_architecture_{inventory,registry,registry_conflicts,runner}.py (test_architecture_*), and open-PR files bundle/test_tar_windows_absolute_path.py, scripts/test_check_exact_test_duplicates.py, security/test_resolve_exec_decision.py",
+  "step3: pre-existing sandbox failures (git commit gpg signing / locale) in cache/test_git_env.py, scripts/test_check_complexity_ratchet.py, utils/test_git_output_decoding.py fail identically on base",
+  "step4: git mv to tests/integration (component, process-spawning): cache/test_git_cache_{autocrlf,materialization,sparse}.py, cache/test_git_text_eol_pin.py, export/test_lazy_import.py, utils/test_git_output_decoding.py, utils/test_git_sparse.py",
+  "step4: kept cache/test_git_env.py and cache/test_git_symlink_config.py in place: their tests/unit paths are imported/asserted by tests/unit root modules owned by the unit-root-small partition (test_windows_native_symlink_probe.py, test_windows_compat_gate_workflow.py); move them together with those references in a follow-up",
+  "step4: kept cache/test_git_cache_recency.py: its node id is pinned by tests/fixtures/lifecycle_bug_ledger.json (protected)",
+  "step4: kept scripts/test_check_complexity_ratchet.py and scripts/test_check_test_assertions.py: RATCHET_TEST_SCOPE fixture tests must live under tests/unit/scripts per tests/quality/test_ci_topology.py",
+  "step4: remaining protected offenders: scripts/test_architecture_registry_conflicts.py (test_architecture_*), copilot_plugins/test_pr2705_folds.py and scripts/test_check_exact_test_duplicates.py (open PRs)",
+  "step5: AQ002 narrowed to HashMismatchError in registry resolver tests; AQ003 fixed by asserting durable cache/lock/file state left behind",
+  "step5: mixed modules split by moving whole test classes (same Class::name) so pure-logic tests sit in unit modules and filesystem tests in component modules: primitives/test_discovery_walk.py and test_primitives.py are now unit; their filesystem classes moved into test_discovery_parser.py",
+  "step5: security/test_executables.py is now unit; its filesystem classes (TestLocalBundleApprovalKey, TestScanPackageExecutables, TestWriteAllowExecutables, TestSaveUserExecutablesAtomic) moved into test_exec_vocab_unification.py",
+  "step5: models/test_dependency_uninstall_selection.py is now unit (its one filesystem dry-run test moved to regressions/test_issue_2549_global_dry_run.py with its lock helper); resolve_user_invocable direct cases moved to primitives/test_primitives.py; TestParseProjectExecutables moved to security/test_executables.py",
+  "step5: models/test_manifest_targets.py is now unit; its six on-disk tests moved to models/test_manifest_io.py with the _declaration helper and the warning re-arm fixture",
+  "step5: security/test_trust_fingerprint.py is now unit; its on-disk hook/plugin cases moved to test_trust_admission.py (helper renamed _scripted_hook_package to avoid shadowing that module's _hook_package)",
+  "step2 follow-up: c1/unit-root-small (760c61842) parametrized its tests/unit/test_portable_relpath.py copies and removed its test_reference_registry_shorthand identity twin, keeping ours; after integration the 4 cross-partition groups disappear and in-scope same_body_groups drops to 2 (both among protected tests/unit/scripts/test_architecture_*.py)",
+  "step5: residual weak_tests are AQ003 only (AQ001=0, AQ002=0 in scope): component tests whose system under test reads files and returns a model (discovery, loaders, detectors, path helpers), network-bound credential tests, env-construction tests inside cache/test_git_env.py, and protected modules (test_architecture_*, *_lifecycle*, open-PR files); they assert the returned value, which is the observable outcome of a reader, and padding them with no-op file checks was rejected",
+  "sandbox note: git commit inside tests fails here (gpg signing service requires a co-author trailer); affected failures in test_git_env.py, test_check_complexity_ratchet.py, test_git_output_decoding.py and test_architecture_registry_conflicts.py are identical on base"
+ ],
+ "counts_left": {
+  "same_body_groups": 6,
+  "unclassified_modules": 7,
+  "placement_offenders": 8,
+  "weak_tests": 419
+ }
+}

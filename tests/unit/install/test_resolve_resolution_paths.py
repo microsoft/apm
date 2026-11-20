@@ -29,6 +29,8 @@ from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, ResolvedReference
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Patch targets for resolve module
 # ---------------------------------------------------------------------------
@@ -533,3 +535,24 @@ class TestDepBaseDirs:
         _run_ctx(ctx, tmp_path, graph=graph)
 
         assert "org/pkg" in ctx.intended_dep_keys
+
+
+def test_materialization_migration_logger_reports_relative_case_change(
+    tmp_path: Path,
+) -> None:
+    """Verbose diagnostics name the old and new package directory spelling."""
+    from apm_cli.install.phases.resolve import _materialization_migration_logger
+
+    logger = MagicMock()
+    modules = tmp_path / "apm_modules"
+    report = _materialization_migration_logger(logger, modules)
+
+    assert report is not None
+    report(
+        modules / "mixedorg" / "mixedchild",
+        modules / "MixedOrg" / "MixedChild",
+    )
+
+    logger.verbose_detail.assert_called_once_with(
+        "    Migrated package directory casing: mixedorg/mixedchild -> MixedOrg/MixedChild"
+    )

@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
+
+pytestmark = pytest.mark.component
 
 
 def _write_local_package(root: Path, name: str) -> None:

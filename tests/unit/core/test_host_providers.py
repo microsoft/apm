@@ -10,6 +10,8 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.host_providers import classify_host_provider, effective_host_provider_identity
 
+pytestmark = pytest.mark.unit
+
 
 def test_gitlab_hint_does_not_route_global_pat_to_untrusted_host() -> None:
     sentinel = "gitlab-global-sentinel"
@@ -173,7 +175,7 @@ class TestCustomAdoServerHostClassification:
             )
             resolver = AuthResolver(allow_external_fallback=False)
             backend = backend_for(dep, resolver)
-            assert backend.build_clone_https_url(dep, token=None) == (
+            assert backend.build_clone_https_url(dep) == (
                 "https://ado.corp.example.com:8443/DefaultCollection/Platform/_git/standards"
             )
             assert resolver.classify_host(dep.host, port=dep.port).api_base == (

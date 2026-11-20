@@ -16,6 +16,8 @@ import pytest
 
 from .conftest import PYEXE, fire_via_context, trust, write_project
 
+pytestmark = pytest.mark.component
+
 
 def test_post_install_fires_twice_runs_twice(apm_home: Path, tmp_path: Path) -> None:
     """No idempotency guard: two fires == two executions."""

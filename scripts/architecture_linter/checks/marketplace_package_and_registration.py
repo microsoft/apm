@@ -610,7 +610,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             "src/apm_cli/integration/mcp_config_view.py",
             (
                 "elif _is_local_claude_plugin_source(dependency, package_dir):",
-                'if not package_dir.is_dir() or (package_dir / "apm.yml").exists():',
+                "if not package_dir.is_dir() or manifest_file(package_dir).exists():",
             ),
             "Local Claude MCP inspection must read the install-synthesized manifest, "
             "never the writable source",

@@ -15,14 +15,13 @@ registry, never a new branch in an ``if/elif`` ladder.
 
 Design constraints (see plan in WIP/host-backends-refactor):
 
-- Backends are stateless: each carries only its :class:`HostInfo`. Tokens,
-  auth contexts, ports, and ssh/https-or-http preferences flow as method
-  arguments so the same backend instance can serve every dependency on a
-  given host.
-- ``build_clone_*`` returns a clone URL suitable for ``git clone``. Bearer
-  tokens are NOT embedded in the URL -- they are injected via git env vars
-  by ``download_strategies``; the backend signals this via
-  ``auth_scheme="bearer"``.
+- Backends are stateless: each carries only its :class:`HostInfo`. Ports
+  and ssh/https-or-http preferences flow as method arguments so the same
+  backend instance can serve every dependency on a given host.
+- ``build_clone_*`` returns a credential-free clone URL suitable for
+  ``git clone``. Credentials are NEVER embedded in the URL -- they are
+  injected via git env (``http.extraheader`` / credential helpers) by
+  :class:`AuthResolver`.
 - ``build_commits_api_url`` returns ``None`` for hosts where no cheap
   commit-resolution endpoint exists (ADO, generic). Callers fall back to
   the explicit ref string in that case.
@@ -47,7 +46,6 @@ from ..models.dependency.host_virtual import repository_path_segments
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
-    build_gitlab_https_clone_url,
     build_https_clone_url,
     build_ssh_url,
     default_host,
@@ -69,7 +67,7 @@ class HostBackend(Protocol):
 
     All concrete backends are immutable dataclasses carrying just the
     :class:`HostInfo` describing the host. Methods take whatever runtime
-    inputs they need (dep_ref, token, auth_scheme) so a single backend
+    inputs they need (e.g. dep_ref) so a single backend
     instance can serve many dependencies on the same host.
     """
 
@@ -95,21 +93,11 @@ class HostBackend(Protocol):
         """
         ...
 
-    def build_clone_https_url(
-        self,
-        dep_ref: DependencyReference,
-        *,
-        token: str | None,
-        auth_scheme: str = "basic",
-    ) -> str:
-        """Build the HTTPS clone URL.
+    def build_clone_https_url(self, dep_ref: DependencyReference) -> str:
+        """Build the credential-free HTTPS clone URL.
 
-        ``token`` may be ``None`` (anonymous), a non-empty string (basic auth
-        embedded in URL), or the empty string ``""`` (explicitly suppress
-        per-instance default -- used by transport plans for plain HTTPS).
-
-        ``auth_scheme="bearer"`` indicates the token will be injected via
-        git env vars; the URL must NOT embed credentials in this case.
+        Credentials are injected via git env by :class:`AuthResolver`,
+        never embedded in the URL.
         """
         ...
 
@@ -176,19 +164,9 @@ class _GitHubFamilyBase:
     def is_generic(self) -> bool:
         return False
 
-    def build_clone_https_url(
-        self,
-        dep_ref: DependencyReference,
-        *,
-        token: str | None,
-        auth_scheme: str = "basic",
-    ) -> str:
-        # Bearer scheme is ADO-specific; GitHub family always uses basic.
-        # Defensive: fall through to plain HTTPS without embedding the token.
-        port = getattr(dep_ref, "port", None)
-        embed_token = token if (token and auth_scheme != "bearer") else None
+    def build_clone_https_url(self, dep_ref: DependencyReference) -> str:
         return build_https_clone_url(
-            self._url_host(dep_ref), dep_ref.repo_url, token=embed_token, port=port
+            self._url_host(dep_ref), dep_ref.repo_url, port=getattr(dep_ref, "port", None)
         )
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
@@ -270,8 +248,8 @@ class ADOBackend:
 
     ADO has its own URL builders that take ``ado_organization``,
     ``ado_project``, ``ado_repo`` triplets instead of a flat
-    ``owner/repo``. Bearer-scheme tokens are injected via git env vars,
-    not embedded in the URL -- the orchestrator handles that.
+    ``owner/repo``. PATs and bearer tokens are injected via git env vars,
+    never embedded in the URL.
     """
 
     host_info: HostInfo
@@ -288,13 +266,7 @@ class ADOBackend:
     def is_generic(self) -> bool:
         return False
 
-    def build_clone_https_url(
-        self,
-        dep_ref: DependencyReference,
-        *,
-        token: str | None,
-        auth_scheme: str = "basic",
-    ) -> str:
+    def build_clone_https_url(self, dep_ref: DependencyReference) -> str:
         # ADO's HTTPS host comes from the dependency itself; ``host_info``
         # is for classification only.
         host = getattr(dep_ref, "host", None) or self.host_info.host
@@ -302,23 +274,10 @@ class ADOBackend:
             raise ValueError(
                 "ADO dependency is missing ado_organization; cannot construct clone URL"
             )
-        # Bearer scheme: token goes into env vars, NOT into the URL.
-        if auth_scheme == "bearer":
-            return build_ado_https_clone_url(
-                dep_ref.ado_organization,
-                dep_ref.ado_project,
-                dep_ref.ado_repo,
-                token=None,
-                host=host,
-                port=getattr(dep_ref, "port", None),
-            )
-        # ADO PATs and bearer tokens are injected through AuthContext.git_env;
-        # never place either credential in argv or persisted remote URLs.
         return build_ado_https_clone_url(
             dep_ref.ado_organization,
             dep_ref.ado_project,
             dep_ref.ado_repo,
-            token=None,
             host=host,
             port=getattr(dep_ref, "port", None),
         )
@@ -359,10 +318,8 @@ class ADOBackend:
 class GitLabBackend:
     """Backend for GitLab (gitlab.com and self-managed instances).
 
-    GitLab uses REST v4 for both commits and raw file fetches. Tokens are
-    embedded in clone URLs as ``oauth2:<token>@`` (not GitHub's
-    ``x-access-token``) when a PAT is available; otherwise falls back to
-    plain HTTPS so git credential helpers can supply auth.
+    GitLab uses REST v4 for both commits and raw file fetches. Clone URLs
+    are credential-free; auth is supplied via git env or credential helpers.
     """
 
     host_info: HostInfo
@@ -382,19 +339,10 @@ class GitLabBackend:
         # GitHub-family host.
         return True
 
-    def build_clone_https_url(
-        self,
-        dep_ref: DependencyReference,
-        *,
-        token: str | None,
-        auth_scheme: str = "basic",
-    ) -> str:
+    def build_clone_https_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        # Bearer scheme is ADO-only; embed PAT as oauth2 basic when given.
-        if token and auth_scheme != "bearer":
-            return build_gitlab_https_clone_url(host, dep_ref.repo_url, token, port=port)
-        return build_https_clone_url(host, dep_ref.repo_url, token=None, port=port)
+        return build_https_clone_url(host, dep_ref.repo_url, port=port)
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
         host = getattr(dep_ref, "host", None) or self.host_info.host
@@ -464,18 +412,10 @@ class GenericGitBackend:
     def is_generic(self) -> bool:
         return True
 
-    def build_clone_https_url(
-        self,
-        dep_ref: DependencyReference,
-        *,
-        token: str | None,
-        auth_scheme: str = "basic",
-    ) -> str:
-        # Generic hosts: never embed tokens in the URL. Auth comes from
-        # git credential helpers. Bearer scheme is ADO-only.
+    def build_clone_https_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        return build_https_clone_url(host, dep_ref.repo_url, token=None, port=port)
+        return build_https_clone_url(host, dep_ref.repo_url, port=port)
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
         host = getattr(dep_ref, "host", None) or self.host_info.host

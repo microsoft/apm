@@ -10,6 +10,8 @@ import requests
 
 from apm_cli.install import validation
 
+pytestmark = pytest.mark.unit
+
 PROBE_PATHS = ("primary", "parse-fallback")
 
 

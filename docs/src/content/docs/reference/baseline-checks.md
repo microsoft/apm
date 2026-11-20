@@ -40,6 +40,7 @@ first failure to skip expensive I/O.
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `content-integrity` | block | `ci_checks.py` | yes |
+| `hook-approval-pins` | block | `ci_checks.py` | yes |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
 | `drift` | block | `_check_drift` in `ci_checks.py`, invoked from `commands/audit.py` | yes, unless `--no-drift` |
 
@@ -157,6 +158,12 @@ the [policy schema](../policy-schema/).
   2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against. Local bundle instructions staged for `apm compile` are checked the same way against `local_staged_file_hashes`; staged paths without a recorded hash (older lockfiles) are skipped.
 - **Fails when.** An applicable prompt contains critical Unicode, recognized content is unreadable or unsupported (incomplete coverage), a recorded hash differs, or a legacy hash lacks canonical ownership metadata. Missing files are reported by `deployed-files-present`; unrecorded files have no hash baseline. Existing path and symlink protections still apply.
 - **Remediation.** Review the reported format or access error for incomplete coverage. Use `apm audit --strip` only for supported regular prompt documents; structured/shared settings and external-root findings require manual review. Run `apm install` to restore hash-drifted files; for drifted staged bundle files, reinstall the bundle with `apm install <bundle> --force`. Discovery does not grant ownership or permission to rewrite user configuration.
+
+### `hook-approval-pins`
+
+- **What it verifies.** That every hook file the lockfile records as deployed is still admitted by its pinned approval in `apm.yml` (see [pinned approvals](../cli/approve/#pinned-approvals)). It runs after `content-integrity` and uses the same check as `apm install --frozen`, so both reach one verdict.
+- **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead.
+- **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`.
 
 ### `includes-consent`
 

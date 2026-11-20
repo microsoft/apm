@@ -26,6 +26,8 @@ from apm_cli.core.lifecycle_scripts import LifecycleScriptRunner, parse_script_f
 
 from .conftest import make_event
 
+pytestmark = pytest.mark.component
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

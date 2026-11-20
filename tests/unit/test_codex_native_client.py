@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import io
 import json
-import queue
 import shlex
 import subprocess
 import sys
@@ -13,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.codex_plugins.client import CodexNativeClient, CodexNativeError, CodexRpc
+from apm_cli.codex_plugins.client import CodexNativeClient, CodexNativeError
 from apm_cli.core.scope import InstallScope
 
 pytestmark = pytest.mark.component
@@ -220,30 +218,6 @@ def test_read_config_selects_user_layer_not_effective_merged_values(tmp_path):
     assert state.version == "user-version"
     assert state.values == {"plugins": {"owned": {"enabled": False}}}
     assert state.path == tmp_path / "config.toml"
-
-
-def test_rpc_reader_failure_stays_bounded_when_response_queue_is_full():
-    """A saturated response stream must not raise a second unhandled queue.Full."""
-    rpc = CodexRpc.__new__(CodexRpc)
-    rpc._process = Mock(stdout=io.BytesIO(b"invalid-json\n"))
-    rpc._responses = queue.Queue(maxsize=1)
-    rpc._responses.put({"id": 1})
-    rpc._reader_error = None
-    rpc._read()
-    assert isinstance(rpc._reader_error, ValueError)
-    assert rpc._responses.qsize() == 1
-
-
-def test_rpc_close_reaps_helper_after_broken_pipe():
-    rpc = CodexRpc.__new__(CodexRpc)
-    rpc._process = Mock()
-    rpc._process.stdin.close.side_effect = BrokenPipeError("closed native stream")
-    rpc._reader = Mock()
-    with pytest.raises(BrokenPipeError):
-        rpc.close()
-    rpc._process.wait.assert_called_once_with(timeout=5)
-    rpc._reader.join.assert_called_once_with(timeout=1)
-    rpc._process.stdout.close.assert_called_once()
 
 
 @pytest.mark.parametrize(

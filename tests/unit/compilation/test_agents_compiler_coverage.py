@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
+import pytest
 import yaml
 
 from apm_cli.compilation.agents_compiler import (
@@ -25,6 +26,8 @@ from apm_cli.compilation.agents_compiler import (
     compile_agents_md,
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -139,21 +142,6 @@ class TestCompilationConfigFromApmYmlAdditional(unittest.TestCase):
         config = CompilationConfig.from_apm_yml(target=None)
         # None override is skipped; config file value remains.
         self.assertEqual(config.target, "claude")
-
-
-# ---------------------------------------------------------------------------
-# CompilationConfig.__post_init__
-# ---------------------------------------------------------------------------
-
-
-class TestCompilationConfigPostInit(unittest.TestCase):
-    def test_single_agents_sets_strategy(self):
-        config = CompilationConfig(single_agents=True)
-        self.assertEqual(config.strategy, "single-file")
-
-    def test_exclude_none_initialised_to_empty_list(self):
-        config = CompilationConfig(exclude=None)
-        self.assertEqual(config.exclude, [])
 
 
 # ---------------------------------------------------------------------------
@@ -500,72 +488,6 @@ class TestGenerateSummaries(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AgentsCompiler._merge_results()
-# ---------------------------------------------------------------------------
-
-
-class TestMergeResults(unittest.TestCase):
-    def _make_result(
-        self,
-        success=True,
-        output_path="out",
-        content="c",
-        warnings=None,
-        errors=None,
-        stats=None,
-    ):
-        return CompilationResult(
-            success=success,
-            output_path=output_path,
-            content=content,
-            warnings=warnings or [],
-            errors=errors or [],
-            stats=stats or {},
-        )
-
-    def test_merge_empty_list_returns_success(self):
-        compiler = AgentsCompiler("/tmp")
-        result = compiler._merge_results([])
-        self.assertTrue(result.success)
-        self.assertEqual(result.content, "")
-
-    def test_merge_single_result_passes_through(self):
-        compiler = AgentsCompiler("/tmp")
-        r = self._make_result(output_path="custom.md", content="hello")
-        merged = compiler._merge_results([r])
-        self.assertIs(merged, r)
-
-    def test_merge_two_results_combines_content(self):
-        compiler = AgentsCompiler("/tmp")
-        r1 = self._make_result(
-            content="part1", output_path="a.md", warnings=["w1"], stats={"count": 2}
-        )
-        r2 = self._make_result(
-            content="part2", output_path="b.md", warnings=["w2"], stats={"count": 3}
-        )
-        merged = compiler._merge_results([r1, r2])
-        self.assertIn("part1", merged.content)
-        self.assertIn("part2", merged.content)
-        self.assertIn("w1", merged.warnings)
-        self.assertIn("w2", merged.warnings)
-        self.assertEqual(merged.stats["count"], 5)
-
-    def test_merge_any_failure_propagates(self):
-        compiler = AgentsCompiler("/tmp")
-        r1 = self._make_result(success=True)
-        r2 = self._make_result(success=False)
-        merged = compiler._merge_results([r1, r2])
-        self.assertFalse(merged.success)
-
-    def test_merge_empty_paths_excluded(self):
-        compiler = AgentsCompiler("/tmp")
-        r1 = self._make_result(output_path="", content="")
-        r2 = self._make_result(output_path="b.md", content="")
-        merged = compiler._merge_results([r1, r2])
-        self.assertEqual(merged.output_path, "b.md")
-
-
-# ---------------------------------------------------------------------------
 # compile_agents_md() convenience function - error path
 # ---------------------------------------------------------------------------
 
@@ -832,6 +754,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         joined = " ".join(progress_calls)
         self.assertIn("Instructions already in .claude/rules/", joined)
         self.assertIn("CLAUDE.md not generated", joined)
+        self.assertFalse((Path(self.tmp_resolved) / "CLAUDE.md").exists())
 
     def test_skip_instructions_ignores_symlink_outside_project(self):
         """A .claude/rules/ symlinked outside the project does not trigger skip."""

@@ -39,7 +39,7 @@ content (the root `.apm/` directory) is always trusted.
 | Type | Gated | Notes |
 |------|-------|-------|
 | Hooks (`.apm/hooks/`, `hooks/`) | Yes | Auto-fire in IDE on lifecycle events |
-| Bin executables (`bin/`) | Yes | Deployed to agent PATH via symlinks |
+| Bin executables (`bin/`) | Yes | Deployed only for a marketplace plugin installed at user scope (`-g`) with the Claude target; copied into the plugin folder on Claude Code's PATH |
 | MCP servers (self-defined) | Yes | `registry: false` servers write to IDE MCP config |
 | LSP servers | Yes | Supported runtimes may start generated server commands automatically |
 | Canvas extensions (`.apm/extensions/`) | Yes | Deploys executable Node.js to IDE extensions |
@@ -110,7 +110,10 @@ Each item is then admitted in this order (first match wins):
 When an approved definition changes upstream, install parks the item and
 warns `Parked MCP server 'kit-docs' (acme/agent-kit): definition changed since
 approval` (or `Parked hook file '<path>' ...`), naming the review and
-re-approve commands.
+re-approve commands. A package none of whose hook files matches its pin
+retires the hooks it deployed earlier. `apm install --frozen` and
+`apm audit --ci` both fail while the lockfile still records such a hook as
+deployed.
 
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run

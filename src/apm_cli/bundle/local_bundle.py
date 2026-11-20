@@ -34,6 +34,8 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..agent_plugins.errors import AgentPluginManifestError
 from ..agent_plugins.io import read_json_document
@@ -367,7 +369,7 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     if path.is_dir():
         if not (path / "plugin.json").is_file():
             return None
-        if (path / "apm.yml").is_file() and not _has_pack_manifest(path):
+        if manifest_file(path).is_file() and not _has_pack_manifest(path):
             return None
         return _build_info(
             path,

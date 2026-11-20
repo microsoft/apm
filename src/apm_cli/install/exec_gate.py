@@ -69,9 +69,10 @@ def check_executable_approval(
         )
 
     approved = package_type_approvals(allow_executables, candidate_keys)
-    # Pinned hook items admit per file at the source plan (hook_file_admission).
+    # Pinned hook items admit per file at the source plan (hook_file_admission);
+    # a package none of whose hook files matches its pin deploys no hooks.
     approved[EXEC_TYPE_HOOKS] = approved[EXEC_TYPE_HOOKS] or hooks_package_admissible(
-        allow_executables, tuple(candidate_keys)
+        allow_executables, tuple(candidate_keys), package_info
     )
     hooks_ok = approved[EXEC_TYPE_HOOKS]
     bin_ok = approved[EXEC_TYPE_BIN]
@@ -643,11 +644,10 @@ class ReplayExecAllowMap:
     def _resolve(self) -> None:
         if self._resolved:
             return
-        from apm_cli.core.scope import manifest_root
+        from apm_cli.core.scope import manifest_root, scope_manifest_path
         from apm_cli.security.executables import (
             exec_trust_context_for_project,
             materialize_exec_map,
-            project_manifest_path,
         )
 
         if self._policy_provider is not None:
@@ -656,13 +656,12 @@ class ReplayExecAllowMap:
             from apm_cli.policy.outcome_routing import resolve_trust_policy
 
             # The replaying command reports the policy outcome itself.
-            policy = resolve_trust_policy(self._project_root, announce=False)
+            policy = resolve_trust_policy(
+                manifest_root(self._project_root, user_scope=self._user_scope), announce=False
+            )
         # Audit is read-only: never migrate legacy user consent here.
-        # Grants come from the scope's manifest (APM_HOME/apm.yml under -g,
-        # #3954); policy stays anchored at the deploy root.
-        manifest = project_manifest_path(
-            manifest_root(self._project_root, user_scope=self._user_scope)
-        )
+        # Grants come from the scope's manifest (APM_HOME/apm.yml under -g, #3954).
+        manifest = scope_manifest_path(self._project_root, user_scope=self._user_scope)
         self._trust_ctx_value = exec_trust_context_for_project(
             manifest, policy=policy, migrate_user_legacy=False
         )
@@ -698,3 +697,53 @@ class ReplayExecAllowMap:
                 return authorized_exec_map(AUTHORIZED_REPLAY)
         self._resolve()
         return self._map
+
+
+def locked_hook_pin_mismatches(
+    lockfile: Any, modules_dir: Path, trust_ctx: Any
+) -> builtins.list[Any]:
+    """Locked hook files whose pinned approval no longer admits them (#4188).
+
+    ``apm install --frozen`` and ``apm audit --ci`` both route here, and each
+    lock row is judged by the trust owner
+    (:func:`~apm_cli.security.trust.recorded_hook_pin_mismatches`), so the two
+    commands reach one verdict. *trust_ctx* may be a provider, called once and
+    only when a locked package deploys hook files. A package not materialized
+    under *modules_dir* is left to the checks that report it.
+    """
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import TRUST_ABSENT, _strip_version
+    from apm_cli.security.trust import recorded_hook_pin_mismatches
+
+    if trust_ctx is None or lockfile is None:
+        return []
+    resolved: builtins.list[Any] = []
+
+    def _ctx() -> Any:
+        if not resolved:
+            resolved.append(trust_ctx() if callable(trust_ctx) else trust_ctx)
+        return resolved[0]
+
+    found: builtins.list[Any] = []
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.exec_status == TRUST_ABSENT:
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        try:
+            package_info = _build_package_info(dep, install_path)
+        except (OSError, ValueError):
+            continue
+        pkg_key = resolve_package_key(package_info, dep.get_unique_key())
+        found.extend(
+            recorded_hook_pin_mismatches(
+                _ctx,
+                tuple(_candidate_keys(pkg_key)),
+                install_path,
+                package=_strip_version(pkg_key),
+                recorded_status=dep.exec_status,
+                recorded_allowed=tuple(dep.exec_allowed_types or ()),
+            )
+        )
+    return found
