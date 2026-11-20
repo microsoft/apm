@@ -39,7 +39,6 @@ from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
 from tests.lifecycle.machines._kit import (
     Bench,
-    KnownCell,
     MachineBase,
     Step,
     WorldPool,
@@ -268,7 +267,7 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
 
 
 # Strict known cells this machine discharges; #4214 is fixed (LSP-only packages survive uninstall).
-KNOWN_CELLS: tuple[KnownCell, ...] = ()
+KNOWN_CELLS: tuple = ()
 
 
 class SourceMachine(MachineBase):

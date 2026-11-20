@@ -31,11 +31,9 @@ _ALL = (
     "revoke-approval",
 )
 _DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
-_BUNDLE = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL = {
     "G|dry-run|local-deny|bin": _DRY_RUN,
-    "G|bundle-install|local-deny|bin": _BUNDLE,
     **{
         f"G|marketplace-install|{change}|bin": _USER_ORG
         for change in ("org-deny", "org-enables-gate", "policy-dep-deny")

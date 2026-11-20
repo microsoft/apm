@@ -157,9 +157,11 @@ class GateReplay(RowReplay):
             ref = self.world.packages[key]
             if ref.source == "local-bundle":
                 _redefine_bundle(Path(ref.spec), kind)
+                # The approval pins the whole bundle digest: every kind loses it.
+                self.model = self.model.revoke(key, self.kinds[key])
             else:
                 _redefine(Path(ref.spec), kind)
-            self.model = self.model.revoke(key, {kind})
+                self.model = self.model.revoke(key, {kind})
         elif edit == "policy":
             variant = str(step["variant"])
             use_policy(self.world, variant)
