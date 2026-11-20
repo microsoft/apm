@@ -1140,7 +1140,7 @@
       "regression_tests": [
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_fails_on_edit_of_every_primitive_type",
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_fails_when_locked_file_is_replaced_by_a_symlink",
-        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths",
+        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_replay_of_unproven_cli_output_fails_closed_and_names_paths",
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_identical_unmanaged_native_skill_is_adopted_then_owned",
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_warm_frozen_with_kept_skill_edit_fails_closed",
         "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_device_only_root_change_is_rebound_by_installed_cli",
@@ -1407,7 +1407,7 @@
       "failure_modes": ["cleanup", "ownership"],
       "properties": ["ownership.preserve_unowned"],
       "regression_tests": [
-        "tests/integration/test_file_primitive_receipt_lifecycle.py::test_adopted_identical_files_get_no_receipt",
+        "tests/integration/test_file_primitive_receipt_lifecycle.py::test_adopted_identical_files_get_a_receipt",
         "tests/integration/test_file_primitive_receipt_lifecycle.py::test_every_deployed_file_of_a_fresh_install_has_a_receipt",
         "tests/integration/test_file_primitive_receipt_lifecycle.py::test_install_records_a_receipt_for_every_file_primitive_write"
       ]
