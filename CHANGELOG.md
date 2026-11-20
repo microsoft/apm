@@ -26,9 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `PROXY_REGISTRY_TOKEN` is sent over `http://` only to loopback or private network hosts; `PROXY_REGISTRY_ALLOW_HTTP=1` now authorizes sending it to other `http://` hosts. (closes #4314, #4317)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
+- `PROXY_REGISTRY_TOKEN` is sent over `http://` only to loopback or private network hosts; `PROXY_REGISTRY_ALLOW_HTTP=1` now authorizes sending it to other `http://` hosts. (closes #4314, #4317)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
 - MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
