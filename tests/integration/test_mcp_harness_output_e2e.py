@@ -59,3 +59,6 @@ def test_opencode_install_uses_the_product_name(tmp_path, apm_binary_path):
     output = apm("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
     assert "fetch -> OpenCode (configured)" in output
     assert "Opencode" not in output
+    # One success line per server: the adapter no longer echoes its own.
+    assert "Successfully configured MCP server" not in output
+    assert "  + fetch\n" not in output

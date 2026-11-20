@@ -571,7 +571,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         add_marketplace(final_source)
 
         logger.success(
-            f"Marketplace '{display_name}' registered ({plugin_count} plugins)",
+            f"Marketplace '{display_name}' registered ({plugin_count} plugin{'' if plugin_count == 1 else 's'})",
             symbol="check",
         )
         if manifest.structural_errors:
@@ -843,7 +843,7 @@ def update(name, verbose):
             logger.start(f"Refreshing marketplace '{name}'...", symbol="gear")
             manifest = fetch_marketplace(source, require_fresh=True)
             logger.success(
-                f"Marketplace '{name}' updated ({len(manifest.plugins)} plugins)",
+                f"Marketplace '{name}' updated ({len(manifest.plugins)} plugin{'' if len(manifest.plugins) == 1 else 's'})",
                 symbol="check",
             )
             return
@@ -857,7 +857,9 @@ def update(name, verbose):
         for s in sources:
             try:
                 manifest = fetch_marketplace(s, require_fresh=True)
-                logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
+                logger.tree_item(
+                    f"  {s.name} ({len(manifest.plugins)} plugin{'' if len(manifest.plugins) == 1 else 's'})"
+                )
             except Exception as exc:
                 failed.append(s.name)
                 logger.error(f"  {s.name}: {exc}", symbol="error")

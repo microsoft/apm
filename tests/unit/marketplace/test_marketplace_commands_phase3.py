@@ -588,7 +588,7 @@ class TestUpdateCmd:
                 result = runner.invoke(marketplace, ["update"])
         # A partial refresh names the failed catalog and exits nonzero (#3279).
         assert result.exit_code == 1
-        assert "good (1 plugins)" in result.output
+        assert "good (1 plugin)" in result.output
         assert "failed: bad" in result.output
         assert "Marketplace cache refreshed" not in result.output
 

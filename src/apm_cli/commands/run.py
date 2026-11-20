@@ -76,9 +76,7 @@ def run(ctx, script_name, param, verbose):
             if not success:
                 logger.error("Script execution failed")
                 sys.exit(1)
-
-            _rich_blank_line()
-            logger.success("Script executed successfully!")
+            # The runner already printed the timed success line (#3994).
 
         except ImportError as ie:
             logger.warning("Script runner not available yet")

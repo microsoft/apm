@@ -911,9 +911,9 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 @click.command(
     name="unpack",
     help=(
-        "[Deprecated] Extract a '--format apm' bundle into the current project. "
-        "Plugin bundles (the default) install with 'apm install <bundle-path>' -- "
-        "this command will be removed in a future release."
+        "[Deprecated] Extract an APM bundle into the current project. "
+        "Reads only '--format apm' bundles; install plugin bundles (the default) "
+        "with 'apm install <bundle-path>'. This command will be removed in a future release."
     ),
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
