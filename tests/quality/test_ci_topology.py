@@ -1661,10 +1661,13 @@ def _assert_license_review_retries_without_softening(workflow: WorkflowNode) -> 
     *retries, final = attempts
     assert all(step.get("continue-on-error") is True for step in retries)
     assert "continue-on-error" not in final, "the last attempt must be able to fail the job"
-    for previous, step in pairwise(attempts):
-        assert f"steps.{previous['id']}.outcome == 'failure'" in str(step["if"]), (
-            "a retry runs only after the previous attempt failed"
+    earlier_failed: list[str] = []
+    for step in attempts:
+        expected = " && ".join(["github.event_name == 'pull_request'", *earlier_failed])
+        assert str(step.get("if")) == expected, (
+            f"{step['id']}: runs on every pull request once every earlier attempt failed"
         )
+        earlier_failed.append(f"steps.{step['id']}.outcome == 'failure'")
 
 
 def test_license_review_retries_transient_failures_without_softening_policy() -> None:
@@ -1681,6 +1684,11 @@ def test_license_review_retries_transient_failures_without_softening_policy() ->
     _license_review_steps(weakened)[1]["with"]["fail-on-severity"] = "critical"
     with pytest.raises(AssertionError):
         _assert_license_review_retries_without_softening(weakened)
+
+    disabled = deepcopy(workflow)
+    _license_review_steps(disabled)[-1]["if"] += " && false"
+    with pytest.raises(AssertionError):
+        _assert_license_review_retries_without_softening(disabled)
 
 
 def _assert_pr_runs_cancel_superseded_pushes_only(workflow: WorkflowNode, name: str) -> None:
