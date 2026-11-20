@@ -25,7 +25,6 @@ _UNINSTALL_SIBLING = (
     "#4215 apm uninstall of another package exits 1 and reports incomplete integration "
     "cleanup after removing an LSP server the gate no longer allows"
 )
-_UPDATE_DEP_DENY = "#4445 update and install agreement on a policy-denied dependency"
 _XFAIL = {
     **{
         f"G|{path}|{change}|lsp": _STALE_EXEC_STATUS
@@ -34,8 +33,7 @@ _XFAIL = {
         if change != "policy-dep-deny"
     },
     **{f"G|frozen-g|{change}|lsp": _STALE_EXEC_STATUS for change in _LOCAL},
-    **{f"G|uninstall-prune-rebuild|{change}|lsp": _UNINSTALL_SIBLING for change in _ALL},
-    "G|update|policy-dep-deny|lsp": _UPDATE_DEP_DENY,
+    "G|uninstall-prune-rebuild|policy-dep-deny|lsp": _UNINSTALL_SIBLING,
 }
 _SMOKE = {"G|install|local-deny|lsp"}
 

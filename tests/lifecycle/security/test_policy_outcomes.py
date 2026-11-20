@@ -511,7 +511,6 @@ def _routed_block(outcome: str) -> tuple[str, ...]:
 SKILL = ".agents/skills/p-skill/SKILL.md"
 HOOK = ".github/hooks/p-exec-session.json"
 
-_PARTIAL_UNINSTALL = "#4185 uninstall exits 1 after it already changed the manifest, lock and disk"
 _CHECK_FAILED = r"check\(s\) failed"
 _UNAVAILABLE = r"Org policy unavailable \("
 _CONSENT_OK = r"config-consistency\s*\|\s*MCP configs match lockfile baseline"
@@ -577,7 +576,6 @@ SITE_SLICES["mcp-install-preflight"] = SiteSlice(
             (KNOB_BLOCK,),
             absent=(".mcp.json",),
             unchanged=("apm.yml",),
-            xfail="#4179 the MCP-only install exits 1 without printing the reason",
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,)),
         "cache=cold": Expect(
@@ -742,22 +740,15 @@ SITE_SLICES["exec-map(getattr: uninstall/hook rebuild/lsp)"] = SiteSlice(
             1,
             (TRUST_BLOCK + "policy hash mismatch",),
             absent=(HOOK,),
-            xfail=_PARTIAL_UNINSTALL,
         ),
-        "absent/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
-        "empty/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
-        "no_git_remote/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
-        "malformed/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
-        "cache_miss_fetch_fail/block": Expect(
-            1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL
-        ),
-        "garbage_response/block": Expect(
-            1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL
-        ),
-        "incomplete_chain": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
-        "cached_stale/org-block": Expect(
-            1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL
-        ),
+        "absent/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
+        "empty/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
+        "no_git_remote/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
+        "malformed/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
+        "cache_miss_fetch_fail/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
+        "garbage_response/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
+        "incomplete_chain": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
+        "cached_stale/org-block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,)),
         "found": Expect(0, (), absent=(HOOK, SKILL)),
         "disabled": Expect(0, (), absent=(HOOK, SKILL)),
         "absent/warn": Expect(0, (), absent=(HOOK, SKILL)),
@@ -1094,9 +1085,6 @@ def test_site_routes_the_outcome(lifecycle_world: World, cell_id: str) -> None:
     run_site_row(lifecycle_world, cell_id)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="#4180 a blocked install also prints that it proceeds without enforcement"
-)
 def test_blocked_install_never_claims_to_proceed(lifecycle_world: World) -> None:
     replay = _replay(lifecycle_world)
     CLASS_SETUPS["cache_miss_fetch_fail/block"](lifecycle_world, replay)
