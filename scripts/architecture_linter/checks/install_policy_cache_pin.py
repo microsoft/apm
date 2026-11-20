@@ -3,9 +3,10 @@
 * ``policy/discovery.py`` is the only module that locates the policy cache
   (``_get_cache_dir`` / ``POLICY_CACHE_DIR``).
 * ``_read_cache_entry`` is the only function there that parses a cached
-  policy document. It checks the document against the fingerprint its
-  metadata recorded (``_cached_policy_matches``) before parsing, and parses
-  the verified text, never the file a second time.
+  policy document. It rejects (returns None) a document that fails
+  ``_cached_policy_verified`` (pin and recorded fingerprint) before any
+  ``load_policy`` call, and parses only the verified text, never the file a
+  second time.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ GUARD_POLICY_CACHE_PIN = "install-deployment-policy-cache-pin"
 
 _OWNER = "src/apm_cli/policy/discovery.py"
 _READER = "_read_cache_entry"
+_VERIFY = "_cached_policy_verified"
 _CACHE_NAMES = frozenset({"_get_cache_dir", "POLICY_CACHE_DIR"})
 _OWNER_NEEDLES = (
     "def _cached_policy_matches(serialized: str, meta: dict) -> bool:",
@@ -46,6 +48,45 @@ def _names(index, node: ast.AST) -> set[str]:
     return found
 
 
+def _rejects_unverified(node: ast.AST) -> bool:
+    """``if not _cached_policy_verified(...): return None``."""
+    if not isinstance(node, ast.If) or node.orelse:
+        return False
+    test = node.test
+    if not (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)):
+        return False
+    call = test.operand
+    if not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == _VERIFY):
+        return False
+    return (
+        len(node.body) == 1
+        and isinstance(node.body[0], ast.Return)
+        and isinstance(node.body[0].value, ast.Constant)
+        and node.body[0].value.value is None
+    )
+
+
+def _reader_order(index, reader: ast.AST) -> str | None:
+    """Why *reader* may parse a cached document before rejecting it, or None."""
+    rejects = [node.lineno for node in index.walk(reader) if _rejects_unverified(node)]
+    parses = [
+        node
+        for node in index.walk(reader)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "load_policy"
+    ]
+    if not rejects:
+        return f"{_READER} must return None when {_VERIFY} fails"
+    for call in parses:
+        verified = (
+            len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "serialized"
+        )
+        if not verified or call.lineno < min(rejects):
+            return f"{_READER} parses a cached policy before or without verifying it"
+    return None
+
+
 def check_policy_cache_pin(provider: FactsProvider) -> tuple[Violation, ...]:
     """The policy cache has one reader, and it verifies a document before use."""
     rule = GUARD_POLICY_CACHE_PIN
@@ -61,6 +102,9 @@ def check_policy_cache_pin(provider: FactsProvider) -> tuple[Violation, ...]:
     if index is not None:
         for function in index.functions():
             if function.name == _READER:
+                problem = _reader_order(index, function)
+                if problem is not None:
+                    findings.append(violation(rule, _OWNER, problem, line=function.lineno))
                 continue
             names = _names(index, function)
             if "_get_cache_dir" in names and "load_policy" in names:

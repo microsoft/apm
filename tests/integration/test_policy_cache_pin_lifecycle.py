@@ -9,7 +9,9 @@ the loopback GitHub HTTPS fixture and caches it. When the cached policy
 document is then altered on disk while its metadata (and recorded hash) stay
 as written, the altered content is never applied: the next command fetches
 the policy again, verifies the pin on the fresh bytes and keeps the project
-as the verified policy allows.
+as the verified policy allows. When the policy cannot be fetched again, the
+pin cannot be verified: the command fails with the policy hash mismatch
+outcome and writes nothing, instead of proceeding without policy.
 """
 
 from __future__ import annotations
@@ -82,3 +84,29 @@ def test_altered_cached_policy_is_not_applied(tmp_path: Path, apm_binary_path: P
         assert "blocked by org policy" not in out, out
         assert deployed_skills(project) == {"pkg-a-skill"}, out
         assert tree_snapshot(project) == before, out
+
+
+def test_altered_cached_policy_without_a_refresh_fails_closed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    package = world.publish_package("pkg-a")
+    world.publish_policy(_POLICY)
+    assert world.policy_repository is not None
+    policy_bytes = (world.policy_repository.worktree / "apm-policy.yml").read_bytes()
+    pin = "sha256:" + hashlib.sha256(policy_bytes).hexdigest()
+    project = world.consumer(dependencies=[package.slug], extra={"policy": {"hash": pin}})
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        run_step(runner, ("install",), cwd=project, env=env, step="install", expected=0)
+    before = tree_snapshot(project)
+
+    _edit_cached_policy(world, f"{ORG}/pkg-a")
+    result = run_step(runner, ("install",), cwd=project, env=env, step="offline", expected=1)
+
+    out = " ".join(output(result).split())
+    assert "Policy hash mismatch" in out, out
+    assert "proceeding without policy enforcement" not in out, out
+    assert tree_snapshot(project) == before, out

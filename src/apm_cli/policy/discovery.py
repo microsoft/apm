@@ -1017,6 +1017,19 @@ def _auto_discover(
             continue
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
+        if result.outcome == "cache_miss_fetch_fail" and _rejected_pinned_cache(
+            _github_candidate_refs(org, host, candidates, is_ado or is_gitlab_hostname(host)),
+            project_root,
+            expected_hash,
+        ):
+            return _unverified_pinned_cache(
+                expected_hash,
+                result.source,
+                error=(
+                    "Policy hash pin cannot be verified: the cached policy was not usable "
+                    f"and a fresh fetch failed ({result.fetch_error or result.error})"
+                ),
+            )
         return result
 
     # All candidates exhausted: no policy published anywhere.
@@ -1112,7 +1125,11 @@ def _fetch_from_url(
 
     if fetch_error:
         result = _stale_fallback_or_error(
-            cache_entry, fetch_error, source_label, "cache_miss_fetch_fail"
+            cache_entry,
+            fetch_error,
+            source_label,
+            "cache_miss_fetch_fail",
+            unverified_pin=expected_hash if cache_entry_persisted else None,
         )
         result.cache_ref = url
         return result
@@ -1212,7 +1229,13 @@ def _fetch_from_repo(
         if error.startswith("404:"):
             return PolicyFetchResult(source=source_label, outcome="absent", not_found=True)
         # Fetch failed -- try stale cache fallback
-        return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
+        return _stale_fallback_or_error(
+            cache_entry,
+            error,
+            source_label,
+            "cache_miss_fetch_fail",
+            unverified_pin=expected_hash if cache_entry_persisted else None,
+        )
 
     if content is None:
         return PolicyFetchResult(source=source_label, outcome="absent")
@@ -1406,7 +1429,13 @@ def _fetch_from_ado_repo(
     if error:
         if error.startswith("404:"):
             return PolicyFetchResult(source=source_label, outcome="absent", not_found=True)
-        return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
+        return _stale_fallback_or_error(
+            cache_entry,
+            error,
+            source_label,
+            "cache_miss_fetch_fail",
+            unverified_pin=expected_hash if cache_entry_persisted else None,
+        )
 
     if content is None:
         return PolicyFetchResult(source=source_label, outcome="absent")
@@ -1587,12 +1616,7 @@ def _cache_only_policy_result(
     """Return a cached policy or an offline-safe absent outcome."""
     if cache_entry is None:
         if expected_hash is not None and cache_entry_persisted:
-            return PolicyFetchResult(
-                source=source_label,
-                outcome="hash_mismatch",
-                error="Cached policy bytes do not match the project policy.hash pin",
-                expected_hash=expected_hash,
-            )
+            return _unverified_pinned_cache(expected_hash, source_label)
         return PolicyFetchResult(source=source_label, outcome="absent")
     return PolicyFetchResult(
         policy=cache_entry.policy,
@@ -1604,6 +1628,44 @@ def _cache_only_policy_result(
         raw_bytes_hash=cache_entry.raw_bytes_hash or None,
         expected_hash=expected_hash,
         warnings=cache_entry.warnings,
+    )
+
+
+def _github_candidate_refs(
+    org: str, host: str, candidates: tuple[str, ...], other_host: bool
+) -> tuple[str, ...]:
+    """Cache refs of the GitHub org policy candidates (none for other hosts)."""
+    if other_host:
+        return ()
+    prefix = f"{host}/" if host and host != "github.com" else ""
+    return tuple(f"{prefix}{org}/{candidate}" for candidate in candidates)
+
+
+def _rejected_pinned_cache(
+    refs: tuple[str, ...], project_root: Path, expected_hash: str | None
+) -> bool:
+    """Whether a pinned project holds a persisted policy cache entry it cannot use."""
+    if expected_hash is None:
+        return False
+    return any(
+        _cache_entry_files_exist(ref, project_root)
+        and _read_cache_entry(ref, project_root, expected_hash=expected_hash) is None
+        for ref in refs
+    )
+
+
+def _unverified_pinned_cache(
+    expected_hash: str,
+    source_label: str,
+    *,
+    error: str = "Cached policy bytes do not match the project policy.hash pin",
+) -> PolicyFetchResult:
+    """A persisted cache entry failed pin verification and nothing replaced it."""
+    return PolicyFetchResult(
+        source=source_label,
+        outcome="hash_mismatch",
+        error=error,
+        expected_hash=expected_hash,
     )
 
 
@@ -1801,8 +1863,25 @@ def _stale_fallback_or_error(
     fetch_error_msg: str,
     source_label: str,
     outcome_on_miss: str,
+    *,
+    unverified_pin: str | None = None,
 ) -> PolicyFetchResult:
-    """Return stale cache if available, otherwise error with given outcome."""
+    """Return stale cache if available, otherwise error with given outcome.
+
+    *unverified_pin* is the project ``policy.hash`` when a persisted cache
+    entry exists but failed verification (#4218). If fresh bytes cannot be
+    fetched either, the pin cannot be verified: that is a hash mismatch,
+    which always blocks, never a fetch failure that may fall open.
+    """
+    if cache_entry is None and unverified_pin is not None:
+        return _unverified_pinned_cache(
+            unverified_pin,
+            source_label,
+            error=(
+                "Policy hash pin cannot be verified: the cached policy was not usable "
+                f"and a fresh fetch failed ({fetch_error_msg})"
+            ),
+        )
     if cache_entry is not None:
         return PolicyFetchResult(
             policy=cache_entry.policy,

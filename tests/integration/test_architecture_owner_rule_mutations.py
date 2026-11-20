@@ -2094,12 +2094,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         rule_id="install-deployment-policy-cache-pin",
         path="src/apm_cli/policy/discovery.py",
         old=(
-            "    return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(\n"
-            "        serialized, meta\n"
-            "    )\n"
+            "        if not _cached_policy_verified(serialized, meta, expected_hash):\n"
+            "            return None\n"
         ),
-        new="    return _cached_pin_matches(raw_bytes_hash, expected_hash)\n",
-        intent="An altered cached policy document is parsed and applied without verification.",
+        new=(
+            "        if not _cached_policy_verified(serialized, meta, expected_hash):\n"
+            "            pass\n"
+        ),
+        intent="A cached policy that fails verification is still parsed and applied.",
     ),
     MutationCase(
         guard_id="install-deployment-policy-disable-switch-owner",
