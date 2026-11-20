@@ -467,9 +467,14 @@ def test_lockfile_unknown_hash_algorithm_rejected():
 
 @pytest.mark.req("req-lk-015")
 def test_lockfile_tree_sha256_canonicalisation_invariant():
+    """Amendment 0.1.71: `content_hash` anchors git-source integrity in v0.1."""
     assert_spec_contains(
         "canonical git tree-hash",
         "tree_sha256",
+        "compute and record `content_hash`, a `sha256` envelope over the\npackage tree",
+        "the consumer MUST re-compute `content_hash` from\nthe package tree at `resolved_commit`",
+        "MUST name the entry, the expected envelope, and the observed\nenvelope.",
+        "recorded as `tree_sha256`, is reserved\nfor v0.2.",
     )
 
 

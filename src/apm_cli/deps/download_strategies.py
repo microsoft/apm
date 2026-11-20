@@ -29,7 +29,7 @@ from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..core.auth_outcome import AuthAttemptFailed
 from ..models.apm_package import DependencyReference
 from ..models.dependency.host_virtual import dependency_repository_owner, repository_owner_and_repo
-from ..utils.archive import ArchiveError, safe_extract_zip
+from ..utils.archive import ArchiveError, read_zip_member, safe_extract_zip
 from ..utils.console import _rich_warning
 from ..utils.git_env import redact_git_diagnostic, validate_git_url_rewrite_safety
 from ..utils.github_host import (
@@ -590,7 +590,7 @@ class DownloadDelegate:
                             entry = zf.getinfo(name)
                         except KeyError:
                             continue
-                        return zf.read(entry)
+                        return read_zip_member(zf, entry, error_type=ArchiveError)
             except (zipfile.BadZipFile, requests.RequestException):
                 continue
 

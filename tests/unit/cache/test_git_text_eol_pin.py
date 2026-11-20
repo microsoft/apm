@@ -310,7 +310,7 @@ def test_bare_materialization_pins_line_endings_without_extra_spawns(
         empty = "" if kwargs.get("text") else b""
         return subprocess.CompletedProcess(argv, 0, stdout=empty, stderr=empty)
 
-    monkeypatch.setattr("apm_cli.deps.bare_cache.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     materialize_from_bare(
         tmp_path / "bare.git", tmp_path / "consumer", ref=None, env={}, known_sha="a" * 40
     )

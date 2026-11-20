@@ -100,7 +100,7 @@ class TestClassifyHost:
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ) as mock_cred,
             patch(
-                "apm_cli.core.token_manager.subprocess.run",
+                "subprocess.run",
                 side_effect=AssertionError("Cache identity must not launch credential helpers"),
             ),
         ):
@@ -1324,7 +1324,7 @@ class TestResolvePortDiscrimination:
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ) as mock_cred,
             patch(
-                "apm_cli.core.token_manager.subprocess.run",
+                "subprocess.run",
                 side_effect=AssertionError("Port metadata must not launch credential helpers"),
             ),
         ):
