@@ -502,6 +502,18 @@ LOCKFILE_UNREADABLE = _entry(
     "regenerate apm.lock.yaml",
     before="delete or fix {path}",
 )
+# A lockfile written by a newer APM: regenerate it, or upgrade APM (req-lk-004).
+LOCKFILE_VERSION_UNSUPPORTED = _entry(
+    "lockfile-version-unsupported",
+    "apm lock",
+    "regenerate it from apm.yml at a supported version",
+    before="move {path} aside",
+)
+LOCKFILE_VERSION_UPGRADE_APM = _entry(
+    "lockfile-version-upgrade-apm",
+    "apm self-update",
+    "install an APM release that reads lockfile version {version}",
+)
 LOCKFILE_RECORDS_INCONSISTENT = _entry(
     "lockfile-records-inconsistent",
     "apm install",

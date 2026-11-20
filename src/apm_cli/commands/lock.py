@@ -84,7 +84,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     elif isinstance(e, (DirectDependencyError, PolicyViolationError)):
         _rich_error(str(e))
     else:
-        _rich_error(f"Error generating lockfile: {e}")
+        _rich_error(f"Error generating lockfile: {e}", symbol="error")
         if not verbose:
             _rich_info("Run with --verbose for detailed diagnostics.", symbol="info")
     sys.exit(1)

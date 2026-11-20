@@ -843,11 +843,14 @@ def _audit_ci_gate(
     # -- Drift detection (default-on per ADR-02) --------------------
     drift_findings: list = []
     if not no_drift and manifest_file(cfg.project_root).exists():
-        from ..deps.lockfile import LockFile, get_lockfile_path
+        from ..deps.lockfile import LockFile, UnsupportedLockfileVersionError, get_lockfile_path
 
         lockfile_path = get_lockfile_path(cfg.project_root)
         if lockfile_path.exists():
-            lockfile = LockFile.read(lockfile_path)
+            try:
+                lockfile = LockFile.read(lockfile_path)
+            except UnsupportedLockfileVersionError:
+                lockfile = None  # the lockfile-exists check already failed with both remedies
             if lockfile is not None:
                 if prepared_replay_error is not None:
                     from ..policy.models import CheckResult

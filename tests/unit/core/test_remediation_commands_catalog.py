@@ -77,6 +77,11 @@ COMPONENT_ONLY: dict[str, str] = {
     "local-dependency-unmapped": "needs a hand-edited lockfile local key",
     "local-dependency-unresolved": _FAULT,
     "lockfile-records-inconsistent": "needs duplicate or invalid lockfile rows",
+    "lockfile-version-unsupported": (
+        "executed end to end by "
+        "tests/integration/test_unsupported_lockfile_version_lifecycle.py (#4233)"
+    ),
+    "lockfile-version-upgrade-apm": _NETWORK,
     "lockfile-state-unreconciled": _FAULT,
     "marketplace-add-failed": _OUTSIDE,
     "marketplace-build-removed": _OUTSIDE,

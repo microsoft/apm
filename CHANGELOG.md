@@ -105,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --dry-run` previews the org policy block that the real install applies when policy cannot be resolved under `fetch_failure_default: block`. (closes #4455, #4466)
 - `apm install` and `apm install --frozen` accept a user's Codex MCP entry that equals the declared server, including one switched off with `enabled = false`, and leave it unowned. (#4470)
 - `apm update` restores a marketplace lock row to the alias `apm.yml` declares when the row records that alias's registered origin. (#4475)
+- A lockfile written by a newer APM now fails with an `[x]` error that names both remedies: move it aside and run `apm lock`, or run `apm self-update`. (#4469)
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
