@@ -30,7 +30,10 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
         ('return relative.as_posix().encode("utf-8") + b"\\0" + mode', "frame path, NUL, mode"),
         ("hashlib.sha256(payload).digest()", "frame each file by its own digest"),
         ("framed.update(_frame_entry(rel_path, payload))", "frame the package stream"),
-        ("hasher.update(_frame_entry(relative, path.read_bytes(), mode))", "frame native pins"),
+        (
+            "hasher.update(_frame_entry(relative, path.read_bytes(), mode if include_mode",
+            "frame native pins",
+        ),
     ),
     RECORDER: (
         (
