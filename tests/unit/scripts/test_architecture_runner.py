@@ -609,6 +609,7 @@ contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
 contracts-tooling-lifecycle-script-gate
+contracts-tooling-lifecycle-policy-errors
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp
 contracts-tooling-lockfile-read
@@ -674,7 +675,9 @@ install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
 install-deployment-policy-disable-switch-owner
+install-deployment-policy-field-types
 install-deployment-policy-mcp-transport-projection
+install-deployment-policy-outcome-routing
 install-deployment-policy-remote-origin-owner
 install-deployment-policy-violation-subjects
 install-deployment-primitive-classification
@@ -791,6 +794,7 @@ transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner
+transport-platform-credential-value-rendering
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight

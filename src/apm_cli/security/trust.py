@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .executables import (
+    EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_MCP,
     ITEM_EXEC_TYPES,
@@ -309,18 +310,12 @@ class McpAdmission:
 
             policy = None
             if not no_policy:
-                from apm_cli.policy.discovery import discover_policy_with_chain
-                from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+                from apm_cli.policy.outcome_routing import classify_project_policy
 
-                try:
-                    result = discover_policy_with_chain(project_root)
-                except (OSError, ValueError, RuntimeError) as exc:
-                    admission.policy_unavailable = type(exc).__name__
-                else:
-                    policy = getattr(result, "policy", None)
-                    outcome = getattr(result, "outcome", None)
-                    if policy is None and outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
-                        admission.policy_unavailable = str(outcome)
+                route = classify_project_policy(project_root)
+                policy = route.policy
+                if policy is None and (route.blocks or route.unresolved):
+                    admission.policy_unavailable = route.outcome
             return exec_trust_context_for_project(
                 grants_manifest, policy=policy, logger=logger, include_user=include_user
             )
@@ -521,13 +516,40 @@ def native_root_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def native_plugin_exec_types(
-    plugin_root: Path, extra: tuple[str, ...] | list[str] = ()
-) -> tuple[str, ...]:
+def agent_plugin_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
+    """Exec types an Agent Plugin's root ``mcp.json`` declares, per the loader's IR.
+
+    ``mcp`` for any server, plus ``bin`` when a server runs a command. A root
+    ``mcp.json`` the loader cannot read still counts as ``mcp`` (fail closed):
+    the harness loads the plugin directory live.
+    """
+    if plugin_root is None:
+        return ()
+    from apm_cli.agent_plugins.errors import AgentPluginError
+    from apm_cli.agent_plugins.loader import detect_agent_plugin
+
+    root = Path(plugin_root)
+    try:
+        detection = detect_agent_plugin(root)
+    except (AgentPluginError, OSError):
+        detection = None
+    if detection is None:
+        return ()
+    components = getattr(detection.plugin, "components", None)
+    servers = getattr(components, "mcp_servers", ()) if components is not None else ()
+    types: list[str] = []
+    if servers or (root / "mcp.json").is_file():
+        types.append(EXEC_TYPE_MCP)
+    if any(getattr(server, "executables", ()) for server in servers):
+        types.append(EXEC_TYPE_BIN)
+    return tuple(types)
+
+
+def native_plugin_exec_types(plugin_root: Path) -> tuple[str, ...]:
     """Executable types a natively loaded plugin declares (the native gate's union).
 
-    *extra* adds types a caller derives from the plugin IR or manifest, so
-    every native path gates on one set.
+    The single source for every native path: install admission, lockfile
+    status, ``apm approve`` and ``apm policy explain`` all read this set.
     """
     import json
 
@@ -535,7 +557,7 @@ def native_plugin_exec_types(
 
     root = Path(plugin_root)
     found: dict[str, None] = dict.fromkeys(scan_package_executables(root, "", "").exec_types)
-    found.update(dict.fromkeys(extra))
+    found.update(dict.fromkeys(agent_plugin_exec_types(root)))
     found.update(dict.fromkeys(native_root_exec_types(root)))
     markers = {
         "hooks": EXEC_TYPE_HOOKS,
@@ -643,7 +665,6 @@ def admit_native_plugin(
     plugin_root: Path,
     *,
     transitive: bool = False,
-    extra_types: tuple[str, ...] | list[str] = (),
     one_off: bool = False,
 ) -> Admission:
     """Decide whether a natively loaded plugin may run, as one unit.
@@ -672,7 +693,7 @@ def admit_native_plugin(
     gate_on = ctx is not None and ctx.gate_enabled
     if not gate_on and not transitive:
         return Admission(True, None, LAYER_GATE_DISABLED)
-    exec_types = native_plugin_exec_types(plugin_root, extra_types)
+    exec_types = native_plugin_exec_types(plugin_root)
     needs_trust = transitive and EXEC_TYPE_MCP in exec_types
     if not gate_on:
         if not needs_trust:
@@ -717,7 +738,17 @@ def admit_native_plugin(
     decisions = [_type_decision(ctx, package_keys, exec_type) for exec_type in exec_types]
     if decisions and all(decision.allowed for decision in decisions):
         return Admission(True, None, decisions[0].deciding_layer, one_off=needs_trust)
-    return Admission(False, REASON_UNAPPROVED, LAYER_DEFAULT_DENY)
+    missing = [t for t, decision in zip(exec_types, decisions, strict=True) if not decision.allowed]
+    # Name the gap only when some type is granted: the grant is incomplete.
+    detail = ", ".join(missing) if len(missing) < len(decisions) else None
+    return Admission(False, REASON_UNAPPROVED, LAYER_DEFAULT_DENY, detail=detail)
+
+
+def native_declaration(declaration: Any, plugin_root: Path) -> Any:
+    """Return *declaration* carrying the native gate's type set for *plugin_root*."""
+    from dataclasses import replace
+
+    return replace(declaration, native_exec_types=native_plugin_exec_types(plugin_root))
 
 
 def parked_plugin_message(
@@ -749,6 +780,8 @@ def parked_plugin_message(
     why = (
         "content changed since approval" if reason == REASON_DEFINITION_CHANGED else "not approved"
     )
+    if reason == REASON_UNAPPROVED and detail:
+        why = f"not approved (missing grant: {detail})"
     return (
         f"Parked native plugin {package}: {why}\n"
         f"    Review: {approve} --pending  |  Re-approve: {approve} {package}"

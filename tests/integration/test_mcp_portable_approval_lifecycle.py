@@ -527,6 +527,135 @@ def test_native_plugin_legacy_hook_grant_registers_and_warns(
     assert "Pin: apm approve <package>" in output
 
 
+_STDIO_SERVER = {"type": "stdio", "command": "npx", "args": ["-y", "np-server@1"]}
+
+
+def _mcp_only_chain(
+    tmp_path: Path, binary: Path, executables: dict, server: dict | None = None
+) -> Chain:
+    """An Agent Plugin whose only executable is its root mcp.json (#4042)."""
+    chain = Chain(tmp_path / "world", binary)
+    package = chain.project / "pkgs" / "np"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+                "name": _PLUGIN,
+                "version": "1.0.0",
+                "description": "Native MCP fixture",
+                "author": {"name": "APM Test"},
+                "license": "MIT",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_plugin_mcp(chain, server or _STDIO_SERVER)
+    chain.write_manifest([], apm=["./pkgs/np"], targets=["copilot"], executables=executables)
+    return chain
+
+
+def _write_plugin_mcp(chain: Chain, server: dict) -> None:
+    (chain.project / "pkgs" / "np" / "mcp.json").write_text(
+        json.dumps(
+            {
+                "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+                "mcpServers": {"np-server": server},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_native_plugin_with_only_a_root_mcp_json_is_approvable(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """approve, --pending, --list and policy explain see what install parks (#4042)."""
+    chain = _mcp_only_chain(tmp_path, apm_binary_path, {})
+    chain.ok("install", "--no-policy")
+    assert not _registered(chain)
+
+    pending = _text(chain.ok("approve", "--pending"))
+    assert "./pkgs/np" in pending and "[not approved]" in pending, pending
+    assert "mcp" in pending and "bin" in pending, pending
+    listing = _text(chain.ok("approve", "--list"))
+    assert "mcp[x:" in listing and "bin[x:" in listing, listing
+    explain = _text(chain.ok("policy", "explain", "./pkgs/np"))
+    assert "not found" not in explain, explain
+    assert "mcp [x] blocked" in explain and "bin [x] blocked" in explain, explain
+
+    listing = _approve(chain, "./pkgs/np")
+    assert "plugin . whole plugin" in listing and "(mcp, bin)" in listing, listing
+    grant = yaml.safe_load((chain.project / "apm.yml").read_text(encoding="utf-8"))["executables"][
+        "allow"
+    ]["./pkgs/np"]
+    assert len(grant["plugin"]) == len("sha256:") + 64
+    chain.ok("install", "--no-policy")
+    assert _registered(chain)
+    assert "All packages with executables are approved." in _text(chain.ok("approve", "--pending"))
+
+    _write_plugin_mcp(chain, {**_STDIO_SERVER, "args": ["-y", "np-server@2"]})
+    output = _text(chain.ok("install", "--no-policy"))
+    assert "Parked native plugin ./pkgs/np: content changed since approval" in output
+    assert not _registered(chain)
+    assert "[changed since approval]" in _text(chain.ok("approve", "--pending"))
+
+    _approve(chain, "./pkgs/np")
+    chain.ok("install", "--no-policy")
+    assert _registered(chain)
+
+
+def test_native_plugin_with_only_a_root_mcp_json_is_pending_without_a_lockfile(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """With no apm.lock.yaml, approve still detects the Agent Plugin it must list."""
+    chain = _mcp_only_chain(tmp_path, apm_binary_path, {})
+    chain.ok("install", "--no-policy")
+    assert not _registered(chain)
+    (chain.project / "apm.lock.yaml").unlink()
+
+    pending = _text(chain.ok("approve", "--pending"))
+    assert "[not approved]" in pending, pending
+    assert "mcp" in pending and "bin" in pending, pending
+    listing = _text(chain.ok("approve", "--list"))
+    assert "mcp[x:" in listing and "bin[x:" in listing, listing
+
+
+def test_native_plugin_mcp_grant_alone_parks_and_names_the_missing_bin(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A command server also runs a binary: mcp: true alone is not enough (#4042)."""
+    chain = _mcp_only_chain(tmp_path, apm_binary_path, {"allow": {"./pkgs/np": {"mcp": True}}})
+    output = _text(chain.ok("install", "--no-policy"))
+    assert not _registered(chain)
+    assert "Parked native plugin ./pkgs/np: not approved (missing grant: bin)" in output, output
+
+    chain.write_manifest(
+        [],
+        apm=["./pkgs/np"],
+        targets=["copilot"],
+        executables={"allow": {"./pkgs/np": {"mcp": True, "bin": True}}},
+    )
+    chain.ok("install", "--no-policy")
+    assert _registered(chain)
+
+
+def test_native_plugin_url_mcp_server_needs_no_bin_grant(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A remote server runs nothing locally, so it never acquires bin."""
+    chain = _mcp_only_chain(
+        tmp_path,
+        apm_binary_path,
+        {"allow": {"./pkgs/np": {"mcp": True}}},
+        server={"type": "http", "url": "https://mcp.example.invalid/mcp"},
+    )
+    chain.ok("install", "--no-policy")
+    assert _registered(chain)
+    listing = _text(chain.ok("approve", "--list"))
+    assert "mcp[+:" in listing and "bin[" not in listing, listing
+
+
 def test_approve_refusal_exits_nonzero_and_writes_nothing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
