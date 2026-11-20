@@ -476,6 +476,18 @@ class McpConfigDiff:
         return not (self.changed or self.source_only or self.lock_only)
 
 
+# Trust notices already shown in this process (#4256): one install collects
+# the locked MCP view in several passes, but the user needs one notice per server.
+_TRUST_NOTICES_SHOWN: set[str] = set()
+
+
+def _progress_trust_once(logger: Any, message: str) -> None:
+    if message in _TRUST_NOTICES_SHOWN:
+        return
+    _TRUST_NOTICES_SHOWN.add(message)
+    logger.progress(message)
+
+
 def _deduplicate(dependencies: list[Any] | tuple[Any, ...]) -> list[Any]:
     """Return first-wins dependencies using the shared MCP/LSP semantics."""
     return deduplicate_deps(list(dependencies))
@@ -1068,8 +1080,9 @@ def _collect_locked_dependencies(
                 and dependency.depth == 1
                 and verdict.layer not in ("project-allow", "user-allow")
             ):
-                logger.progress(
-                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'"
+                _progress_trust_once(
+                    logger,
+                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'",
                 )
             collected.append(
                 replace(

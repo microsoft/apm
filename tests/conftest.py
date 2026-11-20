@@ -207,6 +207,24 @@ def _reset_config_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_once_per_process_warnings():
+    """Forget which once-per-process CLI notices were shown (#4242, #4256).
+
+    One CLI process prints each such notice once; a test is one process
+    in production, so a notice seen by an earlier test must not hide it here.
+    """
+    from apm_cli.integration import mcp_config_view
+    from apm_cli.models.dependency import mcp
+
+    shown = (mcp._PASSTHROUGH_WARNED, mcp_config_view._TRUST_NOTICES_SHOWN)
+    for notices in shown:
+        notices.clear()
+    yield
+    for notices in shown:
+        notices.clear()
+
+
+@pytest.fixture(autouse=True)
 def _restore_executable_caches():
     """Restore the process-wide git/gh executable caches after each test.
 

@@ -2418,6 +2418,36 @@
       ]
     },
     {
+      "issue": 4242,
+      "fixed_in": "Unreleased",
+      "summary": "An MCP dependency's passthrough-key warning ('unknown key(s) preserved in extra' or 'reserved passthrough key(s) ignored') prints once per server per command, not once per manifest parse.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_hermes_mcp_fidelity_lifecycle.py::test_hermes_package_uninstall_removes_only_its_entries"
+      ]
+    },
+    {
+      "issue": 4244,
+      "fixed_in": "Unreleased",
+      "summary": "The MCP registry lookup progress line names the registry it queries, so an install that resolves servers from two registries prints two distinct lines instead of one identical line per registry.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_each_registry_lookup_line_names_its_registry"
+      ]
+    },
+    {
+      "issue": 4256,
+      "fixed_in": "Unreleased",
+      "summary": "apm install --frozen prints the direct-dependency MCP trust notice once per server per command, not once per locked-view collection pass.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_frozen_native_service_lifecycle.py::test_frozen_direct_package_services_keep_trust_and_recorded_ownership"
+      ]
+    },
+    {
       "issue": 4270,
       "fixed_in": "Unreleased",
       "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",

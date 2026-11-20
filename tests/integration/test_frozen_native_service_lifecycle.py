@@ -225,6 +225,9 @@ def test_frozen_direct_package_services_keep_trust_and_recorded_ownership(
     native = _native_bytes(scenario, project)
     direct = _run(scenario, project, "--frozen", label="direct-package-trust")
     assert direct.returncode == 0, _result_evidence(direct)
+    # One trust notice per server per command, not one per collection pass (#4256).
+    flat = " ".join((direct.stdout + direct.stderr).split())
+    assert flat.count("Trusting direct dependency MCP 'fixture-mcp'") == 1, flat
     assert _native_bytes(scenario, project) == native
     _success(
         scenario, project, "--frozen", "--trust-transitive-mcp", label="trusted-recorded-replay"

@@ -58,7 +58,7 @@ class NullCommandLogger:
             return
         _rich_info(message, symbol=symbol)
 
-    def mcp_lookup_heartbeat(self, count: int):
+    def mcp_lookup_heartbeat(self, count: int, registry: str | None = None):
         """Mirror of ``CommandLogger.mcp_lookup_heartbeat`` (F4, #1116).
 
         Provided so ``MCPIntegrator`` can call this unconditionally
@@ -68,7 +68,8 @@ class NullCommandLogger:
         if count <= 0:
             return
         noun = "server" if count == 1 else "servers"
-        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+        where = f"registry {registry}" if registry else "registry"
+        _rich_info(f"Looking up {count} MCP {noun} in {where}...", symbol="running")
 
     def success(self, message: str, symbol: str = "sparkles"):
         _rich_success(message, symbol=symbol)

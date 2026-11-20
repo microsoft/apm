@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP passthrough-key warnings print once per server per command instead of once per manifest parse. (closes #4242, #PRNUM)
+- The MCP registry lookup progress line names the registry it queries. (closes #4244, #PRNUM)
+- `apm install --frozen` prints the direct-dependency MCP trust notice once per server. (closes #4256, #PRNUM)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
 - MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)

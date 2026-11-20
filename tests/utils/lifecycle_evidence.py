@@ -482,25 +482,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         ),
     ),
     KnownOutputCell(
-        "install-registry-lookup-per-registry",
-        "I9",
-        "#4244",
-        _runs_any("install", "update"),
-        r"Looking up 1 MCP server in registry",
-        output=r"^\[i\] Using MCP registry: .*^\[i\] Using MCP registry: ",
-    ),
-    KnownOutputCell(
-        "install-mcp-passthrough-warning-per-parse",
-        "I9",
-        "#4242",
-        _runs("install", "hermes"),
-        r"'hermes-stdio': unknown key\(s\) preserved in extra",
-        output=(
-            r"^\+- MCP Servers.*'hermes-stdio': unknown key"
-            r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
-        ),
-    ),
-    KnownOutputCell(
         "install-mcp-failure-line-per-runtime",
         "I9",
         "#4288",
@@ -594,15 +575,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("pack"),
         r"repeats a diagnostic: '(\[i\]'|\[!\] Secrets withheld from plugin\.json)",
         output=r"^\s*(\[i\]|\[!\] Secrets withheld from plugin\.json[^\n]*)\s*$.*^\s*\1\s*$",
-    ),
-    KnownOutputCell(
-        "install-frozen-trust-notice-repeats",
-        "I9",
-        "#4256",
-        _runs("install", "--frozen"),
-        r"Trusting direct dependency MCP",
-        # Only runs that print the same trust notice twice (one notice is correct).
-        output=r"^(\[i\] Trusting direct dependency MCP[^\n]*)$.*^\1$",
     ),
 )
 

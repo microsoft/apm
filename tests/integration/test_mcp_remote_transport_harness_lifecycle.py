@@ -159,6 +159,28 @@ def test_registry_remote_without_transport_defaults_to_streamable_http(
         )
 
 
+def test_each_registry_lookup_line_names_its_registry(scene: HarnessScene) -> None:
+    """Two registries print one lookup line each, naming the registry (#4244)."""
+    names = ("io.github.apm-fixture/first-remote", "io.github.apm-fixture/second-remote")
+    registries = [
+        scene.start_registry(
+            registry_document(name, f"https://{index}.example.invalid/mcp", transport=None)
+        )
+        for index, name in enumerate(names)
+    ]
+    scene.write_manifest(
+        [{"name": name, "registry": url} for name, url in zip(names, registries, strict=True)],
+        user=False,
+    )
+
+    result = scene.install("copilot", user=False)
+
+    assert result.returncode == 0, describe(result)
+    lookups = [line.strip() for line in result.stdout.splitlines() if "Looking up" in line]
+    expected = [f"[>] Looking up 1 MCP server in registry {url}..." for url in registries]
+    assert sorted(lookups) == sorted(expected), describe(result)
+
+
 _SELF_DEFINED = (
     ("sd-sse", "sse", "https://sse.example.invalid/sse"),
     ("sd-http", "http", "https://http.example.invalid/mcp"),

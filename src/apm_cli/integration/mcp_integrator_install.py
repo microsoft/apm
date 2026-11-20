@@ -133,7 +133,16 @@ def _validate_registry_servers(
     retry_args: tuple[str, ...] = (),
 ) -> list[str]:
     """Validate registry identities and raise before any target write."""
-    logger.mcp_lookup_heartbeat(len(server_names))
+    # Name the registry: one install can look up servers in several (#4244).
+    registry_url = getattr(getattr(operations, "registry_client", None), "registry_url", None)
+    if isinstance(registry_url, str):
+        from apm_cli.registry.client import redact_mcp_registry_url
+
+        logger.mcp_lookup_heartbeat(
+            len(server_names), registry=redact_mcp_registry_url(registry_url)
+        )
+    else:
+        logger.mcp_lookup_heartbeat(len(server_names))
     if verbose:
         logger.verbose_detail(f"Validating {dependency_count} registry servers...")
     if fail_closed:
