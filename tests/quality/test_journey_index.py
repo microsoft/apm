@@ -135,6 +135,17 @@ def test_a_mutated_index_fails(mutation, expected: str) -> None:
     assert any(expected in problem for problem in check_index(index))
 
 
+def test_every_docs_path_exists_on_disk() -> None:
+    """Each journey's docs list names only pages under docs/src/content/docs/ (.md or .mdx)."""
+    missing = [
+        (journey["id"], doc)
+        for journey in _load()["journeys"]
+        for doc in journey["docs"]
+        if not (DOCS / doc).is_file()
+    ]
+    assert missing == [], f"docs pages not on disk (move them to docs_unresolved): {missing}"
+
+
 def test_golden_mutation_fails() -> None:
     index = _load()
     for journey in index["journeys"]:
