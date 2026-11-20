@@ -292,7 +292,10 @@ class InstallService:
 
         if install_worked:
             post_event = self._build_event("post-install", request)
-            runner.fire("post-install", post_event)
+            if request.post_install_after_services:
+                result.post_install = lambda: runner.fire("post-install", post_event)
+            else:
+                runner.fire("post-install", post_event)
 
         return result
 

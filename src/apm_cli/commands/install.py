@@ -1936,7 +1936,12 @@ def _install_apm_packages(ctx, outcome):
 
         try:
             install_result = _install_apm_dependencies(
-                apm_package, ctx.update, ctx.verbose, ctx.only_packages, **pipeline_options
+                apm_package,
+                ctx.update,
+                ctx.verbose,
+                ctx.only_packages,
+                **pipeline_options,
+                post_install_after_services=True,
             )
             if not isinstance(install_result, InstallResult):
                 install_result = InstallResult(
@@ -2040,6 +2045,8 @@ def _install_apm_packages(ctx, outcome):
     ctx.target_decision = service_result.target_decision
     mcp_count = service_result.mcp_count
     lsp_count = service_result.lsp_count
+    if install_result is not None and install_result.post_install is not None:
+        install_result.post_install()
 
     # Local .apm/ integration already ran inside the package pipeline.
 

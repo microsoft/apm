@@ -26,6 +26,7 @@ import pytest
 from apm_cli.deps.lockfile import LockFile
 from tests.integration._fault_injection_kit import FaultWorld, build_world, evidence
 from tests.utils.artifact_snapshot import assert_unchanged
+from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
 pytestmark = [
     pytest.mark.integration,
@@ -226,3 +227,31 @@ def test_dry_run_waits_for_a_running_install(tmp_path: Path, apm_binary_path: Pa
     output, _ = preview.communicate(timeout=240)
     assert preview.returncode == 0, output
     assert "Another APM operation is running" in output, output
+
+
+@pytest.mark.skipif(not INOTIFY_AVAILABLE, reason="counting lockfile writes requires Linux inotify")
+def test_post_install_script_sees_the_final_lockfile_written_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """post-install fires after MCP/LSP reconciliation, so it sees the one committed lockfile."""
+    world = build_world(
+        tmp_path, apm_binary_path, mcp_package="beta", targets=("copilot",), installed=False
+    )
+    manifest = world.project / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="ascii")
+        + "lifecycle:\n  post-install:\n    - type: command\n"
+        + '      bash: "cp apm.lock.yaml seen.lock.yaml"\n      timeoutSec: 60\n',
+        encoding="ascii",
+    )
+    trust = world.apm("lifecycle", "trust")
+    assert trust.returncode == 0, evidence(trust)
+
+    with count_lockfile_writes(world.project) as counter:
+        installed = world.install("--trust-transitive-mcp")
+
+    assert installed.returncode == 0, evidence(installed)
+    assert counter.writes == 1, (counter.events, evidence(installed))
+    seen = world.project / "seen.lock.yaml"
+    assert seen.read_bytes() == world.lockfile_bytes(), evidence(installed)
+    assert "beta-srv" in seen.read_text(encoding="utf-8")
