@@ -58,6 +58,14 @@ def _option_names(command: click.Command) -> frozenset[str]:
     return frozenset(names)
 
 
+def _group_option(group: click.Group, name: str) -> click.Option | None:
+    """The option of *group* itself named *name*, consumed before its subcommand."""
+    for param in group.params:
+        if isinstance(param, click.Option) and name in (*param.opts, *param.secondary_opts):
+            return param
+    return None
+
+
 @dataclass(frozen=True)
 class Resolution:
     """Where an argv lands in the Click tree, and what it got wrong."""
@@ -84,7 +92,15 @@ def resolve(argv: Sequence[str], group: click.Group | None = None) -> Resolution
     command: click.Command = group or root_group()
     path: list[str] = []
     tokens = list(argv)
-    while tokens and isinstance(command, click.Group) and not tokens[0].startswith("-"):
+    while tokens and isinstance(command, click.Group):
+        if tokens[0].startswith("-") and tokens[0] != "--":
+            option = _group_option(command, tokens[0].split("=", 1)[0])
+            if option is None:
+                break
+            token = tokens.pop(0)
+            if not (option.is_flag or option.count) and "=" not in token and tokens:
+                tokens.pop(0)  # the option's value
+            continue
         child = _subcommand(command, tokens[0])
         if child is None:
             return Resolution(tuple(path), None, tokens[0], ())

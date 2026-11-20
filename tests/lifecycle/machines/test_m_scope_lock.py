@@ -37,6 +37,7 @@ from tests.lifecycle.machines._kit import (
     earned_cells,
     machine_settings,
 )
+from tests.lifecycle.model.expected import expected_exit
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.receipts import current_node
@@ -382,3 +383,10 @@ def test_scope_lock_generated_sequences_keep_cross_cutting_laws(
         lambda: ScopeLockMachine(Bench(pool.fresh(), scope)),
         settings=machine_settings(pr_examples=4, nightly_examples=10, steps=8),
     )
+
+
+@pytest.mark.parametrize("command", ["install", "update"])
+@pytest.mark.parametrize("frozen", [False, True])
+def test_model_predicts_refusal_on_a_newer_generator_lock(command: str, frozen: bool) -> None:
+    model = ModelState(declared=frozenset({TOGGLE})).with_lock("newer-generator")
+    assert expected_exit(command, model, frozen=frozen) == frozenset({1})

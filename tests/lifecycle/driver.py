@@ -84,7 +84,8 @@ def command_args(argv: str | Sequence[str], *, scope: str = "project") -> tuple[
         if flag is None:
             raise ValueError(f"apm {args[0]} has no user-scope form")
         if flag not in args and "-g" not in args:
-            args.insert(1, flag)
+            # ``deps`` takes the flag on its subcommand (``apm deps list --global``).
+            args.insert(2 if args[0] == "deps" and len(args) > 1 else 1, flag)
     elif scope != "project":
         raise ValueError(f"unknown scope {scope!r}")
     return tuple(args)

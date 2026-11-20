@@ -240,7 +240,8 @@ class RowReplay:
         fields: dict[str, object] = {
             "forbidden": {"home": ("*",)},
             "allowed": {"home": _PROJECT_HOME_ALLOWED},
-            "read_only": read_only,
+            # A dry run is read-only (I5) wherever a row runs it.
+            "read_only": read_only or "--dry-run" in args,
             "paired": paired or {},
         }
         if args[0] not in _RECONCILING:
