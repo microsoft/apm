@@ -30,6 +30,12 @@ pytestmark = [
     pytest.mark.lifecycle_merge_group,
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise(
+        "P-INV-I7",
+        "P-LAW-ownership.preserve_unowned",
+        "P-OWN-file-level-deploy-sync-cleanup",
+        "P-OWN-unmanaged-skill-preflight",
+    ),
 ]
 
 _REFUSAL = "no trustworthy local deployment baseline"
