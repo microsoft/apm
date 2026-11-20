@@ -398,15 +398,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         # Auto-detected targets print no targeting line, so there is nothing to repeat.
         output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
     ),
-    KnownOutputCell(
-        "self-update-installer-color-codes",
-        "I6",
-        "#4308",
-        _runs("self-update"),
-        r"stdout has characters outside printable ASCII \['0x1b'\]",
-        # self-update passes the installer's output through; install.sh always colors it.
-        output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
-    ),
 )
 
 _EXPECTED_VIOLATIONS: ContextVar[frozenset[str]] = ContextVar(
