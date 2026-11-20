@@ -1,0 +1,17 @@
+# TEMPORARY diagnostic (never merge): bisect the Windows polluter of
+# test_cached_codex_source_pin. Closed after the root cause is found.
+name: DIAG codex-pin bisect
+on:
+  pull_request:
+    paths: [".github/workflows/zz-diag-codex-pin-bisect.yml", "scripts/zz_diag_bisect.py"]
+permissions:
+  contents: read
+jobs:
+  bisect:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      - run: uv run python scripts/zz_diag_bisect.py
