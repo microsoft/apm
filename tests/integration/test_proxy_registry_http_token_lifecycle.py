@@ -24,6 +24,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
+    pytest.mark.promise("P-LAW-auth.credentials_isolated", "P-OWN-credential-origin-scope"),
 ]
 
 PUBLIC_HOST = "art.example.test"
