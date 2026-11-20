@@ -108,9 +108,9 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_APPROVE, 296, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1369, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1388, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1426, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1359, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1378, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1416, '"--no-policy"'),
     ),
     "marketplace": (
         Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
@@ -154,7 +154,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 162, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 77, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1490, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1480, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
 }
 
