@@ -19,7 +19,7 @@ integration suite runs only at merge time via GitHub Merge Queue
    - **Linux-only**. Builds binary inline, then runs smoke + integration +
      release-validation against the tentative merge commit. Hermetic
      integration is sharded by the build-release planner
-     (`scripts/ci_sharding.py`, at most 8 shards); network tests run in a
+     (`scripts/ci_sharding.py`, at most 16 shards); network tests run in a
      retrying lane. `tests/quality/test_ci_topology.py` requires every
      merge_group `EXPECTED_CHECKS` name in `merge-gate.yml` to come from a
      merge_group job, and `merge-queue-freshness.yml` fails daily when

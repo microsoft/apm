@@ -45,7 +45,7 @@
 # Lanes (all on the tentative merge commit):
 #   - hermetic integration, duration-balanced shards planned by the same
 #     planner as build-release.yml (scripts/ci_sharding.py), while the binary
-#     builds; at most 12 shards, about 12-16 min end to end;
+#     builds; at most 16 shards, about 16-18 min end to end;
 #   - network-dependent integration in one small lane that retries only
 #     failed tests, so a DNS blip cannot fail a long hermetic shard;
 #   - release validation, in parallel with integration.
@@ -174,7 +174,7 @@ jobs:
           uv run --frozen python -m pytest tests/integration --collect-only -q \
             -p no:cacheprovider -p scripts.ci_sharding -m "$HERMETIC_MARK_EXPR" \
             --shard-durations shard-plan/merge-queue.json --shard-plan-out shard-plan/plan.json \
-            --shard-target-seconds 300 --shard-workers 4 --shard-max 12 | tail -n 1
+            --shard-target-seconds 300 --shard-workers 4 --shard-max 16 | tail -n 1
           cat shard-plan/plan.json
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json

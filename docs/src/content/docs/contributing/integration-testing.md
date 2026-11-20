@@ -449,7 +449,7 @@ environment end-to-end; for local iteration prefer the direct
 ### GitHub Actions Workflow
 
 **On PR and merge queue:**
-1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds the global coverage floor (`Coverage Combine (Linux)`) and Linux smoke, integration, and release-validation gates. Integration runs in up to 8 shards planned like the release pipeline's, in about 12-16 minutes.
+1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds the global coverage floor (`Coverage Combine (Linux)`) and Linux smoke, integration, and release-validation gates. Integration runs in up to 16 shards planned like the release pipeline's, in about 16-18 minutes.
 
 Architecture ratchet contracts and the real architecture-scaling test run in
 separate Linux jobs, each with the same five-minute setup-to-cleanup limit.

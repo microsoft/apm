@@ -154,7 +154,7 @@ jobs:
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
           # planned Integration shards (timeout 25m) -> fan-in, with
           # Release Validation (timeout 20m) in parallel. Expected
-          # 12-16m end-to-end; sized at 80m to absorb runner queueing
+          # 16-18m end-to-end; sized at 80m to absorb runner queueing
           # without false-failing the gate.
           TIMEOUT_MIN: '80'
           # 5s poll keeps perceived gate latency low. With ~3 expected checks
