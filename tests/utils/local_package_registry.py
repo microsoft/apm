@@ -14,6 +14,7 @@ serves exactly the bytes that were uploaded with ``PUT`` (or seeded with
 for the same key answers ``409``. ``download_fault`` lets a scenario simulate
 an artifact outage or a registry that serves the wrong bytes (optionally a
 well-formed ``substitute_archive``) without changing the advertised digest.
+``bearer_token`` makes every endpoint answer ``401`` without that credential.
 
 No vendor service, account or SDK is involved.
 """
@@ -85,6 +86,7 @@ class LocalPackageRegistry:
     uploads: list[RegistryArtifact] = field(default_factory=list)
     download_fault: DownloadFault | None = None
     substitute_archive: bytes | None = None
+    bearer_token: str | None = None
 
     def seed(self, package: str, version: str, data: bytes) -> RegistryArtifact:
         """Pre-publish *data* as *package* at *version* without a ``PUT``."""
@@ -109,6 +111,8 @@ class LocalPackageRegistry:
         prefix = f"{self.base_path}/v1/packages/"
         if not path.startswith(prefix):
             return _problem(404, "Not found", path)
+        if self.bearer_token and request.header("Authorization") != f"Bearer {self.bearer_token}":
+            return _problem(401, "Unauthorized", path)
         tail = unquote(path[len(prefix) :])
         package, separator, rest = tail.partition("/versions")
         if not separator or not package:
