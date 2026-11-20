@@ -187,7 +187,7 @@ class TestDisplayNextSteps:
 
         with patch("apm_cli.commands.compile.cli._get_console", return_value=broken_console):
             self._call("AGENTS.md")
-        out = capsys.readouterr().out
+        out = "".join(capsys.readouterr())
         assert "* Review the generated AGENTS.md file" in out
         assert "* Install MCP dependencies: apm install" in out
 

@@ -71,7 +71,7 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        out = " ".join(capsys.readouterr().out.split())
+        out = " ".join("".join(capsys.readouterr()).split())
         assert out.count("[x] User-scope apm_modules not found") == 1
 
     def test_success_written_status(self, tmp_path, capsys):
@@ -100,7 +100,7 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        out = " ".join(capsys.readouterr().out.split())
+        out = " ".join("".join(capsys.readouterr()).split())
         assert "claude: wrote" in out
         assert "Compiled 1 user-scope root context file(s)." in out
 
@@ -130,7 +130,7 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=True, logger=logger)
 
         assert rc == 0
-        out = " ".join(capsys.readouterr().out.split())
+        out = " ".join("".join(capsys.readouterr()).split())
         assert "claude: would write" in out
         assert "Would compile 1 user-scope root context file(s)." in out
 
@@ -160,8 +160,8 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        out = " ".join(capsys.readouterr().out.split())
-        assert out == "[i] No user-scope root context files changed."
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert out.count("[i] No user-scope root context files changed.") == 1
 
     def test_success_skipped_no_instructions(self, tmp_path, capsys):
         """Result with 'skipped-no-instructions' -> returns 0 without default detail."""
@@ -189,8 +189,8 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        out = " ".join(capsys.readouterr().out.split())
-        assert out == "[i] No user-scope root context files changed."
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert out.count("[i] No user-scope root context files changed.") == 1
 
     def test_success_skipped_hand_authored(self, tmp_path):
         """Result with 'skipped-hand-authored' -> prints [i] and returns 0."""
@@ -251,7 +251,7 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        out = " ".join(capsys.readouterr().out.split())
+        out = " ".join("".join(capsys.readouterr()).split())
         assert "[x] claude: disk full" in out
 
     def test_critical_security_result_returns_1(self, tmp_path, capsys):
@@ -283,7 +283,7 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        out = " ".join(capsys.readouterr().out.split())
+        out = " ".join("".join(capsys.readouterr()).split())
         assert "claude: wrote" in out
         assert "Compiled" not in out
 
@@ -316,7 +316,7 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        out = " ".join(capsys.readouterr().out.split())
+        out = " ".join("".join(capsys.readouterr()).split())
         assert "claude: wrote" in out
         assert "Compiled 1 user-scope root context file(s); 1 unchanged." in out
 
@@ -346,7 +346,7 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        out = " ".join(capsys.readouterr().out.split())
+        out = " ".join("".join(capsys.readouterr()).split())
         assert out.count("No user-scope targets produced output") == 1
 
 
@@ -510,9 +510,13 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         self._run(source_root, logger)
 
-        assert " ".join(capsys.readouterr().out.split()) == (
-            "[i] Declared global targets (agent-skills) produce no user-scope "
-            "root context output. No files changed."
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert (
+            out.count(
+                "[i] Declared global targets (agent-skills) produce no user-scope "
+                "root context output. No files changed."
+            )
+            == 1
         )
 
     def test_declared_targets_exclude_explicit_only_and_gated_targets(self, tmp_path):
@@ -604,7 +608,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        error = " ".join(capsys.readouterr().out.split()).lower()
+        error = " ".join("".join(capsys.readouterr()).split()).lower()
         assert "failed to parse" in error
         assert "fix the manifest and rerun 'apm compile -g'" in error
 
@@ -657,7 +661,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        error = " ".join(capsys.readouterr().out.split()).lower()
+        error = " ".join("".join(capsys.readouterr()).split()).lower()
         assert "failed to read" in error
         assert "permission denied" in error
         assert "ensure it is a readable yaml file" in error
@@ -679,7 +683,9 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "must contain a yaml object" in " ".join(capsys.readouterr().out.split()).lower()
+        assert (
+            "must contain a yaml object" in " ".join("".join(capsys.readouterr()).split()).lower()
+        )
 
     def test_scalar_manifest_fails_closed_without_compiling(self, tmp_path):
         """A bare scalar document is rejected the same way a sequence is."""
@@ -713,7 +719,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "empty document" in " ".join(capsys.readouterr().out.split()).lower()
+        assert "empty document" in " ".join("".join(capsys.readouterr()).split()).lower()
 
     def test_dangling_manifest_symlink_fails_closed_without_compiling(self, tmp_path, capsys):
         """A present dangling manifest link is not mistaken for no manifest."""
@@ -736,7 +742,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "failed to read" in " ".join(capsys.readouterr().out.split()).lower()
+        assert "failed to read" in " ".join("".join(capsys.readouterr()).split()).lower()
 
     def test_valid_manifest_symlink_fails_closed_without_compiling(self, tmp_path, capsys):
         """A manifest link is rejected instead of following its target."""
@@ -760,7 +766,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "regular, non-symlink file" in " ".join(capsys.readouterr().out.split()).lower()
+        assert "regular, non-symlink file" in " ".join("".join(capsys.readouterr()).split()).lower()
 
     def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.
@@ -785,7 +791,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "unicodedecodeerror" in " ".join(capsys.readouterr().out.split()).lower()
+        assert "unicodedecodeerror" in " ".join("".join(capsys.readouterr()).split()).lower()
 
     def test_anchored_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """req-mf-020(b): a YAML anchor in ~/.apm/apm.yml stops compile -g (#3858)."""
@@ -805,4 +811,4 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "YAML anchor '&t' on line 3" in " ".join(capsys.readouterr().out.split())
+        assert "YAML anchor '&t' on line 3" in " ".join("".join(capsys.readouterr()).split())

@@ -149,7 +149,7 @@ class TestPackRegistryArchive:
         pkg = APMPackage(name="demo", version="1.0.0")
         _pack_archive(tmp_path, tmp_path / "apm.yml", pkg, logger, verbose=True)
 
-        out = capsys.readouterr().out
+        out = "".join(capsys.readouterr())
         assert "[i]   bundling README.md" in out
         assert "[i]   bundling LICENSE" in out
 

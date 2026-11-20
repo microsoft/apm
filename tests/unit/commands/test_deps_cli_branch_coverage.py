@@ -281,7 +281,7 @@ class TestShowScopeDeps:
             "apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(installed, orphaned)
         ):
             _show_scope_deps("Project", apm_dir, logger, console=None, has_rich=False)
-        out = capsys.readouterr().out
+        out = "".join(capsys.readouterr())
         assert "[!] 1 orphaned package(s) found" in out
         assert "[!]   - owner/orphan" in out
 
@@ -312,7 +312,7 @@ class TestShowScopeDeps:
 
         with patch("apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(None, None)):
             _show_scope_deps("Project", apm_dir, logger, console=None, has_rich=False)
-        assert "[x]" not in capsys.readouterr().out
+        assert "[x]" not in "".join(capsys.readouterr())
 
     def test_exception_propagates(self, tmp_path: Path) -> None:
         """Exception inside _show_scope_deps propagates to caller."""

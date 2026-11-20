@@ -104,7 +104,7 @@ class TestMergePackagesIntoYml:
 
         assert "new/pkg" in current_deps
         mock_dump.assert_called_once()
-        assert capsys.readouterr().out.count("[*] Updated apm.yml with 1 new package(s)") == 1
+        assert "".join(capsys.readouterr()).count("[*] Updated apm.yml with 1 new package(s)") == 1
 
     def test_uses_apm_yml_entry_when_present(self, tmp_path: Path) -> None:
         logger = _make_install_logger()

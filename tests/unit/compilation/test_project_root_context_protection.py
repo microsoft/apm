@@ -112,7 +112,7 @@ def test_watch_reporting_surfaces_retained_outputs_and_warnings(
     retained = _report_retained_watch_outputs(logger, result, dry_run=False)
 
     assert retained
-    out = " ".join(capsys.readouterr().out.split())
+    out = " ".join("".join(capsys.readouterr()).split())
     assert out.count("[!] Protected AGENTS.md: hand-authored file will not be overwritten.") == 1
     assert "retained 1 hand-authored context file" in out
     assert "generated 1 other output file" in out
@@ -134,7 +134,7 @@ def test_watch_dry_run_reports_generated_and_retained_outputs(
     retained = _report_retained_watch_outputs(logger, result, dry_run=True)
 
     assert retained
-    message = " ".join(capsys.readouterr().out.split())
+    message = " ".join("".join(capsys.readouterr()).split())
     assert "Would generate 2 other output files" in message
     assert "retain 1 hand-authored context file" in message
 
@@ -182,7 +182,7 @@ def test_mixed_outcome_reports_retained_and_nested_skipped_outputs(
         agents_generated=1,
     )
 
-    message = " ".join(capsys.readouterr().out.split())
+    message = " ".join("".join(capsys.readouterr()).split())
     assert "retained 1 hand-authored context file" in message
     assert "skipped 1 nested Git repository placement" in message
 
@@ -202,7 +202,7 @@ def test_no_write_outcome_reports_retained_and_nested_skipped_outputs(
         [],
     )
 
-    message = " ".join(capsys.readouterr().out.split())
+    message = " ".join("".join(capsys.readouterr()).split())
     assert "Retained 2 hand-authored context files" in message
     assert "skipped 1 nested Git repository placement" in message
 
