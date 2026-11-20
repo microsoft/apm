@@ -377,7 +377,8 @@ class TestOutdatedResolverCleanup:
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
         mock_inst.close = MagicMock()
 
-        runner.invoke(marketplace, ["outdated"])
+        result = runner.invoke(marketplace, ["outdated"])
+        assert result.exit_code == 1, result.output
         mock_inst.close.assert_called_once()
 
 

@@ -195,9 +195,10 @@ class TestInitVerbose:
 class TestInitContentSafety:
     def test_template_is_pure_ascii(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        runner.invoke(marketplace, ["init"])
+        result = runner.invoke(marketplace, ["init"])
+        assert result.exit_code == 0, result.output
         content = (tmp_path / "apm.yml").read_text(encoding="utf-8")
-        content.encode("ascii")  # raises UnicodeEncodeError if non-ASCII
+        assert content.isascii()
 
     def test_template_has_no_epam_references(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

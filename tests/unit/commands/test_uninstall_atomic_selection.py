@@ -90,6 +90,7 @@ def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path)
     assert isinstance(error, OSError)
     message = logger.error.call_args.args[0]
     assert "'apm install --global'" in message
+    assert not (tmp_path / "apm.lock.yaml").exists()
 
 
 def test_uninstall_help_points_to_actionable_dependency_keys() -> None:

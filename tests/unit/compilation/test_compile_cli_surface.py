@@ -189,9 +189,9 @@ class TestDisplayNextSteps:
 
         with patch("apm_cli.commands.compile.cli._get_console", return_value=broken_console):
             self._call("AGENTS.md")
-        # Should not raise; captured or stdout should have steps
-        capsys.readouterr()
-        assert True  # fallback triggers _rich_info
+        out = capsys.readouterr().out
+        assert "* Review the generated AGENTS.md file" in out
+        assert "* Install MCP dependencies: apm install" in out
 
     def test_next_steps_mention_output_filename(self, capsys: pytest.CaptureFixture[str]) -> None:
         """The next-steps text should reference the provided output file."""
@@ -634,8 +634,9 @@ class TestCompileCommandWatchMode:
                     return_value=("vscode", "auto-detect", None),
                 ),
             ):
-                runner.invoke(cli, ["compile", "--watch"])
+                result = runner.invoke(cli, ["compile", "--watch"])
 
+        assert result.exit_code == 0, result.output
         mock_watch.assert_called_once()
 
 

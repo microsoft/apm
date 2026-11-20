@@ -41,11 +41,14 @@
   "step2: TestRenderFindingsTable empty/info cases now assert nothing is echoed or printed instead of only not raising; TestFormatTargetLabel none case now also covers label sources",
   "step3: 79 modules got one module-level pytestmark: component when the module uses tmp_path, tempfile, CliRunner, chdir, real file reads/writes or repo files; unit for the 3 pure-logic modules (test_build_id, test_find_reverse_index, compile/test_watch_target_forwarding)",
   "step3: tests/unit/commands/test_approve_deny.py, test_experimental_command.py and test_install_context.py stay unclassified because open pull requests own them",
-  "step4: taxonomy_inventory_plugin.spawns_processes finds no process-spawning module in scope and no scope module lives under tests/integration; no moves needed"
+  "step4: taxonomy_inventory_plugin.spawns_processes finds no process-spawning module in scope and no scope module lives under tests/integration; no moves needed",
+  "step3 side effect: AQ003 only judges component/e2e modules, so lane-marking 76 modules component surfaced about 1190 AQ003 findings (baseline allowed 72 in scope); most are pure-logic or mock-only tests sharing a module with tmp_path/CliRunner tests. assertion_quality_baseline.json is not edited here (protected); it needs a remeasure at integration",
+  "step5: fix only where an honest observable exists: exit codes of CliRunner invocations, files kept/removed on disk, captured stdout; pure return-value and mock-only tests are left (they need a module split into a unit module, which would add new modules needing promise ids)"
  ],
  "counts_left": {
   "same_body_groups": 0,
   "unclassified_modules": 3,
-  "placement_offenders": 0
+  "placement_offenders": 0,
+  "weak_tests": 1167
  }
 }

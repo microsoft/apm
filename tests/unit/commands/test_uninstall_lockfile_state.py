@@ -105,3 +105,4 @@ def test_fully_refreshed_survivor_replaces_complete_deployed_file_view(
     assert dependency.deployed_files == [new_path]
     assert set(dependency.deployed_file_hashes) == {new_path}
     assert dependency.deployed_file_hashes[new_path].startswith("sha256:")
+    assert new_file.read_text(encoding="ascii") == "# refreshed\n"

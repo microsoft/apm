@@ -490,7 +490,8 @@ class TestCheckResolverCleanup:
         mock_inst.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
         mock_inst.close = MagicMock()
 
-        runner.invoke(marketplace, ["check"])
+        result = runner.invoke(marketplace, ["check"])
+        assert result.exit_code == 0, result.output
         mock_inst.close.assert_called_once()
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
@@ -501,7 +502,8 @@ class TestCheckResolverCleanup:
         )
         mock_inst.close = MagicMock()
 
-        runner.invoke(marketplace, ["check"])
+        result = runner.invoke(marketplace, ["check"])
+        assert result.exit_code == 1, result.output
         mock_inst.close.assert_called_once()
 
 

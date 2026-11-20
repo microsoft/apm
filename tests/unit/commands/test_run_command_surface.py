@@ -313,7 +313,8 @@ class TestPreviewScriptFound:
             patch("apm_cli.commands.run._rich_panel"),
             patch("apm_cli.commands.run._rich_blank_line"),
         ):
-            CliRunner().invoke(preview, ["s", "--param", "env=prod"])
+            result = CliRunner().invoke(preview, ["s", "--param", "env=prod"])
+        assert result.exit_code == 0, result.output
         mock_runner._auto_compile_prompts.assert_called_once_with("cmd", {"env": "prod"})
 
     def test_preview_compiled_file_path_stem(self) -> None:
