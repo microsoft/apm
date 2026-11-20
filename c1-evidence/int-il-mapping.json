@@ -1,0 +1,654 @@
+{
+ "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceNoTargets::test_returns_materialization_with_none_package_info_when_no_targets": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceNoTargets::test_returns_materialization_with_none_package_info_when_no_targets"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_loads_bare_package_without_apm_yml": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_loads_bare_package_without_apm_yml"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_loads_package_from_apm_yml": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_loads_package_from_apm_yml"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_unpinned_dep_adds_unpinned_delta": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_unpinned_dep_adds_unpinned_delta"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_all_known_types_return_string": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_all_known_types_return_string"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_claude_skill_label": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_claude_skill_label"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_hook_package_label_not_none": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_hook_package_label_not_none"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_marketplace_plugin_label": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_marketplace_plugin_label"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_skill_bundle_label": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_skill_bundle_label"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_unknown_type_returns_none": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_unknown_type_returns_none"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceCopyFailure::test_returns_none_on_copy_failure": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceCopyFailure::test_returns_none_on_copy_failure"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceMarketplacePlugin::test_legacy_plugin_still_normalizes_through_validation": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceMarketplacePlugin::test_legacy_plugin_still_normalizes_through_validation"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceNoApmYml::test_rejects_package_without_supported_manifest": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceNoApmYml::test_rejects_package_without_supported_manifest"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_accepts_absolute_path_at_user_scope": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_accepts_absolute_path_at_user_scope"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_rejects_empty_local_path_at_user_scope": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_rejects_empty_local_path_at_user_scope"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_rejects_relative_path_at_user_scope": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_rejects_relative_path_at_user_scope"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestMaterialization::test_custom_deltas": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestMaterialization::test_custom_deltas"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestMaterialization::test_default_deltas": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestMaterialization::test_default_deltas"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_falls_back_to_dep_ref_reference": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_falls_back_to_dep_ref_reference"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_fetched_this_run_falls_back_to_resolved_ref": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_fetched_this_run_falls_back_to_resolved_ref"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_fetched_this_run_uses_callback_sha": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_fetched_this_run_uses_callback_sha"
+ },
+ "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_uses_existing_lockfile_sha_when_cached": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_uses_existing_lockfile_sha_when_cached"
+ },
+ "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only": {
+  "kind": "folded",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestAttemptSpec::test_creation_and_fields": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestAttemptSpec::test_creation_and_fields"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestAttemptSpec::test_unpacking": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestAttemptSpec::test_unpacking"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_bash_renamed_to_command": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_bash_renamed_to_command"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_powershell_renamed_to_command": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_powershell_renamed_to_command"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_timeout_sec_to_ms": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_timeout_sec_to_ms"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_windows_key_renamed_to_command": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_windows_key_renamed_to_command"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_ado_host_skips_probe": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_ado_host_skips_probe"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_github_200_returns_true": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_github_200_returns_true"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_github_404_returns_false": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_github_404_returns_false"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_no_token_still_makes_request": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_no_token_still_makes_request"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_request_exception_returns_false": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_request_exception_returns_false"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_full_constructor_via_super": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_full_constructor_via_super"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_hooks_integrated_alias": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_hooks_integrated_alias"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_target_paths_preserved": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_target_paths_preserved"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_empty_package_returns_empty": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_empty_package_returns_empty"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_skips_symlinks": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_skips_symlinks"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_invalid_json_returns_none": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_invalid_json_returns_none"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_missing_file_returns_none": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_missing_file_returns_none"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_non_dict_returns_none": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_non_dict_returns_none"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_valid_json_returned": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_valid_json_returned"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_41_chars_too_long": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_41_chars_too_long"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_abbreviated_7_char_sha": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_abbreviated_7_char_sha"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_branch_name_not_sha": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_branch_name_not_sha"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_full_40_char_sha": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_full_40_char_sha"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_mixed_case_sha": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_mixed_case_sha"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_non_hex_returns_false": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_non_hex_returns_false"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_tag_name_not_sha": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_tag_name_not_sha"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_too_short_not_sha": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_too_short_not_sha"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_empty_drifted_noop": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_empty_drifted_noop"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_sorted_order": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_sorted_order"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_basic_reinject": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_basic_reinject"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_cursor_plugin_root_variable": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_cursor_plugin_root_variable"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_plugin_root_variable_replaced": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_plugin_root_variable_replaced"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_system_command_unchanged": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_system_command_unchanged"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_project_scope_no_crash": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_project_scope_no_crash"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[source-prefixed]": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[source-prefixed]"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_empty_owner_returns_none": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_empty_owner_returns_none"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_empty_repo_returns_none": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_empty_repo_returns_none"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_no_slash_returns_none": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_no_slash_returns_none"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_valid_owner_repo": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_valid_owner_repo"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_allow_fallback_permits_ssh": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_allow_fallback_permits_ssh"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_import_error_returns_false": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_import_error_returns_false"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_ssh_protocol_preference_allows": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_ssh_protocol_preference_allows"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_removes_managed_hook_json": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_removes_managed_hook_json"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_already_nested_entry_left_alone": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_already_nested_entry_left_alone"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_apm_source_promoted_to_outer": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_apm_source_promoted_to_outer"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_flat_copilot_entry_wrapped": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_flat_copilot_entry_wrapped"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_non_dict_entry_passed_through": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_non_dict_entry_passed_through"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_timeoutsec_converted_in_flat": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_timeoutsec_converted_in_flat"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly"
+ },
+ "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error": {
+  "kind": "merged",
+  "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error"
+ },
+ "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallRuntimeDetection::test_stored_mcp_configs_none_defaults_empty": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_stored_mcp_configs_none_defaults_to_empty_dict"
+ },
+ "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallRuntimeDetection::test_verbose_true_no_crash_on_empty_deps": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_run_mcp_install_verbose_no_crash"
+ },
+ "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallScopeHandling::test_project_scope_enum_propagates_no_exception": {
+  "kind": "deleted-equal-copy",
+  "to": "tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_project_scope_sets_user_scope_false"
+ }
+}

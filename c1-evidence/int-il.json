@@ -1,0 +1,1917 @@
+{
+ "added": 2,
+ "added_new": [],
+ "after_nodes": 1460,
+ "before_nodes": 1621,
+ "body_changed": [
+  {
+   "node": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only",
+   "reason": "parametrized over skill_subset to absorb the source-prefixed case from the merged test_integrators_hooks_phase3c.py copy; leaf case keeps the original literal and all assertions"
+  }
+ ],
+ "by_kind": {
+  "deleted-equal-copy": 25,
+  "folded": 1,
+  "merged": 137
+ },
+ "covered_lines_after": 26611,
+ "covered_lines_before": 26611,
+ "cross_partition_groups": [
+  {
+   "digest": "13a460213bdb5e03",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "192eecba1d65c308",
+   "nodes": [
+    "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_empty_package_returns_empty",
+    "tests/integration/test_wave6_integrators_coverage.py::TestHookIntegratorFindHookFiles::test_returns_empty_when_no_hooks"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "328371523ebb03f9",
+   "nodes": [
+    "tests/integration/test_integrators_validation_rules.py::TestIsTlsFailure::test_ssl_error_detected",
+    "tests/unit/install/test_validation_error_handling.py::TestIsTlsFailure::test_ssl_error_returns_true",
+    "tests/unit/install/test_validation_phase3.py::TestIsTlsFailure::test_ssl_error_returns_true"
+   ],
+   "note": "near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+  },
+  {
+   "digest": "348cf894239375cc",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPConfigDrift::test_new_dep_not_in_stored_ignored",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorDriftDetection::test_ignores_new_deps_not_in_stored"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "53a1e62a51422a57",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_empty_deps_returns_zero",
+    "tests/integration/test_mcp_install_flow.py::TestRunMcpInstallEarlyReturns::test_empty_deps_returns_zero",
+    "tests/integration/test_mcp_install_phase3w4.py::TestRunMcpInstallEarlyReturns::test_empty_deps_returns_zero"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "5585be9620932be2",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorRemoveStale::test_empty_stale_set_is_noop",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorRemoveStale::test_empty_stale_names_is_noop"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "616e1ac92678b7de",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorRemoveStale::test_exclude_prevents_cleanup",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorRemoveStale::test_exclude_removes_runtime_from_set"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "69b72666fdde09a2",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorServerHelpers::test_get_server_names_empty",
+    "tests/integration/test_mcp_integrator_install_flow.py::TestGetServerNames::test_empty_list",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorGetServerNames::test_empty_list",
+    "tests/unit/integration/test_mcp_integrator.py::TestGetServerNames::test_empty"
+   ],
+   "note": "near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+  },
+  {
+   "digest": "73f775f0fc74c8c9",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorDeduplicate::test_empty_list",
+    "tests/unit/integration/test_mcp_integrator.py::TestDeduplicate::test_empty_list",
+    "tests/unit/test_transitive_mcp.py::TestDeduplicateMCPDeps::test_empty_list"
+   ],
+   "note": "near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+  },
+  {
+   "digest": "7439acb1269816ad",
+   "nodes": [
+    "tests/integration/test_integrators_validation_rules.py::TestParseWorkflowFrontmatter::test_autopilot_mode_rejected",
+    "tests/unit/integration/test_copilot_app_schedule.py::TestParseWorkflowFrontmatter::test_rejects_autopilot_mode_with_diagnostic"
+   ],
+   "note": "near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+  },
+  {
+   "digest": "7cd68f1925e6b229",
+   "nodes": [
+    "tests/integration/test_integrators_validation_rules.py::TestIsTlsFailure::test_runtime_error_with_tls_prefix",
+    "tests/integration/test_wave6_validation_uninstall_coverage.py::TestTLSHelpers::test_is_tls_failure_with_tls_prefix"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "7ed5864e1aa0e843",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestValidateSkillName::test_uppercase_invalid",
+    "tests/integration/test_wave6_integrators_coverage.py::TestValidateSkillName::test_uppercase"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "85d615ce49037ce8",
+   "nodes": [
+    "tests/integration/test_intellij_target.py::TestIntelliJConstants::test_intellij_in_valid_target_values",
+    "tests/unit/core/test_target_detection.py::TestTargetParamType::test_valid_target_values_includes_intellij"
+   ],
+   "note": "near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+  },
+  {
+   "digest": "9fd8d2daa3bd894e",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorRemoveStale::test_removes_from_opencode_json"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "b36c6e91b99aec0d",
+   "nodes": [
+    "tests/integration/test_intellij_target.py::TestIntelliJConstants::test_intellij_not_in_all_canonical_targets",
+    "tests/unit/core/test_target_detection.py::TestIntelliJConstantGuards::test_intellij_not_in_all_canonical_targets"
+   ],
+   "note": "near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+  },
+  {
+   "digest": "c10a57b66a4d5791",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestValidateSkillName::test_empty_name_invalid",
+    "tests/integration/test_wave6_integrators_coverage.py::TestValidateSkillName::test_empty_name"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "cb86d261444fbfc4",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorCollectTransitive::test_returns_empty_when_no_apm_modules",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorCollectTransitive::test_returns_empty_when_no_apm_modules_dir"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "cce82afd24803934",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestBuildSelfDefinedInfo::test_tools_override_embedded",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorBuildSelfDefinedInfo::test_with_tools_override"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "d534af65c19e4ac6",
+   "nodes": [
+    "tests/integration/test_intellij_target.py::TestIntelliJConstants::test_intellij_in_mcp_only_targets",
+    "tests/unit/core/test_target_detection.py::TestIntelliJConstantGuards::test_intellij_in_mcp_only_targets"
+   ],
+   "note": "near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+  },
+  {
+   "digest": "d85fc479da624990",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestIsVscodeAvailable::test_vscode_dir_makes_available",
+    "tests/integration/test_wave6_integrators_coverage.py::TestIsVscodeAvailable::test_vscode_dir_makes_it_available"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "df4b696c52d1633d",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestValidateSkillName::test_single_char_valid",
+    "tests/integration/test_wave6_integrators_coverage.py::TestValidateSkillName::test_single_char"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "ea8e54e300f3172b",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorRemoveStale::test_vscode_file_absent_is_noop",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorRemoveStale::test_skips_vscode_when_file_absent"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "f40fee1dc4e6d349",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  },
+  {
+   "digest": "fb973a57bb2d2b29",
+   "nodes": [
+    "tests/integration/test_integrators_end_to_end.py::TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
+    "tests/integration/test_wave6_integrators_coverage.py::TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent"
+   ],
+   "note": "non-equal near-twin across partitions; other side is the lexicographically later integration file"
+  }
+ ],
+ "defects_found": [],
+ "deferred_files": [
+  {
+   "path": "tests/integration/test_ide_target_refusal_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_init_bootstrap_chain_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_init_reinit_targets_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_init_removed_flags_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_install_audit_replay_matrix_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_install_dir_plugin_audit_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_install_dir_source_package_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_install_dry_run_transitive_lifecycle.py",
+   "reason": "protected (lifecycle/architecture) and touched by open PR #4138; no edits at all"
+  },
+  {
+   "path": "tests/integration/test_intellij_mcp_config_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_json_mcp_native_conflict_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_kiro_agent_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_kiro_prompt_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_legacy_plugin_skill_declaration_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_legacy_skill_layout_copilot_home_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_legacy_skill_layout_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lifecycle_deny_all_chain_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lifecycle_reconciliation.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lifecycle_script_interrupt_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lifecycle_state_snapshot_contract.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lifecycle_trust_upgrade_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lifecycle_workspace_lock.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_bundle_hooks_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_bundle_manifest_targets_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_bundle_mcp_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_bundle_mcp_retire_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_bundle_primitive_paths_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_claude_plugin_mcp_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_dependency_graph_chain_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_link_audit_replay_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_link_rejection_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_single_file_frozen_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_local_single_file_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lock_derived_expected_state_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lockfile_generator_gate_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_lockfileless_skill_cleanup_lifecycle.py",
+   "reason": "protected (lifecycle/architecture/contract) module; only a behavioral marker may be added"
+  },
+  {
+   "path": "tests/integration/test_install_services_orchestration.py",
+   "reason": "touched by open 0.37 PR #4025; no edits"
+  },
+  {
+   "path": "tests/integration/test_install_services_phase3w5.py",
+   "reason": "touched by open 0.37 PR #4025; no edits"
+  }
+ ],
+ "folded": [
+  "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]"
+ ],
+ "lines_fell_to_zero": {},
+ "mapping": {
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceNoTargets::test_returns_materialization_with_none_package_info_when_no_targets": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceNoTargets::test_returns_materialization_with_none_package_info_when_no_targets"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_loads_bare_package_without_apm_yml": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_loads_bare_package_without_apm_yml"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_loads_package_from_apm_yml": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_loads_package_from_apm_yml"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_unpinned_dep_adds_unpinned_delta": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_unpinned_dep_adds_unpinned_delta"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_all_known_types_return_string": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_all_known_types_return_string"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_claude_skill_label": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_claude_skill_label"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_hook_package_label_not_none": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_hook_package_label_not_none"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_marketplace_plugin_label": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_marketplace_plugin_label"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_skill_bundle_label": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_skill_bundle_label"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_unknown_type_returns_none": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_unknown_type_returns_none"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceCopyFailure::test_returns_none_on_copy_failure": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceCopyFailure::test_returns_none_on_copy_failure"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceMarketplacePlugin::test_legacy_plugin_still_normalizes_through_validation": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceMarketplacePlugin::test_legacy_plugin_still_normalizes_through_validation"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceNoApmYml::test_rejects_package_without_supported_manifest": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceNoApmYml::test_rejects_package_without_supported_manifest"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_accepts_absolute_path_at_user_scope": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_accepts_absolute_path_at_user_scope"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_rejects_empty_local_path_at_user_scope": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_rejects_empty_local_path_at_user_scope"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_rejects_relative_path_at_user_scope": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_rejects_relative_path_at_user_scope"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestMaterialization::test_custom_deltas": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestMaterialization::test_custom_deltas"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestMaterialization::test_default_deltas": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestMaterialization::test_default_deltas"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_falls_back_to_dep_ref_reference": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_falls_back_to_dep_ref_reference"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_fetched_this_run_falls_back_to_resolved_ref": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_fetched_this_run_falls_back_to_resolved_ref"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_fetched_this_run_uses_callback_sha": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_fetched_this_run_uses_callback_sha"
+  },
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_uses_existing_lockfile_sha_when_cached": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_uses_existing_lockfile_sha_when_cached"
+  },
+  "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only": {
+   "kind": "folded",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestAttemptSpec::test_creation_and_fields": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestAttemptSpec::test_creation_and_fields"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestAttemptSpec::test_unpacking": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestAttemptSpec::test_unpacking"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_bash_renamed_to_command": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_bash_renamed_to_command"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_powershell_renamed_to_command": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_powershell_renamed_to_command"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_timeout_sec_to_ms": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_timeout_sec_to_ms"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_windows_key_renamed_to_command": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_windows_key_renamed_to_command"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_ado_host_skips_probe": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_ado_host_skips_probe"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_github_200_returns_true": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_github_200_returns_true"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_github_404_returns_false": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_github_404_returns_false"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_no_token_still_makes_request": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_no_token_still_makes_request"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_request_exception_returns_false": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_request_exception_returns_false"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_full_constructor_via_super": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_full_constructor_via_super"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_hooks_integrated_alias": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_hooks_integrated_alias"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_target_paths_preserved": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_target_paths_preserved"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_empty_package_returns_empty": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_empty_package_returns_empty"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_skips_symlinks": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_skips_symlinks"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_invalid_json_returns_none": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_invalid_json_returns_none"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_missing_file_returns_none": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_missing_file_returns_none"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_non_dict_returns_none": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_non_dict_returns_none"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_valid_json_returned": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_valid_json_returned"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_41_chars_too_long": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_41_chars_too_long"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_abbreviated_7_char_sha": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_abbreviated_7_char_sha"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_branch_name_not_sha": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_branch_name_not_sha"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_full_40_char_sha": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_full_40_char_sha"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_mixed_case_sha": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_mixed_case_sha"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_non_hex_returns_false": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_non_hex_returns_false"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_tag_name_not_sha": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_tag_name_not_sha"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_too_short_not_sha": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_too_short_not_sha"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_empty_drifted_noop": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_empty_drifted_noop"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_sorted_order": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_sorted_order"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_basic_reinject": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_basic_reinject"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_cursor_plugin_root_variable": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_cursor_plugin_root_variable"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_plugin_root_variable_replaced": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_plugin_root_variable_replaced"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_system_command_unchanged": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_system_command_unchanged"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_project_scope_no_crash": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_project_scope_no_crash"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[source-prefixed]": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[source-prefixed]"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_empty_owner_returns_none": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_empty_owner_returns_none"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_empty_repo_returns_none": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_empty_repo_returns_none"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_no_slash_returns_none": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_no_slash_returns_none"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_valid_owner_repo": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_valid_owner_repo"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_allow_fallback_permits_ssh": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_allow_fallback_permits_ssh"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_import_error_returns_false": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_import_error_returns_false"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_ssh_protocol_preference_allows": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_ssh_protocol_preference_allows"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_removes_managed_hook_json": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_removes_managed_hook_json"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_already_nested_entry_left_alone": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_already_nested_entry_left_alone"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_apm_source_promoted_to_outer": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_apm_source_promoted_to_outer"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_flat_copilot_entry_wrapped": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_flat_copilot_entry_wrapped"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_non_dict_entry_passed_through": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_non_dict_entry_passed_through"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_timeoutsec_converted_in_flat": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_timeoutsec_converted_in_flat"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly"
+  },
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error": {
+   "kind": "merged",
+   "to": "tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error"
+  },
+  "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallRuntimeDetection::test_stored_mcp_configs_none_defaults_empty": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_stored_mcp_configs_none_defaults_to_empty_dict"
+  },
+  "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallRuntimeDetection::test_verbose_true_no_crash_on_empty_deps": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_run_mcp_install_verbose_no_crash"
+  },
+  "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallScopeHandling::test_project_scope_enum_propagates_no_exception": {
+   "kind": "deleted-equal-copy",
+   "to": "tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_project_scope_sets_user_scope_false"
+  }
+ },
+ "merged": [
+  "tests/integration/test_integrators_hooks_phase3c.py::TestAttemptSpec::test_creation_and_fields -> tests/integration/test_integrators_hooks_execution.py::TestAttemptSpec::test_creation_and_fields",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestAttemptSpec::test_unpacking -> tests/integration/test_integrators_hooks_execution.py::TestAttemptSpec::test_unpacking",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_bash_renamed_to_command -> tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_bash_renamed_to_command",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten -> tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_powershell_renamed_to_command -> tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_powershell_renamed_to_command",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_timeout_sec_to_ms -> tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_timeout_sec_to_ms",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestCopilotKeysToGemini::test_windows_key_renamed_to_command -> tests/integration/test_integrators_hooks_execution.py::TestCopilotKeysToGemini::test_windows_key_renamed_to_command",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_ado_host_skips_probe -> tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_ado_host_skips_probe",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_github_200_returns_true -> tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_github_200_returns_true",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_github_404_returns_false -> tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_github_404_returns_false",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false -> tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_no_token_still_makes_request -> tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_no_token_still_makes_request",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestDirectoryExistsAtRef::test_request_exception_returns_false -> tests/integration/test_integrators_hooks_execution.py::TestDirectoryExistsAtRef::test_request_exception_returns_false",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf -> tests/integration/test_integrators_hooks_execution.py::TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_full_constructor_via_super -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_full_constructor_via_super",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_hooks_integrated_alias -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_hooks_integrated_alias",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegrationResultCompat::test_target_paths_preserved -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegrationResultCompat::test_target_paths_preserved",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_empty_package_returns_empty -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_empty_package_returns_empty",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorFindHookFiles::test_skips_symlinks -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorFindHookFiles::test_skips_symlinks",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_invalid_json_returns_none -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_invalid_json_returns_none",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_missing_file_returns_none -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_missing_file_returns_none",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_non_dict_returns_none -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_non_dict_returns_none",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestHookIntegratorParseHookJson::test_valid_json_returned -> tests/integration/test_integrators_hooks_execution.py::TestHookIntegratorParseHookJson::test_valid_json_returned",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks -> tests/integration/test_integrators_hooks_execution.py::TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result -> tests/integration/test_integrators_hooks_execution.py::TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent -> tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_41_chars_too_long -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_41_chars_too_long",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_abbreviated_7_char_sha -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_abbreviated_7_char_sha",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_branch_name_not_sha -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_branch_name_not_sha",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_full_40_char_sha -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_full_40_char_sha",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_mixed_case_sha -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_mixed_case_sha",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_non_hex_returns_false -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_non_hex_returns_false",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_tag_name_not_sha -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_tag_name_not_sha",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestIsShaPin::test_too_short_not_sha -> tests/integration/test_integrators_hooks_execution.py::TestIsShaPin::test_too_short_not_sha",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_empty_drifted_noop -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_empty_drifted_noop",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorAppendDrifted::test_sorted_order -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorAppendDrifted::test_sorted_order",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent -> tests/integration/test_integrators_hooks_execution.py::TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten -> tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_basic_reinject -> tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_basic_reinject",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once -> tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored -> tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored -> tests/integration/test_integrators_hooks_execution.py::TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_cursor_plugin_root_variable -> tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_cursor_plugin_root_variable",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list -> tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_plugin_root_variable_replaced -> tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_plugin_root_variable_replaced",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy -> tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_system_command_unchanged -> tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_system_command_unchanged",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base -> tests/integration/test_integrators_hooks_execution.py::TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_project_scope_no_crash -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_project_scope_no_crash",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs -> tests/integration/test_integrators_hooks_execution.py::TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf] -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[leaf]",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[source-prefixed] -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only[source-prefixed]",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped -> tests/integration/test_integrators_hooks_execution.py::TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_empty_owner_returns_none -> tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_empty_owner_returns_none",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_empty_repo_returns_none -> tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_empty_repo_returns_none",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_no_slash_returns_none -> tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_no_slash_returns_none",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo -> tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSplitOwnerRepo::test_valid_owner_repo -> tests/integration/test_integrators_hooks_execution.py::TestSplitOwnerRepo::test_valid_owner_repo",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_allow_fallback_permits_ssh -> tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_allow_fallback_permits_ssh",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_import_error_returns_false -> tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_import_error_returns_false",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSshAttemptAllowed::test_ssh_protocol_preference_allows -> tests/integration/test_integrators_hooks_execution.py::TestSshAttemptAllowed::test_ssh_protocol_preference_allows",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_removes_managed_hook_json -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_removes_managed_hook_json",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json -> tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_already_nested_entry_left_alone -> tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_already_nested_entry_left_alone",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_apm_source_promoted_to_outer -> tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_apm_source_promoted_to_outer",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_flat_copilot_entry_wrapped -> tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_flat_copilot_entry_wrapped",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_non_dict_entry_passed_through -> tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_non_dict_entry_passed_through",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestToGeminiHookEntries::test_timeoutsec_converted_in_flat -> tests/integration/test_integrators_hooks_execution.py::TestToGeminiHookEntries::test_timeoutsec_converted_in_flat",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected -> tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error -> tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker -> tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal -> tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly -> tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly",
+  "tests/integration/test_integrators_hooks_phase3c.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error -> tests/integration/test_integrators_hooks_execution.py::TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error"
+ ],
+ "moved": [],
+ "node_counts": {
+  "after": 1460,
+  "before": 1621
+ },
+ "notes": [
+  "test_integrators_hooks_phase3c.py merged into test_integrators_hooks_execution.py: 135 bodies identical; survivor carries a superset of module marks (integration + platform_sensitive) and the stronger oracle (extra version assertion, extra codex sidecar test). Not a D5 equal copy only because module pytestmark differed.",
+  "Removed files are still referenced by .github/ci-durations/linux-*.json seeds (not editable by this partition): test_integrators_hooks_phase3c.py, test_install_sources_phase3w4.py, and node ids in test_integrators_validation_rules.py."
+ ],
+ "oracle_gaps_written": [],
+ "partition": "int-il",
+ "pre_existing_failures": [],
+ "problems": [],
+ "pytest_after": {
+  "exit": 1,
+  "failed": [
+   "ERROR: Coverage failure: total of 16 is less than fail-under=80"
+  ]
+ },
+ "pytest_before": {
+  "exit": 1,
+  "failed": [
+   "ERROR: Coverage failure: total of 16 is less than fail-under=80"
+  ]
+ },
+ "removed": [
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceNoTargets::test_returns_materialization_with_none_package_info_when_no_targets -> tests/integration/test_install_sources_classification.py::TestCachedDependencySourceNoTargets::test_returns_materialization_with_none_package_info_when_no_targets",
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_loads_bare_package_without_apm_yml -> tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_loads_bare_package_without_apm_yml",
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_loads_package_from_apm_yml -> tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_loads_package_from_apm_yml",
+  "tests/integration/test_install_sources_phase3w4.py::TestCachedDependencySourceWithApmYml::test_unpinned_dep_adds_unpinned_delta -> tests/integration/test_install_sources_classification.py::TestCachedDependencySourceWithApmYml::test_unpinned_dep_adds_unpinned_delta",
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_all_known_types_return_string -> tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_all_known_types_return_string",
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_claude_skill_label -> tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_claude_skill_label",
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_hook_package_label_not_none -> tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_hook_package_label_not_none",
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_marketplace_plugin_label -> tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_marketplace_plugin_label",
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_skill_bundle_label -> tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_skill_bundle_label",
+  "tests/integration/test_install_sources_phase3w4.py::TestFormatPackageTypeLabel::test_unknown_type_returns_none -> tests/integration/test_install_sources_classification.py::TestFormatPackageTypeLabel::test_unknown_type_returns_none",
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceCopyFailure::test_returns_none_on_copy_failure -> tests/integration/test_install_sources_classification.py::TestLocalDependencySourceCopyFailure::test_returns_none_on_copy_failure",
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceMarketplacePlugin::test_legacy_plugin_still_normalizes_through_validation -> tests/integration/test_install_sources_classification.py::TestLocalDependencySourceMarketplacePlugin::test_legacy_plugin_still_normalizes_through_validation",
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceNoApmYml::test_rejects_package_without_supported_manifest -> tests/integration/test_install_sources_classification.py::TestLocalDependencySourceNoApmYml::test_rejects_package_without_supported_manifest",
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_accepts_absolute_path_at_user_scope -> tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_accepts_absolute_path_at_user_scope",
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_rejects_empty_local_path_at_user_scope -> tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_rejects_empty_local_path_at_user_scope",
+  "tests/integration/test_install_sources_phase3w4.py::TestLocalDependencySourceUserScope::test_rejects_relative_path_at_user_scope -> tests/integration/test_install_sources_classification.py::TestLocalDependencySourceUserScope::test_rejects_relative_path_at_user_scope",
+  "tests/integration/test_install_sources_phase3w4.py::TestMaterialization::test_custom_deltas -> tests/integration/test_install_sources_classification.py::TestMaterialization::test_custom_deltas",
+  "tests/integration/test_install_sources_phase3w4.py::TestMaterialization::test_default_deltas -> tests/integration/test_install_sources_classification.py::TestMaterialization::test_default_deltas",
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_falls_back_to_dep_ref_reference -> tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_falls_back_to_dep_ref_reference",
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_fetched_this_run_falls_back_to_resolved_ref -> tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_fetched_this_run_falls_back_to_resolved_ref",
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_fetched_this_run_uses_callback_sha -> tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_fetched_this_run_uses_callback_sha",
+  "tests/integration/test_install_sources_phase3w4.py::TestResolveCachedCommit::test_uses_existing_lockfile_sha_when_cached -> tests/integration/test_install_sources_classification.py::TestResolveCachedCommit::test_uses_existing_lockfile_sha_when_cached",
+  "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallRuntimeDetection::test_stored_mcp_configs_none_defaults_empty -> tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_stored_mcp_configs_none_defaults_to_empty_dict",
+  "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallRuntimeDetection::test_verbose_true_no_crash_on_empty_deps -> tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_run_mcp_install_verbose_no_crash",
+  "tests/integration/test_integrators_validation_rules.py::TestRunMcpInstallScopeHandling::test_project_scope_enum_propagates_no_exception -> tests/integration/test_integrators_end_to_end.py::TestRunMcpInstall::test_project_scope_sets_user_scope_false"
+ ],
+ "renamed": [],
+ "residual": {
+  "dup_body_groups_left": 65,
+  "dup_body_groups_left_detail": [
+   {
+    "digest": "08dcf9d30617c3e9",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_two_target_paths_are_collapsed_on_one_line",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_two_target_paths_are_collapsed_on_one_line"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "1296a65cb739dd54",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegrateLocalContent::test_calls_integrate_package_primitives_via_module_lookup",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegrateLocalContent::test_calls_integrate_package_primitives_via_module_lookup"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "13a460213bdb5e03",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "1672e7355bc8ec06",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_hooks_use_hooks_config_display",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_hooks_use_hooks_config_display"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "18f67b1559534c27",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_instruction_plain_format_uses_instruction_label",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_instruction_plain_format_uses_instruction_label"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "192eecba1d65c308",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "19f20fd41e037cca",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestDeployedPathEntry::test_outside_project_with_copilot_app_fallback_uses_uri",
+     "tests/integration/test_install_services_phase3w5.py::TestDeployedPathEntry::test_outside_project_with_copilot_app_fallback_uses_uri"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "271d8f67920cb23e",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_multi_target_dispatch_entries_are_skipped",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_multi_target_dispatch_entries_are_skipped"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "274a4f5bb4a4de82",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_skill_created_logs_single_path",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_skill_created_logs_single_path"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "2ed7f796c8285e9a",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_verbose_skill_paths_are_expanded",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_verbose_skill_paths_are_expanded"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "2fa148fd3056fe66",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestDeployedPathEntry::test_empty_targets_falls_back_to_project_relative",
+     "tests/integration/test_install_services_phase3w5.py::TestDeployedPathEntry::test_empty_targets_falls_back_to_project_relative"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "328371523ebb03f9",
+    "reason": "cross-partition: near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+   },
+   {
+    "digest": "3320db59eefe7064",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_copilot_app_hint_is_not_logged_for_adopted_only",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_copilot_app_hint_is_not_logged_for_adopted_only"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "348cf894239375cc",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "37fd1cf9661b111b",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_instruction_cursor_rules_use_rule_label",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_instruction_cursor_rules_use_rule_label"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "3aaf360182c9c417",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_deployed_path_entry_called_for_each_target_path",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_deployed_path_entry_called_for_each_target_path"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "3d224d24b7276e03",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_non_int_adopted_value_is_treated_as_zero",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_non_int_adopted_value_is_treated_as_zero"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "4b7e4c71d338268a",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_commands_use_plain_label",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_commands_use_plain_label"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "506fd926b76335ce",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_files_unchanged_not_logged_when_work_happened",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_files_unchanged_not_logged_when_work_happened"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "51b7a5e1b68bc1c9",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_sub_skills_promoted_logs_count",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_sub_skills_promoted_logs_count"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "51c0c500a3c95748",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_package_name_override_is_used_in_cowork_warning",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_package_name_override_is_used_in_cowork_warning"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "53a1e62a51422a57",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "5585be9620932be2",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "616e1ac92678b7de",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "61a36a4aa0da474d",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_dispatch_calls_prompt_integrator_and_updates_counter",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_dispatch_calls_prompt_integrator_and_updates_counter"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "62bc5e89ad79cfbd",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestDeployedPathEntry::test_targets_none_falls_back_to_project_relative",
+     "tests/integration/test_install_services_phase3w5.py::TestDeployedPathEntry::test_targets_none_falls_back_to_project_relative"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "65c03fa1aec5147c",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_cowork_warning_emits_once_and_sets_context",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_cowork_warning_emits_once_and_sets_context"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "686d0f72bc09f5d0",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestDeployedPathEntry::test_dynamic_target_uses_cowork_lockfile_path",
+     "tests/integration/test_install_services_phase3w5.py::TestDeployedPathEntry::test_dynamic_target_uses_cowork_lockfile_path"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "69b72666fdde09a2",
+    "reason": "cross-partition: near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+   },
+   {
+    "digest": "73f775f0fc74c8c9",
+    "reason": "cross-partition: near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+   },
+   {
+    "digest": "7439acb1269816ad",
+    "reason": "cross-partition: near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+   },
+   {
+    "digest": "7cd68f1925e6b229",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "7ed5864e1aa0e843",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "804e703416f25d78",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_duplicate_target_paths_are_deduplicated",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_duplicate_target_paths_are_deduplicated"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "85d615ce49037ce8",
+    "reason": "cross-partition: near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+   },
+   {
+    "digest": "90446c9ab43a12de",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_skill_integrator_receives_targets_and_subset",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_skill_integrator_receives_targets_and_subset"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "9cf728d77682dab5",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_adopted_only_logs_adopted_without_incrementing_counter",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_adopted_only_logs_adopted_without_incrementing_counter"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "9fd8d2daa3bd894e",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "a4e83c239974d5cb",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_empty_skill_target_paths_use_default_skills_dir",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_empty_skill_target_paths_use_default_skills_dir"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "aab2b15627fb42de",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestDeployedPathEntry::test_copilot_app_target_uses_lockfile_uri",
+     "tests/integration/test_install_services_phase3w5.py::TestDeployedPathEntry::test_copilot_app_target_uses_lockfile_uri"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "b36c6e91b99aec0d",
+    "reason": "cross-partition: near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+   },
+   {
+    "digest": "b53575767591815a",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_package_info_name_is_used_when_package_name_empty",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_package_info_name_is_used_when_package_name_empty"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "ba373c883820bbe5",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_deployed_files_include_skill_paths",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_deployed_files_include_skill_paths"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "bb703481971e82bc",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestDeployedPathEntry::test_outside_project_with_no_targets_raises",
+     "tests/integration/test_install_services_phase3w5.py::TestDeployedPathEntry::test_outside_project_with_no_targets_raises"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "c0546e7a9a186e64",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_copilot_app_hint_is_logged_for_integrated_files",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_copilot_app_hint_is_logged_for_integrated_files"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "c10a57b66a4d5791",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "c4a40fc39c3402a3",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestDeployedPathEntry::test_outside_project_with_dynamic_targets_uses_fallback_loop",
+     "tests/integration/test_install_services_phase3w5.py::TestDeployedPathEntry::test_outside_project_with_dynamic_targets_uses_fallback_loop"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "c85695c8bf0ab390",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_dispatch_calls_agent_integrator",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_dispatch_calls_agent_integrator"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "cb86d261444fbfc4",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "cce82afd24803934",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "cda8fee465f0ccfa",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_files_unchanged_annotation_when_nothing_integrated",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_files_unchanged_annotation_when_nothing_integrated"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "d210433ef6fdfd75",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_three_target_paths_collapse_to_count",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_three_target_paths_collapse_to_count"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "d534af65c19e4ac6",
+    "reason": "cross-partition: near-twin with tests/unit or another partition; not a D5 equal copy (different conftest chain or body context)"
+   },
+   {
+    "digest": "d85fc479da624990",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "d8818bddf1d6154f",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_out_of_tree_skill_paths_collapse_to_cowork",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_out_of_tree_skill_paths_collapse_to_cowork"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "de13e48d4e0718d4",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_verbose_mode_expands_multiple_paths",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_verbose_mode_expands_multiple_paths"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "df4b696c52d1633d",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "e24f68b5f557738a",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegrateLocalContent::test_missing_apm_dir_means_no_local_integration",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegrateLocalContent::test_missing_apm_dir_means_no_local_integration"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "e52c2382051b9a1b",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_empty_targets_returns_early",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_empty_targets_returns_early"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "ea8e54e300f3172b",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "f40fee1dc4e6d349",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "f6f3903277acc75f",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_missing_mapping_is_skipped",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_missing_mapping_is_skipped"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "fb973a57bb2d2b29",
+    "reason": "cross-partition: non-equal near-twin across partitions; other side is the lexicographically later integration file"
+   },
+   {
+    "digest": "fc855bc74d5d3634",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_scratch_root_validation_uses_ensure_path_within",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_scratch_root_validation_uses_ensure_path_within"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   },
+   {
+    "digest": "ff6f818809282a09",
+    "nodes": [
+     "tests/integration/test_install_services_orchestration.py::TestIntegratePackagePrimitives::test_dispatch_uses_deploy_root_when_present",
+     "tests/integration/test_install_services_phase3w5.py::TestIntegratePackagePrimitives::test_dispatch_uses_deploy_root_when_present"
+    ],
+    "reason": "all members in files touched by open PR #4025; deferred"
+   }
+  ],
+  "moves_left": 0,
+  "moves_left_detail": [],
+  "unclassified_left": 61,
+  "unclassified_left_detail": [
+   {
+    "path": "tests/integration/test_ide_target_refusal_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_inactive_target_ghost_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_init_bootstrap_chain_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_init_reinit_targets_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_init_removed_flags_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_audit_policy_floor.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_audit_replay_matrix_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_cli_cursor_claude_import_recheck_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_compile_antigravity_dedup_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_compile_claude_dedup_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_dir_plugin_audit_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_dry_run_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_invalid_deps_format_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_local_bundle_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_lsp_lockfile_determinism.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_marketplace_phase4w3.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_root_redirect_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_services_orchestration.py",
+    "reason": "touched by open PR; no edits"
+   },
+   {
+    "path": "tests/integration/test_install_services_phase3w5.py",
+    "reason": "touched by open PR; no edits"
+   },
+   {
+    "path": "tests/integration/test_install_silent_skip_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_sources_classification.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_subdir_dedup_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_validation_rules.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_verbose_redaction_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_install_with_links.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_integration.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_integration_runtime_coverage.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_integrators_end_to_end.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_integrators_hooks_execution.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_integrators_validation_rules.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_intellij_target.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_intra_package_cleanup.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_isolated_apm_environment_contract.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_json_mcp_native_conflict_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lifecycle_deny_all_chain_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lifecycle_reconciliation.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lifecycle_script_interrupt_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lifecycle_state_snapshot_contract.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lifecycle_trust_upgrade_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lifecycle_workspace_lock.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_link_rewrite_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_bundle_hooks_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_bundle_manifest_targets_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_bundle_mcp_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_bundle_mcp_retire_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_bundle_primitive_paths_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_claude_plugin_mcp_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_content_audit.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_dependency_graph_chain_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_git_repository_factory_contract.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_install.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_link_audit_replay_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_link_rejection_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_package_factory_contract.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_local_path_dependency_targets_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lock_derived_expected_state_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lock_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lockfile_transitive_replay_e2e.py",
+    "reason": "UNRESOLVED"
+   },
+   {
+    "path": "tests/integration/test_lockfileless_skill_cleanup_lifecycle.py",
+    "reason": "UNRESOLVED"
+   }
+  ]
+ },
+ "sizing_now": {
+  "d5_deletable": 41,
+  "d5_groups": 41,
+  "dup_body_groups": 65,
+  "modules": 83,
+  "open_pr": 3,
+  "partition": "int-il",
+  "protected": 37,
+  "unclassified": 61
+ },
+ "subsumed": [],
+ "unmapped": 0
+}

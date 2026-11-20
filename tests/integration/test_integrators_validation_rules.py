@@ -100,19 +100,6 @@ class TestRunMcpInstallScopeHandling:
         )
         assert result == 0
 
-    def test_project_scope_enum_propagates_no_exception(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from apm_cli.core.scope import InstallScope
-
-        monkeypatch.chdir(tmp_path)
-        result = run_mcp_install(
-            [],
-            scope=InstallScope.PROJECT,
-            logger=NullCommandLogger(),
-        )
-        assert result == 0
-
     def test_user_scope_without_supported_runtimes_warns(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -326,25 +313,6 @@ class TestRunMcpInstallRuntimeDetection:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0\n")
         result = run_mcp_install([], project_root=tmp_path, logger=NullCommandLogger())
-        assert result == 0
-
-    def test_stored_mcp_configs_none_defaults_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """stored_mcp_configs=None defaults to {} without error."""
-        monkeypatch.chdir(tmp_path)
-        result = run_mcp_install(
-            [],
-            stored_mcp_configs=None,
-            logger=NullCommandLogger(),
-        )
-        assert result == 0
-
-    def test_verbose_true_no_crash_on_empty_deps(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.chdir(tmp_path)
-        result = run_mcp_install([], verbose=True, logger=NullCommandLogger())
         assert result == 0
 
     def test_string_deps_treated_as_registry(self) -> None:
