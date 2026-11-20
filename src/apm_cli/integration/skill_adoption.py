@@ -169,17 +169,15 @@ def adoption_baselines(
     return {path: compute_file_hash(path) for path in members}
 
 
-def all_files_trusted(destination: Path, trusted: Callable[[Path], str | None]) -> bool:
-    """Return whether every file under *destination* still holds its trusted receipt."""
+def all_files_receipted(destination: Path, held: Callable[[Path], bool]) -> bool:
+    """Return whether every file under *destination* still holds its receipted bytes."""
     if destination.is_symlink() or not destination.is_dir():
         return True
-    for directory, _directories, filenames in os.walk(destination):
-        for name in filenames:
-            path = Path(directory) / name
-            receipted = trusted(path)
-            if receipted is None or path.is_symlink() or compute_file_hash(path) != receipted:
-                return False
-    return True
+    return all(
+        not (Path(directory) / name).is_symlink() and held(Path(directory) / name)
+        for directory, _directories, filenames in os.walk(destination)
+        for name in filenames
+    )
 
 
 def installing_commit(package_info: Any) -> str | None:
@@ -321,11 +319,12 @@ def skill_tree_baselines(
     with the source being installed first, then, when *commit* (the one being
     installed) differs from the lock, with the currently locked source
     rendered under the same copy filter. *plan*, *owner*, *targets* and
-    *commit* default to the integrator's current package. Only receipts the
-    session trusts for the current lock claim count: a tree whose files all
-    still hold them needs no adoption. A missing, untrusted or no longer
-    matching receipt (another worktree or checkout) falls through to the
-    renders, so bytes equal to what APM renders are never refused or kept.
+    *commit* default to the integrator's current package. A tree whose files
+    all still hold the bytes this installation receipted needs no adoption;
+    the session's baseline decides it. A missing, or no longer held, receipt
+    (another worktree or checkout) falls through to the renders, where a
+    member matches its trusted receipt or the render, so bytes equal to what
+    APM renders are never refused or kept.
     """
     session = integrator._materialization_session
     if session is None or force:
@@ -338,7 +337,7 @@ def skill_tree_baselines(
     def trusted(path: Path) -> str | None:
         return session.baseline(path, targets)
 
-    if all_files_trusted(destination, trusted):
+    if all_files_receipted(destination, session.receipt_held):
         return {}
     compare = partial(
         adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned, trusted=trusted

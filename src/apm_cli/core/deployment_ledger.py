@@ -291,6 +291,11 @@ class DeploymentMaterializationSession:
             if (content_hash := self._records[key].content_hash) is not None
         }
 
+    def receipt_held(self, path: Path) -> bool:
+        """Return whether *path* still holds the bytes this installation receipted there."""
+        record = self._records.get(self._physical_keys.get(path.resolve().as_posix(), ""))
+        return record is not None and self._holds(path, record)
+
     def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
         """Record a declared member this run deliberately left on disk unwritten."""
         from apm_cli.install.deployed_paths import deployed_path_entry

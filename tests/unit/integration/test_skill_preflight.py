@@ -274,6 +274,7 @@ def _session_conflicts(
     integrator = SkillIntegrator()
     integrator._materialization_session = SimpleNamespace(
         baseline=lambda _path, _targets: baseline,
+        receipt_held=lambda _path: False,
         locked_sources=LockedSkillSources(lambda _owner, _scratch: locked),
     )
     targets = [KNOWN_TARGETS["copilot"]]

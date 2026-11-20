@@ -2141,8 +2141,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-skill-adoption-trusted-receipt",
         rule_id="install-deployment-skill-adoption-trusted-receipt",
         path="src/apm_cli/integration/skill_adoption.py",
-        old="    if all_files_trusted(destination, trusted):\n",
-        new='    if trusted(destination / "SKILL.md") is not None:\n',
+        old="    if all_files_receipted(destination, session.receipt_held):\n",
+        new='    if session.receipt_held(destination / "SKILL.md"):\n',
         intent="Adoption bails on another checkout's receipt and refuses unchanged skill bytes.",
     ),
     MutationCase(

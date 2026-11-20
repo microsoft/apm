@@ -177,7 +177,9 @@ def _locked_update(tmp_path: Path, old_body: bytes = b"v1\n", new_body: bytes = 
 
     integrator = SkillIntegrator()
     integrator._materialization_session = SimpleNamespace(
-        baseline=lambda _path, _targets: None, locked_sources=LockedSkillSources(fetch)
+        baseline=lambda _path, _targets: None,
+        receipt_held=lambda _path: False,
+        locked_sources=LockedSkillSources(fetch),
     )
     return SimpleNamespace(
         new=new,
@@ -230,10 +232,8 @@ def test_update_never_adopts_a_differing_or_owned_elsewhere_tree(
     elif change == "unclaimed":
         overrides["owned"] = lambda _path: False
     elif change == "receipt":
-        # A trusted receipt the file still holds needs no adoption.
-        update.integrator._materialization_session.baseline = lambda path, _targets: (
-            compute_file_hash(path)
-        )
+        # Files that all still hold their receipted bytes need no adoption.
+        update.integrator._materialization_session.receipt_held = lambda _path: True
     else:
         overrides["force"] = True
     assert _locked_baselines(update, **overrides) == {}

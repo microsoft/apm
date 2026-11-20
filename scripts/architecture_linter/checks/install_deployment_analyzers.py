@@ -300,7 +300,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         GUARD_TRUSTED_RECEIPT,
-        "Skill adoption bails only on a trusted receipt the file still holds.",
+        "Skill adoption bails only when every file still holds its receipted bytes.",
         check_skill_adoption_trusted_receipt,
     ),
     _rule(

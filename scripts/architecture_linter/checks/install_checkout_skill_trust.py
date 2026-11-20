@@ -33,22 +33,25 @@ def _missing_fragments(
 
 
 def check_skill_adoption_trusted_receipt(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Adoption bails only when every file holds a trusted receipt; none bails on presence."""
+    """Adoption bails only when every file holds its receipted bytes, never on presence."""
     failures = _missing_fragments(
         provider,
         GUARD_TRUSTED_RECEIPT,
         {
             _ADOPTION: (
-                "if all_files_trusted(destination, trusted):",
+                "if all_files_receipted(destination, session.receipt_held):",
                 "return session.baseline(path, targets)",
                 "if receipted is not None and compute_file_hash(target) == receipted:",
             ),
-            "src/apm_cli/core/deployment_ledger.py": ("and not self._holds(path, record)",),
+            "src/apm_cli/core/deployment_ledger.py": (
+                "and not self._holds(path, record)",
+                "return record is not None and self._holds(path, record)",
+            ),
             "src/apm_cli/integration/skill_integrator.py": (
                 "(lambda path: adopted.get(path) or session.baseline(path, targets))",
             ),
         },
-        "Skill adoption bails only on a trusted receipt the file still holds",
+        "Skill adoption bails only when every file still holds its receipted bytes",
     )
     failures.extend(
         _duplicate_definition_lines(
