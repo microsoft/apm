@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g --target claude` installs Claude plugins intact through Claude settings, including MCP and LSP servers and `bin/` under one approval and org policy; plugins with `monitors/` or `workflows/` are parked with a warning, and loose Claude hooks from older installs need `apm uninstall -g <package>` then reinstall. (closes #3181, #3191, #3290)
 - `apm install --frozen` now fails before deploying on any edited deployed file, of every primitive type; delete the files, rerun `apm install`, and commit. (closes #3994, #4004)
 - `PROXY_REGISTRY_ONLY=1` also refuses unsanctioned MCP registries and marketplace catalogs the proxy cannot serve; set `MCP_REGISTRY_URL` to a proxied registry. (closes #3994, #4004)
+- **BREAKING:** `apm init --plugin` and `--marketplace` are removed and exit 2; use `apm plugin init` (now with `--version`, `--author`, `--description`) or `apm marketplace init`. (closes #4073, #4074)
 
 ### Added
 
