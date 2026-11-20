@@ -16,10 +16,11 @@ an agent does at runtime. Every field is in the [policy schema](../../reference/
 
 :::caution[Project installs only]
 Org policy does not govern user-scope (`-g`) installs in 0.37; local approvals and denies
-still apply. APM finds org policy from the project's git remote, and `apm install -g`,
-`update -g` and `uninstall -g` do not use it, even when you run them from inside a governed
-project. [#3703](https://github.com/microsoft/apm/issues/3703) tracks user-scope org policy
-for 0.38.
+still apply. `apm install -g`, `update -g` and `uninstall -g` look for org policy from your
+home directory, not from the project you run them in, so a governed project's policy is not
+applied to them. Two paths check the current directory's policy instead: `apm install -g --mcp`
+and a user-scope install of a local bundle. Do not rely on either for governance.
+[#3703](https://github.com/microsoft/apm/issues/3703) tracks user-scope org policy for 0.38.
 
 When the executables gate is on at user scope, it still parks hooks, MCP servers, LSP servers
 and `bin/` from dependencies, and `apm approve --user` and `apm deny --user` (including
@@ -161,7 +162,7 @@ rules per field: [policy schema](../../reference/policy-schema/#merge-rules).
 A developer can skip policy on their machine: `apm install --no-policy` for one command,
 or `APM_POLICY_DISABLE=1 apm <command>` (never export it in CI). A fork under a personal account
 discovers the fork owner's policy, not yours. User-scope installs (`apm install -g`)
-have no git remote and are not governed (see the caution above). None of this changes the pull request: a
+do not inherit the project's policy (see the caution above). None of this changes the pull request: a
 required `apm audit --ci --policy org` check re-runs the policy in CI, where the
 bypass is not set. See [Gate pull requests](../enforce-in-ci/).
 
