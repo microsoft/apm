@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.utils.content_hash import compute_package_hash
 from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.local_github_https_fixture import openssl_executable
 from tests.utils.skill_selection_world import (
@@ -60,6 +62,10 @@ def _entries_except_bundle(path: Path) -> list[dict[str, object]]:
     return [e for e in data["dependencies"] if e["repo_url"] != _BUNDLE]
 
 
+def _without_content_hash(entries: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [{k: v for k, v in e.items() if k != "content_hash"} for e in entries]
+
+
 @pytest.mark.parametrize("version", _VERSIONS)
 @pytest.mark.parametrize("scenario", ["divergent-diamond", "target-subset"])
 def test_frozen_install_on_an_old_first_wins_lock_fails_with_remediation(
@@ -101,7 +107,19 @@ def test_install_rewrites_an_old_diamond_lock_to_the_union_then_uninstall_shrink
         world.run(INSTALL, cwd=project, env=env, scenario_id="up-install")
         assert skill_dirs(project / _AGENTS) == sorted(UPGRADE_SKILLS)
         assert locked(project, _BUNDLE)["skill_subset"] == sorted(UPGRADE_SKILLS)
-        assert _entries_except_bundle(lock_path(project)) == others_before
+        # Besides the union, the only diff is the one-time move to lockfile
+        # version 4 (hash framing hardening, #4000): every other row is
+        # re-hashed in the framed stream from its verified installed bytes.
+        others_after = _entries_except_bundle(lock_path(project))
+        assert _without_content_hash(others_after) == _without_content_hash(others_before)
+        assert load_yaml(lock_path(project))["lockfile_version"] == "4"
+        for entry in others_after:
+            installed = (
+                LockedDependency.from_dict(entry)
+                .to_dependency_ref()
+                .get_install_path(project / "apm_modules")
+            )
+            assert entry["content_hash"] == compute_package_hash(installed, framed=True)
         audit = world.run(AUDIT_CI, cwd=project, env=env, expect=None, scenario_id="up-audit")
         assert audit.returncode == 0, audit_failures(audit)
         world.run(
