@@ -1467,6 +1467,44 @@ class TestGitlabPolicyInheritance(unittest.TestCase):
 class TestFetchFromAdoRepo(unittest.TestCase):
     """Test _fetch_from_ado_repo orchestration around the ADO transport."""
 
+    @patch("apm_cli.policy.discovery.policy_get")
+    def test_authenticated_fetch_caches_no_credential(self, mock_get):
+        """The policy cache holds the document and its warnings, never the credential."""
+        token = "adopat-4c0ffee-secret-needle"
+        seen_headers: list[dict] = []
+
+        def _get(url, *, headers=None, ambient_credentials=True):
+            seen_headers.append(dict(headers or {}))
+            response = MagicMock()
+            response.status_code = 200
+            response.text = VALID_POLICY_YAML + "enforcment: block\n"
+            return response
+
+        mock_get.side_effect = _get
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.dict(os.environ, {"ADO_APM_PAT": token}, clear=False),
+        ):
+            root = Path(tmpdir)
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="apm",
+                repo="apm-policy",
+                host="dev.azure.com",
+                project_root=root,
+            )
+            cached = b"".join(p.read_bytes() for p in sorted(_get_cache_dir(root).iterdir()))
+
+        self.assertTrue(result.found)
+        self.assertIn("Unknown top-level policy key: 'enforcment'", result.warnings)
+        # The fetch carried the credential, so the check below is not vacuous.
+        authorization = seen_headers[0]["Authorization"]
+        encoded = authorization.removeprefix("Basic ")
+        self.assertEqual(base64.b64decode(encoded).decode(), f":{token}")
+        self.assertIn(b"enforcment", cached)
+        for needle in (token, encoded, authorization):
+            self.assertNotIn(needle.encode(), cached)
+
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
     def test_legacy_coordinate_is_used_only_after_primary_404(self, mock_fetch):
         """The migration fallback must be bounded to a primary 404."""
