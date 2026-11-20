@@ -369,34 +369,16 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:41807c80edb8661312ed9f494af86d40b5ebc3ccfe8a27b0567c9c8ba664e461
+  content_hash: sha256:ce9524e50a341237151124d413166a07621c0458de05f23e6601703ecc97c8b9
 - kind: project-relative
   target: copilot
-  value: .agents/skills/apm-lifecycle-tests/assets/templates/ledger-row.json
+  value: .agents/skills/apm-lifecycle-tests/assets/templates.md
   runtime: null
   scope: project
   owners:
   - .
   active_owner: .
-  content_hash: sha256:bb17be907ad98870c97478dbb8c3dac827d982676a57bb19e19b1c9315af9ebc
-- kind: project-relative
-  target: copilot
-  value: .agents/skills/apm-lifecycle-tests/assets/templates/replay-row.yaml
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: sha256:c9a3a400710580989afb4d156f56fb6d32da73675c8190deb2a7b7170e03c987
-- kind: project-relative
-  target: copilot
-  value: .agents/skills/apm-lifecycle-tests/assets/templates/test_lifecycle_promise.py.txt
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: sha256:4d2c6007b27fa4edbfb5db8e3668f1da6075affb9cbe4877be833945753b9c42
+  content_hash: sha256:e35e50ac2365d3d8c7dc7a3ed619feec77b786be292a7722427d1ab18c7d24cf
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/evals/README.md
@@ -405,7 +387,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:d37c86074f1350a9dc2601ad4ca1b5d0ba157b30a4c37b973601110d1fb12fb2
+  content_hash: sha256:389cda3fcf5b35c9bd9d65dd19a4c6dbc569ac495b70aae6891b4b9e0788999f
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/evals/content-evals.json
@@ -414,7 +396,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:99a57e6d4b0f40dc7ec0c8cde005e120006b13513b6f9cc4c9f3a48b411b9d84
+  content_hash: sha256:97825cf74f804c8e898e0a9b2ba599f7d79f9b4e47415d5327667a0591223694
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/evals/trigger-evals.json
@@ -423,7 +405,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:d0def126a524d41285f4238022b4656ae8d04da451f3d65118db6d6e0fdddef4
+  content_hash: sha256:56528747063844baabb047c49eb1bd9c1af366b475ca9865d67a7d7abffdf87a
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/references/family.md
@@ -432,7 +414,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:b259b4aea972f8685ea624581f47b1f22996d5a669fa8e3d77f704d4d33b0025
+  content_hash: sha256:6888ead131112e76d5471b85961b8c7af0cd6cb09fe55ac685f4f9cc08bd9ff7
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/references/migrate-and-merge.md
@@ -441,7 +423,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:f6d9fefaf9c10d6963e4468c8f06ebb756e451e5a45ba7b503f8ee9d3639ba47
+  content_hash: sha256:b2e7afbae904ee986ca309ed1a2d509a0c1feb5f2794ab07b4b268d978559fd6
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/references/oracles.md
@@ -450,7 +432,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:5def20e0665de5628362a35b9771ee420ee4d4dfbb1bfe3e5ce3c6590ead8a2c
+  content_hash: sha256:d846b20d9e27f5c2d6137d5c7a3c3a6f6b626c47f64cead4b191c19e12542262
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-spec-guardian
@@ -3091,9 +3073,7 @@ deployments:
 local_deployed_files:
 - .agents/skills/apm-lifecycle-tests
 - .agents/skills/apm-lifecycle-tests/SKILL.md
-- .agents/skills/apm-lifecycle-tests/assets/templates/ledger-row.json
-- .agents/skills/apm-lifecycle-tests/assets/templates/replay-row.yaml
-- .agents/skills/apm-lifecycle-tests/assets/templates/test_lifecycle_promise.py.txt
+- .agents/skills/apm-lifecycle-tests/assets/templates.md
 - .agents/skills/apm-lifecycle-tests/evals/README.md
 - .agents/skills/apm-lifecycle-tests/evals/content-evals.json
 - .agents/skills/apm-lifecycle-tests/evals/trigger-evals.json
@@ -3285,16 +3265,14 @@ local_deployed_files:
 - .github/instructions/python.instructions.md
 - .github/instructions/tests.instructions.md
 local_deployed_file_hashes:
-  .agents/skills/apm-lifecycle-tests/SKILL.md: sha256:41807c80edb8661312ed9f494af86d40b5ebc3ccfe8a27b0567c9c8ba664e461
-  .agents/skills/apm-lifecycle-tests/assets/templates/ledger-row.json: sha256:bb17be907ad98870c97478dbb8c3dac827d982676a57bb19e19b1c9315af9ebc
-  .agents/skills/apm-lifecycle-tests/assets/templates/replay-row.yaml: sha256:c9a3a400710580989afb4d156f56fb6d32da73675c8190deb2a7b7170e03c987
-  .agents/skills/apm-lifecycle-tests/assets/templates/test_lifecycle_promise.py.txt: sha256:4d2c6007b27fa4edbfb5db8e3668f1da6075affb9cbe4877be833945753b9c42
-  .agents/skills/apm-lifecycle-tests/evals/README.md: sha256:d37c86074f1350a9dc2601ad4ca1b5d0ba157b30a4c37b973601110d1fb12fb2
-  .agents/skills/apm-lifecycle-tests/evals/content-evals.json: sha256:99a57e6d4b0f40dc7ec0c8cde005e120006b13513b6f9cc4c9f3a48b411b9d84
-  .agents/skills/apm-lifecycle-tests/evals/trigger-evals.json: sha256:d0def126a524d41285f4238022b4656ae8d04da451f3d65118db6d6e0fdddef4
-  .agents/skills/apm-lifecycle-tests/references/family.md: sha256:b259b4aea972f8685ea624581f47b1f22996d5a669fa8e3d77f704d4d33b0025
-  .agents/skills/apm-lifecycle-tests/references/migrate-and-merge.md: sha256:f6d9fefaf9c10d6963e4468c8f06ebb756e451e5a45ba7b503f8ee9d3639ba47
-  .agents/skills/apm-lifecycle-tests/references/oracles.md: sha256:5def20e0665de5628362a35b9771ee420ee4d4dfbb1bfe3e5ce3c6590ead8a2c
+  .agents/skills/apm-lifecycle-tests/SKILL.md: sha256:ce9524e50a341237151124d413166a07621c0458de05f23e6601703ecc97c8b9
+  .agents/skills/apm-lifecycle-tests/assets/templates.md: sha256:e35e50ac2365d3d8c7dc7a3ed619feec77b786be292a7722427d1ab18c7d24cf
+  .agents/skills/apm-lifecycle-tests/evals/README.md: sha256:389cda3fcf5b35c9bd9d65dd19a4c6dbc569ac495b70aae6891b4b9e0788999f
+  .agents/skills/apm-lifecycle-tests/evals/content-evals.json: sha256:97825cf74f804c8e898e0a9b2ba599f7d79f9b4e47415d5327667a0591223694
+  .agents/skills/apm-lifecycle-tests/evals/trigger-evals.json: sha256:56528747063844baabb047c49eb1bd9c1af366b475ca9865d67a7d7abffdf87a
+  .agents/skills/apm-lifecycle-tests/references/family.md: sha256:6888ead131112e76d5471b85961b8c7af0cd6cb09fe55ac685f4f9cc08bd9ff7
+  .agents/skills/apm-lifecycle-tests/references/migrate-and-merge.md: sha256:b2e7afbae904ee986ca309ed1a2d509a0c1feb5f2794ab07b4b268d978559fd6
+  .agents/skills/apm-lifecycle-tests/references/oracles.md: sha256:d846b20d9e27f5c2d6137d5c7a3c3a6f6b626c47f64cead4b191c19e12542262
   .agents/skills/apm-spec-guardian/SKILL.md: sha256:a17a88097bdd4414ca2aa2d4956e7fd99b8eb06c843af7cfeffd3c6702e412de
   .agents/skills/apm-spec-guardian/assets/comment-template.md: sha256:8f5703aa98d1036d2418ffa45eac9d0270504dac33f3e9b1892884a9d48da1a6
   .agents/skills/apm-spec-guardian/assets/linter-checklist.md: sha256:b3b60af18f4b37e9f68815aaf8001617b81cc24fb8fe0a1f19074db93efa6b3b

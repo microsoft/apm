@@ -1,10 +1,21 @@
-"""<Promise sentence, e.g. uninstall preserves an unmanaged file next to a deployed skill.>
+# Templates
+
+Load at Step 4 (test) and Step 8 (ledger row). Copy, rename, and keep
+every oracle call.
+
+## A. Pytest lifecycle test on today's harness
+
+Copy to `tests/integration/test_<promise>_lifecycle.py`. This skeleton
+runs green as written against the in-tree CLI
+(`APM_BINARY_PATH="$(uv run which apm)" uv run --extra dev pytest <file> -n 0 -q`);
+replace the arrange / act / assert blocks with your cell. Policy stays
+ON: no `--no-policy`.
+
+```python
+"""APMLifecycle: <one-line promise in user words> (<issue or promise id>).
 
 PROMISE: <id, e.g. ownership.preserve_unowned> (source: <path or issue>)
-CELLS: op=<install|uninstall|...>, scope=project, target=<claude>, source=local
-Template for today's harness. Copy to
-tests/integration/test_<promise>_lifecycle.py, rename the test, and keep
-the before/after snapshot plus the cross-cutting checks.
+CELL: OP=uninstall SRC=local PRIM=skill SCOPE=project TGT=claude
 """
 
 from __future__ import annotations
@@ -101,3 +112,53 @@ def test_promise_name_here(tmp_path: Path, apm_binary_path: Path) -> None:
     # I3: the audit verdict agrees with the durable state.
     audit = apm("audit", "--ci")
     assert audit.returncode == 0, _evidence(audit)
+```
+
+Reusing the reference module instead: `_new_scenario`, `_publish`,
+`_run_success` and `_assert_same_state` can be imported from
+`tests.integration.test_required_lifecycle_state_machine`. Pass a fresh
+directory (`_new_scenario(tmp_path / "world", apm_binary_path)`;
+`IsolatedApmEnvironment.create` refuses an existing root), and do not
+reuse its `_INSTALL_ARGS`, which carries `--no-policy`.
+
+## B. Replay row (only when `tests/lifecycle/replay/` exists)
+
+```yaml
+id: T1/update/revoked/lsp
+promises: [P-INV-I4, P-OWN-executable-trust-context]   # ids must resolve in the promise catalog
+cell: {OP: update, SRC: git, PRIM: lsp, SCOPE: project, GATE: revoked-after-deploy}
+world: {packages: [p-lsp, p-skill], targets: [copilot, claude], scope: project}
+given:
+  - apm install p-lsp p-skill
+  - apm approve p-lsp
+  - apm install
+when:
+  - apm deny p-lsp
+  - apm update --yes
+then:
+  exit: 0
+  deployed: expected        # reference model: LSP config gone, skill kept
+  announce: retired         # I7
+```
+
+## C. Bug-ledger row
+
+Append to `bugs` in `tests/fixtures/lifecycle_bug_ledger.json`, keeping
+`bugs` sorted by `issue`:
+
+```json
+{
+  "issue": 1234,
+  "fixed_in": "0.37.0",
+  "summary": "<user-visible law that was broken, one neutral sentence>",
+  "failure_modes": ["ownership"],
+  "properties": ["ownership.preserve_unowned"],
+  "regression_tests": ["tests/integration/<file>.py::<test>"]
+}
+```
+
+- `failure_modes` uses the ledger taxonomy: auth, cache, cleanup,
+  idempotency, observation, outcome, ownership, portability, reference,
+  routing, transaction.
+- `properties` are ids from the ledger's `property_catalog`.
+- Validate: `uv run --extra dev pytest tests/quality/test_lifecycle_bug_ledger.py -q`.

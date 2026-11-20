@@ -1,41 +1,36 @@
 {
-  "description": "Trigger evals for the apm-lifecycle-tests dispatch description. 10 should-trigger + 10 near-miss should-NOT-trigger. 60/40 train/val split. Validation split is the ship gate (>=0.5 on should-trigger AND <0.5 on should-not-trigger).",
+  "description": "Trigger evals for the apm-lifecycle-tests dispatch description. 10 should-trigger + 10 should-NOT-trigger. 60/40 train/val split. Validation split is the ship gate (>=0.5 on should-trigger AND <0.5 on should-not-trigger).",
   "should_trigger": {
     "train": [
-      "Write a regression test proving apm uninstall keeps a user file next to a deployed skill",
-      "Add an e2e test that apm install --frozen and apm audit --ci agree after a target is removed",
-      "Changing how apm prune treats a hand-added MCP entry; write the failing-before test first",
-      "Add a lifecycle_smoke test for apm update after a dependency tag moves",
-      "Reviewer says lifecycle coverage is missing for the new --dry-run path of apm compile; add it",
-      "Add a state-machine rule for deny followed by update in the lifecycle harness"
+      "Write a regression test for: apm deny does not remove the MCP server deployed by a previous install",
+      "Add an e2e test proving apm install --frozen fails when an edited instruction was restored",
+      "The reviewer says lifecycle coverage is missing for the uninstall cleanup change; add it",
+      "Add a state machine rule for apm update after an approval is revoked",
+      "Migrate tests/integration/test_hook_path_package_lifecycle.py into the new lifecycle family",
+      "Prove that apm uninstall keeps a user-authored file next to a deployed skill"
     ],
     "val": [
-      "Add an integration test that a stricter org policy removes a previously deployed hook on the next install",
-      "Migrate tests/integration/test_mcp_slashed_server_cleanup_lifecycle.py into the new lifecycle family",
-      "Write a replay row for apm install of a local bundle with skills selection",
-      "Add a test that apm pack then apm install of the bundle deploys the same files to .claude and .github"
+      "Add an integration test that apm compile does not write the lockfile twice",
+      "We fixed apm prune leaving a stale lockfile entry; add the test that would have caught it",
+      "Write the replay row for T4: newer-generator lockfile refused by prune -g",
+      "Add a docs journey step for the CI gate with apm audit --ci"
     ]
   },
   "should_not_trigger": {
     "train": [
-      "Add a unit test for DependencyReference.parse_from_dict with a subdirectory URL",
-      "Review PR 1234 for test coverage gaps",
-      "Which of these old integration tests should we delete?",
-      "Fix the flaky timeout in tests/unit/test_console.py",
-      "Write a unit test for the ASCII status symbol table in console.py",
-      "Speed up the CI shard that runs the integration suite"
+      "Add a unit test for DependencyReference.parse with a GitLab subgroup URL",
+      "Review this PR for missing test coverage and post the panel verdict",
+      "Fix the ruff RUF043 lint error in tests/unit/test_auth.py",
+      "Which tests in tests/unit can we delete to speed up CI?",
+      "Update the CHANGELOG for the 0.37 release",
+      "Shard the Windows unit tests into three CI jobs"
     ],
     "val": [
-      "Add a docstring to ApmLifecycleRunner.run_sequence",
-      "Update the lifecycle_smoke job's runner image in ci.yml",
-      "Write a component test for the lockfile YAML serializer round trip",
-      "Explain how the bug ledger quality test validates failure_modes"
+      "Write a property test for the semver range parser",
+      "Explain how the architecture linter guards work",
+      "Rename the --skill flag in the install help text",
+      "Profile why apm --version takes 1.3 seconds to start"
     ]
   },
-  "notes": [
-    "Unit and component tests of one function do not trigger even when they touch lifecycle-adjacent modules.",
-    "PR review of test coverage belongs to the test-coverage-expert persona, not this skill.",
-    "Deciding which tests to delete is out of scope; migration with moves or merges does trigger.",
-    "CI plumbing and harness docstring edits do not trigger; authoring a test against the real CLI does."
-  ]
+  "notes": "Near-misses cover unit tests, PR review (persona), corpus cuts (steward/method), CI topology, docs and lint work."
 }

@@ -1,66 +1,49 @@
 {
-  "description": "Content evals for apm-lifecycle-tests. Each scenario is run with_skill (skill loaded) and without_skill (generic test author). If the outputs are indistinguishable on the must / must_not checks, the skill is not adding value: redesign or delete.",
+  "description": "Content evals for apm-lifecycle-tests. Each scenario is run with_skill and without_skill. If the outputs are indistinguishable, the skill adds no value; redesign or delete it (genesis evals doctrine).",
   "scenarios": [
     {
-      "id": "C1-uninstall-preserves-unmanaged-sibling",
-      "label": "Fix: uninstall must preserve an unmanaged sibling file next to a deployed skill",
-      "prompt": "Fix task: `apm uninstall` must preserve a file the user created next to a deployed skill directory. Write the regression test for the fix.",
-      "expected": {
-        "must": [
-          "names the promise (for example ownership.preserve_unowned from tests/fixtures/lifecycle_bug_ledger.json) before writing code",
-          "drives the installed CLI (ApmLifecycleRunner with apm_binary_path, or the tests/lifecycle driver when that family exists), not Click CliRunner or a Python API",
-          "uses a hermetic world (IsolatedApmEnvironment or a _*_kit.py world) with local packages and no network",
-          "captures a before/after durable-state snapshot around the uninstall (LifecycleStateSnapshot or ArtifactSnapshot)",
-          "decisive assertion is the ownership oracle: the sibling file bytes are unchanged and APM-owned files are gone",
-          "checks at least I1 (lockfile matches deployed) and I6 (ASCII output) after the mutating command",
-          "runs the test red before the fix with a targeted pytest command (-n 0) and shows the failing line",
-          "adds or names a bug-ledger row with the regression node id"
-        ],
-        "must_not": [
-          "passes --no-policy to install, uninstall or audit",
-          "asserts only on a stdout substring",
-          "names the test file by phase, wave or gap"
-        ]
-      },
-      "value_delta_hypothesis": "Without the skill an author tends to write a CliRunner test asserting 'Uninstalled' in stdout with --no-policy. With the skill the test proves the negative on disk and records the ledger row."
+      "id": "C1-ownership-regression",
+      "label": "Bug fix: uninstall removes an unmanaged sibling file",
+      "prompt": "apm uninstall of a skill package also deletes a user-authored file that sits next to the deployed skill files. Add the test that proves the fix.",
+      "expect_with_skill": [
+        "names promise I5 / ownership.preserve_unowned and the cleanup owner",
+        "drives the installed CLI in a hermetic world, policy ON (no --no-policy)",
+        "asserts the sibling file is byte-identical and the package files are gone via before/after snapshot",
+        "checks I1 lock==deployed after the uninstall",
+        "shows failing-before and passing-after runs",
+        "adds a bug-ledger row"
+      ],
+      "expect_without_skill_risk": [
+        "CliRunner or mocked filesystem",
+        "--no-policy copied from helpers",
+        "asserts only a log string"
+      ]
     },
     {
-      "id": "C2-migrate-substring-only-lifecycle-test",
-      "label": "Migrate an old *_lifecycle.py whose only assertion is a stdout substring",
-      "prompt": "Move tests/integration/test_example_lifecycle.py into the lifecycle family. Its single test runs `apm install` then `apm compile` and asserts `'Compiled' in result.stdout`.",
-      "expected": {
-        "must": [
-          "loads references/migrate-and-merge.md",
-          "identifies the substring assertion as not lifecycle proof (string-only or anti-oracle)",
-          "names the promise the test appears to guard",
-          "replaces it with a state oracle (compiled file present with expected bytes, snapshot diff bounded to the compile write set) or flags it explicitly in the PR",
-          "keeps the strongest markers of the source test",
-          "updates every reference to the old node id, including the bug ledger, and runs tests/quality/test_lifecycle_bug_ledger.py",
-          "shows a node-set diff (collect-only before and after)"
-        ],
-        "must_not": [
-          "moves the test unchanged and claims lifecycle coverage",
-          "deletes the test because a heuristic marked it as a duplicate"
-        ]
-      },
-      "value_delta_hypothesis": "Without the skill the file is moved verbatim and keeps a filename that implies a guarantee it does not check. With the skill the move upgrades or flags the oracle."
+      "id": "C2-migrate-string-only",
+      "label": "Migrate an old lifecycle file whose assertion is a string compare",
+      "prompt": "Fold tests/integration/test_example_lifecycle.py into the lifecycle family; its only assertion is 'assert \"integrated\" in result.stdout'.",
+      "expect_with_skill": [
+        "flags the string-only assertion as an anti-oracle",
+        "converts it to a replay or scenario row with a state oracle",
+        "keeps or names the regression trap in the ledger",
+        "never drops the assertion silently"
+      ],
+      "expect_without_skill_risk": [
+        "moves the file verbatim",
+        "deletes it as redundant"
+      ]
     },
     {
-      "id": "C3-unit-test-for-parser-declines",
-      "label": "Add a unit test for a parser (out of scope)",
-      "prompt": "Add a unit test for the dependency reference parser covering a git URL with a subdirectory.",
-      "expected": {
-        "must": [
-          "recognizes the request as unit scope (one function, no CLI, no durable state)",
-          "does not apply the lifecycle procedure; follows tests/unit conventions instead"
-        ],
-        "must_not": [
-          "builds an IsolatedApmEnvironment or runs the apm binary",
-          "adds a bug-ledger row",
-          "adds lifecycle markers (e2e, lifecycle_smoke, requires_apm_binary)"
-        ]
-      },
-      "value_delta_hypothesis": "The skill must not inflate a unit test into an expensive lifecycle test. Equal behavior with and without the skill is the pass condition here; a with_skill run that escalates is a dispatch defect."
+      "id": "C3-unit-out-of-scope",
+      "label": "Pure parser unit test requested",
+      "prompt": "Add a unit test for the version-constraint parser rejecting '^^1.0'.",
+      "expect_with_skill": [
+        "declines the lifecycle procedure; a unit test at the owner is the right instrument"
+      ],
+      "expect_without_skill_risk": [
+        "n/a: tests that the skill does not over-trigger its procedure"
+      ]
     }
   ]
 }
