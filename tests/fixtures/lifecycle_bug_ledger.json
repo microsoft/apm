@@ -559,6 +559,17 @@
       ]
     },
     {
+      "issue": 4079,
+      "fixed_in": "0.37.0",
+      "summary": "Policy outcome routing consistency: the apm audit --ci drift replay and the lifecycle script policy gate now route every org policy discovery outcome as install does, so an outcome that stops install also stops the audit replay and lifecycle scripts.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_audit_ci_replay_routes_policy_outcome_like_install",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_lifecycle_scripts_are_suppressed_when_org_policy_cannot_be_resolved"
+      ]
+    },
+    {
       "issue": 4080,
       "fixed_in": "Unreleased",
       "summary": "apm unpack deploys through the shared bundle-admission owner that apm install <bundle> uses: org policy, integrity under require_hashes, the lifecycle lock and the lockfile record.",
@@ -580,6 +591,17 @@
       ]
     },
     {
+      "issue": 4084,
+      "fixed_in": "0.37.0",
+      "summary": "Policy outcome routing consistency: apm audit --ci and apm approve handled some org policy discovery outcomes differently from apm install; every policy reader now takes one routed decision per outcome from a closed outcome set.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_outcome_routing_lifecycle.py::test_every_policy_reader_routes_the_outcome_like_install",
+        "tests/integration/test_policy_outcome_routing_lifecycle.py::test_approve_under_unreachable_policy_follows_fetch_failure_default"
+      ]
+    },
+    {
       "issue": 4125,
       "fixed_in": "Unreleased",
       "summary": "apm update verifies a registry dependency whose version did not move against its locked hash, as it does for a git dependency whose commit did not move.",
@@ -596,28 +618,6 @@
       "regression_tests": [
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_altered_bytes_for_an_unchanged_registry_version",
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_accepts_a_new_registry_version"
-      ]
-    },
-    {
-      "issue": 4079,
-      "fixed_in": "0.37.0",
-      "summary": "Policy outcome routing consistency: the apm audit --ci drift replay and the lifecycle script policy gate now route every org policy discovery outcome as install does, so an outcome that stops install also stops the audit replay and lifecycle scripts.",
-      "failure_modes": ["outcome", "routing"],
-      "properties": ["outcome.status_matches_state"],
-      "regression_tests": [
-        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_audit_ci_replay_routes_policy_outcome_like_install",
-        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_lifecycle_scripts_are_suppressed_when_org_policy_cannot_be_resolved"
-      ]
-    },
-    {
-      "issue": 4084,
-      "fixed_in": "0.37.0",
-      "summary": "Policy outcome routing consistency: apm audit --ci and apm approve handled some org policy discovery outcomes differently from apm install; every policy reader now takes one routed decision per outcome from a closed outcome set.",
-      "failure_modes": ["outcome", "routing"],
-      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
-      "regression_tests": [
-        "tests/integration/test_policy_outcome_routing_lifecycle.py::test_every_policy_reader_routes_the_outcome_like_install",
-        "tests/integration/test_policy_outcome_routing_lifecycle.py::test_approve_under_unreachable_policy_follows_fetch_failure_default"
       ]
     },
     {
