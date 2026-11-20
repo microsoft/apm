@@ -36,11 +36,38 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     site (in ``_install_apm_dependencies``) share one implementation.
     Returns ``{rel_path: "sha256:<hex>"}`` for files that exist as regular
     files; symlinks and unreadable paths are silently omitted (they cannot
-    contribute meaningful provenance).
+    contribute meaningful provenance). ``cowork://`` rows hash the file
+    they decode to under the resolved Cowork root, so they carry the same
+    provenance as project rows (#3701); without a resolvable root they get
+    no hash.
     """
+    from apm_cli.integration.copilot_cowork_paths import (
+        COWORK_URI_SCHEME,
+        CoworkResolutionError,
+        from_lockfile_path,
+        resolve_copilot_cowork_skills_dir,
+    )
+    from apm_cli.utils.path_security import PathTraversalError
+
     out: dict = {}
+    cowork_root: Path | None = None
+    cowork_resolved = False
     for _rel in rel_paths or ():
-        _full = project_root / _rel
+        if _rel.startswith(COWORK_URI_SCHEME):
+            if not cowork_resolved:
+                cowork_resolved = True
+                try:
+                    cowork_root = resolve_copilot_cowork_skills_dir()
+                except CoworkResolutionError:
+                    cowork_root = None
+            if cowork_root is None:
+                continue
+            try:
+                _full = from_lockfile_path(_rel, cowork_root)
+            except (PathTraversalError, ValueError):
+                continue
+        else:
+            _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
             try:  # noqa: SIM105
                 out[_rel] = compute_file_hash(_full)
