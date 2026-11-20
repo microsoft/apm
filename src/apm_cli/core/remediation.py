@@ -107,6 +107,13 @@ def either_sentence(first: Remediation, *alternatives: Remediation) -> str:
     return _sentence(either(first, *alternatives))
 
 
+def kept_file_message(
+    path: str, reason: str, remedy: Remediation, *alternatives: Remediation
+) -> str:
+    """Render the one kept-file shape: ``Kept <path>: <reason>. <Remedy sentence>``."""
+    return f"Kept {path}: {reason}. {either_sentence(remedy, *alternatives)}"
+
+
 _CATALOG: dict[str, Remediation] = {}
 
 
@@ -173,6 +180,9 @@ RESTORE_EDITED_SKILL = _entry(
     before="delete {subject}",
     then="commit the result",
 )
+# A managed file install kept because it may hold local edits (#4360, #4504).
+KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+KEPT_FILE_OVERWRITE = _entry("kept-file-overwrite", "apm install --force", "overwrite it")
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
     "apm install --force",
@@ -1140,6 +1150,14 @@ FROZEN_HOOK_PINS_STALE = _entry(
     "retire the hooks their approval no longer admits (without --frozen)",
     then="commit apm.yml and apm.lock.yaml",
 )
+# The way out of an org-enforced fail-closed block; never advertise a bypass.
+# {source} binds to " (<source>)" when discovery named the source it tried, else "".
+POLICY_FETCH_FAILURE_BLOCKED = _entry(
+    "policy-fetch-failure-blocked",
+    "apm policy status",
+    "check that the org policy source{source} is reachable",
+    then="retry, or ask your org admin",
+)
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
 # Advice printed by install/ drift replay, audit replay, cache pins, executable
@@ -1243,6 +1261,12 @@ NATIVE_PLUGIN_HASH_MISSING = _entry(
 )
 NATIVE_PLUGIN_CACHE_DIFFERS = _entry(
     "native-plugin-cache-differs", "apm install", "restore the package"
+)
+LOCAL_BUNDLE_EXECUTABLES_PARKED = _entry(
+    "local-bundle-executables-parked",
+    "apm approve --pending",
+    "list the approval key of each parked local bundle executable",
+    then="add it under executables.allow and reinstall the bundle",
 )
 # -- end W4 drift-trust --
 # -- W4 phases-targets --

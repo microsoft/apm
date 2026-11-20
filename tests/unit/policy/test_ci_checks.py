@@ -1409,6 +1409,7 @@ class TestRunBaselineChecks:
             "no-orphaned-packages",
             "skill-subset-consistency",
             "config-consistency",
+            "native-mcp-ownership",
             "content-integrity",
             "local-bundle-hooks",
             "hook-approval-pins",

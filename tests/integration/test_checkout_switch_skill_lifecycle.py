@@ -39,7 +39,7 @@ pytestmark = [
 ]
 
 _REFUSAL = "no trustworthy local deployment baseline"
-_MODIFIED = "modified since deployment"
+_MODIFIED = "it was modified since APM deployed it"
 _REMOTE = "https://github.com/test/kit.git"
 _SKILL = "---\nname: alpha\ndescription: Alpha\n---\nSee [guide](../../../docs/guide.md).\n"
 _LOCAL_SKILL = "---\nname: x\ndescription: Skill x.\n---\n# x\n"
@@ -624,10 +624,12 @@ def test_user_edit_variants_never_lose_bytes(
         _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "source edit\n")
     before = _tree(world.project, _X)
 
+    # R2/R4 bring new bytes for the edited file: the kept edit blocks the
+    # requested state, so install exits 1; otherwise it only warns.
     result = world.apm("install")
     output = _output(result)
     _assert_nothing_deleted(before, world.project)
-    assert result.returncode == 0, output
+    assert result.returncode == (1 if case in ("R2", "R4") else 0), output
     assert _MODIFIED in output, output
     assert "Cleaned" not in output and "Kept user-edited file" not in output, output
     assert deployed.read_text(encoding="ascii").endswith(_USER_EDIT)

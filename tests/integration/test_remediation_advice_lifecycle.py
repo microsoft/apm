@@ -1037,6 +1037,59 @@ def test_w4_frozen_policy_remediation_clears_the_reported_state(
     _check_bound_proof(tmp_path, apm_binary_path, proof)
 
 
+def test_policy_fetch_failure_remediation_clears_the_block(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``fetch_failure_default: block`` with no reachable org policy blocks the
+    install; the advice comes from the catalog, the advised ``apm policy status``
+    runs, and once the source serves a policy the retried install succeeds."""
+    import os
+
+    from apm_cli.core.remediation import catalog
+    from tests.integration._policy_scope_kit import PolicyScopeWorld
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+    from tests.utils.local_github_https_fixture import local_github_https_fixture
+
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    package = world.publish_package("pkg-a")
+    project = world.consumer(
+        dependencies=[f"{package.slug}#v1.0.0"],
+        extra={"policy": {"fetch_failure_default": "block"}},
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
+    entry = catalog()["policy-fetch-failure-blocked"].bind(source="")
+
+    def run(env: dict[str, str], args: tuple[str, ...], scenario_id: str):
+        return runner.run(args, scenario_id=scenario_id, cwd=project, env=env)
+
+    with local_github_https_fixture(
+        tmp_path / "certs-unreachable", world.served_repositories()
+    ) as fx:
+        reported = run(fx.child_environment(world.git_env()), ("install",), "remediation-reported")
+    assert reported.returncode == 1, _result_evidence(reported)
+    assert entry.sentence() in _normalized(reported), _result_evidence(reported)
+    assert "--no-policy" not in _normalized(reported), _result_evidence(reported)
+
+    # The manual step the advice names: make the org policy source reachable.
+    world.publish_policy(
+        {
+            "name": "contoso-policy",
+            "version": "1.0.0",
+            "enforcement": "block",
+            "mcp": {"deny": ["unused-server"]},
+        }
+    )
+    with local_github_https_fixture(
+        tmp_path / "certs-reachable", world.served_repositories()
+    ) as fx:
+        env = fx.child_environment(world.git_env())
+        advised = run(env, entry.argv()[1:], "remediation-run-policy-fetch-failure-blocked")
+        assert advised.returncode == 0, _result_evidence(advised)
+        again = run(env, ("install",), "remediation-cleared")
+    assert again.returncode == 0, _result_evidence(again)
+    assert entry.option() not in _normalized(again), _result_evidence(again)
+
+
 # -- end W4 frozen-policy proofs --
 # -- W4 drift-trust proofs --
 #

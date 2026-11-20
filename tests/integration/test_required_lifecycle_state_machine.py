@@ -74,6 +74,7 @@ _GLOBAL_AUDIT_RULES = frozenset(
         "includes-consent",
         "local-bundle-hooks",
         "lockfile-exists",
+        "native-mcp-ownership",
         "no-orphaned-packages",
         "ref-consistency",
         "skill-subset-consistency",

@@ -16,7 +16,11 @@ from apm_cli.utils.git_env import (
     git_subprocess_env,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-git-child-repository-isolation")]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-OWN-git-child-repository-isolation"),
+]
 
 # Git dies with "'$GIT_DIR' too big" when an explicit GIT_DIR is longer than
 # PATH_MAX - 40. PATH_MAX is 260 in Git for Windows, 1024 on macOS, 4096 on Linux.

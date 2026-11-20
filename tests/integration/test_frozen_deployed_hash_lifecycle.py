@@ -52,8 +52,7 @@ _OLD_RENDERINGS = {
     ),
 }
 _KEPT_REMEDY = (
-    "Move it aside, then run 'apm install' to restore it; or run 'apm install --force' "
-    "to overwrite it."
+    "Move it aside, then run 'apm install' to restore it, or 'apm install --force' to overwrite it."
 )
 
 

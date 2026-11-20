@@ -205,15 +205,25 @@ def untrusted_baseline_message(
     )
 
 
-def unproven_overwrite_message(entry: str, *, user_scope: bool) -> str:
-    """Refuse to replace a managed file that APM cannot prove it deployed (#4360)."""
-    install = "apm install -g" if user_scope else "apm install"
-    return (
-        f"Kept {entry}: it differs from what APM renders and there is no local "
-        "deployment receipt or locked render proving APM wrote it, so it may hold "
-        f"local edits. Move it aside, then run '{install}' to restore it; or run "
-        f"'{install} --force' to overwrite it."
+def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str:
+    """Name a managed file install kept, and the runnable way past it.
+
+    *proven_edit* means the file differs from the bytes APM recorded deploying;
+    otherwise no receipt or locked render proves APM wrote it (#4360).
+    """
+    from apm_cli.core import remediation
+
+    reason = (
+        "it was modified since APM deployed it"
+        if proven_edit
+        else "it differs from what APM renders and there is no local deployment "
+        "receipt or locked render proving APM wrote it, so it may hold local edits"
     )
+    restore, overwrite = remediation.KEPT_FILE_RESTORE, remediation.KEPT_FILE_OVERWRITE
+    if user_scope:
+        restore = restore.with_command("apm install -g")
+        overwrite = overwrite.with_command("apm install -g --force")
+    return remediation.kept_file_message(entry, reason, restore, overwrite)
 
 
 class BaseIntegrator:
@@ -378,6 +388,34 @@ class BaseIntegrator:
             user_scope=user_scope,
         )
 
+    @staticmethod
+    def _member_edit(
+        target_file: Path, source_file: Path, expected: str | None, *, untrusted: bool
+    ) -> str | None:
+        """Classify an existing member against the bytes APM recorded deploying.
+
+        ``None`` writes it. ``"untrusted"``: no baseline proves APM wrote it.
+        ``"drift"``: a user edit while the package brings the recorded bytes.
+        ``"blocked"``: a user edit while the package brings new bytes (an
+        upgrade the kept edit blocks). A file that already holds the package's
+        bytes is rewritten, which records them.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        if not target_file.is_file():
+            return None
+        if untrusted:
+            return "untrusted"
+        if expected is None:
+            return None
+        disk = compute_file_hash(target_file)
+        if disk == expected:
+            return None
+        incoming = compute_file_hash(source_file)
+        if incoming == disk:
+            return None
+        return "drift" if incoming == expected else "blocked"
+
     def copy_directory_files(
         self,
         source: Path,
@@ -403,7 +441,6 @@ class BaseIntegrator:
         without deleting or inventorying destination siblings. *package* is the
         owning dependency key used to attribute refusal diagnostics.
         """
-        from apm_cli.utils.content_hash import compute_file_hash
 
         copied: list[Path] = []
         destination_existed = destination.exists()
@@ -451,28 +488,30 @@ class BaseIntegrator:
                     if baseline_hash is not None
                     else recorded_hashes.get(entry)
                 )
-                if (
-                    not force
-                    and target_file.is_file()
-                    and (
-                        (baseline_hash is not None and expected is None)
-                        or (expected is not None and compute_file_hash(target_file) != expected)
+                state = (
+                    None
+                    if force
+                    else self._member_edit(
+                        target_file,
+                        source_file,
+                        expected,
+                        untrusted=(baseline_hash is not None and expected is None),
                     )
-                ):
-                    if expected is None:
+                )
+                if state is not None:
+                    if state == "untrusted":
                         message = self.untrusted_member_message(
                             entry, path_entry(destination), destination
                         )
                     else:
-                        message = (
-                            f"Skipped {entry}: modified since deployment. "
-                            "Preserve your changes before reinstalling with --force."
+                        message = kept_edit_message(
+                            entry, user_scope=self.install_user_scope(), proven_edit=True
                         )
                     if diagnostics is not None:
-                        if expected is None:
-                            diagnostics.error(message, package=package)
-                        else:
+                        if state == "drift":
                             diagnostics.warn(message)
+                        else:
+                            diagnostics.error(message, package=package)
                     else:
                         _rich_warning(message)
                     if on_member_skipped is not None:
@@ -767,7 +806,9 @@ class BaseIntegrator:
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
             return True, False
-        message = unproven_overwrite_message(rel_path, user_scope=bool(gate and gate.user_scope))
+        message = kept_edit_message(
+            rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=False
+        )
         if diagnostics is not None:
             diagnostics.error(message, package=gate.owner if gate else "")
         else:

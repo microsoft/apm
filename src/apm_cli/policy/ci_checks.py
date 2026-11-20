@@ -56,7 +56,7 @@ def _read_audited_lock(lockfile_path: Path) -> tuple[Any, CheckResult | None]:
             name="lockfile-exists",
             passed=False,
             message=str(exc),
-            remediations=exc.remediations,
+            remediations=getattr(exc, "remediations", ()),
         )
 
 
@@ -737,6 +737,44 @@ def _check_config_consistency(
             f"('--only apm' for skills-only) to reconcile{policy_note}"
         ),
         details=details,
+    )
+
+
+def _check_native_mcp_ownership(
+    project_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+) -> CheckResult:
+    """Fail where ``install --frozen`` refuses a differing same-name native MCP entry (#4477)."""
+    from ..install.mcp.ownership import differing_unrecorded_native_mcp_entries
+
+    pairs = differing_unrecorded_native_mcp_entries(
+        lock,
+        [target.name for target in targets],
+        project_root=project_root,
+        user_scope=user_scope,
+    )
+    if not pairs:
+        return CheckResult(
+            name="native-mcp-ownership",
+            passed=True,
+            message="No unrecorded native MCP entries differ from their declarations",
+        )
+    return CheckResult(
+        name="native-mcp-ownership",
+        passed=False,
+        message=(
+            f"{len(pairs)} existing native MCP entr(ies) differ from their declarations "
+            "and their ownership is not recorded in apm.lock.yaml -- make the entry match "
+            "the declaration or remove it, then run 'apm install'"
+        ),
+        details=[
+            f"MCP server {name!a} target {runtime!a}: the existing entry differs from "
+            "its declaration"
+            for name, runtime in pairs
+        ],
     )
 
 
@@ -1495,7 +1533,8 @@ def run_baseline_checks(
     ):
         return result
 
-    # Check 7: Config consistency (MCP)
+    # Check 7: Config consistency (MCP); 7b: a differing same-name native MCP
+    # entry --frozen refuses (#4477)
     if _run(
         _check_config_consistency(
             manifest,
@@ -1504,6 +1543,8 @@ def run_baseline_checks(
             prepared_replay_error=prepared_replay_error,
             no_policy=no_policy,
         )
+    ) or _run(
+        _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
     ):
         return result
 

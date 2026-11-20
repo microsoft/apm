@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm install` names every kept edited file with one message and a runnable next step; an upgrade blocked by a kept edit exits 1. (#4504)
 - Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)
 - CI: merge-queue integration uses the release shard planner, and a daily alarm fails when `main` moves without a `merge_group` run. (#4149)
 - `apm unpack` applies org policy and integrity checks like `apm install <bundle>`, waits for other APM operations, and records deployed files when unpacking into an APM project. (closes #4080, #4157)
@@ -35,9 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: lifecycle tests add security tables and all 25 documented user journeys, each credited only through oracle receipts. (#4156)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 - Internal: each CI shard collects only its own test files instead of every test root, checked against a full collect on the same commit. (closes #4120, #4150)
+- Installs blocked by `policy.fetch_failure_default: block` name the org policy source when known and advise `apm policy status`, never a policy bypass. (closes #4450, #4500)
 
 ### Fixed
 
+- `apm update` names each local bundle whose executables are parked, with the approval next step, instead of reporting nothing. (closes #4441, #4471)
 - `apm update` with nothing to change applies org policy like `apm install`: a denied dependency exits 1 and nothing is written. (closes #4458, #4482)
 - `apm install` blocked by org policy ends with a runnable next step: remove or replace the blocked dependencies, check `apm policy status`, then re-run. (closes #4404, #4418)
 - `apm uninstall` resolves the remaining packages' org-policy trust before changing state, so that refusal leaves `apm.yml`, the lockfile and deployed files unchanged, and uninstall refuses out-of-project paths before any change. (closes #4185, #4255)
@@ -68,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A dependency chain deeper than the transitive depth cap (50) fails the install, naming the chain, instead of dropping the dependency past the cap. (#4284)
 - Registry lock replay accepts the locked archive from any registry declared in `apm.yml` when it matches `resolved_hash`; each registry's credentials go only to its own URL and a hash mismatch still fails. (#4284)
 - Org policy discovery uses the single git remote when there is no `origin`, and with several remotes and no `origin` it stops and names them. (#4284)
+- `apm prune` prints one message when there is nothing to prune, whether or not `apm_modules/` exists. (#4483)
+- `apm approve` accepts the local-bundle key `apm install <bundle>` prints, writing the same `executables.allow` grant; a wrong or stale key is refused, nothing written. (#4437, #4490)
 - `apm install` accepts unchanged skills after a branch or worktree switch, keeps skill files it does not rewrite, and names the recovery when it refuses. (#4258)
 - `apm update` names an installed local bundle it leaves untouched and says how to update it (`apm install <newer-bundle-file>`), instead of only reporting no APM dependencies. (#4338)
 - `apm uninstall` no longer prints the remaining packages' integration lines, unattributed and once per surviving package, when it rebuilds them. (#4160, #4338)
@@ -108,9 +113,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A lockfile written by a newer APM now fails with an `[x]` error that names both remedies: move it aside and run `apm lock`, or run `apm self-update`. (#4469)
 - `apm install` writes `apm.lock.yaml` when the project's own `.apm/` hooks only merge into shared harness settings, so `apm audit --ci` checks them for drift. (closes #4033, #4489)
 - `apm install` on Windows works from deep project paths: the Git config safety check no longer fails with `'$GIT_DIR' too big` for staged dependencies. (#4487)
+- A refreshed org policy that fails validation no longer drops a valid cached policy: install and `apm audit --ci` keep applying the cached policy, as for an unreachable policy host. (#4476, #4481)
+- `apm audit --ci` verifies the skill selection of a local Claude plugin without `apm.yml` installed with `--skill`, instead of reporting it as unverified. (#4494)
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
+- `apm audit --ci` fails and names a user's MCP entry that differs from a declared server with the same name, matching `apm install --frozen`. (#4493)
+- `apm audit --ci` names locked git and registry entries that carry no content hash and points at `security.integrity.require_hashes`, without changing the exit code. (closes #4453, #4495)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)

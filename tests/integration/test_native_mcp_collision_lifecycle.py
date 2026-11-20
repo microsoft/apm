@@ -748,3 +748,8 @@ def test_user_disabled_matching_codex_connection_installs_and_replays_frozen(
         refused = scenario.install(*flags, targets="codex")
         assert refused.returncode == 1, refused.stdout + refused.stderr
         assert path.read_bytes() == edited
+    # The CI audit reaches the frozen verdict for the same entry and names it (#4477).
+    audited = scenario.audit()
+    assert audited.returncode == 1, audited.stdout + audited.stderr
+    assert "MCP server 'notes' target 'codex'" in audited.stdout + audited.stderr
+    assert path.read_bytes() == edited

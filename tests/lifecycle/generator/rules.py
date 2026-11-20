@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1012, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 529, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 539, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 560, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 587, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 554, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 564, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 585, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 612, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 760, 'argument("packages"'),
@@ -105,12 +105,12 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "mcp-install": (Ev(_INSTALL, 948, '"--mcp"'), Ev(_INSTALL, 880, '"--target"')),
     "approve-deny": (
         Ev(_APPROVE, 223, 'argument("packages"'),
-        Ev(_APPROVE, 317, 'argument("packages"'),
+        Ev(_APPROVE, 327, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1401, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1420, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1458, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1418, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1437, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1475, '"--no-policy"'),
     ),
     "marketplace": (
         Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 912, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 552, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 577, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 768, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
@@ -154,7 +154,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1522, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1539, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
 }
 
@@ -214,7 +214,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 912, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 741, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 490, "No APM dependencies to update"),
-            Ev("src/apm_cli/commands/prune.py", 219, "Nothing to prune"),
+            Ev("src/apm_cli/core/command_logger.py", 525, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
     ),
@@ -317,7 +317,8 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     # p-exec ships only executables the gate parks, so its bundle install records
     # nothing: update has no bundle to name (#4318 names a recorded one).
     LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
-    LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
+    # One canonical no-op line (#4460); the retired wordings must not match.
+    LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"No orphaned packages found\. Nothing to prune\."),
 }
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex
 # the fixed output matches). The cell is known-failing until that output appears.

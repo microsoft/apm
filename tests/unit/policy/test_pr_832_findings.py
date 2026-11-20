@@ -163,6 +163,18 @@ class TestOutcomeRoutingTable:
         with pytest.raises(PolicyViolationError, match="fetch_failure_default=block"):
             route_discovery_outcome(fetch, logger=logger, fetch_failure_default="block")
 
+    def test_fetch_failure_block_remedy_comes_from_the_catalog(self):
+        from apm_cli.core.remediation import catalog
+        from apm_cli.policy.outcome_routing import classify_discovery_outcome
+
+        fetch = PolicyFetchResult(
+            policy=None, source="org:acme/.github", outcome="cache_miss_fetch_fail"
+        )
+        route = classify_discovery_outcome(fetch, fetch_failure_default="block")
+        remedy = catalog()["policy-fetch-failure-blocked"].bind(source=" (org:acme/.github)")
+        assert route.block_reason.endswith(f". {remedy.sentence()}")
+        assert "--no-policy" not in route.block_reason
+
     def test_fetch_failure_default_warn_does_not_raise(self):
         logger = InstallLogger()
         fetch = PolicyFetchResult(

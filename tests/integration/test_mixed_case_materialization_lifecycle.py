@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from apm_cli.deps.lockfile import LockFile
-from apm_cli.integration.base_integrator import unproven_overwrite_message
+from apm_cli.integration.base_integrator import kept_edit_message
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -287,7 +287,9 @@ def test_mixed_case_links_survive_install_update_audit_and_uninstall(
     )
     assert kept.returncode == 1, (kept.stdout, kept.stderr)
     kept_text = " ".join(kept.stderr.split())
-    assert unproven_overwrite_message(stale_relative, user_scope=False) in kept_text, kept_text
+    assert kept_edit_message(stale_relative, user_scope=False, proven_edit=False) in kept_text, (
+        kept_text
+    )
     assert stale_managed.read_bytes() == stale_bytes
     stale_managed.rename(consumer.root.parent / "stale-aside.md")
 
