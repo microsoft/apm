@@ -61,6 +61,27 @@ def record_bundle_executables(
     path.write_text(json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n", "utf-8")
 
 
+@dataclass
+class BundleRecordStage:
+    """One install's bundle executables entry, persisted only on commit (#4492).
+
+    A failed install never calls :meth:`commit`, so it leaves the record as it was.
+    """
+
+    scope_dir: Path
+    slug: str
+    approval_key: str | None
+    exec_types: tuple[str, ...]
+    committed: bool = False
+
+    def commit(self) -> None:
+        """Persist the staged entry once; later calls are no-ops."""
+        if self.committed:
+            return
+        self.committed = True
+        record_bundle_executables(self.scope_dir, self.slug, self.approval_key, self.exec_types)
+
+
 def _recorded(scope_dir: Path) -> list[PendingBundle]:
     found: list[PendingBundle] = []
     for slug, entry in sorted(_read(scope_dir).items()):

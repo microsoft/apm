@@ -35,6 +35,8 @@ from .deployed_paths import log_bundle_deployed
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
 
+    from .local_bundle_pending import BundleRecordStage
+
 
 def install_local_bundle(
     *,
@@ -177,7 +179,7 @@ def install_local_bundle(
             else []
         )
         bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)
-        _record_bundle_executables(
+        bundle_record = _stage_bundle_executables(
             bundle_info,
             str(alias or bundle_info.package_id),
             bundle_approval_key,
@@ -367,9 +369,14 @@ def install_local_bundle(
             )
 
             lockfile.write(lockfile_path)
+            # The lockfile write commits this install; the pending record joins it.
+            if bundle_record is not None:
+                bundle_record.commit()
             if _kept_legacy:
                 _refuse_unproven_legacy(_kept_legacy, logger, user_scope=global_)
 
+        if bundle_record is not None:
+            bundle_record.commit()
         msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
         if skipped:
             msg += f" ({skipped} skipped)"
@@ -660,25 +667,26 @@ def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> 
     return tuple(declared)
 
 
-def _record_bundle_executables(
+def _stage_bundle_executables(
     bundle_info,
     slug: str,
     approval_key: str | None,
     service_deps: tuple[list, list],
     *,
     scope_dir: Path | None,
-) -> None:
-    """Record this install's exact-content key and executable types; not on dry runs.
+) -> BundleRecordStage | None:
+    """Stage this install's exact-content key and executable types; not on dry runs.
 
     ``apm approve --pending`` lists the types trust still parks (#4221);
     ``apm approve <key>`` grants only a key an install recorded (#4437).
+    The record is written only when the install commits (#4492).
     """
-    from .local_bundle_pending import record_bundle_executables
+    from .local_bundle_pending import BundleRecordStage
 
     if scope_dir is None:
-        return
+        return None
     declared = _declared_bundle_exec_types(bundle_info, *service_deps)
-    record_bundle_executables(scope_dir, slug, approval_key, declared if approval_key else ())
+    return BundleRecordStage(scope_dir, slug, approval_key, tuple(declared) if approval_key else ())
 
 
 def _bundle_owner_key(bundle_info) -> str:
