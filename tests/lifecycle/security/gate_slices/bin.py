@@ -20,6 +20,10 @@ _NEVER = {
     "project": (".agents/plugins/p-exec/bin/p-exec",),
     "home": (".agents/plugins/p-exec/bin/p-exec",),
 }
+_NEVER_DEPLOYS = (
+    "bin/ never deploys on this path (install/exec_gate.py plugin_bin_deployable; "
+    "bundle/unpacker.py refuses executables): steward ruling pending"
+)
 _ALL = (
     "local-deny",
     "org-deny",
@@ -76,6 +80,7 @@ def _absent_row(path: str, change: str) -> GateRow:
         unchanged=_NEVER,
         package="p-exec",
         target="copilot",
+        definition_pending=_NEVER_DEPLOYS,
         xfail=_XFAIL.get(row_id, ""),
     )
 

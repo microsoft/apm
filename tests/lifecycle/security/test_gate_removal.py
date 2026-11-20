@@ -51,6 +51,8 @@ from tests.lifecycle.oracles import (
     Evidence,
     ExpectedCell,
     Observation,
+    _evidence_problems,
+    _strength_problems,
     check_cross_cutting,
     check_obligation,
     operation_for,
@@ -598,12 +600,20 @@ def test_gate_change_removes_on_the_next_mutating_command(
         absent = dict(gate_row.surface)
     elif not removed:
         unchanged = {**unchanged, **gate_row.surface}
+    evidence = Evidence(absent=absent, unchanged=unchanged, output_matches=(announce,))
+    if gate_row.definition_pending:
+        # The surface never deploys on this path: the facts must hold, but they
+        # earn no receipt until the steward rules on the cell's definition.
+        problems = _strength_problems(STRENGTH, before, after, result, evidence)
+        problems += _evidence_problems(before.artifacts, after.artifacts, result, evidence)
+        assert not problems, f"{gate_row.id}:\n" + "\n".join(problems)
+        return
     check_obligation(
         gate_row.id,
         strength=STRENGTH,
         before=before,
         after=after,
         result=result,
-        evidence=Evidence(absent=absent, unchanged=unchanged, output_matches=(announce,)),
+        evidence=evidence,
         scope=scope,
     )
