@@ -277,7 +277,9 @@ def _display_marketplace_plugin(
         from ..marketplace.errors import DependencyConfusionError
         from ..marketplace.resolver import resolve_marketplace_plugin
 
-        resolution = resolve_marketplace_plugin(plugin_name, marketplace_name)
+        resolution = resolve_marketplace_plugin(
+            plugin_name, marketplace_name, enforce_ref_pins=False
+        )
         resolved_display = resolution.canonical
         try:
             admit_marketplace_resolution(resolution)

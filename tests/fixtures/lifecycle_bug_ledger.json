@@ -2923,6 +2923,17 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4400,
+      "fixed_in": "Unreleased",
+      "summary": "A marketplace plugin version that resolves to a ref other than the one a committed install recorded is refused (exit 1, both refs named) at project scope and with -g, instead of being re-recorded after one warning; the recorded pin and project state stay unchanged.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_ref_swap_lifecycle.py::test_swapped_marketplace_ref_is_refused_every_time",
+        "tests/unit/marketplace/test_versioned_resolver.py::TestWarningHandler::test_ref_swap_is_refused_not_warned"
+      ]
     }
   ],
   "lifecycle_contracts": [

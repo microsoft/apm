@@ -2559,6 +2559,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Raw structural diagnostics stop originating empty in the model owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-ref-pin-commit",
+        rule_id="marketplace-integrations-ref-pin-commit",
+        path="src/apm_cli/install/transaction.py",
+        old="            try:\n                self._ref_pins.discard()\n                try:",
+        new="            try:\n                try:",
+        intent="A rolled-back install keeps its staged ref pins for a later commit.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-source-admission",
         rule_id="marketplace-integrations-source-admission",
         path="src/apm_cli/marketplace/client.py",

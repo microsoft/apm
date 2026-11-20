@@ -995,6 +995,7 @@ def resolve_marketplace_plugin(
     version_spec: str | None = None,
     auth_resolver: object | None = None,
     warning_handler: Callable[[str], None] | None = None,
+    enforce_ref_pins: bool = True,
 ) -> MarketplacePluginResolution:
     """Resolve a marketplace plugin reference to a canonical string and plugin row.
 
@@ -1019,6 +1020,9 @@ def resolve_marketplace_plugin(
             stdlib logging.  Callers typically pass
             ``CommandLogger.warning`` so warnings render through the CLI
             output system.
+        enforce_ref_pins: When ``True`` (installs), a ref that contradicts the
+            recorded version pin raises ``RefPinMismatchError`` and a new ref is
+            staged for the install transaction. Read-only callers pass ``False``.
 
     Returns:
         :class:`MarketplacePluginResolution` (iterates as ``(canonical, plugin)``).
@@ -1028,6 +1032,7 @@ def resolve_marketplace_plugin(
         PluginNotFoundError: If the plugin is not in the marketplace.
         MarketplaceFetchError: If the marketplace cannot be fetched.
         ValueError: If the plugin source cannot be resolved.
+        RefPinMismatchError: If the resolved ref contradicts the recorded pin.
     """
 
     def _emit_warning(msg: str) -> None:
@@ -1289,33 +1294,23 @@ def resolve_marketplace_plugin(
         else:
             canonical = f"{base}#{resolved_override}"
 
-    # ---- Ref immutability check (advisory) ----
-    # Stage the plugin -> ref mapping (scoped by version) and warn if
-    # it changed since the last install (potential ref-swap attack).
-    # The install transaction writes staged pins only on commit.
-    # Using the plugin's declared version field ensures legitimate
-    # version bumps never trigger false-positive warnings.
+    # ---- Ref immutability check (trust on first use) ----
+    # A recorded pin that disagrees with the resolved ref is a refusal; a new
+    # or matching ref is staged and written only when the install commits.
+    # Pins key on the version a range resolved to, else the plugin's declared
+    # version, so a release never collides with an earlier pin. A raw ref
+    # override is the consumer's own choice and neither checks nor moves the
+    # publisher's pin.
     current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
-    plugin_version = plugin.version or ""
-    if current_ref:
-        from .version_pins import check_ref_pin, stage_ref_pin
+    raw_ref_override = bool(version_spec) and resolved_constraint is None
+    if current_ref and enforce_ref_pins and not raw_ref_override:
+        from .version_pins import enforce_ref_pin
 
-        previous_ref = check_ref_pin(
+        enforce_ref_pin(
             marketplace_name,
             plugin_name,
             current_ref,
-            version=plugin_version,
-        )
-        if previous_ref is not None:
-            _emit_warning(
-                f"Plugin {plugin_name}@{marketplace_name} ref changed: was '{previous_ref}', now '{current_ref}'. "
-                "This may indicate a ref swap attack."
-            )
-        stage_ref_pin(
-            marketplace_name,
-            plugin_name,
-            current_ref,
-            version=plugin_version,
+            version=resolved_version or plugin.version or "",
         )
 
     logger.debug(

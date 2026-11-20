@@ -737,6 +737,7 @@ marketplace-integrations-package-projection
 marketplace-integrations-producer-admission
 marketplace-integrations-projection-boundary
 marketplace-integrations-raw-diagnostics
+marketplace-integrations-ref-pin-commit
 marketplace-integrations-removed-plugin-lifecycle
 marketplace-integrations-source-admission
 marketplace-integrations-source-parsing

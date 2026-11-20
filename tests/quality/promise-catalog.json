@@ -122,6 +122,7 @@
     "P-OWN-marketplace-locked-selection": "architecture owner (marketplace-plugins.json): Requested-ref consistency against locked selection evidence: marketplace selections and full-SHA manifest pins (install drift, install --frozen, audit ref consistency), and lock-first replay vs re-resolve of marketplace declarations",
     "P-OWN-marketplace-metadata-enrichment": "architecture owner (marketplace-plugins.json): Marketplace metadata-enrichment outcome and certifiability",
     "P-OWN-marketplace-raw-structure-diagnostics": "architecture owner (marketplace-plugins.json): Marketplace raw-structure diagnostics",
+    "P-OWN-marketplace-ref-pin-commit": "architecture owner (marketplace-plugins.json): Marketplace ref pins are trust on first use: resolution checks and stages, a contradicting ref is refused, and only a committed install records pins",
     "P-OWN-marketplace-source-admission": "architecture owner (marketplace-plugins.json): Marketplace source admission, transport identity, and repository-relative catalog path",
     "P-OWN-marketplace-tag-pattern": "architecture owner (marketplace-plugins.json): Marketplace tag-pattern validation and expansion",
     "P-OWN-materialized-manifest-evidence": "architecture owner (install-deployment.json): Acquired manifest metadata snapshot",
