@@ -296,3 +296,22 @@ def _hermetic_mcp_transport_lookup():
     finally:
         mcp_transport_resolution._registry_client = original
         mcp_transport_resolution.clear_registry_info_memo()
+
+
+_LIFECYCLE_MERGE_GROUP_MARKER = "lifecycle_merge_group"
+_LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``.
+
+    The merge-group selection is then a subset of the full lifecycle smoke
+    selection by construction. ``tryfirst`` runs this before ``-m``
+    deselection, so ``-m lifecycle_smoke`` collects merge-group nodes.
+    """
+    for item in items:
+        if item.get_closest_marker(_LIFECYCLE_MERGE_GROUP_MARKER) and not item.get_closest_marker(
+            _LIFECYCLE_SMOKE_MARKER
+        ):
+            item.add_marker(_LIFECYCLE_SMOKE_MARKER)
