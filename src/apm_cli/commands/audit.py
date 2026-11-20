@@ -19,9 +19,14 @@ import click
 
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import (
-    DEPLOYMENT_OWNER_REMEDIATION,
     DeploymentLedgerCodec,
     DeploymentOwnerViolation,
+)
+from ..core.remediation import (
+    AUDIT_POLICY_IN_CI,
+    INVALID_DEPLOYMENT_OWNERS,
+    LIST_INSTALLED_PACKAGES,
+    STRIP_HIDDEN_UNICODE,
 )
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..install.locking import serialized_lifecycle_when
@@ -345,7 +350,7 @@ def _render_summary(
     remedy = (
         "Review structured or external prompt fields manually; --strip does not rewrite native settings."
         if any(not entry.strippable and entry.file in findings_by_file for entry in coverage)
-        else "  Review file contents, then run 'apm audit --strip' to remove hidden characters"
+        else f"  Review file contents, then {STRIP_HIDDEN_UNICODE.clause()}"
     )
 
     _rich_echo("")
@@ -403,7 +408,7 @@ def _render_owner_violations(
             else ""
         )
         logger.error_detail(f"  {violation.locator.key}: invalid owner(s)={invalid}{active}")
-    logger.error_detail(DEPLOYMENT_OWNER_REMEDIATION)
+    logger.error_detail(INVALID_DEPLOYMENT_OWNERS.sentence())
 
 
 def _apply_strip(
@@ -516,7 +521,7 @@ def _preview_strip(
 
     _rich_echo("")
     logger.progress(f"{affected} file(s) would be modified")
-    logger.progress("Run 'apm audit --strip' to apply")
+    logger.progress(STRIP_HIDDEN_UNICODE.sentence())
     return affected
 
 
@@ -1053,7 +1058,7 @@ def _require_installed_package_key(
         return selection.key
     logger.error(
         f"Package '{package}' is not installed: no matching dependency in apm.lock.yaml. "
-        "Run 'apm deps list' to see installed packages."
+        f"{LIST_INSTALLED_PACKAGES.sentence()}"
     )
     sys.exit(1)
 
@@ -1608,10 +1613,7 @@ def audit(  # noqa: PLR0913 -- Click handler
 
     # -- Content scan mode ------------------------------------------
     if policy_source:
-        logger.warning(
-            "--policy requires --ci mode. "
-            "Use 'apm audit --ci --policy <source>' to run policy checks."
-        )
+        logger.warning(f"--policy requires --ci mode. {AUDIT_POLICY_IN_CI.sentence()}")
 
     if not file_path:
         _reject_invalid_manifest(project_root, logger)

@@ -14,6 +14,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import INSTALL_COWORK_GLOBAL, SET_COWORK_SKILLS_DIR
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.integration.targets import TargetProfile
@@ -261,14 +263,12 @@ def _gate_cowork_target(
                 if _sys.platform.startswith("linux"):
                     _cowork_msg = (
                         "Cowork has no auto-detection on Linux.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
+                        f"Set APM_COPILOT_COWORK_SKILLS_DIR, or {SET_COWORK_SKILLS_DIR.clause()}"
                     )
                 else:
                     _cowork_msg = (
                         "Cowork: no OneDrive path detected.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
+                        f"Set APM_COPILOT_COWORK_SKILLS_DIR, or {SET_COWORK_SKILLS_DIR.clause()}"
                     )
                 if ctx.logger:
                     ctx.logger.error(_cowork_msg, symbol="cross")
@@ -281,7 +281,7 @@ def _gate_cowork_target(
             if ctx.logger:
                 ctx.logger.error(
                     "The 'copilot-cowork' target requires --global (user scope). "
-                    "Run: apm install --target copilot-cowork --global"
+                    f"{INSTALL_COWORK_GLOBAL.sentence()}"
                 )
             raise SystemExit(1)
 

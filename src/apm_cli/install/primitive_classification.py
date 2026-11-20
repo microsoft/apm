@@ -12,6 +12,7 @@ import yaml
 
 from apm_cli.agent_plugins.constants import PLUGIN_SCHEMA_ID
 from apm_cli.agent_plugins.errors import AgentPluginManifestError
+from apm_cli.core.remediation import RERUN_AFTER_FIX
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import loads_frontmatter
@@ -158,7 +159,7 @@ def classify_agent_source_file(source: Path, source_root: Path) -> AgentSourceCl
                 source,
                 source_root,
                 "could not be read",
-                "fix the file permissions, then rerun 'apm install'",
+                RERUN_AFTER_FIX.bind(fix="fix the file permissions").clause(),
             ),
         )
 
@@ -226,8 +227,11 @@ def _skipped_asset_warning(source: Path, source_root: Path) -> str:
     return (
         f"Skipped non-agent asset in agents source tree: {_display_path(source, source_root)}. "
         "APM deploys agent sources as flat Markdown files for this target, so sibling "
-        "assets would not be readable at runtime. Action: move the asset to a supported "
-        "package surface or inline the content, then rerun 'apm install'."
+        "assets would not be readable at runtime. Action: "
+        + RERUN_AFTER_FIX.bind(
+            fix="move the asset to a supported package surface or inline the content"
+        ).clause()
+        + "."
     )
 
 

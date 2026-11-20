@@ -26,6 +26,8 @@ from urllib.parse import urlparse
 
 import click
 
+from apm_cli.core.remediation import RESET_MCP_REGISTRY_URL
+
 from ...models.dependency.mcp import _ALLOWED_URL_SCHEMES
 from ...utils.net import is_loopback_host, parse_host_address
 
@@ -165,8 +167,8 @@ def resolve_registry_url(
             raise click.UsageError(f"MCP_REGISTRY_URL is invalid: {detail}") from exc
         if source == "config":
             raise click.UsageError(
-                "Configured mcp-registry-url is invalid; run "
-                f"'apm config unset mcp-registry-url' and retry: {detail}"
+                f"Configured mcp-registry-url is invalid ({detail}); "
+                f"{RESET_MCP_REGISTRY_URL.clause()}"
             ) from exc
         raise
     if validated_url is not None:

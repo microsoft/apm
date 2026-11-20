@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.remediation import Remediation
     from apm_cli.security.content_scanner import ScanFinding
     from apm_cli.security.file_scanner import CoverageEntry
 
@@ -98,6 +99,9 @@ class CheckResult:
     # A violation downgraded to pass by ``enforcement: warn``; text output
     # still names its subjects (#3994). Not serialized: ``passed`` is the contract.
     warned: bool = False
+    # Structured remediations named in ``message`` (core/remediation.py);
+    # serialized so scripts can run the advised command.
+    remediations: tuple[Remediation, ...] = ()
 
     def violation_subjects(self) -> tuple[PolicySubject, ...]:
         """Return one :class:`PolicySubject` per violation to report.
@@ -142,6 +146,11 @@ class CIAuditResult:
                     "passed": c.passed,
                     "message": c.message,
                     "details": c.details,
+                    **(
+                        {"remediations": [item.to_json() for item in c.remediations]}
+                        if c.remediations
+                        else {}
+                    ),
                     **(
                         {"content_findings": [finding_to_json(f) for f in c.content_findings]}
                         if c.content_findings

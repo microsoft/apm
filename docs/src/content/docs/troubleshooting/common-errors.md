@@ -80,10 +80,10 @@ Fix: use `--target copilot` for GitHub Copilot in JetBrains IDEs. To also write 
 
 See also: [`apm install`](../../reference/cli/install/)
 
-### `lockfile not found at <path>; run 'apm install' to generate it`
+### `lockfile not found at <path>; run 'apm install' to generate apm.lock.yaml`
 
 ```
-lockfile not found at apm.lock.yaml; run 'apm install' to generate it
+lockfile not found at apm.lock.yaml; run 'apm install' to generate apm.lock.yaml
 ```
 
 Cause: a command that needs a resolved dependency graph (drift check, audit, compile against lockfile) ran before the project had ever been installed.
@@ -98,7 +98,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: not found in lockfile
-1 ref mismatch -- run 'apm update' to update lockfile
+1 ref mismatch -- run 'apm update' to re-resolve the changed refs into apm.lock.yaml
 ```
 
 Cause: a dependency exists in `apm.yml` but has no entry in `apm.lock.yaml`. Most often hit in CI when the lockfile was not regenerated after editing the manifest.
@@ -111,7 +111,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: manifest ref 'v2' != lockfile ref 'v1'
-N ref mismatches -- run 'apm install' to update lockfile
+N ref mismatches -- run 'apm install' to resolve the manifest refs into apm.lock.yaml
 ```
 
 Cause: the version or ref pinned in `apm.yml` was changed without re-running install. The lockfile is stale.
@@ -124,10 +124,10 @@ See also: [Install failures](../install-failures/)
 
 ```
 [!] Drift detected: N file(s)
-[i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
+[i] Delete the modified files, then run 'apm install' to restore the locked content, then commit the result, or 'apm install --force' to restore them without deleting first (overwrites every local edit and deploys despite critical security findings).
 ```
 
-When some files are missing or unrecorded instead, APM prints `Run 'apm install' to re-sync deployed files with the lockfile.`
+When some files are missing or orphaned instead, APM prints `Run 'apm install' to re-sync deployed files with the lockfile.` For unrecorded files it prints `Run 'apm install' to record the deployed files in apm.lock.yaml, then commit apm.lock.yaml to restore content-integrity coverage.`
 
 Cause: deployed primitive files in the project differ from the content recorded in `apm.lock.yaml`. Either the files were edited locally, or the lockfile was updated without re-running install.
 
@@ -254,8 +254,8 @@ Fix: restore network access or credentials for the marketplace and retry.
 
 ```
 [x] --frozen: dependency selections differ from apm.lock.yaml.
-  - selection for <owner>/<repo> changed: the skills and targets its declaring manifests request differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml
-[i] Tip: run 'apm install' without --frozen, retaining --root DIR or --global if specified, then commit apm.lock.yaml.
+  - selection for <owner>/<repo> changed: the skills and targets its declaring manifests request differ from apm.lock.yaml; run 'apm install' to record the changed selections in apm.lock.yaml (keep --root DIR or --global if you used them), then commit apm.lock.yaml
+[i] Tip: run 'apm install' to record the changed selections in apm.lock.yaml (keep --root DIR or --global if you used them), then commit apm.lock.yaml.
 ```
 
 Cause: several manifests narrow one dependency with different `skills:` or `targets:`, and `apm.lock.yaml` records another pairing (lockfiles from APM before 0.37 record the cross-product). `--frozen` refuses before deploying anything.

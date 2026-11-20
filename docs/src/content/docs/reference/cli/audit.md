@@ -92,7 +92,7 @@ This is the explicit power tool. Built-in protection against critical Unicode fi
 `PACKAGE`, when supplied, scans one installed dependency, so only files recorded for that package are included. Pass the dependency key from `apm.lock.yaml` (`owner/repo` for GitHub, `host/owner/repo` for other hosts) or any form `apm uninstall` accepts, such as `https://github.com/owner/repo`, `github.com/owner/repo`, `owner/repo#ref`, `plugin@marketplace` or the `_local/<name>` key `apm deps list` prints; APM selects it offline, exactly as uninstall does, and normalizes it to the lockfile key. A package that matches no installed dependency fails with exit `1`, so a typo in a CI gate cannot pass silently:
 
 ```text
-[x] Package 'test/typo-pkg' is not installed: no matching dependency in apm.lock.yaml. Run 'apm deps list' to see installed packages.
+[x] Package 'test/typo-pkg' is not installed: no matching dependency in apm.lock.yaml. Run 'apm deps list' to see the packages apm.lock.yaml records.
 ```
 
 Omit `PACKAGE` to scan deployed files across the whole project. See [Baseline CI checks](../../baseline-checks/#content-integrity) for the exact lockfile, target-directory, symlink, and `.apm/` scope boundaries.
@@ -147,6 +147,12 @@ from violation `details`. SARIF retains it in invocation `primitiveCoverage`
 properties, and text shows discovered hooks even when all checks pass.
 CI `content_findings` identifies each critical finding's actual file and prompt
 pointer separately from inventory; SARIF uses that file, not the lockfile.
+A failed CI check that names a fix also carries `remediations`, a list of
+`{id, command, fixes, clears}` objects with optional `before` (a manual step
+to take first) and `then` (a step after the command succeeds). `command` is
+the exact command to run; `<name>` marks a value you supply. `clears` names
+the reported state it clears. The field is additive: checks without a
+structured fix omit it.
 Automatic `--strip` also refuses user-scoped prompt files when auditing from
 `~/.apm`, even though the traversal root is the home directory. The explicit
 single-file `--file` operation is unchanged.
@@ -354,7 +360,7 @@ dependency was removed without running `apm prune` -- is a hard failure,
 not drift: it always exits `1`, in bare `apm audit` and `--ci` alike, and
 is reported under the `deployment-ledger-owners` check ID in `--ci` output.
 The finding names the owning locator and its invalid owner(s) with one
-remediation: `Run 'apm prune', then rerun 'apm audit'.` `--strip` refuses to
+remediation: `Run 'apm prune' to remove the invalid deployment ownership records, then rerun 'apm audit'.` `--strip` refuses to
 modify content while any owner reference is invalid. Stale owner rows never
 authorize deleting files -- only `apm prune` reconciles them, and only ever
 as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).

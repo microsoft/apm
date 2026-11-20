@@ -145,6 +145,20 @@ from ..core.command_logger import InstallLogger, _ValidationOutcome
 from ..core.project_name import (
     resolve_bootstrap_project_name as _resolve_bootstrap_project_name,
 )
+from ..core.remediation import (
+    APPLY_SKILL_SELECTION,
+    BOOTSTRAP_PROJECT_MANIFEST,
+    BOOTSTRAP_USER_MANIFEST,
+    DIAGNOSE_CONNECTIVITY,
+    INIT_PROJECT,
+    INSTALL_FROM_REGISTRY,
+    REPACK_PLUGIN_BUNDLE,
+    TRUST_PACKAGE,
+    UNPACK_LEGACY_BUNDLE,
+    UPDATE_REFS,
+    UPDATE_REFS_THEN_FROZEN,
+    either_sentence,
+)
 from ..core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ..core.target_detection import TargetParamType, install_runtime_option
 from ..install.mcp.args import parse_env_pairs as _parse_mcp_env_pairs
@@ -854,7 +868,10 @@ def _handle_mcp_install(  # noqa: PLR0913
 @click.option(
     "--force",
     is_flag=True,
-    help="Overwrite locally-authored files on collision and deploy despite critical security findings (does NOT refresh refs; use 'apm update' for that)",
+    help=(
+        "Overwrite locally-authored files on collision and deploy despite critical security "
+        f"findings (does NOT refresh refs; {UPDATE_REFS.clause()})"
+    ),
 )
 @click.option(
     "--frozen",
@@ -1011,7 +1028,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     "skill_names",
     multiple=True,
     metavar="NAME",
-    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' (quote the asterisk in your shell) to reset to all skills; to drop a single skill, edit the skills: list in apm.yml then re-run apm install.",
+    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' (quote the asterisk in your shell) to reset to all skills; to drop a single skill, "
+    f"{APPLY_SKILL_SELECTION.clause()}.",
 )
 @click.option(
     "--no-policy",
@@ -1026,7 +1044,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     type=click.Choice(["off", "warn", "block"], case_sensitive=False),
     default=None,
     help=(
-        "Run 'apm audit' over deployed files during install: off, warn, or block. "
+        "Audit deployed files during install (as 'apm audit' does): off, warn, or block. "
         "Overrides config/policy. Requires 'apm experimental enable external-scanners'. "
         "An org policy 'block' cannot be relaxed below by this flag."
     ),
@@ -1043,8 +1061,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     is_flag=True,
     default=False,
     help="Re-fetch all dependencies from upstream and re-resolve all ref pins. Marketplaces are "
-    "revalidated; the install fails rather than use stale marketplace data. Use 'apm update' for "
-    "interactive upgrade planning.",
+    "revalidated; the install fails rather than use stale marketplace data. "
+    f"For an interactive upgrade plan, {UPDATE_REFS.clause()}.",
 )
 @click.option(
     "--legacy-skill-paths",
@@ -1077,7 +1095,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         "--trust-bin deploys bin/ executables (suppresses the trust warning). "
         "--no-trust-bin skips bin/ deployment even when policy allows it. "
         "Default: deploys bin/ but emits a warning; non-interactive contexts "
-        "skip bin/ by default. Use 'apm approve' for persistent per-package trust."
+        "skip bin/ by default. For persistent per-package trust, "
+        f"{TRUST_PACKAGE.bind(package='<package>').clause()}."
     ),
 )
 @click.option(
@@ -1190,8 +1209,7 @@ def install(  # noqa: PLR0913
         raise click.ClickException(str(exc)) from exc
     if frozen and update:
         raise click.UsageError(
-            "--frozen and --update are mutually exclusive. "
-            "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
+            f"--frozen and --update are mutually exclusive. {UPDATE_REFS_THEN_FROZEN.sentence()}"
         )
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
@@ -1315,14 +1333,12 @@ def install(  # noqa: PLR0913
                     raise click.UsageError(
                         f"'{packages[0]}' was packed with '--format apm' (legacy format). "
                         "'apm install <bundle>' requires the plugin format. "
-                        "Repack with 'apm pack --claude-plugin --archive', "
-                        "or use 'apm unpack' to deploy the legacy bundle."
+                        f"{either_sentence(REPACK_PLUGIN_BUNDLE, UNPACK_LEGACY_BUNDLE)}"
                     )
                 raise click.UsageError(
                     f"'{packages[0]}' is not a valid APM bundle archive "
                     "(no plugin.json found at the bundle root). "
-                    "Use 'apm install org/package' for registry installs, "
-                    "or repack the source with 'apm pack'."
+                    f"{either_sentence(INSTALL_FROM_REGISTRY, REPACK_PLUGIN_BUNDLE)}"
                 )
         # IM8: --as is only meaningful for local-bundle installs.  If we get
         # here, no local bundle was detected, so reject --as instead of
@@ -1498,10 +1514,9 @@ def install(  # noqa: PLR0913
         if not apm_yml_exists and not packages:
             logger.error(f"No {manifest_display} found")
             if scope is InstallScope.USER:
-                logger.progress("Run 'apm install -g <org/repo>' to auto-create + install")
+                logger.progress(BOOTSTRAP_USER_MANIFEST.sentence())
             else:
-                logger.progress("Run 'apm init' to create one, or:")
-                logger.progress("  apm install <org/repo> to auto-create + install")
+                logger.progress(either_sentence(INIT_PROJECT, BOOTSTRAP_PROJECT_MANIFEST))
             sys.exit(1)
 
         reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
@@ -1634,7 +1649,7 @@ def install(  # noqa: PLR0913
         logger.error(str(e))
         if e.diagnostic_context:
             logger.error_detail(e.diagnostic_context)
-        logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+        logger.info(f"Tip: {DIAGNOSE_CONNECTIVITY.clause()}.")
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1941,7 +1956,7 @@ def _install_apm_packages(ctx, outcome):
             logger.error(str(e))
             if e.diagnostic_context:
                 logger.error_detail(e.diagnostic_context)
-            logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+            logger.info(f"Tip: {DIAGNOSE_CONNECTIVITY.clause()}.")
             raise InstallFailureAlreadyRendered(str(e)) from e
         except FrozenInstallError as e:
             log_frozen_install_error(e, logger)

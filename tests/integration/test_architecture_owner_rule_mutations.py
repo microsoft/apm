@@ -1280,6 +1280,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Frontmatter owner loses its BOM-aware utf-8-sig decoding default.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-frozen-help",
+        rule_id="contracts-tooling-frozen-help",
+        path="src/apm_cli/commands/install.py",
+        old='"config state, or when deployed files do not match the hashes it records "',
+        new='"config state, or when installed files look different "',
+        intent="install --frozen help stops naming the deployed-hash check it enforces (#3994).",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-generation-footer",
         rule_id="contracts-tooling-generation-footer",
         path="src/apm_cli/compilation/footer.py",
@@ -1294,6 +1302,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="authorizes_implementation: false",
         new="authorizes_implementation: true",
         intent="Advisory evidence starts claiming implementation authority.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-init-apply-discover",
+        rule_id="contracts-tooling-init-apply-discover",
+        path="src/apm_cli/commands/init.py",
+        old="        discover_flag = True",
+        new="        discover_flag = discover_flag",
+        intent="init --apply stops implying --discover (#3994).",
     ),
     MutationCase(
         guard_id="contracts-tooling-lifecycle-script-gate",
@@ -1408,6 +1424,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="is_generated_python_artifact(relative)",
         new="False",
         intent="Skill lockfile inventory stops excluding generated Python artifacts.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-remediation-advice",
+        rule_id="contracts-tooling-remediation-advice",
+        path="src/apm_cli/policy/ci_checks.py",
+        old='message=f"Lockfile missing -- {remediation.LOCKFILE_MISSING.clause()}",',
+        new="message=\"Lockfile missing -- run 'apm install' to generate apm.lock.yaml\",",
+        intent="An audit check spells free-text remediation instead of the owner's catalog entry.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-remediation-drift-kinds",
+        rule_id="contracts-tooling-remediation-drift-kinds",
+        path="src/apm_cli/core/remediation.py",
+        old='"modified": RESTORE_EDITED,',
+        new='"modified": RESYNC_DEPLOYED,',
+        intent="Edited drift findings are advised a plain re-sync that keeps the edit (#3994).",
     ),
     MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",

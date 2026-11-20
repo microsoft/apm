@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
+from apm_cli.core.remediation import REINSTALL_USER_PACKAGE
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import format_target_collapse as _format_target_collapse
@@ -153,7 +154,7 @@ def _check_native_claude_transition(
         failed = ", ".join(reconcile_stats.get("failed_paths", []))
         recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
         if not reconcile_stats.get("errors"):
-            recovery = f"Run: apm uninstall --global {package} && apm install --global {package}"
+            recovery = REINSTALL_USER_PACKAGE.bind(package=package).sentence()
         raise ClaudeNativePluginError(
             f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
         )

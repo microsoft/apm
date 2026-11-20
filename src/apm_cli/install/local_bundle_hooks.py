@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.remediation import REPACK_WITH_INTEGRITY
+
 from ..utils.path_security import ensure_path_within, validate_path_segments
 from .local_bundle_paths import is_plugin_hook_path
 
@@ -85,7 +87,7 @@ def integrate_local_bundle_hooks(
             _retire_bundle_hooks(project_root, targets, slug)
         _warn(
             f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: the bundle has "
-            "no integrity manifest. Repack it with 'apm pack' to register its hooks.",
+            f"no integrity manifest. {REPACK_WITH_INTEGRITY.sentence()}",
             slug,
             diagnostics,
             logger,

@@ -6,6 +6,8 @@ from collections.abc import Callable
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import EXPLAIN_POLICY
+
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..utils.path_security import PathTraversalError, validate_path_segments
 
@@ -132,8 +134,9 @@ def bundle_deploy_skip_warning(
     if kind := _unapproved_executable_kind(deploy_rel, hooks_approved, canvas_approved):
         return (
             f"Skipped packed bundle {kind} file {rel_path!r}: {kind} from this bundle "
-            "is not approved for its exact content. Run 'apm policy explain' "
-            "and approve the bundle only if policy permits."
+            "is not approved for its exact content. "
+            f"{EXPLAIN_POLICY.bind(package='<bundle>').sentence()} "
+            "Approve the bundle only if policy permits."
         )
     target_name = target.name if target is not None else "this target"
     if target is not None and not _is_primitive_deploy_path(deploy_rel, target):

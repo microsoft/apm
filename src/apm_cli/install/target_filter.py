@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import RETRY_INSTALL
 from apm_cli.models.apm_package import canonical_package_targets
 
 if TYPE_CHECKING:
@@ -88,7 +89,7 @@ def warn_target_reconcile_failure(
         package=package_name,
         detail=(
             f"targets: [{', '.join(failed_targets)}]; "
-            f"configs: [{', '.join(failed_paths)}]; run apm install again"
+            f"configs: [{', '.join(failed_paths)}]; {RETRY_INSTALL.clause()}"
         ),
     )
 

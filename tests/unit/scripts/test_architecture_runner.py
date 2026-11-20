@@ -606,8 +606,10 @@ contracts-tooling-apply-to-placement
 contracts-tooling-cached-policy-shape
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
+contracts-tooling-frozen-help
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
+contracts-tooling-init-apply-discover
 contracts-tooling-lifecycle-script-gate
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp
@@ -621,6 +623,8 @@ contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
+contracts-tooling-remediation-advice
+contracts-tooling-remediation-drift-kinds
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing

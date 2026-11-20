@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import APPLY_REPLACEMENT_TABLE
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -983,8 +984,8 @@ def run(ctx: InstallContext) -> None:
         )
         if not unchanged:
             raise RuntimeError(
-                "Replacement rules changed during a partial install. Run 'apm install' "
-                "without package selectors to apply the complete replacement table."
+                "Replacement rules changed during a partial install. "
+                f"{APPLY_REPLACEMENT_TABLE.sentence()}"
             )
     _ensure_modules_dir(ctx)
     staging_session = resolution_for_context(ctx)

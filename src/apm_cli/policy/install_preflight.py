@@ -19,6 +19,7 @@ from pathlib import Path
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
 # ``PolicyBlockError`` remains as an alias re-exported below so external
 # call sites that imported it from this module keep working.
+from apm_cli.core.remediation import POLICY_FULL_REPORT
 from apm_cli.install.errors import PolicyViolationError
 
 from .discovery import PolicyFetchResult, discover_policy_with_chain
@@ -194,7 +195,7 @@ def run_policy_preflight(
             if overflow > 0:
                 logger.warning(
                     f"... and {overflow} more would be blocked by policy. "
-                    "Run `apm audit` for full report."
+                    f"{POLICY_FULL_REPORT.sentence()}"
                 )
 
             # Emit warn bucket (capped)
@@ -203,7 +204,7 @@ def run_policy_preflight(
             overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
             if overflow > 0:
                 logger.warning(
-                    f"... and {overflow} more policy warnings. Run `apm audit` for full report."
+                    f"... and {overflow} more policy warnings. {POLICY_FULL_REPORT.sentence()}"
                 )
         else:
             # -- Real install: push each violation to DiagnosticCollector

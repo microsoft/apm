@@ -39,6 +39,7 @@ from pathlib import Path
 
 import yaml
 
+from apm_cli.core.remediation import RERUN_AFTER_FIX
 from apm_cli.deps.virtual_file import materialize_virtual_file_package, virtual_file_subdirectory
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
@@ -126,6 +127,10 @@ def compute_local_package_hash(source: Path, *, framed: bool = True) -> str:
         return compute_package_hash(snapshot, framed=framed)
 
 
+def _rerun(fix: str) -> str:
+    return RERUN_AFTER_FIX.bind(fix=fix).sentence()
+
+
 class LocalPackageError(ValueError):
     """A local dependency cannot be admitted without changing existing output."""
 
@@ -191,17 +196,17 @@ def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> L
     except FileNotFoundError as exc:
         raise LocalPackageError(
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            + _rerun("restore the source or correct the dependency path")
         ) from exc
     except OSError as exc:
         raise LocalPackageError(
             f"Cannot read local package: {dep_ref.local_path}: {exc}. "
-            "Check the source permissions and symlink target, then rerun apm install."
+            + _rerun("check the source permissions and symlink target")
         ) from exc
     except (UnicodeError, yaml.YAMLError) as exc:
         raise LocalPackageError(
             f"Invalid primitive content in {dep_ref.local_path}: {exc}. "
-            "Use UTF-8 Markdown with valid YAML frontmatter, then rerun apm install."
+            + _rerun("use UTF-8 Markdown with valid YAML frontmatter")
         ) from exc
 
 

@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core.remediation import COMPILE_STAGED_INSTRUCTIONS, REPACK_WITH_INTEGRITY
+
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..bundle.formats import BundleFormat
 
@@ -241,8 +243,8 @@ def install_local_bundle(
                 )
             logger.warning(
                 "Bundle has no apm.lock.yaml -- skipping integrity check. "
-                "It was produced by an older APM version or by another tool; "
-                "repack it with 'apm pack' to embed an integrity manifest."
+                "It was produced by an older APM version or by another tool. "
+                f"{REPACK_WITH_INTEGRITY.sentence()}"
             )
         else:
             errors = verify_bundle_integrity(bundle_info.source_dir, bundle_info.lockfile)
@@ -432,8 +434,8 @@ def install_local_bundle(
             target_names = ", ".join(sorted({t.name for t in targets}))
             logger.warning(
                 f"Bundle staged {len(staged_instructions)} instruction(s) "
-                f"for compile (target: {target_names}). Run 'apm compile' "
-                "to merge them into AGENTS.md / GEMINI.md / equivalent. "
+                f"for compile (target: {target_names}). "
+                f"{COMPILE_STAGED_INSTRUCTIONS.sentence()} "
                 "Reference: https://microsoft.github.io/apm/consumer/choose-harnesses/#compiled-outputs"
             )
 

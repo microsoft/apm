@@ -933,16 +933,14 @@ def test_deployment_ledger_owner_is_hard_integrity_failure():
     detection surface and the spec language that mandates the unconditional
     hard failure are intact.
     """
-    from apm_cli.core.deployment_ledger import (
-        DEPLOYMENT_OWNER_REMEDIATION,
-        DeploymentLedgerCodec,
-    )
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.deployment_state import (
         DeploymentLedger,
         DeploymentLocator,
         DeploymentRecord,
         LocatorKind,
     )
+    from apm_cli.core.remediation import INVALID_DEPLOYMENT_OWNERS
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.policy.ci_checks import _check_deployment_ledger_owners
 
@@ -973,7 +971,7 @@ def test_deployment_ledger_owner_is_hard_integrity_failure():
 
     check = _check_deployment_ledger_owners(lockfile)
     assert check.passed is False
-    assert DEPLOYMENT_OWNER_REMEDIATION in check.message
+    assert INVALID_DEPLOYMENT_OWNERS.sentence() in check.message
 
     # Spec-text drift guard: the normative phrasing MUST stay in the body.
     assert_spec_contains(

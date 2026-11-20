@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import RERUN_AFTER_FIX
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -73,7 +74,7 @@ COLLISION_HEADER_TEMPLATE = (
 )
 COLLISION_DETAIL_TEMPLATE = "  {dst_path} conflicts with {src_path} (from {dep_name})"
 COLLISION_HINT = (
-    "Remove the conflicting file(s) and re-run `apm install`, "
+    f"{RERUN_AFTER_FIX.bind(fix='Remove the conflicting file(s)').clause()}, "
     "or pass --legacy-skill-paths to keep per-client paths."
 )
 

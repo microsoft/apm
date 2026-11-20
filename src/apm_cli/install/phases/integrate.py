@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import DEPLOY_APPROVED_EXECUTABLES, EXPLAIN_POLICY, TRUST_AND_DEPLOY
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
@@ -547,8 +548,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             from apm_cli import config
 
             ctx.logger.info(
-                f"Updated {config.CONFIG_FILE}. "
-                "Run 'apm install' again to deploy approved executables.",
+                f"Updated {config.CONFIG_FILE}. {DEPLOY_APPROVED_EXECUTABLES.sentence()}",
                 symbol="info",
             )
 
@@ -567,8 +567,8 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             symbol="info",
         )
         logger.info(
-            f"Deploy later: apm approve {first} (then re-run apm install)  |  "
-            f"Why parked?: apm policy explain {first}",
+            f"{TRUST_AND_DEPLOY.bind(package=first).sentence()}  |  "
+            f"{EXPLAIN_POLICY.bind(package=first).sentence()}",
             symbol="info",
         )
 

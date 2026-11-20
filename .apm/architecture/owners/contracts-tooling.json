@@ -13,7 +13,7 @@
       "decision": "Discovery inventory and consented consumer dependency delta; never source or deployment mutation",
       "owner": "adopt/discovery.py + adopt/materialize.py + adopt/manifest_edit.py",
       "selectors": ["src/apm_cli/adopt/*.py", "src/apm_cli/commands/discover.py", "src/apm_cli/commands/init.py"],
-      "guards": ["onboarding-metadata-only"]
+      "guards": ["onboarding-metadata-only", "contracts-tooling-init-apply-discover"]
     },
     {
       "id": "dependency-identity-materialization",
@@ -149,6 +149,13 @@
         "scripts/architecture_linter/checks/contracts_strip_charset.py"
       ],
       "guards": ["contracts-tooling-strip-charset"]
+    },
+    {
+      "id": "remediation-advice",
+      "decision": "User-facing remediation advice: the command to run and the reported state it clears",
+      "owner": "core/remediation.py (Remediation catalog and renderers)",
+      "selectors": ["src/apm_cli/core/remediation.py"],
+      "guards": ["contracts-tooling-remediation-advice", "contracts-tooling-remediation-drift-kinds"]
     }
   ]
 }

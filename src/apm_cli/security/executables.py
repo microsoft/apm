@@ -25,6 +25,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.remediation import EXPLAIN_POLICY, TRUST_PACKAGE, TRUST_RECOMMENDED
+
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
 EXEC_TYPE_MCP = "mcp"
@@ -785,8 +787,10 @@ def trust_remedy(package: str, recommend: Collection[str] = ()) -> str:
     Offers ``apm approve --recommended`` only when the org policy declares an
     ``executables.recommend`` set; otherwise that command finds nothing.
     """
-    bulk = "Trust the org-vetted set: apm approve --recommended  |  " if recommend else ""
-    return f"{bulk}Trust one: apm approve {package}  |  Inspect: apm policy explain {package}"
+    hints = [TRUST_PACKAGE.bind(package=package), EXPLAIN_POLICY.bind(package=package)]
+    if recommend:
+        hints.insert(0, TRUST_RECOMMENDED)
+    return "  |  ".join(hint.sentence() for hint in hints)
 
 
 def prompt_executable_approval(

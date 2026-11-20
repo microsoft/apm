@@ -17,9 +17,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence, cast  # noqa: UP035
 
-from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
+from ..core import remediation
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
+
+_DRIFTED_FILES = {False: "the drifted files", True: "the drifted bundle files"}
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -96,8 +98,9 @@ def _check_lockfile_exists(
     return CheckResult(
         name="lockfile-exists",
         passed=False,
-        message="Lockfile missing -- run 'apm install' to generate apm.lock.yaml",
+        message=f"Lockfile missing -- {remediation.LOCKFILE_MISSING.clause()}",
         details=["apm.yml declares dependencies but apm.lock.yaml is absent"],
+        remediations=(remediation.LOCKFILE_MISSING,),
     )
 
 
@@ -151,14 +154,15 @@ def _check_ref_consistency(
             passed=True,
             message="All dependency refs match lockfile",
         )
-    repair_command = "apm update" if requires_update else "apm install"
+    repair = remediation.REF_MISMATCH_UPDATE if requires_update else remediation.REF_MISMATCH
     n = len(mismatches)
     noun = "mismatch" if n == 1 else "mismatches"
     return CheckResult(
         name="ref-consistency",
         passed=False,
-        message=(f"{n} ref {noun} -- run '{repair_command}' to update lockfile"),
+        message=f"{n} ref {noun} -- {repair.clause()}",
         details=mismatches,
+        remediations=(repair,),
     )
 
 
@@ -291,8 +295,9 @@ def _check_deployed_files_present(
     return CheckResult(
         name="deployed-files-present",
         passed=False,
-        message=(f"{n} deployed {noun} missing -- run 'apm install' to restore"),
+        message=f"{n} deployed {noun} missing -- {remediation.DEPLOYED_FILES_MISSING.clause()}",
         details=missing,
+        remediations=(remediation.DEPLOYED_FILES_MISSING,),
     )
 
 
@@ -322,9 +327,10 @@ def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
         passed=False,
         message=(
             f"{len(violations)} invalid deployment ownership record(s) -- "
-            f"{DEPLOYMENT_OWNER_REMEDIATION}"
+            f"{remediation.INVALID_DEPLOYMENT_OWNERS.sentence()}"
         ),
         details=details,
+        remediations=(remediation.INVALID_DEPLOYMENT_OWNERS,),
     )
 
 
@@ -366,9 +372,11 @@ def _check_no_orphans(
         name="no-orphaned-packages",
         passed=False,
         message=(
-            f"{len(orphaned)} orphaned package(s) in lockfile -- run 'apm install' to clean up"
+            f"{len(orphaned)} orphaned package(s) in lockfile -- "
+            f"{remediation.ORPHANED_PACKAGES.clause()}"
         ),
         details=orphaned,
+        remediations=(remediation.ORPHANED_PACKAGES,),
     )
 
 
@@ -476,9 +484,11 @@ def _check_skill_subset_consistency(
         name="skill-subset-consistency",
         passed=False,
         message=(
-            f"{len(mismatches)} skill subset mismatch(es) -- regenerate lockfile (apm install)"
+            f"{len(mismatches)} skill subset mismatch(es) -- "
+            f"{remediation.SKILL_SUBSET_MISMATCH.clause()}"
         ),
         details=mismatches,
+        remediations=(remediation.SKILL_SUBSET_MISMATCH,),
     )
 
 
@@ -598,8 +608,9 @@ def _check_config_consistency(
             message=(
                 f"MCP configs match lockfile baseline; {len(changed)} server(s) parked "
                 "because the definition changed since approval: "
-                f"{', '.join(changed)}. Review: apm approve --pending{policy_note}"
+                f"{', '.join(changed)}. {remediation.REVIEW_PARKED_MCP.sentence()}{policy_note}"
             ),
+            remediations=(remediation.REVIEW_PARKED_MCP,),
         )
         if changed
         else None
@@ -644,10 +655,10 @@ def _check_config_consistency(
         passed=False,
         message=(
             f"{len(details)} MCP config inconsistenc(ies) -- "
-            "repeat 'apm install' with the intended selection "
-            f"('--only apm' for skills-only) to reconcile{policy_note}"
+            f"{remediation.MCP_CONFIG_MISMATCH.clause()}{policy_note}"
         ),
         details=details,
+        remediations=(remediation.MCP_CONFIG_MISMATCH,),
     )
 
 
@@ -888,42 +899,45 @@ def _check_content_integrity(
         )
 
     parts: list[str] = []
-    remedies: list[str] = []
+    manual: list[str] = []
+    remedies: list[remediation.Remediation] = []
     if scan.incomplete:
         parts.append(f"{len(scan.incomplete)} primitive(s) with incomplete prompt coverage")
-        remedies.append("review the reported format or file access and rerun audit")
+        manual.append("review the reported format or file access and rerun audit")
     if critical_files:
         parts.append(f"{len(critical_files)} file(s) with critical hidden Unicode")
-        remedies.append(
-            "review structured prompt fields manually"
-            if scan.protected_files.intersection(critical_files)
-            else "'apm audit --strip' to clean Unicode"
-        )
+        if scan.protected_files.intersection(critical_files):
+            manual.append("review structured prompt fields manually")
+        else:
+            remedies.append(remediation.STRIP_HIDDEN_UNICODE)
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
         from ..deps.file_provenance import LOCAL_BUNDLE_OWNER
-        from ..install.local_edits import restore_drifted_files_remedy
 
         owners = {drift.owner == LOCAL_BUNDLE_OWNER for drift in hash_mismatches}
-        remedies.extend(restore_drifted_files_remedy(bundle=bundle) for bundle in sorted(owners))
+        remedies.extend(
+            remediation.restore_edited(_DRIFTED_FILES[bundle], bundle=bundle)
+            for bundle in sorted(owners)
+        )
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
-        remedies.append("'apm install <bundle> --force' to restage drifted files")
+        remedies.append(remediation.RESTAGE_BUNDLE)
     if missing_ownership:
         parts.append(f"{len(missing_ownership)} file(s) without deployment ownership")
-        remedies.append("'apm install' to repair ownership metadata")
+        remedies.append(remediation.REPAIR_OWNERSHIP)
     if unresolved_hash_paths:
         parts.append(f"{len(unresolved_hash_paths)} unsafe or unresolved deployed path(s)")
-        remedies.append("'apm install' to restore managed paths")
+        remedies.append(remediation.RESTORE_MANAGED_PATHS)
     summary = "; ".join(parts)
-    remedy = " and ".join(remedies)
+    advice = "; ".join((*manual, *((remediation.each(*remedies),) if remedies else ())))
     return CheckResult(
         name="content-integrity",
         passed=False,
-        message=f"{summary} -- run {remedy}",
+        message=f"{summary} -- {advice}",
         details=details,
         coverage=scan.inventory,
         content_findings=critical_findings,
+        remediations=tuple(remedies),
     )
 
 
@@ -1006,7 +1020,9 @@ def _check_drift(
         diff_scratch_against_project,
         run_replay,
     )
+    from ..install.drift_render import drift_remediations
     from ..install.errors import PolicyViolationError
+    from ..install.local_edits import unedited_modified_paths
     from ..integration.targets import resolve_audit_targets
 
     logger = CheckLogger(verbose=verbose)
@@ -1052,8 +1068,10 @@ def _check_drift(
                     passed=False,
                     message=(
                         f"drift replay failed: corrupt local dependency graph in the "
-                        f"lockfile ({exc}). Fix the resolved_by chain or re-run 'apm install'."
+                        f"lockfile ({exc}). Fix the resolved_by chain, or "
+                        f"{remediation.REBUILD_LOCAL_GRAPH.clause()}."
                     ),
+                    remediations=(remediation.REBUILD_LOCAL_GRAPH,),
                 ),
                 [],
             )
@@ -1064,8 +1082,9 @@ def _check_drift(
                     passed=True,
                     message=(
                         f"{DRIFT_SKIP_PREFIX}: install cache not populated "
-                        "(run 'apm install' first or pass --no-drift)"
+                        f"({remediation.POPULATE_INSTALL_CACHE.clause()}, or pass --no-drift)"
                     ),
+                    remediations=(remediation.POPULATE_INSTALL_CACHE,),
                 ),
                 [],
             )
@@ -1142,6 +1161,9 @@ def _check_drift(
             passed=False,
             message=f"drift detected: {len(findings)} file(s): {preview}{suffix}",
             details=[f"{f.kind}: {f.path}" for f in findings],
+            remediations=drift_remediations(
+                findings, unedited=unedited_modified_paths(findings, lockfile, deployment_root)
+            ),
         ),
         findings,
     )
@@ -1186,10 +1208,11 @@ def _check_local_bundle_hooks(
         passed=False,
         message=(
             f"{len(unadmitted)} local bundle(s) have hooks the current executables "
-            "trust does not admit; run 'apm install' to retire them, or approve the "
-            "bundle and rerun 'apm install <bundle>'"
+            "trust does not admit; "
+            + remediation.either(remediation.RETIRE_BUNDLE_HOOKS, remediation.KEEP_BUNDLE_HOOKS)
         ),
         details=[f"{item.slug}: {item.reason}" for item in unadmitted],
+        remediations=(remediation.RETIRE_BUNDLE_HOOKS, remediation.KEEP_BUNDLE_HOOKS),
     )
 
 
@@ -1262,10 +1285,10 @@ def run_baseline_checks(
                         name="manifest-missing",
                         passed=False,
                         message=(
-                            "No apm.yml in the current directory -- nothing was audited."
-                            " Run 'apm audit --ci' from the project root that"
-                            " contains apm.yml (APM does not search parent directories)."
+                            "No apm.yml in the current directory -- nothing was audited. "
+                            f"{remediation.AUDIT_FROM_PROJECT_ROOT.sentence()}"
                         ),
+                        remediations=(remediation.AUDIT_FROM_PROJECT_ROOT,),
                     )
                 )
         result.checks.append(

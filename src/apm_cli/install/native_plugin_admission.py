@@ -16,6 +16,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import (
+    POPULATE_INSTALL_CACHE,
+    REGENERATE_CONTENT_HASHES,
+    TRUST_PACKAGE,
+)
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -159,7 +165,7 @@ def finalize_native_plugin(
         # verbose-gated, so the fix must live there, not in a dim detail line).
         diagnostics.warn(
             "Agent Plugin not registered with GitHub Copilot: its executables "
-            f"are not approved. Run 'apm approve {label}' to trust and register it.",
+            f"are not approved. {TRUST_PACKAGE.bind(package=label).sentence()}",
             package=package_name,
         )
         return result
@@ -201,7 +207,7 @@ def verify_native_plugin_cache(
         if not expected_hash:
             raise AgentPluginDeploymentBoundaryError(
                 f"Native Agent Plugin {lock_dep.get_unique_key()} has no content hash; "
-                "run 'apm install' to regenerate its integrity baseline"
+                f"{REGENERATE_CONTENT_HASHES.clause()}"
             )
     carried = () if lock_dep.is_local_source else lock_dep.carried_licenses
     if not candidate.is_dir() or not verify_locked_package(
@@ -209,5 +215,5 @@ def verify_native_plugin_cache(
     ):
         raise AgentPluginDeploymentBoundaryError(
             f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
-            "run 'apm install' to restore the package"
+            f"{POPULATE_INSTALL_CACHE.clause()}"
         )

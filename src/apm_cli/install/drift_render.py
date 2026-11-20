@@ -9,12 +9,21 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.core.remediation import (
+    DRIFT_KIND_REMEDIATION,
+    RESTORE_EDITED,
+    RESTORE_EDITED_FORCE,
+    RESYNC_AFTER_UNMANAGED_CONFLICT,
+    RESYNC_DEPLOYED,
+    Remediation,
+    either_sentence,
+    restore_edited,
+)
 from apm_cli.deps.file_provenance import LOCAL_BUNDLE_OWNER
 from apm_cli.install.local_edits import (
     count_exportable_findings,
     local_edit_hint,
     rendering_change_hint,
-    restore_locked_content_hint,
     unedited_modified_paths,
 )
 from apm_cli.utils.console import STATUS_SYMBOLS
@@ -24,6 +33,7 @@ if TYPE_CHECKING:
     from apm_cli.install.drift import DriftFinding
 
 _INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
+_EDITED_SUBJECT = {False: "the modified files", True: "the modified bundle files"}
 
 
 class CheckLogger(CommandLogger):
@@ -82,6 +92,42 @@ def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
     return ""
 
 
+def drift_remediations(
+    findings: list[DriftFinding], *, unedited: frozenset[str] | set[str] = frozenset()
+) -> tuple[Remediation, ...]:
+    """Return the remediations that clear *findings*, in the order to apply them.
+
+    The one selection shared by drift text and the audit ``drift`` check JSON.
+    Each kind maps through :data:`DRIFT_KIND_REMEDIATION`; *unedited* names
+    ``modified`` files whose bytes still match the lock, which only need
+    re-rendering (plain re-sync), not a restore.
+    """
+    kinds = {finding.kind for finding in findings}
+    if "unmanaged-conflict" in kinds:
+        return (RESYNC_AFTER_UNMANAGED_CONFLICT,) if kinds - {"unmanaged-conflict"} else ()
+    if "unrecorded" in kinds:
+        return (DRIFT_KIND_REMEDIATION["unrecorded"],)
+    edited = [
+        finding
+        for finding in findings
+        if finding.kind == "modified" and finding.path not in unedited
+    ]
+    remedies: list[Remediation] = [
+        restore_edited(_EDITED_SUBJECT[bundle], bundle=bundle)
+        for bundle in sorted({finding.package == LOCAL_BUNDLE_OWNER for finding in edited})
+    ]
+    edited_paths = {finding.path for finding in edited}
+    for finding in findings:
+        if finding.path in edited_paths:
+            continue
+        remedy = (
+            RESYNC_DEPLOYED if finding.kind == "modified" else DRIFT_KIND_REMEDIATION[finding.kind]
+        )
+        if remedy is not None and remedy not in remedies:
+            remedies.append(remedy)
+    return tuple(remedies)
+
+
 def render_drift_text(
     findings: list[DriftFinding],
     verbose: bool = False,
@@ -128,39 +174,22 @@ def render_drift_text(
     if unedited:
         lines.append(f"  {STATUS_SYMBOLS['info']} {rendering_change_hint(len(unedited))}")
 
+    info = STATUS_SYMBOLS["info"]
     if by_kind.get("unmanaged-conflict"):
         lines.append(
-            f"  {STATUS_SYMBOLS['info']} Rename the conflicting local file or skill (APM "
+            f"  {info} Rename the conflicting local file or skill (APM "
             "does not own it), or choose a valid skill/target selection, before "
             "reinstalling. Ordinary 'apm install' skips or refuses unmanaged "
             "conflicts; it cannot repair these files. 'apm install --force' "
             "overwrites a skipped non-skill file."
         )
-        if any(finding.kind != "unmanaged-conflict" for finding in findings):
-            lines.append(
-                f"  {STATUS_SYMBOLS['info']} After resolving ownership conflicts, "
-                "run 'apm install' to re-sync the other findings."
-            )
-    elif by_kind.get("unrecorded"):
-        lines.append(f"  {STATUS_SYMBOLS['info']} 1. Run 'apm install' to re-sync deployed files.")
-        lines.append(
-            f"  {STATUS_SYMBOLS['info']} 2. Commit the regenerated apm.lock.yaml "
-            "to restore content-integrity coverage."
+    for remedy in drift_remediations(findings, unedited=unedited):
+        advice = (
+            either_sentence(remedy, RESTORE_EDITED_FORCE)
+            if remedy.id == RESTORE_EDITED.id
+            else remedy.sentence()
         )
-    else:
-        edited = [
-            finding for finding in by_kind.get("modified", []) if finding.path not in unedited
-        ]
-        bundle_edits = {finding.package == LOCAL_BUNDLE_OWNER for finding in edited}
-        for bundle in sorted(bundle_edits):
-            subject = "the modified bundle files" if bundle else "the modified files"
-            hint = restore_locked_content_hint(subject, bundle=bundle)
-            lines.append(f"  {STATUS_SYMBOLS['info']} {hint}.")
-        if len(edited) < len(findings):
-            lines.append(
-                f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
-                "with the lockfile."
-            )
+        lines.append(f"  {info} {advice}")
     return "\n".join(lines).rstrip() + "\n"
 
 

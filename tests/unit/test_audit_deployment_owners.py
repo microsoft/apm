@@ -10,16 +10,14 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.audit import audit
-from apm_cli.core.deployment_ledger import (
-    DEPLOYMENT_OWNER_REMEDIATION,
-    DeploymentLedgerCodec,
-)
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import (
     DeploymentLedger,
     DeploymentLocator,
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.remediation import INVALID_DEPLOYMENT_OWNERS
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
@@ -101,7 +99,7 @@ def test_default_json_reports_ghost_before_no_files_exit(tmp_path: Path) -> None
     assert finding["locator"]["value"] == _GHOST_PATH
     assert finding["owners"] == [_GHOST_OWNER]
     assert finding["active_owner"] == _GHOST_OWNER
-    assert finding["remediation"] == DEPLOYMENT_OWNER_REMEDIATION
+    assert finding["remediation"] == INVALID_DEPLOYMENT_OWNERS.sentence()
     assert "codepoint" not in finding
     assert "line" not in finding
 
@@ -157,7 +155,7 @@ def test_default_sarif_stdout_uses_deployment_owner_rule(tmp_path: Path) -> None
     assert finding["ruleId"] == "apm/lockfile/deployment-owner"
     assert finding["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "apm.lock.yaml"
     assert finding["properties"]["owners"] == [_GHOST_OWNER]
-    assert DEPLOYMENT_OWNER_REMEDIATION in finding["message"]["text"]
+    assert INVALID_DEPLOYMENT_OWNERS.sentence() in finding["message"]["text"]
 
 
 def test_default_text_names_owner_locator_and_remediation(tmp_path: Path) -> None:
@@ -168,7 +166,7 @@ def test_default_text_names_owner_locator_and_remediation(tmp_path: Path) -> Non
     assert result.exit_code == 1
     assert _GHOST_OWNER in result.output
     assert _GHOST_PATH in result.output
-    assert DEPLOYMENT_OWNER_REMEDIATION in result.output
+    assert INVALID_DEPLOYMENT_OWNERS.sentence() in result.output
 
 
 def test_strip_preserves_content_while_owner_integrity_fails(tmp_path: Path) -> None:
@@ -207,7 +205,7 @@ def test_ci_machine_report_fails_owner_check(
         assert owner_check["passed"] is False
         assert _GHOST_PATH in owner_check["details"][0]
         assert _GHOST_OWNER in owner_check["details"][0]
-        assert owner_check["message"].endswith(DEPLOYMENT_OWNER_REMEDIATION)
+        assert owner_check["message"].endswith(INVALID_DEPLOYMENT_OWNERS.sentence())
         assert report.get("drift", []) == []
     else:
         assert report["runs"][0]["results"][0]["ruleId"] == ("deployment-ledger-owners")

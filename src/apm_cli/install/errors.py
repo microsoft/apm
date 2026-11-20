@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import REPAIR_LOCK_STATE
+
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.policy.models import CIAuditResult
@@ -153,10 +155,7 @@ def frozen_install_tip(error: FrozenInstallError) -> str:
         lock_state = "MCP lock state"
     else:
         lock_state = "package lock state"
-    return (
-        f"Tip: rerun 'apm install' without --frozen to create or repair {lock_state}, "
-        "retaining the original options, including --root DIR or --global if specified."
-    )
+    return f"Tip: {REPAIR_LOCK_STATE.bind(lock_state=lock_state).clause()}."
 
 
 class PolicyViolationError(RuntimeError):

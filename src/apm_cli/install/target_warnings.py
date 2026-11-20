@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import TRUST_PACKAGE
 from apm_cli.integration.targets import (
     target_supports_primitive,
     target_warns_unsupported_primitives,
@@ -36,7 +37,7 @@ def log_hooks_skip(
     if logger:
         logger.warning(
             f"{_pkg_label}: hooks skipped (not approved in executables.allow). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
+            f"{TRUST_PACKAGE.bind(package=_pkg_label).sentence()}",
             symbol="warning",
         )
 
@@ -57,7 +58,7 @@ def log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger 
     if logger:
         logger.warning(
             f"{_pkg_label}: canvas extension(s) skipped (not approved in executables.allow). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
+            f"{TRUST_PACKAGE.bind(package=_pkg_label).sentence()}",
             symbol="warning",
         )
 

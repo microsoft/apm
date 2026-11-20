@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
+from ..core.remediation import INVALID_DEPLOYMENT_OWNERS
 from ..utils.diagnostics import printable_ascii_text
 from .content_scanner import ScanFinding
 
@@ -97,7 +97,7 @@ def _owner_json(violation: DeploymentOwnerViolation) -> dict[str, Any]:
         "invalid_owners": list(violation.invalid_owners),
         "invalid_active_owner": violation.invalid_active_owner,
         "description": _owner_description(violation),
-        "remediation": DEPLOYMENT_OWNER_REMEDIATION,
+        "remediation": INVALID_DEPLOYMENT_OWNERS.sentence(),
     }
 
 
@@ -233,7 +233,9 @@ def findings_to_sarif(
                 "ruleId": _DEPLOYMENT_OWNER_RULE,
                 "level": "error",
                 "message": {
-                    "text": (f"{_owner_description(violation)} {DEPLOYMENT_OWNER_REMEDIATION}")
+                    "text": (
+                        f"{_owner_description(violation)} {INVALID_DEPLOYMENT_OWNERS.sentence()}"
+                    )
                 },
                 "locations": [
                     {
@@ -423,7 +425,7 @@ def findings_to_markdown(
                 f"| CRITICAL | `{violation.locator.key}` | `{owners}` | "
                 f"`{violation.active_owner}` |"
             )
-        lines.extend(["", DEPLOYMENT_OWNER_REMEDIATION])
+        lines.extend(["", INVALID_DEPLOYMENT_OWNERS.sentence()])
     if sorted_findings:
         lines.extend(
             [

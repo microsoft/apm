@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import ACCEPT_NEW_CONTENT, CLEAN_DOWNLOAD_CACHE, RERUN_AFTER_FIX
+
 if TYPE_CHECKING:
     from apm_cli.deps.dependency_graph import DependencyNode
     from apm_cli.install.context import InstallContext
@@ -62,13 +64,14 @@ def content_hash_mismatch_hint(ctx: Any, dep_key: str) -> str:
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import get_lockfile_path
 
-    install = "apm install -g" if ctx.scope is InstallScope.USER else "apm install"
+    global_flag = " -g" if ctx.scope is InstallScope.USER else ""
     apm_dir = getattr(ctx, "apm_dir", None)
     lockfile = get_lockfile_path(apm_dir) if apm_dir is not None else "apm.lock.yaml"
     return (
-        "This may indicate a supply-chain attack. Run 'apm cache clean' and retry. "
-        f"To accept the new content, remove the '{dep_key}' entry from "
-        f"{lockfile} and run '{install}'."
+        f"This may indicate a supply-chain attack. {CLEAN_DOWNLOAD_CACHE.sentence()} "
+        + ACCEPT_NEW_CONTENT.bind(
+            global_flag=global_flag, package=dep_key, lockfile=lockfile
+        ).sentence()
     )
 
 
@@ -139,7 +142,7 @@ def materialized_manifest_snapshot(
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise DirectDependencyError(
             f"Invalid materialized manifest for {package.name}: {exc}. "
-            "Restore valid dependency metadata and rerun 'apm install'."
+            + RERUN_AFTER_FIX.bind(fix="restore valid dependency metadata").sentence()
         ) from exc
     snapshot.source = package.source
     snapshot.resolved_commit = package.resolved_commit

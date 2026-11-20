@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import RERUN_AFTER_FIX
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import printable_ascii_text
@@ -26,6 +27,12 @@ from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+_RERUN_WITH_REAL_FILES = RERUN_AFTER_FIX.bind(
+    fix="use real files and directories in .apm/agents/ (or real *.agent.md files at the "
+    "package root)"
+).sentence()
 
 
 def _is_safe_source_path(
@@ -156,9 +163,7 @@ class DeployableSourcePlan:
                     message=(
                         "Skipped symlinked agent source: "
                         f"{printable_ascii_text(relative)}. "
-                        "Symlinked agent sources are not deployed. "
-                        "Use real files and directories in .apm/agents/ "
-                        "(or real *.agent.md files at the package root), then rerun apm install."
+                        "Symlinked agent sources are not deployed. " + _RERUN_WITH_REAL_FILES
                     ),
                     package=printable_ascii_text(package_name),
                 )

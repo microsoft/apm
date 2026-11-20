@@ -9,6 +9,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import APPROVE_TRANSITIVE_MCP
+
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -117,7 +119,7 @@ def warn_one_off_trust(one_off: tuple[tuple[str, str], ...], logger: "InstallLog
         f"--trust-transitive-mcp deployed {len(one_off)} unapproved MCP {noun} for this run "
         f"only ({shown}{more})\n"
         "    It is not saved: the next install without the flag removes it. "
-        f"Keep it: apm approve {first_package}",
+        f"To keep it, {APPROVE_TRANSITIVE_MCP.bind(package=first_package).clause()}.",
         symbol="warning",
     )
 

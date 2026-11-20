@@ -38,6 +38,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import PIN_REF_FOR_AUDIT
+
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
 
@@ -185,8 +187,7 @@ def sync_markers_for_lockfile(
             for repo in unpinned:
                 _rich_warning(
                     f"cache-pin: remote dep {repo!r} has no resolved_commit; "
-                    "drift cannot verify its cache freshness. Re-run 'apm install' "
-                    "with a pinned ref (commit, tag, or specific branch HEAD)."
+                    f"drift cannot verify its cache freshness. {PIN_REF_FOR_AUDIT.sentence()}"
                 )
 
     written = 0

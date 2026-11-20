@@ -13,6 +13,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from ..core.remediation import (
+    CONFIGURE_REGISTRY,
+    REGENERATE_CONTENT_HASHES,
+    REPAIR_REQUIRED_PACKAGES,
+    TRACK_UNMANAGED_FILE,
+    TRUST_PACKAGE,
+    TRUST_RECOMMENDED,
+)
 from .models import (
     CheckResult,
     CIAuditResult,
@@ -327,8 +335,8 @@ def _check_required_packages_deployed(
             absent.append(
                 PolicySubject(
                     pkg_name,
-                    "required package absent from the lockfile -- run "
-                    "`apm install --no-policy` to repair it, then reinstall normally",
+                    "required package absent from the lockfile -- "
+                    f"{REPAIR_REQUIRED_PACKAGES.clause()}",
                     remedy=None,
                 )
             )
@@ -342,8 +350,8 @@ def _check_required_packages_deployed(
     messages: list[str] = []
     if absent:
         messages.append(
-            f"{len(absent)} required package(s) absent from the lockfile. Hint: run "
-            "`apm install --no-policy` to repair the lockfile, then reinstall normally."
+            f"{len(absent)} required package(s) absent from the lockfile. "
+            f"{REPAIR_REQUIRED_PACKAGES.sentence()}"
         )
     if unresolved:
         messages.append(
@@ -413,11 +421,9 @@ def _check_required_executable_untrusted(
     messages: list[str] = []
     if untrusted:
         recommend = set(exec_policy.recommend or ())
-        remedy = "Trust them to deploy: `apm approve <package>` per package."
+        remedy = f"Per package, {TRUST_PACKAGE.bind(package='<package>').clause()}."
         if any(pkg in recommend for pkg in untrusted):
-            remedy += (
-                " Org-recommended packages can be bulk-trusted with `apm approve --recommended`."
-            )
+            remedy += f" {TRUST_RECOMMENDED.sentence()}"
         messages.append(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}")
     if misnamed:
         messages.append(
@@ -427,7 +433,7 @@ def _check_required_executable_untrusted(
     subjects = [
         PolicySubject(
             pkg,
-            f"required executable present but untrusted -- trust it with `apm approve {pkg}`",
+            f"required executable present but untrusted -- {TRUST_PACKAGE.bind(package=pkg).clause()}",
             remedy=None,
         )
         for pkg in untrusted
@@ -1006,7 +1012,7 @@ _MAX_UNMANAGED_SCAN_FILES = 10_000
 # Appended once to a non-empty unmanaged-files report so a flagged file is
 # self-resolving: the reader learns how to track it or how to suppress it.
 _UNMANAGED_NEXT_ACTION = (
-    "Next: run 'apm install <ref>' to track a flagged file, "
+    f"Next: {TRACK_UNMANAGED_FILE.clause()}, "
     "or add a glob to unmanaged_files.exclude to suppress it."
 )
 
@@ -1244,8 +1250,8 @@ def _check_registry_source(
         if not registries_map or req_name not in registries_map:
             violations.append(
                 f"required registry '{req_name}' is not configured -- "
-                "add it to the 'registries:' block or via 'apm config set registry."
-                f"{req_name}.url <url>'"
+                "add it to the 'registries:' block, or "
+                f"{CONFIGURE_REGISTRY.bind(name=req_name).clause()}"
             )
 
     for dep in deps:
@@ -1402,9 +1408,10 @@ def _check_dependency_content_hashes(
             passed=False,
             message=(
                 "Locked dependencies are missing required content hashes -- "
-                "run 'apm install' to regenerate them"
+                f"{REGENERATE_CONTENT_HASHES.clause()}"
             ),
             details=[str(exc)],
+            remediations=(REGENERATE_CONTENT_HASHES,),
         )
     return CheckResult(
         name=check_name,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import RESOLVE_DEPENDENCIES
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
 if TYPE_CHECKING:
@@ -87,8 +88,7 @@ def render_and_exit(
     if plan.dependency_preview_errors:
         logger.dry_run_notice(
             "Dependency preview incomplete; showing only locally known dependencies. "
-            "Orphan removals are not previewed. Run 'apm install' without --dry-run "
-            "to resolve dependencies."
+            f"Orphan removals are not previewed. {RESOLVE_DEPENDENCIES.sentence()}"
         )
         for error in plan.dependency_preview_errors:
             if error not in plan.dependency_declaration_errors:

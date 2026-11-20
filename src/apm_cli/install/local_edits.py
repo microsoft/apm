@@ -1,11 +1,11 @@
 """Local edits to APM-managed files: detection and the export hint.
 
-Single owner of the ``apm export-patch`` hint wording shown by
-``apm audit`` (drift text output) and ``apm install`` (before it re-syncs
-managed files), of which owners count as exportable upstream, and of the
-read-only check that tells a local edit (on-disk bytes differ from the
-locked hash) from a rendering change (bytes still match the lock but this
-APM version renders them differently).
+Renders the ``apm export-patch`` hint shown by ``apm audit`` (drift text
+output) and ``apm install`` (before it re-syncs managed files) from the
+remediation owner (``core/remediation.py``). Owns which owners count as
+exportable upstream and the read-only check that tells a local edit
+(on-disk bytes differ from the locked hash) from a rendering change (bytes
+still match the lock but this APM version renders them differently).
 """
 
 from __future__ import annotations
@@ -13,6 +13,14 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from apm_cli.core.remediation import (
+    ADOPT_NEW_RENDERING,
+    EXPORT_LOCAL_EDITS,
+    RESTORE_EDITED_FORCE,
+    either_sentence,
+    restore_edited,
+)
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -27,47 +35,24 @@ def local_edit_hint(count: int, *, installing: bool = False) -> str:
     noun = f"{count} local edit(s) to managed files"
     if installing:
         return (
-            f"{noun} may be overwritten by this install; next time, run "
-            "'apm export-patch' first to export them as upstream patches"
+            f"{noun} may be overwritten by this install; next time, {EXPORT_LOCAL_EDITS.clause()}"
         )
-    return (
-        f"{noun}; run 'apm export-patch' to export them as upstream patches "
-        "before the next install overwrites them"
-    )
+    return f"{noun}; {EXPORT_LOCAL_EDITS.clause()}"
 
 
 def restore_locked_content_hint(subject: str, *, bundle: bool = False) -> str:
-    """Return the hint naming the commands that restore edited managed files.
-
-    A plain ``apm install`` can keep a local edit to a managed file, so it is
-    not a restore command on its own. Files a local bundle deployed are not
-    redeployed by ``apm install`` at all; only reinstalling the bundle
-    restores them (#3994).
-    """
+    """Return the advice that restores edited managed files named by *subject*."""
+    restore = restore_edited(subject, bundle=bundle)
     if bundle:
-        return (
-            f"To restore the locked content, delete {subject} and reinstall the bundle "
-            "that deployed them ('apm install <bundle-path>'), then commit the result"
-        )
-    return (
-        f"To restore the locked content, delete {subject} and rerun 'apm install', "
-        "then commit the result ('apm install --force' also restores them, but "
-        "overwrites every local edit and deploys despite critical security findings)"
-    )
-
-
-def restore_drifted_files_remedy(*, bundle: bool = False) -> str:
-    """Return the audit remedy clause for files whose bytes drifted from the lock."""
-    if bundle:
-        return "'apm install <bundle-path>' after deleting the drifted bundle files"
-    return "'apm install' after deleting the drifted files (plain install keeps local edits)"
+        return restore.sentence()
+    return either_sentence(restore, RESTORE_EDITED_FORCE)
 
 
 def rendering_change_hint(count: int) -> str:
     """Return the hint for drift whose on-disk bytes still match apm.lock.yaml."""
     return (
         f"{count} file(s) still match apm.lock.yaml but this APM version renders them "
-        "differently; run 'apm install' and commit the result to adopt the new rendering"
+        f"differently; {ADOPT_NEW_RENDERING.clause()}"
     )
 
 

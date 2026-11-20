@@ -12,6 +12,8 @@ from collections.abc import Mapping, Sequence
 
 import click
 
+from apm_cli.core.remediation import UPDATE_REFS
+
 # Mapping for E10: which flags require --mcp.  Keyed by attribute-style
 # name so we can read directly from the Click handler locals.
 MCP_REQUIRED_FLAGS: tuple[tuple[str, str], ...] = (
@@ -86,7 +88,7 @@ def validate_mcp_conflicts(
 
     # E5: --update is for refreshing, not adding.
     if update:
-        raise click.UsageError("use 'apm update' instead to update MCP entries")
+        raise click.UsageError(f"--update does not add MCP entries; {UPDATE_REFS.clause()}")
 
     # E9: --header without --url.
     if headers and not url:

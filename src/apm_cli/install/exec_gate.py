@@ -12,6 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import EXPLAIN_POLICY, TRUST_BIN, TRUST_PACKAGE
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -538,17 +540,17 @@ def log_bin_status(
     elif skill_result.bin_skipped_reason == "not_approved":
         log_fn(
             f"  |-- bin/ executables skipped (not approved in executables.allow). "
-            f"Run 'apm approve {package_label}' to approve."
+            f"{TRUST_PACKAGE.bind(package=package_label).sentence()}"
         )
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
             "  |-- bin/ executables skipped (not trusted). "
-            f"Run 'apm install --trust-bin {package_label}' to deploy."
+            f"{TRUST_BIN.bind(package=package_label).sentence()}"
         )
     elif skill_result.bin_skipped_reason == "not_retrusted_on_uninstall":
         log_fn(
             "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-            f"Run 'apm install --trust-bin {package_label}' to restore them."
+            f"{TRUST_BIN.bind(package=package_label).sentence()}"
         )
 
 
@@ -576,13 +578,12 @@ def log_hooks_skip(
     denied = getattr(ctx, "package_denied_exec_types", None) or {}
     if EXEC_TYPE_HOOKS in denied.get(package_name, frozenset()):
         message = (
-            f"{label}: hooks skipped (denied). "
-            f"Run 'apm policy explain {label}' to see which deny applies."
+            f"{label}: hooks skipped (denied). {EXPLAIN_POLICY.bind(package=label).sentence()}"
         )
     else:
         message = (
             f"{label}: hooks skipped (not approved in executables.allow). "
-            f"Run 'apm approve {label}' to approve."
+            f"{TRUST_PACKAGE.bind(package=label).sentence()}"
         )
     logger.warning(message, symbol="warning")
 

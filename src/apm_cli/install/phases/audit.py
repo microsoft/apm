@@ -20,6 +20,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import (
+    FORCE_INSTALL,
+    REVIEW_HIDDEN_UNICODE,
+    STRIP_HIDDEN_UNICODE,
+    either,
+    either_sentence,
+)
+
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.install.context import InstallContext
 
@@ -107,8 +115,7 @@ def run(ctx: InstallContext) -> None:
 
         raise PolicyViolationError(
             f"Install-time audit blocked: {summary}. "
-            f"Run 'apm audit --strip' to clean hidden characters, or "
-            f"'apm install --force' to override"
+            f"To resolve, {either(STRIP_HIDDEN_UNICODE, FORCE_INSTALL)}"
             + (
                 ", or '--no-policy' to skip the policy floor"
                 if "policy" in decision.source.lower()
@@ -124,7 +131,7 @@ def run(ctx: InstallContext) -> None:
             f"Install-time audit found hidden-character / scanner findings: {summary}",
             package="audit",
             detail=(
-                "Review with 'apm audit' or clean with 'apm audit --strip'."
+                either_sentence(REVIEW_HIDDEN_UNICODE, STRIP_HIDDEN_UNICODE)
                 + (
                     " Deployed despite critical findings (--force)."
                     if has_critical and ctx.force

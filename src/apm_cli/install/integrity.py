@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import LOCKFILE_MISSING
+
 from ..deps.lockfile import LockedDependency
 
 if TYPE_CHECKING:
@@ -88,7 +90,7 @@ def enforce_installed_hash_policy(ctx: InstallContext) -> None:
         raise PolicyViolationError(
             "security.integrity.require_hashes is enabled but the lockfile at "
             f"{lockfile_path} could not be read (missing or corrupt); "
-            "failing closed. Re-run 'apm install' to regenerate it."
+            f"failing closed. {LOCKFILE_MISSING.sentence()}"
         )
     try:
         enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)
