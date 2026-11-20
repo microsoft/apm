@@ -15,11 +15,9 @@ apm uninstall [OPTIONS] PACKAGES...
 
 ## Description
 
-`apm uninstall` is the inverse of `apm install <package>`. It removes selected
-packages and unused transitive dependencies from APM-managed state,
-including `apm_modules/`, configured targets, the manifest, and the lockfile.
-
-The command only deletes files tracked in the lockfile's `deployed_files` manifest, so hand-authored content in the same harness folders is left alone.
+`apm uninstall` removes selected packages and unused transitive dependencies.
+File cleanup uses the lockfile's `deployed_files` list, preserving hand-authored
+content. Global uninstalls also remove the Claude plugin declarations APM made.
 
 ## Arguments
 
@@ -120,6 +118,9 @@ What gets removed, in order:
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
+8. For global uninstalls, after lockfile processing, remove the removed packages'
+   `~/.agents/plugins/<plugin>/` roots and their `enabledPlugins` keys. A key you
+   set to `false`, your own entries and a root you edited are kept.
 
 When uninstall rebuilds a surviving package's loose skills, it deploys only the
 skills that package selects with `skills:`, as `apm install` does. APM records
@@ -182,6 +183,13 @@ If safe LSP cleanup fails after package removal, uninstall exits nonzero,
 preserves the conflicting configuration, and tells you to repair the path or
 ownership conflict. Run `apm install` to reconcile project state, or
 `apm install --global` after a global uninstall.
+
+If updating Claude's settings fails, uninstall exits nonzero; package and
+manifest removals may already have happened. APM restores the previous
+`apm.lock.yaml`, so it still records the plugins to remove. Repair the reported
+issue, then run `apm install --global` to finish. Do not re-add removed package
+arguments. See
+[native registration and runtime qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
 A package declared more than once -- in both `dependencies` and
 `devDependencies`, or under two spellings such as `owner/repo` and its HTTPS

@@ -590,10 +590,8 @@ def _skip_unsupported_remote_transport(
         unsupported_remote_transport,
     )
     from apm_cli.factory import ClientFactory
-    from apm_cli.install.mcp.ownership import (
-        is_frozen_unrecorded_mcp_pair,
-        managed_unsupported_connection,
-    )
+    from apm_cli.install.mcp.native_runtimes import retire_runtime_claim
+    from apm_cli.install.mcp.ownership import is_frozen_unrecorded_mcp_pair
 
     try:
         client = ClientFactory.create_client(
@@ -609,22 +607,16 @@ def _skip_unsupported_remote_transport(
             raise frozen_services_error([frozen_unrecorded_reason("MCP", name, runtime)])
         return False
     skip_unsupported_remote(client, name, transport, warn=logger.warning)
-    claims = (managed_target_servers or {}).get(runtime, set())
-    if name not in claims:
-        return True
-    key = managed_unsupported_connection(
+    retire_runtime_claim(
         client,
+        runtime,
         name,
-        requested_info=server_info if registry_info else None,
+        server_info if registry_info else None,
+        logger,
         stored_config=stored_config,
-        native_hash=(native_hashes or {}).get(runtime, {}).get(name),
+        managed_target_servers=managed_target_servers,
+        native_hashes=native_hashes,
     )
-    if key is not None:
-        _remove_native_entry(client, key, logger)
-    # Reached only after a successful removal (cleanup failures raise).
-    claims.discard(name)
-    if native_hashes is not None:
-        native_hashes.get(runtime, {}).pop(name, None)
     return True
 
 
@@ -1395,6 +1387,10 @@ def _install_self_defined_deps(
     Returns the number of servers newly configured or updated.
     """
     from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.install.mcp.native_runtimes import (
+        native_runtimes_of,
+        retire_native_runtime_claims,
+    )
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         claim_shared_destination,
@@ -1411,6 +1407,20 @@ def _install_self_defined_deps(
     native_conflicts: list[str] = []
     if written_connections is None:
         written_connections = set()
+    retire_native_runtime_claims(
+        [dep for dep in self_defined_deps if native_runtimes_of(dep)],
+        target_runtimes,
+        logger,
+        project_root=project_root,
+        user_scope=user_scope,
+        stored_mcp_configs=stored_mcp_configs,
+        managed_target_servers=managed_target_servers,
+        native_hashes=native_hashes,
+    )
+    # Runtimes that load a server natively from its plugin never get APM's copy.
+    self_defined_deps = [
+        dep for dep in self_defined_deps if not set(target_runtimes) <= native_runtimes_of(dep)
+    ]
     protected_clients = native_comparison_clients(
         target_runtimes, project_root=project_root, user_scope=user_scope
     )
@@ -1490,6 +1500,8 @@ def _install_self_defined_deps(
         successful_runtimes: list[str] = []
         failed_runtimes: list[str] = []
         for rt in target_runtimes:
+            if rt in native_runtimes_of(dep):
+                continue
             if _skip_unsupported_remote_transport(
                 rt,
                 dep.name,

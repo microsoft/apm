@@ -1106,6 +1106,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
 | `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
 | `extensions`              | Optional mapping of top-level keys matching `x-[a-z][a-z0-9-]*` from the dependency manifest, in declaration order. Omitted when empty. Values are not interpreted (see [req-ext-003](#req-ext-003)). Manifest-origin metadata, distinct from per-entry `x-<name>` keys. |
+| `native_plugin`           | Optional mapping, present only when the consumer natively activated this entry's plugin under [Section 8.5.11](#8511-native-plugin-activation-profile): `name` (declared plugin name), `root` (deployed plugin root as a POSIX path relative to the deploy root of its scope, the project root or the user home at user scope: `.agents/plugins/<name>`), `fingerprint` (the [req-na-002](#req-na-002) root digest, a `sha256:<hex-lowercase>` envelope per [req-lk-016](#req-lk-016); not the [req-na-005](#req-na-005) approval digest, and not itself an approval), and `marketplace` (`{name, path}`: the binding its activation entries were declared under, which a later run reads as the previous binding under [req-na-004](#req-na-004)). Informative: install, including a frozen install (`--frozen` or equivalent), records it only after the lockfile gates pass and then reconciles settings from it; a restore redeploys only bytes whose root digest equals `fingerprint`; audit recomputes the root digest on the materialized source and on the deployed root without writing (see [req-na-002](#req-na-002), [req-na-005](#req-na-005) and [Section 5.5](#55-drift-and-integrity-model)). (Amendments 0.1.65 and 0.1.66.) |
 | `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
 | `x-<name>`                | Vendor extension (per [req-ext-001](#req-ext-001)).                             |
 
@@ -3801,7 +3802,8 @@ applies whatever the plugin format. The consumer MUST verify, without
 following symbolic links, that each deployed path resolves inside the
 profile root. A plugin whose manifest references a path that resolves
 outside its directory has no plugin root and MUST NOT be natively
-activated. It MUST record in the lock entry
+activated. It MUST record in the lock entry (the `native_plugin` field of
+[Section 5.2](#52-per-entry-fields))
 the deployed plugin root and one root digest covering the path, bytes, and
 executable bit of every file in that root, and MUST treat a deployed root
 whose recomputed digest differs from the recorded one as drift under [Section 5.5](#55-drift-and-integrity-model); its drift
@@ -3810,9 +3812,8 @@ The root digest is a hash envelope of the form `sha256:<hex-lowercase>`
 defined by [req-lk-016](#req-lk-016). It is the SHA-256 of the
 concatenation, over every regular file in the plugin root except any file
 whose relative path has a component equal to `.git`, at any depth, and
-except the consumer's own normalization output (a root `apm.yml` and a root
-`.apm/` directory, which a consumer may generate when it materializes a
-package), taken in ascending byte-wise order of the file's POSIX relative
+except every file whose relative path has a first component equal to `apm.yml` or `.apm` (which covers a root `apm.yml` file and every file under a root `.apm/` directory),
+whether or not the consumer generated them, taken in ascending byte-wise order of the file's POSIX relative
 path encoded as UTF-8, with no Unicode normalization, of: that relative
 path, one NUL (0x00) byte, one byte `x` (0x78) when the file is
 owner-executable or `-` (0x2D) otherwise, and the 32-byte raw SHA-256 digest
@@ -3837,10 +3838,18 @@ dependency activated under this subsection, the deployed plugin root takes
 the place of the materialized package beneath the resolved dependency root
 in the in-place reference obligation of [req-tg-013](#req-tg-013).
 
-> **Editorial note.** The root digest is computed over raw bytes, so a
-> checkout filter that rewrites line endings or the executable bit of a
-> committed project-scope plugin root is reported as drift. Project-scope
-> handling is settled with the project-scope route (#3921).
+> **Editorial note.** The root digest is computed over raw bytes and the
+> executable bit, so a checkout filter that rewrites line endings or the
+> executable bit of a committed project-scope plugin root is reported as
+> drift. A file system that does not carry the executable bit can yield a
+> root digest that differs from one recorded on a file system that does;
+> that difference is likewise reported as drift and is never admitted.
+> Until the project-scope route (#3921) settles a portable integrity
+> construction, a recorded root digest is comparable only with a root on a
+> file system with the same executable-bit semantics. At user scope the
+> lock is per-machine, so the case does not arise there. The approval
+> digest of [req-na-005](#req-na-005) omits the bit and is not affected.
+> Project-scope handling is settled with the project-scope route (#3921).
 
 <a id="req-na-003"></a>
 **[req-na-003]** A conforming **consumer** implementation that natively
@@ -3875,7 +3884,8 @@ MUST report that in an actionable diagnostic, MUST NOT remove any existing
 activation entry, and MAY add what the next lockfile requires; a first
 activation with no such entry needs no diagnostic. When the binding has
 moved (the expected marketplace name or profile-root path differs from the
-binding the previous lockfile's entries were produced under), or an entry
+binding the previous lockfile's entries were produced under, recorded as
+`native_plugin.marketplace` per [Section 5.2](#52-per-entry-fields)), or an entry
 under the consumer's marketplace name points at a different source, the
 consumer MUST report the conflict in an actionable diagnostic, MUST NOT
 write, delete, or overwrite any activation entry under either name, and
@@ -3900,16 +3910,24 @@ path.
 **[req-na-005]** A conforming **consumer** implementation that natively
 activates plugins MUST write an
 enable value of `true` for a natively activated plugin only when an
-approval covers the content of its plugin root, identified by the root
-digest of [req-na-002](#req-na-002) rather than by package name, version
-label, or source location, and the lock-integrity obligations
+approval covers the content of its plugin root, identified by the approval
+digest of that root rather than by package name, version label, or source
+location, and the lock-integrity obligations
 ([req-lk-013](#req-lk-013), [req-lk-015](#req-lk-015)), the authorized
 source-plan scan ([req-sc-015](#req-sc-015)), and executable authorization
 ([req-sc-009](#req-sc-009), [req-sc-010](#req-sc-010),
 [req-sc-011](#req-sc-011), and [req-sc-014](#req-sc-014)) admit it, whether
 or not it is a schema-bearing Agent Plugins v1 dependency. The approval
-mechanism is the consumer's own; it MUST be bound to the root digest and
-disclosed in the consumer's conformance statement. When no such approval
+mechanism is the consumer's own; it MUST be bound to the approval digest and
+disclosed in the consumer's conformance statement. The approval digest is
+the [req-na-002](#req-na-002) root digest construction over the same file
+set, order and encoding, with the executable-bit byte omitted: for each file,
+its relative path, one NUL (0x00) byte, and the 32-byte raw SHA-256 digest of
+its bytes. Like the root digest, it is a `sha256:<hex-lowercase>` envelope as defined by [req-lk-016](#req-lk-016); it is distinct from the root digest recorded as `native_plugin.fingerprint` ([Section 5.2](#52-per-entry-fields)), and a recorded root digest is not an approval. Files that [req-na-002](#req-na-002) excludes from the root digest are outside the approval digest as well, so an approval never covers them. It binds paths and bytes only, so an approval recorded on one
+operating system still covers the same content on another whose file system
+does not carry the executable bit. The [req-na-002](#req-na-002) root digest,
+which includes that bit, still gates integrity between the materialized
+source, the deployed root, and the lock. When no such approval
 covers the content of a plugin the consumer would natively activate, the
 consumer MUST NOT deploy that content under the profile root,
 MUST NOT declare it to any target, MUST NOT declare it in a disabled state,
@@ -3921,8 +3939,7 @@ previous lock entry (including its recorded plugin root and root digest),
 the previously deployed root, and its activation entries unchanged, and
 emit a default-visible diagnostic that names the plugin and states that the
 update was not applied; or retire the deployed root and its activation
-entries in the same rollback unit as the lock write. The written lock MUST
-NOT record a pin or root digest for content the consumer did not deploy.
+entries in the same rollback unit as the lock write. The written lock MUST NOT record a root digest, or an approval digest if the consumer records one there, for content the consumer did not deploy.
 
 <a id="req-na-006"></a>
 **[req-na-006]** A conforming **consumer** implementation that natively
@@ -4637,7 +4654,8 @@ settings the consumer does not own.
 
 **Mitigation.** [Section 8.5.11](#8511-native-plugin-activation-profile)
 derives activation only from the lockfile, admits content through the gates
-of [req-na-005](#req-na-005) bound to the root digest of
+of [req-na-005](#req-na-005) bound to the approval digest of the plugin
+root, checks deployed roots against the root digest of
 [req-na-002](#req-na-002), writes only documented activation entries
 ([req-na-003](#req-na-003)), derives ownership from the previous and next
 lockfile ([req-na-004](#req-na-004)), and requires per-project marketplace
@@ -4651,7 +4669,7 @@ the target's own trust prompt is the remaining gate. A committed `true`
 enable entry is a version-control enablement path that
 [req-sc-010](#req-sc-010) does not cover (see
 [Section 10.11](#1011-summary-table), row 12); it is not an approval under
-[req-na-005](#req-na-005) for any other user.
+[req-na-005](#req-na-005) for any other user. Because the approval digest of [req-na-005](#req-na-005) omits the executable bit, a change that only sets or clears that bit on an approved plugin root stays covered by the existing approval; the lock then records the new [req-na-002](#req-na-002) root digest, and the executable-authorization gates that [req-na-005](#req-na-005) also applies ([req-sc-009](#req-sc-009), [req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011), [req-sc-014](#req-sc-014)) still decide whether that content is admitted.
 
 ---
 
@@ -5402,10 +5420,11 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.63  | 2026-11-19 | Amendment for issue #3880 (shared MCP document attribution, deferred from the 0.1.61 review). Added [req-mf-027](#req-mf-027) (Section 4.5, consumer MUST): when two or more targets write project-scoped MCP servers to the same configuration file (at this revision `claude` and `copilot` share the workspace-root `.mcp.json`), each entry the consumer wrote there is attributed to the file, not only to the target that selected the server; an entry recorded for one of those targets is not foreign to another that selects the same server, subject to the same recorded-write checks; when one of those targets stops selecting the server, for example because it is deactivated, the entry is kept and owned, retaining a recorded write hash, for any other active target that writes the file and still selects it, and is removable, under the consumer's other ownership rules including [req-mf-026](#req-mf-026), only once no such target selects it. Entries the consumer did not write and distinct (including user-scoped) configuration files are outside the requirement. The non-normative Section 4.2.1 note now points to the new requirement instead of deferring it. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: the only verdict class that changes is a consumer that removes, or treats as foreign, a shared-file entry another active target sharing that file still selects, which no longer conforms. The reference implementation already behaves this way. Sections 1.3, 4.2.1, 4.5, 4.9, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Proposed 2026-11-19; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. Adoption does not change the status of [req-mf-026](#req-mf-026), which amendment 0.1.57 still proposes. Adds one MUST. Statement count: 139 -> 140 (135 MUST, 5 SHOULD). |
 | 0.1.64 (proposed) | 2026-11-19 | Amendment for accepted issue #3902 (portable, content-bound approval for transitive MCP servers). Added [req-sc-016](#req-sc-016) (Section 10.13, consumer MUST): a consumer admits a transitive dependency's self-defined, registry-naming or overlaying MCP server only when the consuming manifest re-declares it, a manifest grant binds the declaring package, the server name and a matching definition fingerprint, or the operator opts in for that invocation; consent is never derived from the lockfile, a per-invocation opt-in is never persisted, a no-longer-matching fingerprint withholds the server with a diagnostic naming the package and server even under the opt-in, and an organization denial still wins over every path. The grant may live in the consuming manifest or the per-user approval location of [req-sc-010](#req-sc-010) (the manifest deciding); a dependency's own manifest never grants. The fingerprint is a full-length `sha256` digest over the declaration as installed, covering every field that determines what runs plus any resolved registry entry; an unrecognized fingerprint does not match. Revised [req-sc-011](#req-sc-011) (Section 10.14) in place so the identical-outcome clause also covers a frozen install. Under Section 9.2 both change verdicts: a consumer that keeps a server only because the lockfile lists it, persists the opt-in, deploys a server whose bound definition changed, admits such a transitive server on a package-level or type-level grant alone, or reaches a frozen-install verdict different from install, no longer conforms; such projects re-declare the server or record a fingerprint grant. The reference implementation behaves this way. Sections 1.3, 10.11 (row 26), 10.13, 10.14, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Adds one MUST. Statement count: 147 -> 148 (143 MUST, 5 SHOULD), counted after the adopted 0.1.65 amendment, which landed first. |
 | 0.1.65  | 2026-11-19 | Amendment for issue #3919 (native plugin activation profile), from the #3094 design record accepted on 2026-11-19. Added Section 8.5.11 with seven consumer MUSTs. Part A (normative) defines target criteria A1 to A5: documented user and project settings files with precedence, an in-place local directory marketplace with relative paths at project scope, a declarative per-plugin enable switch that needs no install command once declared and trusted, no automatic update of directory sources, and documented precedence when a target reads another target's files. [req-na-001](#req-na-001) permits native activation only for a target, scope and client version that meets A1 to A5 by published documentation, with a conformance-statement disclosure. Part B (normative): [req-na-002](#req-na-002) the lockfile is the source of truth, only the approved plugin root is deployed to `.agents/plugins/<plugin>/` or `~/.agents/plugins/<plugin>/` with a generated `.claude-plugin/marketplace.json`, plugin names are safe path segments, and the lock records one root digest whose construction is pinned; [req-na-003](#req-na-003) only the documented activation entries are written, never private target state, and no target binary, CLI or RPC is called; [req-na-004](#req-na-004) ownership comes from the previous and next lockfile with no receipt file, preserving unrelated keys and explicit `false`; [req-na-005](#req-na-005) a plugin is enabled only when an implementation-defined approval bound to the root digest covers it and the [req-tg-013](#req-tg-013) admission gates admit it, and is otherwise neither deployed nor declared; [req-na-006](#req-na-006) a target that does not qualify gets explicit split install or refusal with a default-visible diagnostic, never silent; [req-na-007](#req-na-007) generated marketplace names are unique per project and per scope. Part C (informative) records Claude Code as native-eligible, GitHub Copilot as native-eligible at user scope with project scope unknown under A5, Codex as split (fails A3; A2 also not met; Codex 0.170.0, 2026-11-19) with schema-bearing Agent Plugins v1 dependencies opaque under [req-tg-011](#req-tg-011), and every other catalog target as unknown. [req-tg-013](#req-tg-013) is unchanged; a Section 8.5.7 editorial note identifies the two clauses, [req-na-002](#req-na-002) and [req-na-004](#req-na-004), that substitute for its placement and ledger clauses for a profile-activated dependency. Under Section 9.2 this adds an optional capability: the requirements bind only a consumer that natively activates plugins as Section 8.5.11 defines it, so no existing verdict changes and registrations made under [req-tg-013](#req-tg-013) alone are unaffected. No schema or lockfile-version change; the lock records the root and digest as additive entry data. Sections 1.3, 8.5.7, 8.7, 10.11, 10.18 (new), 11.2, 11.3.2, 12.4, Appendix C, the requirements manifest, a reconciliation oracle and conformance coverage are updated. Version 0.1.64 is reserved for the concurrent proposal for issue #3902; this amendment does not adopt proposed amendment 0.1.64. Proposed and adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3919, without the Section 9.3 reviewer-panel approval and public comment period. Adds seven MUSTs. Statement count: 140 -> 147 (142 MUST, 5 SHOULD). |
+| 0.1.66 (proposed) | 2026-11-19 | Amendment for the portable native-plugin approval pin (issue #3919 follow-up, PR #3290; implementation in PR #3989). Revised [req-na-005](#req-na-005) in place: the approval that permits native activation is bound to the plugin root's approval digest, which is the [req-na-002](#req-na-002) root digest construction over the same file set, order and encoding with the executable-bit byte omitted, so one approval covers the same paths and bytes on operating systems whose file systems do not carry that bit; the approval digest is distinct from the root digest the lock records. The [req-na-002](#req-na-002) root digest keeps the bit and still gates integrity between the materialized source, the deployed root and the lock. Revised the [req-na-002](#req-na-002) file-set exclusion clause in place: a root `apm.yml` and a root `.apm/` are excluded whether or not the consumer generated them, so they are neither digested nor deployed under the profile root, and a plugin whose manifest references them is not natively activated. Added the `native_plugin` row to Section 5.2, documenting the lock data that [req-na-002](#req-na-002) and [req-na-004](#req-na-004) already require; both now cross-reference it. Under Section 9.2 this changes verdicts: a consumer that binds the approval to the executable-bit-including root digest, or that digests or deploys an author-shipped root `apm.yml` or `.apm/`, no longer conforms. Approvals recorded against the earlier root digest no longer match, so the plugin is withheld with the [req-na-005](#req-na-005) diagnostic until it is re-approved; a lock entry whose root digest was computed under the earlier exclusion reading is reported as drift under [Section 5.5](#55-drift-and-integrity-model). The reference implementation behaves this way. The root digest is not portable across file systems with different executable-bit semantics; the [req-na-002](#req-na-002) editorial note records this limitation pending the project-scope route (#3921). Sections 5.2, 8.5.11 and 10.18 are updated; schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 148 (143 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63 and 0.1.65 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63 amendment and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63 amendment and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place; none adds a statement. Together, this
 working draft
 contains 148 statements (143 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), and amendment 0.1.65 on the same date by editor decision (issue #3919), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.

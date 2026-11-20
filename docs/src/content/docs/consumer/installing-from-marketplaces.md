@@ -81,6 +81,11 @@ install the plugin for one user, with no project lockfile, policy check or
 Use the native command for a personal tool. Use `apm install` when the plugin
 belongs to the project.
 
+
+A Claude Code plugin installed with `apm install -g --target claude <plugin>@<marketplace>`
+is deployed whole and registered in Claude Code's settings; see
+[Claude Code plugins at user scope](../install-plugins/#claude-code-plugins-at-user-scope).
+
 ## How marketplace installs lock
 
 The lockfile records the plugin's commit and file hashes like any package,

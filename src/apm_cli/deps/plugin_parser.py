@@ -464,6 +464,47 @@ def install_generated_mirror_source(rel_path: str, plugin_path: Path) -> str | N
     return None if upstream.as_posix() == rel_path else upstream.as_posix()
 
 
+def normalized_hook_source(rel_path: str, plugin_path: Path) -> str | None:
+    """Return the publisher path a normalized ``.apm/hooks/`` file is a byte copy of.
+
+    Normalization copies a plugin's hooks into ``.apm/hooks/``: the default
+    ``hooks/`` directory, a manifest-declared hooks directory, or a declared
+    config file as ``hooks.json``. Only a byte-identical, non-symlinked
+    publisher file inside the plugin qualifies, so an approval keyed on the
+    publisher path still binds the bytes that deploy. ``None`` otherwise.
+    """
+    from ..utils.helpers import find_plugin_json
+
+    parts = PurePosixPath(rel_path).parts
+    if len(parts) < 3 or parts[:2] != (".apm", "hooks"):
+        return None
+    root = plugin_path.resolve()
+    tail = PurePosixPath(*parts[2:])
+    candidates = [root / "hooks" / tail]
+    manifest_path = find_plugin_json(root)
+    try:
+        declared = parse_plugin_manifest(manifest_path).get("hooks") if manifest_path else None
+    except (OSError, ValueError):
+        declared = None
+    for value in declared if isinstance(declared, list) else [declared]:
+        if isinstance(value, str) and value:
+            base = root / value
+            candidates.append(base if base.is_file() and str(tail) == "hooks.json" else base / tail)
+    try:
+        copied = (root / rel_path).read_bytes()
+        for candidate in candidates:
+            if (
+                not candidate.is_symlink()
+                and candidate.is_file()
+                and candidate.resolve().is_relative_to(root)
+                and candidate.read_bytes() == copied
+            ):
+                return candidate.resolve().relative_to(root).as_posix()
+    except OSError:
+        return None
+    return None
+
+
 def _write_plugin_skill_sources(
     plugin_path: Path,
     apm_dir: Path,
@@ -824,6 +865,92 @@ def _extract_mcp_servers(
                     break
 
     return servers
+
+
+_NATIVE_MCP_TRANSPORTS = frozenset({"stdio", "http", "sse", "streamable-http"})
+_NATIVE_MCP_BUNDLE_SUFFIXES = (".mcpb", ".dxt")
+
+
+def _native_mcp_transport(spec: dict[str, Any]) -> str | None:
+    """Claude's transport for one server: explicit ``type``, then ``url``, then ``command``."""
+    kind = spec.get("type")
+    if kind is not None:
+        return kind if kind in _NATIVE_MCP_TRANSPORTS else None
+    if "url" in spec:
+        return "http"
+    if "command" in spec:
+        return "stdio"
+    return None
+
+
+def claude_native_mcp_servers(
+    plugin_path: Path, manifest: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Every MCP server Claude's plugin loader would start, and what APM cannot model.
+
+    The native Claude route (#3290) hands the intact plugin to Claude, which
+    loads the root ``.mcp.json`` AND merges every ``mcpServers`` form in the
+    manifest: an inline mapping, a path to a JSON file inside the plugin, or
+    a list mixing paths and inline mappings. Returns ``(servers, unmodeled)``:
+    each server is ``{"name", "transport", "url", "command", "spec"}`` (a name
+    may repeat across sources; every occurrence is returned), and
+    *unmodeled* names each entry APM cannot read (unparseable or missing file,
+    path outside the plugin, ``.mcpb``/``.dxt`` bundle, URL, non-object entry,
+    unknown transport). Callers must not assume an unmodeled entry complies.
+    The loose (normalized) route keeps :func:`_extract_mcp_servers`.
+    """
+    servers: list[dict[str, Any]] = []
+    unmodeled: list[str] = []
+
+    def add_mapping(mapping: Any, source: str) -> None:
+        if not isinstance(mapping, dict):
+            unmodeled.append(f"{source} (not a server mapping)")
+            return
+        for name, spec in mapping.items():
+            transport = _native_mcp_transport(spec) if isinstance(spec, dict) else None
+            if transport is None:
+                unmodeled.append(f"server '{name}' in {source}")
+                continue
+            servers.append(
+                {
+                    "name": str(name),
+                    "transport": transport,
+                    "url": spec.get("url"),
+                    "command": spec.get("command"),
+                    "spec": spec,
+                }
+            )
+
+    def add_file(rel_path: str, source: str) -> None:
+        candidate = plugin_path / rel_path
+        try:
+            inside = candidate.resolve().is_relative_to(plugin_path.resolve())
+            readable = inside and candidate.is_file() and not candidate.is_symlink()
+            data = _bounded_read_json(candidate) if readable else None
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            unmodeled.append(f"{source} (unreadable or outside the plugin)")
+            return
+        add_mapping(data.get("mcpServers", data), source)
+
+    def add_entry(entry: Any) -> None:
+        if isinstance(entry, dict):
+            add_mapping(entry, "plugin.json mcpServers")
+        elif not isinstance(entry, str):
+            unmodeled.append(f"mcpServers entry of type {type(entry).__name__}")
+        elif "://" in entry or entry.lower().endswith(_NATIVE_MCP_BUNDLE_SUFFIXES):
+            unmodeled.append(f"mcpServers entry '{entry}'")
+        else:
+            add_file(entry, f"'{entry}'")
+
+    if (plugin_path / ".mcp.json").exists() or (plugin_path / ".mcp.json").is_symlink():
+        add_file(".mcp.json", "'.mcp.json'")
+    declared = manifest.get("mcpServers")
+    if declared is not None:
+        for entry in declared if isinstance(declared, list) else [declared]:
+            add_entry(entry)
+    return servers, unmodeled
 
 
 def _read_mcp_file(

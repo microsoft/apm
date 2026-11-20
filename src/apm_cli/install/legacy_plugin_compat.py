@@ -36,12 +36,19 @@ def preserve_normalized_marketplace_plugin_type(
     detected_type: PackageType,
 ) -> PackageType:
     """Keep parser-normalized plugin caches typed as marketplace plugins."""
-    if (
-        locked_dependency is not None
-        and locked_dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
-        and has_normalized_plugin_skill_sources_receipt(package_path)
+    if not has_normalized_plugin_skill_sources_receipt(package_path):
+        return detected_type
+    if locked_dependency is not None and (
+        locked_dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
     ):
         return PackageType.MARKETPLACE_PLUGIN
+    # The parser's generated apm.yml/.apm must not masquerade as an
+    # independently authored APM layout on the subsequent cached-source pass.
+    # This also repairs older locks that recorded that second-pass type.
+    if detected_type in {PackageType.APM_PACKAGE, PackageType.SKILL_BUNDLE}:
+        evidence = gather_detection_evidence(package_path)
+        if evidence.has_plugin_manifest:
+            return PackageType.MARKETPLACE_PLUGIN
     return detected_type
 
 

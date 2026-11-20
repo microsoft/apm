@@ -943,11 +943,20 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
     ]
 
 
-def _is_native_plugin(package_type: str | None, package_dir: Path) -> bool:
-    """A plugin a harness loads intact: an Agent Plugin or a Codex bundle."""
+def _is_native_plugin(
+    package_type: str | None, package_dir: Path, *, user_scope: bool = False
+) -> bool:
+    """A plugin a harness loads intact: an Agent Plugin, a Codex bundle, or a
+    Claude plugin under the user-scope native route (#3290)."""
     if package_type == "agent_plugin":
         return True
-    return (package_dir / ".codex-plugin" / "plugin.json").is_file()
+    if (package_dir / ".codex-plugin" / "plugin.json").is_file():
+        return True
+    return (
+        user_scope
+        and package_type in (None, "marketplace_plugin")
+        and (package_dir / ".claude-plugin" / "plugin.json").is_file()
+    )
 
 
 def scan_installed_executable_packages(manifest: Path) -> list:
@@ -962,6 +971,9 @@ def scan_installed_executable_packages(manifest: Path) -> list:
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
+    from ..core.scope import InstallScope, get_apm_dir
+
+    user_scope = manifest.parent.resolve() == get_apm_dir(InstallScope.USER).resolve()
 
     if not apm_modules.is_dir():
         return results
@@ -1024,7 +1036,9 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         install_path=str(package_dir),
                         depth=locked.depth,
                         content_verified=installed_content_matches_lock(locked, package_dir),
-                        native_plugin=_is_native_plugin(locked.package_type, package_dir),
+                        native_plugin=_is_native_plugin(
+                            locked.package_type, package_dir, user_scope=user_scope
+                        ),
                     )
                 )
         return results
@@ -1065,7 +1079,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                     replace(
                         decl,
                         install_path=str(pkg_dir),
-                        native_plugin=_is_native_plugin(None, pkg_dir),
+                        native_plugin=_is_native_plugin(None, pkg_dir, user_scope=user_scope),
                     )
                 )
 

@@ -41,6 +41,7 @@ from ..models.dependency.replacement import (
     project_effective_reference,
 )
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
+from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 
 logger = logging.getLogger(__name__)
@@ -580,6 +581,9 @@ class LockedDependency:
     # in declaration order. Omitted from YAML when empty so lockfiles that
     # declare no extensions stay byte-identical. Values are not interpreted.
     extensions: dict[str, Any] = field(default_factory=dict)
+    # Intact native plugin APM deployed and declared for this dependency; the
+    # only ownership evidence for native settings keys and deployed roots.
+    native_plugin: NativePluginRecord | None = None
     replacement: ReplacementBinding | None = field(default=None, repr=False)
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
@@ -743,6 +747,8 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
+        if self.native_plugin is not None:
+            result["native_plugin"] = self.native_plugin.to_lock_data()
         if self.exec_allowed_types:
             result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
@@ -832,6 +838,7 @@ class LockedDependency:
             "exec_status",
             "exec_allowed_types",
             "name",
+            "native_plugin",
             "replacement",
             # legacy migration key handled above
             "deployed_skills",
@@ -889,6 +896,11 @@ class LockedDependency:
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
         )
+        if "native_plugin" in data:
+            try:
+                locked.native_plugin = NativePluginRecord.from_lock_data(data["native_plugin"])
+            except NativePluginRecordError as exc:
+                raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
         if "replacement" in data:
             try:
                 locked.replacement = ReplacementBinding.from_dict(
