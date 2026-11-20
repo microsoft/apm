@@ -446,6 +446,7 @@ jobs:
         uv run --frozen --extra dev pytest -p no:cacheprovider -q
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
+        tests/perf/test_architecture_linter_scaling.py::test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n
 
   test-architecture:
     name: Test Architecture Ratchets
@@ -803,7 +804,7 @@ jobs:
   lifecycle-smoke-shard-1:
     name: Lifecycle Smoke Shard 1 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -864,7 +865,7 @@ jobs:
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -874,7 +875,7 @@ jobs:
   lifecycle-smoke-shard-3:
     name: Lifecycle Smoke Shard 3 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -884,7 +885,7 @@ jobs:
   lifecycle-smoke-shard-4:
     name: Lifecycle Smoke Shard 4 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:

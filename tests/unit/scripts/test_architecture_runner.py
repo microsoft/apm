@@ -294,10 +294,10 @@ def test_spill_write_failure_keeps_facts_without_rewalking(
     target.write_text(_SAMPLE_SOURCE, encoding="utf-8")
     provider = FactsProvider(tmp_path, (path,), registry=None)
 
-    def fail_spill(_relative_path: str, _facts: FileFacts) -> None:
+    def fail_spill(_key: object, _facts: FileFacts) -> None:
         raise OSError("injected spill failure")
 
-    monkeypatch.setattr(provider, "_spill_facts", fail_spill)
+    monkeypatch.setattr(provider.session, "store_cold", fail_spill)
 
     with pytest.raises(OSError, match="injected spill failure"):
         provider.file_facts(path)
@@ -324,10 +324,10 @@ def test_spill_load_failure_never_rebuilds_or_hides_the_failure(
     facts = provider.file_facts(path)
     provider._transient_facts.clear()
 
-    def fail_load(_spill_path: Path) -> FileFacts:
+    def fail_load(_key: object) -> FileFacts:
         raise OSError("injected spill load failure")
 
-    monkeypatch.setattr(provider, "_load_spilled_facts", fail_load)
+    monkeypatch.setattr(provider.session, "load_cold", fail_load)
 
     for _ in range(2):
         with pytest.raises(OSError, match="injected spill load failure"):
@@ -611,6 +611,8 @@ contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
 contracts-tooling-lifecycle-script-gate
+contracts-tooling-linter-cache-content-key
+contracts-tooling-linter-cache-parse-once
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp
 contracts-tooling-lockfile-read
@@ -643,6 +645,7 @@ install-deployment-drift-claim-classification
 install-deployment-effective-selection
 install-deployment-executable-item-admission
 install-deployment-executable-trust-context
+install-deployment-frozen-flag-reader
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
 install-deployment-gitlab-facade-orchestration
@@ -759,6 +762,7 @@ registry_delegation.apm_home_resolution
 registry_delegation.audit_target_selection
 registry_delegation.bootstrap_project_name
 registry_delegation.build_id_verification
+registry_delegation.cli_startup_imports
 registry_delegation.command_machine_output
 registry_delegation.compile_inventory_authority
 registry_delegation.compiled_output_writes

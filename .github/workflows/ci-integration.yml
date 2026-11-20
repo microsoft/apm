@@ -12,10 +12,16 @@
 #     workflow (Build/Smoke/Integration/Release Validation - all Linux) are
 #     not required at PR time; they only run on the `gh-readonly-queue/main/*`
 #     SHA the merge queue creates, against the tentative merge commit.
-#   - This workflow intentionally does NOT trigger on pull_request events.
-#     Doing so would let a fork PR check out and run code with the secrets
-#     declared below, which is a supply-chain attack vector. Keep this file
-#     `merge_group`-only forever.
+#   - It also runs on two opt-in paths, both write-access gated:
+#       * workflow_dispatch on a branch of this repository;
+#       * pull_request when the PR carries the `full-integration` label
+#         (labeling needs triage access). Every job is skipped on unlabeled
+#         PRs, and merge-gate.yml requires these checks at PR time only
+#         when the label is present. Add the label, then push, so the gate
+#         re-evaluates with it.
+#     Fork PRs never receive repository secrets on `pull_request`, so a
+#     labeled fork PR runs without them. Never add `pull_request_target`
+#     or `push`: those would hand secrets to PR code.
 #
 # Trust model:
 #   - merge_group only fires when a user with write access enqueues a PR.
@@ -38,6 +44,16 @@ on:
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    types: [ labeled, synchronize, reopened ]
+
+# A newer push or label event on the same PR supersedes the older full run;
+# merge_group and dispatch runs are never cancelled.
+concurrency:
+  group: ci-integration-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -45,6 +61,7 @@ permissions:
 jobs:
   build:
     name: Build (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,6 +102,7 @@ jobs:
 
   smoke-test:
     name: Smoke Test (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     needs: [build]
     runs-on: ubuntu-24.04
     steps:
@@ -130,6 +148,7 @@ jobs:
 
   scaling-guards:
     name: Scaling Guards (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,6 +175,7 @@ jobs:
 
   integration-tests-shard:
     name: Integration Tests Shard ${{ matrix.shard }} (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     needs: [build, smoke-test]
     runs-on: ubuntu-24.04
     strategy:
@@ -241,13 +261,14 @@ jobs:
           # that honors pytest.mark.xdist_group, which we use to keep
           # HOME-mutating tests serialized on a single worker.
           PYTEST_TARGETS: "@shard-files.txt"
-          PYTEST_EXTRA_ARGS: "-n 2 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
+          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
         # Keep an outer cap above the runtime setup and sharded integration
         # suite so runner variance does not turn into an unbounded job.
-        timeout-minutes: 20
+        # Under --cov the in-process architecture suites run ~3x slower.
+        timeout-minutes: 50
 
       - name: Rename coverage data for shard
         if: always()
@@ -272,7 +293,7 @@ jobs:
   integration-tests:
     name: Integration Tests (Linux)
     needs: [integration-tests-shard, scaling-guards]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration'))
     runs-on: ubuntu-24.04
     steps:
       # Coverage summary runs first (with if: always()) so we get
@@ -339,6 +360,7 @@ jobs:
 
   release-validation:
     name: Release Validation (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     needs: [build, integration-tests]
     runs-on: ubuntu-24.04
     steps:

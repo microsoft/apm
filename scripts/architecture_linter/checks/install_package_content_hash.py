@@ -57,7 +57,11 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
     PROMOTER: (
-        ('if getattr(ctx, "frozen", False)', "never promote under --frozen"),
+        (
+            "withheld = InstallService.frozen_disposition(ctx).withhold_lockfile_writes",
+            "never promote under --frozen",
+        ),
+        ('if withheld or getattr(ctx, "dry_run", False):', "never promote under --frozen"),
         ("elif recorded_framed and dep.content_hash_framed:", "trust framed rows only from v4"),
         ("framed = verified_framed_digest(", "re-hash carried rows only from verified bytes"),
     ),
