@@ -248,25 +248,50 @@ def _plugin_world(
 
 
 def test_trust_bin(tmp_path: Path, apm_binary_path: Path) -> None:
-    world = _plugin_world(
-        tmp_path,
-        apm_binary_path,
-        "bin-plugin",
-        {
-            ".claude-plugin/plugin.json": '{"name": "bin-tool"}',
-            "bin/tool": "#!/bin/sh\necho TOOL\n",
-            "skills/hello/SKILL.md": "---\nname: hello\ndescription: bin fixture\n---\n# hello\n",
-        },
-    )
-    home = world.scenario.isolated.home
-    installed = world.install(scenario_id="trust-bin-skipped")
-    assert "bin/ executables skipped (not trusted)" in flat(_output(installed))
-    assert not list(home.rglob("bin/tool"))
-    remediation = advised("trust-bin", _output(installed), package="apm-fixture-org/bin-plugin")
+    # bin/ deploys only with a user-scope Claude plugin, which a run without
+    # --trust-bin parks; the advice reruns that install with --trust-bin.
+    scenario = _new_scenario(tmp_path / "trust-bin", apm_binary_path)
+    isolated = scenario.isolated
+    source_root = isolated.package_root / "bin-plugin"
+    files = {
+        ".claude-plugin/plugin.json": '{"name": "bin-tool"}',
+        "bin/tool": "#!/bin/sh\necho TOOL\n",
+    }
+    for relative, content in files.items():
+        path = source_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="ascii")
+    (source_root / "bin/tool").chmod(0o755)
+    repository = scenario.repositories.create("bin-plugin", source_tree=source_root)
+    commit = scenario.repositories.commit(repository, message="publish bin-plugin")
+    remote_url = "https://github.com/apm-fixture-org/bin-plugin"
+    env = scenario.repositories.url_rewrite_subprocess_env(repository, remote_url)
+    env["CLAUDE_CONFIG_DIR"] = str(isolated.home / ".claude")
+    (isolated.home / ".claude").mkdir(parents=True, exist_ok=True)
+    package = "apm-fixture-org/bin-plugin"
+    manifest = {
+        "name": "bin-consumer",
+        "version": "1.0.0",
+        "dependencies": {"apm": [{"git": package, "ref": commit.sha}]},
+        "executables": {"allow": {}},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
 
-    run_advised(world, remediation)
+    def run(*args: str, cwd: Path = isolated.work_root) -> CommandResult:
+        result = scenario.runner.run(args, scenario_id="trust-bin", cwd=cwd, env=env)
+        assert result.returncode == 0, _output(result)
+        return result
 
-    deployed = home / ".agents" / "plugins" / "bin-tool" / "bin" / "tool"
+    run("install", "--global", "--target", "claude")
+    run("approve", "--all", cwd=isolated.config_root)
+    parked = _output(run("install", "--global", "--target", "claude"))
+    assert f"Parked native plugin {package}: its bin/ executables are not trusted" in flat(parked)
+    deployed = isolated.home / ".agents/plugins/bin-tool/bin/tool"
+    assert not deployed.exists()
+    remediation = advised("trust-bin", parked)
+
+    run(*advised_argv(remediation))
+
     assert deployed.read_text(encoding="ascii") == "#!/bin/sh\necho TOOL\n"
 
 

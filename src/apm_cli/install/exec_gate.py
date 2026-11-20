@@ -543,14 +543,11 @@ def log_bin_status(
             f"{TRUST_PACKAGE.bind(package=package_label).sentence()}"
         )
     elif skill_result.bin_skipped_reason == "not_trusted":
-        log_fn(
-            "  |-- bin/ executables skipped (not trusted). "
-            f"{TRUST_BIN.bind(package=package_label).sentence()}"
-        )
+        log_fn(f"  |-- bin/ executables skipped (not trusted). {TRUST_BIN.sentence()}")
     elif skill_result.bin_skipped_reason == "not_retrusted_on_uninstall":
         log_fn(
             "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-            f"{TRUST_BIN.bind(package=package_label).sentence()}"
+            f"{TRUST_BIN.sentence()}"
         )
 
 

@@ -440,9 +440,9 @@ REPAIR_LOCK_STATE = _entry(
 )
 TRUST_BIN = _entry(
     "trust-bin",
-    "apm install --global --trust-bin {package}",
-    "deploy its bin/ executables",
-    clears="a package's bin/ executables were not deployed",
+    "apm install --global --trust-bin",
+    "deploy the parked bin/ executables",
+    clears="bin/ executables were not deployed because they were not trusted",
 )
 EXPLAIN_POLICY = _entry(
     "explain-policy",

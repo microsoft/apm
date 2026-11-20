@@ -246,9 +246,7 @@ def test_log_bin_status_not_trusted() -> None:
 
     log_bin_status(skill_result, "", "pkg", SimpleNamespace(name="pkg"), lines.append)
 
-    assert lines == [
-        f"  |-- bin/ executables skipped (not trusted). {TRUST_BIN.bind(package='pkg').sentence()}"
-    ]
+    assert lines == [f"  |-- bin/ executables skipped (not trusted). {TRUST_BIN.sentence()}"]
 
 
 def test_log_bin_status_sanitizes_not_approved_package_name() -> None:
@@ -279,8 +277,7 @@ def test_log_bin_status_explains_uninstall_retrust() -> None:
     log_bin_status(skill_result, "", "pkg", SimpleNamespace(name="pkg"), lines.append)
 
     assert lines == [
-        "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-        f"{TRUST_BIN.bind(package='pkg').sentence()}"
+        f"  |-- bin/ executables not re-deployed during uninstall cleanup. {TRUST_BIN.sentence()}"
     ]
 
 

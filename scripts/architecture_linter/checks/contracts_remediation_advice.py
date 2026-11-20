@@ -65,7 +65,6 @@ _UNMIGRATED_ADVICE: dict[str, int] = {
     "src/apm_cli/bundle/packer.py": 3,
     "src/apm_cli/bundle/plugin_exporter.py": 5,
     "src/apm_cli/bundle/unpacker.py": 4,
-    "src/apm_cli/claude_plugins/admission.py": 1,
     "src/apm_cli/claude_plugins/registrar.py": 4,
     "src/apm_cli/cli.py": 2,
     "src/apm_cli/codex_plugins/client.py": 1,
