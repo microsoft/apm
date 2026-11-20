@@ -1482,6 +1482,56 @@ class TestFrozenInstallNeverWritesLockfile:
 
         assert_spec_contains("the lockfile is never written\nor rewritten")
 
+    @pytest.mark.req("req-lk-006")
+    def test_frozen_refusal_keeps_unrecorded_files_it_cannot_prove_it_wrote(self, tmp_path):
+        """A refused frozen install withdraws only what it wrote (#4309).
+
+        The lockfile stays byte-identical. An unrecorded file with no
+        deployment receipt (a user file the install adopted) is kept,
+        byte-identical, and named in the refusal.
+        """
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, suppress_lockfile_writes
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.service import InstallService
+
+        def _lock(deployed):
+            lock = LockFile(lockfile_version="1", apm_version="0.0.0")
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="https://github.com/o/r",
+                    resolved_ref="main",
+                    resolved_commit="a" * 40,
+                    depth=1,
+                    deployed_files=list(deployed),
+                )
+            )
+            return lock
+
+        lockfile_path = tmp_path / "apm.lock.yaml"
+        (tmp_path / "apm.yml").write_text("name: t\nversion: 1.0.0\n")
+        _lock([".claude/skills/recorded/SKILL.md"]).write(lockfile_path)
+        committed_bytes = lockfile_path.read_bytes()
+        adopted = tmp_path / ".claude/skills/adopted/SKILL.md"
+        adopted.parent.mkdir(parents=True)
+        adopted.write_bytes(b"user content\n")
+
+        request = MagicMock()
+        request.apm_package.package_path = tmp_path / "apm.yml"
+        produced = _lock([".claude/skills/recorded/SKILL.md", ".claude/skills/adopted/SKILL.md"])
+        with suppress_lockfile_writes() as withheld:
+            produced.write(lockfile_path)
+
+        with pytest.raises(FrozenInstallError) as exc:
+            InstallService._enforce_frozen_no_rewrite(request, withheld)
+        assert exc.value.reasons == [
+            "  - .claude/skills/adopted/SKILL.md is deployed by this install "
+            "but not recorded in apm.lock.yaml",
+            "  - kept .claude/skills/adopted/SKILL.md: no receipt proves this install wrote it",
+        ]
+        assert "the other unrecorded files were removed again" in exc.value.tip
+        assert adopted.read_bytes() == b"user content\n"
+        assert lockfile_path.read_bytes() == committed_bytes
+
 
 @pytest.mark.req("req-lk-021")
 def test_dropped_cursor_target_merge_hook_state_reconciled_fail_safe(tmp_path):
