@@ -22,6 +22,7 @@ from apm_cli.commands.install import (
     _merge_packages_into_yml,
     _resolve_package_references,
 )
+from apm_cli.core.command_logger import CommandLogger
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -82,8 +83,10 @@ def _make_dep_ref(
 
 
 class TestMergePackagesIntoYml:
-    def test_appends_packages_to_current_deps(self, tmp_path: Path) -> None:
-        logger = _make_install_logger()
+    def test_appends_packages_to_current_deps(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        logger = CommandLogger("install")
         apm_yml = tmp_path / "apm.yml"
         data = {"dependencies": {"apm": ["existing/pkg"]}}
         current_deps = data["dependencies"]["apm"]
@@ -101,7 +104,7 @@ class TestMergePackagesIntoYml:
 
         assert "new/pkg" in current_deps
         mock_dump.assert_called_once()
-        logger.success.assert_called_once()
+        assert capsys.readouterr().out.count("[*] Updated apm.yml with 1 new package(s)") == 1
 
     def test_uses_apm_yml_entry_when_present(self, tmp_path: Path) -> None:
         logger = _make_install_logger()
