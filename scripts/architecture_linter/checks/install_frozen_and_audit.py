@@ -29,6 +29,9 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.install_lifecycle_serialization import (
+    SERIALIZED_LIFECYCLE_ROUTES,
+)
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, violation
 from scripts.architecture_linter.models import Violation
@@ -832,51 +835,7 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
 def check_lifecycle_serialization(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every declared lifecycle mutator must route through install/locking.py."""
     rule_id = _GUARD_LIFECYCLE_SERIALIZATION
-    required = {
-        "src/apm_cli/commands/audit.py": {
-            "audit": "serialized_lifecycle_when",
-        },
-        "src/apm_cli/commands/approve.py": {
-            "approve_cmd": "serialized_lifecycle",
-            "deny_cmd": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/compile/cli.py": {
-            "_handle_global_flag": "serialized_lifecycle_unless",
-            "_run_compilation": "serialized_lifecycle_unless",
-        },
-        "src/apm_cli/commands/config.py": {
-            "set": "serialized_lifecycle",
-            "unset": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/deps/cli.py": {
-            "clean": "serialized_lifecycle_unless",
-            "update": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/experimental.py": {
-            "enable_flag": "serialized_lifecycle",
-            "disable_flag": "serialized_lifecycle",
-            "reset_flags": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/init.py": {"init": "serialized_lifecycle_unless"},
-        "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless"},
-        "src/apm_cli/commands/lifecycle.py": {
-            "lifecycle_init": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/lock.py": {"_run_lock": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/__init__.py": {
-            "add": "serialized_lifecycle",
-            "update": "serialized_lifecycle",
-            "remove": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/marketplace/init.py": {"init": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/plugin/add.py": {"add": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/plugin/remove.py": {"remove": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/plugin/set.py": {"set_cmd": "serialized_lifecycle"},
-        "src/apm_cli/commands/plugin/init.py": {"init": "serialized_lifecycle"},
-        "src/apm_cli/commands/prune.py": {"prune": "serialized_lifecycle_unless"},
-        "src/apm_cli/commands/uninstall/cli.py": {"uninstall": "serialized_lifecycle"},
-        "src/apm_cli/commands/update.py": {"update": "serialized_lifecycle"},
-    }
+    required = SERIALIZED_LIFECYCLE_ROUTES
     findings: list[Violation] = []
     for path, functions in required.items():
         facts, failures = _facts_for(provider, path, rule_id)

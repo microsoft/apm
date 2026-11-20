@@ -29,6 +29,7 @@ from ..bootstrap_mirror import (
     release_metadata_public_lookup_blocked,
 )
 from ..core.command_logger import CommandLogger
+from ..install.locking import serialized_lifecycle_unless
 from ..update_policy import get_self_update_disabled_message, is_self_update_enabled
 from ..utils.subprocess_env import external_process_env
 from ..version import get_version
@@ -229,6 +230,7 @@ def _build_self_update_installer_env(
     ),
 )
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
+@serialized_lifecycle_unless("check")
 def self_update(check: bool) -> None:
     """Update APM CLI to the latest version (like npm update -g npm).
 

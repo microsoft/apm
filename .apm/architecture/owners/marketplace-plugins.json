@@ -226,7 +226,8 @@
       "owner": "core/plugin_manifest.py (PLUGIN_ECOSYSTEM_PATHS, build_plugin_manifest, write_plugin_manifest_with_outcome); codex_plugins/manifest.py derives CODEX_COMPAT_MANIFEST from it",
       "selectors": [
         "src/apm_cli/core/plugin_manifest.py",
-        "src/apm_cli/core/build_orchestrator.py"
+        "src/apm_cli/core/build_orchestrator.py",
+        "src/apm_cli/bundle/packer.py"
       ],
       "guards": ["marketplace-integrations-pack-plugin-manifests"]
     }
