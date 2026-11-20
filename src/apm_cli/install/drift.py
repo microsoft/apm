@@ -605,8 +605,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
         declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
-        apm_yml = manifest_file(project_root)
-        if apm_yml.exists():
+        if (apm_yml := manifest_file(project_root)).exists():
             manifest = APMPackage.from_apm_yml(apm_yml)
             declared_transports.record(
                 [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]

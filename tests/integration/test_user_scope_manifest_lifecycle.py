@@ -1,5 +1,10 @@
 """User-scope (-g) config and policy inputs come only from the user manifest (#4087).
 
+PROMISE: outcome.status_matches_state -- -g exit status reflects the user-scope
+config, and -g is not governed by a git remote (source:
+docs/src/content/docs/enterprise/apm-policy.mdx).
+CELL: OP=install|update SCOPE=user GATE=policy NET=local-fixture
+
 Hermetic chains against the installed CLI, run from a directory outside
 HOME with ``APM_HOME`` pointing elsewhere. At user scope the deploy root
 (HOME) is not the manifest directory (``$APM_HOME``), so:
@@ -39,6 +44,7 @@ from tests.utils.local_github_https_fixture import (
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
 ]
@@ -68,6 +74,16 @@ def _manifest(root: Path, **extra: object) -> None:
     )
 
 
+def _step(runner, args, *, cwd, env, step, expected=0):
+    """Run one step and apply the I6 (ASCII) and I9 (no duplicate status lines) oracles."""
+    result = run_step(runner, args, cwd=cwd, env=env, step=step, expected=expected)
+    for stream in (result.stdout, result.stderr):
+        assert stream.isascii(), output(result)
+        lines = [line.strip() for line in stream.splitlines() if line.lstrip().startswith("[")]
+        assert len(lines) == len(set(lines)), output(result)
+    return result
+
+
 def _skill_deployed(home: Path) -> bool:
     return (home / ".claude" / "skills" / "pkg-user-skill" / "SKILL.md").is_file()
 
@@ -84,7 +100,7 @@ def test_global_fetch_failure_default_comes_from_user_manifest(
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = {**fx.child_environment(world.git_env()), "APM_HOME": str(apm_home)}
         env.pop("CLAUDE_CONFIG_DIR", None)
-        result = run_step(
+        result = _step(
             runner,
             ("install", "-g", f"{pkg.slug}#v1.0.0"),
             cwd=cwd,
@@ -100,7 +116,8 @@ def test_global_fetch_failure_default_comes_from_user_manifest(
             policy={"fetch_failure_default": "block"},
             dependencies={"apm": [f"{pkg.slug}#v1.0.0"]},
         )
-        result = run_step(
+        before = (tree_snapshot(apm_home), tree_snapshot(home / ".claude"))
+        result = _step(
             runner,
             ("install", "-g"),
             cwd=cwd,
@@ -109,6 +126,8 @@ def test_global_fetch_failure_default_comes_from_user_manifest(
             expected=1,
         )
         assert "fetch_failure_default=block" in output(result), output(result)
+        # I7: the blocked command preserves user-scope state.
+        assert (tree_snapshot(apm_home), tree_snapshot(home / ".claude")) == before
 
 
 def _policy_requests(fx) -> list[str]:
@@ -141,7 +160,7 @@ def test_global_commands_do_not_discover_policy_from_home_git_remote(
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = {**fx.child_environment(world.git_env()), "APM_HOME": str(apm_home)}
         env.pop("CLAUDE_CONFIG_DIR", None)
-        result = run_step(
+        result = _step(
             runner,
             ("install", "-g", f"{pkg.slug}#v1.0.0"),
             cwd=cwd,
@@ -150,12 +169,12 @@ def test_global_commands_do_not_discover_policy_from_home_git_remote(
         )
         assert _skill_deployed(home), output(result)
         assert "Policy violation" not in output(result), output(result)
-        result = run_step(runner, ("update", "-g", "--yes"), cwd=cwd, env=env, step="update-g")
+        result = _step(runner, ("update", "-g", "--yes"), cwd=cwd, env=env, step="update-g")
         assert "Policy violation" not in output(result), output(result)
         assert _skill_deployed(home), output(result)
 
         # The user-scope policy source is stated, including "none".
-        result = run_step(
+        result = _step(
             runner, ("policy", "status", "-g", "--json"), cwd=cwd, env=env, step="status-g"
         )
         report = json.loads(result.stdout)
@@ -170,7 +189,7 @@ def test_global_commands_do_not_discover_policy_from_home_git_remote(
         assert tree_snapshot(home / ".git", exclude=()) == git_before
 
         # Control: the same checkout at project scope does discover that policy.
-        result = run_step(
+        result = _step(
             runner, ("policy", "status", "--json"), cwd=home, env=env, step="status-project"
         )
         assert json.loads(result.stdout)["outcome"] == "found", result.stdout
