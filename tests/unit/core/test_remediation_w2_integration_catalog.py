@@ -64,8 +64,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "the rename is the manual step",
     "skill-selection-declared-unmatched": "needs a transitive package whose own apm.yml "
     "declares the selection; updating it needs a new revision",
-    "uninstall-evidence-reinstall": "needs a receiptless deployed file from an older APM; covered by the uninstall deletion-evidence tests",
-    "uninstall-evidence-remove": "needs an unreachable package source; covered by the uninstall deletion-evidence tests",
+    "uninstall-evidence-reinstall": "executed as printed by test_cleanup_deployment_evidence_lifecycle (full sentence asserted)",
+    "uninstall-evidence-remove": "full sentence asserted by test_cleanup_deployment_evidence_lifecycle and test_remediation_gate9_call_sites",
 }
 
 
