@@ -294,6 +294,10 @@ class CleanupResult:
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
 
+    unproven: list[str] = field(default_factory=list)
+    """Files kept because no deployment evidence proves APM wrote them (#3701);
+    also listed in ``skipped_unmanaged``. Callers name them to the user."""
+
     released: list[str] = field(default_factory=list)
     """Skill directories of a departing owner (orphan cleanup) kept on disk
     because only user content remains in them. Every APM-owned member is
@@ -495,6 +499,7 @@ def _keep_without_evidence(
     """Keep a file whose deployment evidence does not authorize deletion."""
     if verdict == UNPROVEN:
         result.skipped_unmanaged.append(stale_path)
+        result.unproven.append(stale_path)
         message = (
             f"Kept {stale_path}: no local deployment receipt or render of the locked "
             "package version proves APM deployed it. Delete it manually if you no "
