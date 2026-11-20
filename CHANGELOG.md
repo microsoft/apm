@@ -119,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
 - `apm audit --ci` fails and names a user's MCP entry that differs from a declared server with the same name, matching `apm install --frozen`. (#4493)
 - `apm audit --ci` names locked git and registry entries that carry no content hash and points at `security.integrity.require_hashes`, without changing the exit code. (closes #4453, #4495)
+- `apm update --dry-run` no longer writes the marketplace catalog cache while it re-verifies locked provenance. (#4475)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)
