@@ -26,6 +26,7 @@ import tomlkit
 import yaml
 from tomlkit.exceptions import TOMLKitError
 
+from apm_cli.adapters.client._remote_shapes import harness_label
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import (
     LockFile,
@@ -33,6 +34,7 @@ from apm_cli.deps.lockfile import (
     get_lockfile_path,
     installed_apm_version,
 )
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
@@ -1239,7 +1241,7 @@ class MCPIntegrator:
         # is MCP state to record. Calls that clear the last server keep the
         # early return: they must not conjure a lockfile for a project that
         # never had one.
-        creating = not lock_path.exists()
+        creating = not lockfile_exists(lock_path)
         if creating and not (mcp_server_names or mcp_configs):
             return
         try:
@@ -1429,7 +1431,8 @@ class MCPIntegrator:
                         managed_fields=managed_fields,
                     )
                     if result["failed"]:
-                        logger.error(f"  Failed to install {dep}")
+                        # Name the runtime: one dependency fails once per runtime (#4288).
+                        logger.error(f"  Failed to install {dep} for {harness_label(runtime)}")
                         all_ok = False
                     elif result.get("installed") and installed_servers is not None:
                         installed_servers.add(dep)
@@ -1452,7 +1455,9 @@ class MCPIntegrator:
                         runtime,
                         exc_info=True,
                     )
-                    logger.error(f"  Failed to install {dep}: {install_error}")
+                    logger.error(
+                        f"  Failed to install {dep} for {harness_label(runtime)}: {install_error}"
+                    )
                     all_ok = False
 
             # Emit aggregated post-install diagnostics for runtimes that

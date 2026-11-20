@@ -13,6 +13,13 @@ from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile_generator import require_current_cli
+from ...deps.lockfile_write_authority import (
+    LockfileWriter,
+    flush_lockfile_writes,
+    lockfile_writer,
+    remove_lockfile,
+    restore_lockfile_bytes,
+)
 from ...hook_contract import HookContractError
 from ...install.errors import PolicyViolationError
 from ...install.locking import serialized_lifecycle
@@ -30,6 +37,7 @@ from .engine import (
     _dependency_public_label,
     _dry_run_uninstall,
     _preflight_uninstall_survivors,
+    _progress_once,
     _project_transitive_orphans,
     _remove_packages_from_disk,
     _removed_lock_key,
@@ -128,7 +136,9 @@ def _persist_uninstall_lockfile(
             removal_pending = True
         else:
             ensure_lockfile_writable(lockfile_path)
-            lockfile_path.unlink(missing_ok=True)
+            remove_lockfile(lockfile_path)
+        # Survivors are durable before native registrations change.
+        flush_lockfile_writes()
     except LockfileSymlinkError:
         raise
     except Exception:
@@ -189,7 +199,88 @@ def _persist_lock_then_resync_native(
         lockfile_path=lockfile_path,
     )
     if saved is not None and saved.removal_pending:
-        lockfile_path.unlink(missing_ok=True)
+        remove_lockfile(lockfile_path)
+
+
+def _preflight_uninstall_writes(
+    surviving_deps,
+    deploy_root,
+    manifest_path,
+    scope,
+    logger,
+    *,
+    dry_run,
+    lockfile,
+    removed_keys,
+    kept_paths=frozenset(),
+):
+    """Refuse before the first write; return the survivors' trust context (#4185).
+
+    Uninstall refuses out-of-project paths before any change, and survivor
+    re-integration needs the org-policy trust map; either refusal stops the
+    command while apm.yml, the lockfile and deployed files are untouched.
+    """
+    from ...core.scope import InstallScope
+    from ...security.executables import resolve_project_exec_allow_map
+
+    if dry_run:
+        return (None, False)
+    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger, kept_paths)
+    if not surviving_deps:
+        return (None, False)
+    try:
+        apm_package = APMPackage.from_apm_yml(manifest_path)
+    except Exception:
+        return (None, False)
+    try:
+        allow_map = resolve_project_exec_allow_map(
+            deploy_root, apm_package, user_scope=scope is InstallScope.USER, logger=logger
+        )
+    except PolicyViolationError as exc:
+        logger.error(str(exc))
+        logger.progress("Resolve the org policy issue above and retry; no APM writes were made.")
+        sys.exit(1)
+    return (allow_map, True)
+
+
+def _refuse_unvalidated_paths(
+    lockfile, dependency_keys, deploy_root, scope, logger, kept_paths=frozenset()
+) -> None:
+    """Refuse out-of-project paths before any change.
+
+    Each path this uninstall removes goes through the deploy-path gate the
+    cleanup uses; rows another profile keeps on disk are not removed.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...core.scope import InstallScope
+    from ...integration.base_integrator import BaseIntegrator
+
+    if lockfile is None or not dependency_keys:
+        return
+    paths = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys).paths
+    rejected = sorted(
+        path
+        for path in paths
+        # URI rows (cowork://, copilot-app-db://) have their own owners.
+        if "://" not in path
+        and path not in kept_paths
+        and not BaseIntegrator.validate_deploy_path(
+            path,
+            deploy_root,
+            user_scope=scope is InstallScope.USER,
+            allow_final_symlink=True,
+        )
+    )
+    if not rejected:
+        return
+    logger.error("Uninstall stopped: apm.lock.yaml records paths APM does not manage:")
+    for path in rejected:
+        logger.error(f"  - {path}")
+    logger.progress(
+        "Restore apm.lock.yaml from version control or run 'apm install' to repair it, "
+        "then retry; no APM writes were made."
+    )
+    sys.exit(1)
 
 
 def _sync_integrations_for_manifest(
@@ -205,6 +296,7 @@ def _sync_integrations_for_manifest(
     default_counts,
     evidence,
     excluded_survivor_keys=frozenset(),
+    executable_context=(None, False),
 ) -> tuple[IntegrationCleanupOutcome, Exception | None]:
     """Run post-uninstall integration cleanup when the manifest is parseable."""
     default_outcome = IntegrationCleanupOutcome(
@@ -236,6 +328,7 @@ def _sync_integrations_for_manifest(
                 deployed_file_hashes=deployed_file_hashes,
                 excluded_survivor_keys=excluded_survivor_keys,
                 evidence=evidence,
+                executable_context=executable_context,
             ),
             None,
         )
@@ -361,6 +454,7 @@ def _abort_if_retained_target_cleanup_paths(
     outcome.apply_to(lockfile)
     try:
         lockfile.write(lockfile_path)
+        flush_lockfile_writes()
         lock_state = "apm.lock.yaml now records only the files still on disk"
     except OSError as exc:
         lock_state = f"apm.lock.yaml could not be updated ({exc}) and may list removed files"
@@ -386,6 +480,8 @@ def _uninstall_deletion_evidence(
         lockfile=lockfile,
         lockfile_root=lockfile_path.parent,
         diagnostics=logger.diagnostics,
+        # Not an integrating install: nothing was kept this run.
+        kept=(),
     )
     if lockfile:
         evidence.prepare(
@@ -644,7 +740,8 @@ def _finish_selected_profile_uninstall(
 )
 @click.pass_context
 @serialized_lifecycle
-def uninstall(ctx, packages, dry_run, verbose, global_):
+@lockfile_writer(LockfileWriter.UNINSTALL)
+def uninstall(ctx, packages, dry_run, verbose, global_):  # noqa: PLR0915
     """Remove APM packages from apm.yml and apm_modules (like npm uninstall).
 
     This command removes packages from both the apm.yml dependencies list
@@ -847,6 +944,17 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             excluded_keys=removed_keys | builtins.set(projected_orphans),
             source_root=manifest_path.parent,
         )
+        survivor_trust = _preflight_uninstall_writes(
+            surviving_deps,
+            deploy_root,
+            manifest_path,
+            scope,
+            logger,
+            dry_run=dry_run,
+            lockfile=lockfile,
+            removed_keys=removed_keys | builtins.set(projected_orphans) | profile_keys,
+            kept_paths=profile_survivors,
+        )
         if not dry_run:
             staged_local_refreshes = _stage_shared_local_survivors(
                 packages_to_remove,
@@ -983,6 +1091,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             return
 
         # Step 4: Remove from apm.yml
+        printed: builtins.set[str] = builtins.set()
         for section, declarations in (
             ("dependencies.apm", prod_deps),
             ("devDependencies.apm", dev_deps),
@@ -990,7 +1099,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             for declaration in manifest_declarations_of(declarations, packages_to_remove):
                 declarations.remove(declaration)
                 package_label = _dependency_public_label(declaration)
-                logger.progress(f"Removed {package_label} from {section} in apm.yml")
+                _progress_once(
+                    logger, printed, f"Removed {package_label} from {section} in apm.yml"
+                )
         data["dependencies"]["apm"] = prod_deps
         data["devDependencies"]["apm"] = dev_deps
         # Drop empty devDependencies wrappers so the manifest stays clean
@@ -1065,6 +1176,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             default_counts=cleaned,
             excluded_survivor_keys=profile_keys,
             evidence=deletion_evidence,
+            executable_context=survivor_trust,
         )
         cleaned = integration_cleanup.counts
         surviving_deployed_files = integration_cleanup.deployed_files
@@ -1294,7 +1406,7 @@ def _resync_native_registration_after_uninstall(
     except ClaudeNativePluginError as exc:
         if native_before is not None and native_before.lock_bytes and lockfile_path is not None:
             # One rollback unit: keep the removed plugins' ownership for the retry.
-            lockfile_path.write_bytes(native_before.lock_bytes)
+            restore_lockfile_bytes(lockfile_path, native_before.lock_bytes)
         raise ClaudeNativePluginError(
             "Package removal may already be complete, but Claude registration did not converge. "
             f"{exc} Reconcile remaining declarations with 'apm install --global' and the "

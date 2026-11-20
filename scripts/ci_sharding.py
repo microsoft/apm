@@ -12,7 +12,7 @@ run publishes a fresh one as an artifact, and a committed seed keeps the lanes
 balanced when no artifact is available. Node IDs missing from the file are
 weighted with the mean known duration. Without any file every test weighs 1.
 
-Three modes:
+Five modes:
 
 * ``--shard-plan-out PATH`` (with ``--collect-only``) estimates the work of the
   selection and writes ``{"shard_count": N, "shards": [1..N], ...}``. N is the
@@ -24,12 +24,25 @@ Three modes:
 * ``--shard-store-durations PATH`` records the measured setup + call +
   teardown seconds of every test that ran (on the xdist controller) so the
   nightly run can publish fresh durations.
+* ``--shard-inventory-out PATH`` writes every selected node ID with its marker
+  names, so the drift guard can evaluate each job's ``-m`` from one collect.
+* ``python -m scripts.ci_sharding files`` (no pytest collection) writes the
+  test modules of one shard to a pytest ``@argfile``. Each sharded CI job
+  passes that file list instead of whole directories, so every shard imports
+  only its own modules. Modules stay whole, modules naming one xdist group
+  stay together, and the shards' file lists are disjoint and cover every
+  test module under the targets that can hold a test selected by ``-m``.
+  tests/quality/test_ci_topology.py compares the lists with a full collect.
 """
 
 from __future__ import annotations
 
+import argparse
+import ast
+import fnmatch
 import json
 import math
+import re
 import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -42,6 +55,11 @@ from pytest_split.algorithms import LeastDurationAlgorithm
 DEFAULT_TARGET_SECONDS = 480.0
 DEFAULT_WORKERS = 4
 DEFAULT_MAX_SHARDS = 8
+# pytest's default python_files and norecursedirs, which this repo keeps.
+TEST_MODULE_PATTERNS = ("test_*.py", "*_test.py")
+_SKIPPED_DIRS = frozenset({"_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}"})
+_GROUP_NAME = re.compile(r"""xdist_group\(\s*(?:name\s*=\s*)?['"]([^'"]+)['"]""")
+_EXPRESSION_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass(frozen=True)
@@ -271,6 +289,240 @@ def plan_shard_count(
     }
 
 
+@dataclass(frozen=True)
+class FilePartition:
+    """Test modules per shard and the estimated serial seconds of each."""
+
+    shards: tuple[tuple[str, ...], ...]
+    seconds: tuple[float, ...]
+
+
+def _skipped_dir(part: str) -> bool:
+    return part.startswith(".") or part.endswith(".egg") or part in _SKIPPED_DIRS
+
+
+def discover_test_modules(targets: Sequence[str], root: Path) -> list[str]:
+    """Every test module pytest would collect under targets, as sorted relative paths."""
+    found: set[str] = set()
+    for target in targets:
+        path = root / target
+        if path.is_file():
+            found.add(path.relative_to(root).as_posix())
+            continue
+        if not path.is_dir():
+            raise pytest.UsageError(f"Shard target does not exist: {target}")
+        for candidate in path.rglob("*.py"):
+            relative = candidate.relative_to(root)
+            if any(_skipped_dir(part) for part in relative.parts[:-1]):
+                continue
+            if any(fnmatch.fnmatchcase(candidate.name, glob) for glob in TEST_MODULE_PATTERNS):
+                found.add(relative.as_posix())
+    return sorted(found)
+
+
+def required_markers(expression: str | None) -> tuple[str, ...]:
+    """Markers every test selected by a ``-m`` expression must carry.
+
+    Only a plain conjunction promises a marker; ``or``, parentheses or marker
+    arguments return none, so the caller keeps every module.
+    """
+    if not expression or re.search(r"\bor\b|[()]", expression):
+        return ()
+    required: set[str] = set()
+    negated = False
+    for word in _EXPRESSION_WORD.findall(expression):
+        if word == "not":
+            negated = not negated
+        elif word != "and":
+            if not negated:
+                required.add(word)
+            negated = False
+    return tuple(sorted(required))
+
+
+def select_test_modules(
+    targets: Sequence[str], expression: str | None, root: Path
+) -> dict[str, str]:
+    """Map each module that can hold a selected test to its source text.
+
+    A module whose source never names a marker the expression requires
+    cannot hold a selected test, so it is not imported at all.
+    """
+    patterns = [re.compile(rf"\b{re.escape(name)}\b") for name in required_markers(expression)]
+    selected: dict[str, str] = {}
+    for module in discover_test_modules(targets, root):
+        text = (root / module).read_text(encoding="utf-8", errors="replace")
+        if all(pattern.search(text) for pattern in patterns):
+            selected[module] = text
+    return selected
+
+
+def module_units(sources: Mapping[str, str]) -> list[tuple[str, ...]]:
+    """Keep modules that name the same xdist group on one shard."""
+    parent = {module: module for module in sources}
+
+    def root_of(module: str) -> str:
+        while parent[module] != module:
+            parent[module] = parent[parent[module]]
+            module = parent[module]
+        return module
+
+    first_by_group: dict[str, str] = {}
+    for module, text in sorted(sources.items()):
+        for name in sorted(set(_GROUP_NAME.findall(text))):
+            first = first_by_group.setdefault(name, module)
+            parent[root_of(module)] = root_of(first)
+    units: dict[str, list[str]] = defaultdict(list)
+    for module in sorted(sources):
+        units[root_of(module)].append(module)
+    return sorted(tuple(members) for members in units.values())
+
+
+def _entry_of(node: str) -> tuple[str, str | None]:
+    """Split a duration key into its module and top-level test (class or function)."""
+    module, _, rest = node.partition("::")
+    if not rest:
+        return module, None
+    return module, re.split(r"::|\[|@", rest, maxsplit=1)[0]
+
+
+def entry_weights(durations: Mapping[str, float]) -> dict[str, float]:
+    """Sum every duration under each module and under each module's top-level test."""
+    totals: dict[str, float] = defaultdict(float)
+    for node, seconds in durations.items():
+        module, test = _entry_of(node)
+        totals[module] += seconds
+        if test is not None:
+            totals[f"{module}::{test}"] += seconds
+    return totals
+
+
+def module_weights(modules: Sequence[str], durations: Mapping[str, float]) -> dict[str, float]:
+    """Sum every duration entry of a module; unknown modules weigh the mean."""
+    totals = entry_weights(durations)
+    known = [totals[module] for module in modules if module in totals]
+    default = sum(known) / len(known) if known else 1.0
+    return {module: totals.get(module, default) for module in modules}
+
+
+def top_level_tests(text: str) -> tuple[str, ...]:
+    """Top-level test functions and classes, or none when splitting is unsafe.
+
+    A module that imports test names, names an xdist group or does not parse
+    is never split, so every test it holds stays reachable from its file.
+    """
+    if _GROUP_NAME.search(text):
+        return ()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return ()
+    names: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+            (alias.asname is None and alias.name.split(".")[-1].startswith(("test", "Test")))
+            or (alias.asname or "").startswith(("test", "Test"))
+            for alias in node.names
+        ):
+            return ()
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith("test")
+        ) or (isinstance(node, ast.ClassDef) and node.name.startswith("Test")):
+            names.append(node.name)
+    return tuple(dict.fromkeys(names))
+
+
+def _split_heavy_units(
+    units: list[tuple[str, ...]],
+    sources: Mapping[str, str],
+    weights: dict[str, float],
+    totals: Mapping[str, float],
+    limit: float,
+) -> list[tuple[str, ...]]:
+    """Run a module heavier than limit as one node ID per top-level test."""
+    result: list[tuple[str, ...]] = []
+    for unit in units:
+        module = unit[0]
+        tests = top_level_tests(sources[module]) if len(unit) == 1 else ()
+        if weights[module] <= limit or len(tests) < 2:
+            result.append(unit)
+            continue
+        entries = [f"{module}::{test}" for test in tests]
+        measured = sum(totals.get(entry, 0.0) for entry in entries)
+        residual = max(weights[module] - measured, 0.0) / len(entries)
+        for entry in entries:
+            weights[entry] = totals.get(entry, 0.0) + residual
+            result.append((entry,))
+    return result
+
+
+def partition_modules(
+    sources: Mapping[str, str], shard_count: int, durations: Mapping[str, float]
+) -> FilePartition:
+    """Split modules into shard_count disjoint, nonempty, balanced shards.
+
+    Modules stay whole unless one outweighs half a shard's share; such a
+    module runs as one pytest node ID per top-level test instead.
+    """
+    weights = module_weights(list(sources), durations)
+    units = module_units(sources)
+    if shard_count < 1 or len(units) < shard_count:
+        raise pytest.UsageError(
+            f"Cannot split {len(units)} module units into {shard_count} nonempty shards."
+        )
+    limit = sum(weights.values()) / (shard_count * 2)
+    units = _split_heavy_units(units, sources, weights, entry_weights(durations), limit)
+    unit_seconds = {unit: sum(weights[entry] for entry in unit) for unit in units}
+    shards: list[list[str]] = [[] for _ in range(shard_count)]
+    loads = [0.0] * shard_count
+    for unit in sorted(units, key=lambda unit: (-unit_seconds[unit], unit)):
+        index = min(range(shard_count), key=lambda shard: (loads[shard], shard))
+        shards[index].extend(unit)
+        loads[index] += unit_seconds[unit]
+    return FilePartition(
+        shards=tuple(tuple(sorted(shard)) for shard in shards),
+        seconds=tuple(loads),
+    )
+
+
+def shard_test_files(
+    targets: Sequence[str],
+    expression: str | None,
+    shard_count: int,
+    durations: Mapping[str, float],
+    root: Path,
+) -> FilePartition:
+    """The canonical per-shard test file lists every sharded CI job runs."""
+    return partition_modules(select_test_modules(targets, expression, root), shard_count, durations)
+
+
+def _write_shard_files(args: argparse.Namespace) -> int:
+    if not 1 <= args.shard_index <= args.shard_count:
+        print("[x] --shard-index must be between 1 and --shard-count", file=sys.stderr)
+        return 2
+    try:
+        plan = shard_test_files(
+            args.targets,
+            args.marker_expression,
+            args.shard_count,
+            load_durations(args.shard_durations),
+            Path.cwd(),
+        )
+    except pytest.UsageError as exc:
+        print(f"[x] {exc}", file=sys.stderr)
+        return 2
+    files = plan.shards[args.shard_index - 1]
+    Path(args.out).write_text("".join(f"{path}\n" for path in files), encoding="utf-8")
+    seconds = ", ".join(f"{value:.0f}" for value in plan.seconds)
+    print(
+        f"[i] shard {args.shard_index}/{args.shard_count}: {len(files)} of "
+        f"{sum(len(shard) for shard in plan.shards)} test files -> {args.out}; "
+        f"estimated serial seconds per shard: {seconds}"
+    )
+    return 0
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("ci-sharding")
     group.addoption("--shard-count", type=int, default=None, help="Total shards.")
@@ -285,6 +537,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
     group.addoption("--shard-workers", type=int, default=DEFAULT_WORKERS)
     group.addoption("--shard-max", type=int, default=DEFAULT_MAX_SHARDS)
+    group.addoption(
+        "--shard-inventory-out",
+        default=None,
+        help="Write {node_id: [marker names]} of every selected test (drift guard input).",
+    )
     group.addoption(
         "--shard-store-durations",
         default=None,
@@ -318,6 +575,12 @@ def pytest_configure(config: pytest.Config) -> None:
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Plan or select one shard after pytest's marker selection."""
+    inventory_out = config.getoption("shard_inventory_out", default=None)
+    if inventory_out is not None:
+        inventory = {
+            item.nodeid: sorted({mark.name for mark in item.iter_markers()}) for item in items
+        }
+        Path(inventory_out).write_text(json.dumps(inventory, sort_keys=True), encoding="utf-8")
     plan_out = config.getoption("shard_plan_out")
     count = config.getoption("shard_count")
     index = config.getoption("shard_index")
@@ -352,10 +615,27 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         )
 
 
+def _files_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m scripts.ci_sharding files",
+        description="Write one shard's test modules to a pytest @argfile.",
+    )
+    parser.add_argument("--shard-count", type=int, required=True)
+    parser.add_argument("--shard-index", type=int, required=True)
+    parser.add_argument("--shard-durations", default=None, help="JSON {node_id: seconds}.")
+    parser.add_argument("-m", dest="marker_expression", default=None, help="pytest -m expression.")
+    parser.add_argument("--out", required=True, help="Write one test file path per line here.")
+    parser.add_argument("targets", nargs="+", help="Test directories or files.")
+    return parser
+
+
 def main(argv: Sequence[str]) -> int:
-    """``python -m scripts.ci_sharding compact OUT IN...``: merge, then compact."""
+    """``compact OUT IN...`` merges and compacts; ``files ...`` writes a shard file list."""
+    if argv and argv[0] == "files":
+        return _write_shard_files(_files_parser().parse_args(list(argv[1:])))
     if len(argv) < 3 or argv[0] != "compact":
         print("usage: python -m scripts.ci_sharding compact OUT IN...", file=sys.stderr)
+        print("       python -m scripts.ci_sharding files --help", file=sys.stderr)
         return 2
     merged: dict[str, float] = {}
     for path in argv[2:]:

@@ -1,6 +1,8 @@
 """Console utility functions for formatting and output."""
 
+import os
 import re
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Any
@@ -67,13 +69,47 @@ _ascii_console_classes: dict[type, type] = {}
 _ELLIPSIS_RUN = re.compile(r"([^\s|]{0,2})\u2026")
 
 
+def ascii_safe(text: str) -> str:
+    """Return *text* with every non-ASCII character as a Python escape (#4330).
+
+    User-supplied text such as a project or package path may hold any
+    character; output stays printable ASCII, so ``\u00fc`` prints as
+    ``\\xfc``. Control characters are left to their callers.
+    """
+    if text.isascii():
+        return text
+    return text.encode("ascii", "backslashreplace").decode("ascii")
+
+
 def _ascii_ellipsis(segment: Any) -> Any:
-    """Return *segment* with U+2026 runs rewritten to dots of the same width."""
+    """Return *segment* in ASCII: U+2026 runs become dots of the same width.
+
+    Any other non-ASCII character left by a pre-built renderable is escaped.
+    """
     text = segment.text
-    if "\u2026" not in text:
+    if text.isascii():
         return segment
-    dotted = _ELLIPSIS_RUN.sub(lambda m: "." * (len(m.group(1)) + 1), text)
-    return segment._replace(text=dotted)
+    if "\u2026" in text:
+        text = _ELLIPSIS_RUN.sub(lambda m: "." * (len(m.group(1)) + 1), text)
+    return segment._replace(text=ascii_safe(text))
+
+
+def _piped_windows_width(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Keep the full width when a Windows console writes to a pipe or file (#4409).
+
+    Rich treats any stream without VT support as a legacy Windows console and
+    renders one column narrower, which only prevents an auto-wrap on an
+    interactive old conhost. Rich keeps its own detection for a terminal.
+    """
+    if os.name != "nt" or "legacy_windows" in kwargs:
+        return kwargs
+    stream = kwargs.get("file") or (sys.stderr if kwargs.get("stderr") else sys.stdout)
+    isatty = getattr(stream, "isatty", None)
+    try:
+        interactive = bool(isatty and isatty())
+    except (OSError, ValueError):
+        interactive = False
+    return kwargs if interactive else {**kwargs, "legacy_windows": False}
 
 
 def _ascii_console(base: Any, **kwargs: Any) -> Any:
@@ -85,6 +121,7 @@ def _ascii_console(base: Any, **kwargs: Any) -> Any:
     """
     if not isinstance(base, type):
         return base(**kwargs)
+    kwargs = _piped_windows_width(kwargs)
     cls = _ascii_console_classes.get(base)
     if cls is None:
 
@@ -92,6 +129,10 @@ def _ascii_console(base: Any, **kwargs: Any) -> Any:
             @property
             def encoding(self) -> str:
                 return "ascii"
+
+            def render_str(self, text: str, **kwargs: Any) -> Any:
+                # Escape before layout so table columns size the escaped text.
+                return super().render_str(ascii_safe(text), **kwargs)
 
             def _render_buffer(self, buffer: Any) -> str:
                 # Rich truncates with U+2026 whatever the encoding (#3994); swap
@@ -237,10 +278,11 @@ def _rich_echo(
         color_code = color_map.get(color, Fore.WHITE)
         style_code = Style.BRIGHT if bold else ""
         click.echo(
-            f"{color_code}{style_code}{message}{Style.RESET_ALL}", err=err or _console_stderr
+            f"{color_code}{style_code}{ascii_safe(message)}{Style.RESET_ALL}",
+            err=err or _console_stderr,
         )
     else:
-        click.echo(message, err=err or _console_stderr)
+        click.echo(ascii_safe(message), err=err or _console_stderr)
 
 
 def _rich_success(message: str, symbol: str = None):  # noqa: RUF013

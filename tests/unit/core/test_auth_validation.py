@@ -1039,6 +1039,32 @@ class TestDescribeCredentialTried:
             "GH_TOKEN, gh auth token, git credential helper"
         )
 
+    def test_names_secondary_sources_tried_in_order_without_values(self) -> None:
+        """#4322: a PAT refused, then a credential helper answering 404, names both."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT_ACME": "sentinel-acme-value"}, clear=True):
+            resolver = AuthResolver()
+            with (
+                patch.object(
+                    resolver._token_manager, "resolve_credential_from_gh_cli", return_value=None
+                ),
+                patch.object(
+                    resolver._token_manager,
+                    "resolve_credential_from_git",
+                    return_value="sentinel-helper-value",
+                ),
+            ):
+
+                def _op(token, _env):
+                    if token == "sentinel-acme-value":
+                        raise RuntimeError("fatal: Authentication failed (HTTP 401)")
+                    raise RuntimeError("fatal: repository not found")
+
+                with pytest.raises(RuntimeError, match="not found"):
+                    resolver.try_with_fallback("acme.ghe.com", _op, org="acme")
+            text = resolver.describe_credential_tried("acme.ghe.com", "acme")
+        assert text == "credentials tried: GITHUB_APM_PAT_ACME, git credential helper"
+        assert "sentinel" not in text
+
 
 class TestBuildErrorContextNonADO:
     def test_github_com_with_token_mentions_saml(self) -> None:

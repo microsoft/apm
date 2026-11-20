@@ -467,7 +467,7 @@ Identity casing compares GitHub and registry owner/repository prefixes case-inse
 
 These checks run without a policy file:
 
-- `lockfile-exists` -- apm.lock.yaml present
+- `lockfile-exists` -- apm.lock.yaml present when APM, MCP or LSP dependencies are declared
 - `ref-consistency` -- dependency refs match lockfile
 - `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `deployed-files-present` -- all deployed files exist
@@ -527,7 +527,8 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 ### 2. Discovery and applicability
 
-APM auto-discovers org policy from the project's git remote by checking
+APM auto-discovers org policy from the project's git remote (`origin`, else the
+single remote; several remotes without `origin` stop the install and are named) by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. No policy found is silent by default; on github.com, `*.ghe.com` and
 the `GITHUB_HOST` host, `apm policy status`, `--verbose` and the `fetch_failure_default: block`
@@ -676,13 +677,15 @@ $ apm install acme/evil-pkg
 
 One violation line per offending dependency or MCP server; the hint names what to change in apm.yml (for a transitive MCP server, the dependency that brings it in) and cites the check in parentheses.
 
-Transitive MCP server blocked -- APM packages stay installed, MCP configs are not written:
+Transitive MCP server blocked -- the install stops before anything is committed; `apm.lock.yaml`, deployed files and MCP configs are unchanged:
 
 ```shell
 $ apm install
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
+[x] Policy violation: evil-srv -- denied by pattern: evil-*
+  Blocked by org policy at org:contoso/.github (mcp-denylist) -- remove `acme/carrier` (it brings in `evil-srv`) from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Install blocked by org policy: 1 check(s) failed
 ```
 
 ### 8. Escape hatches

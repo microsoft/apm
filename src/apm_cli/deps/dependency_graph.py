@@ -88,6 +88,9 @@ class DependencyTree:
     # apm.yml mistakes every install refuses, whatever is cached locally; a
     # subset of resolution_errors that previews must show (#3967).
     declaration_errors: list[str] = field(default_factory=list)
+    # --dry-run: subtrees whose metadata could not be loaded. Install treats
+    # them as leaves; a preview reports them as incomplete.
+    unavailable_subtrees: list[str] = field(default_factory=list)
 
     def add_declaration_error(self, error: str) -> None:
         """Record an apm.yml declaration error install always refuses."""

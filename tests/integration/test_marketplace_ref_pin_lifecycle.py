@@ -33,6 +33,7 @@ _REMOTE = f"https://{_HOST}/team/catalog"
 _ALIAS = "company"
 _PLUGIN = "example-plugin"
 _BROKEN = "broken-plugin"
+_GHOST = "ghost-plugin"
 _FLAGS = ("--target", "codex", "--parallel-downloads", "0")
 _PIN_KEY = f"{_ALIAS}/{_PLUGIN}"
 
@@ -90,6 +91,16 @@ class _World:
                         _plugin_entry(_PLUGIN, f"plugins/{_PLUGIN}"),
                         # #4194: the component path does not exist in the repository.
                         _plugin_entry(_BROKEN, "plugins/does-not-exist"),
+                        # #4322: a source that validation cannot reach after its pin resolves.
+                        {
+                            "name": _GHOST,
+                            "source": {
+                                "source": "git-subdir",
+                                "url": f"https://{_HOST}/team/ghost",
+                                "path": "plugins/ghost",
+                                "ref": "main",
+                            },
+                        },
                     ],
                 }
             ),
@@ -109,6 +120,11 @@ class _World:
         result = self._runner.run(args, cwd=self.project, env=self.env)
         _assert_output_oracles(result)
         assert result.returncode == expected, _evidence(result)
+        return result
+
+    def runner_run(self, *args: str) -> CommandResult:
+        result = self._runner.run(args, cwd=self.project, env=self.env)
+        _assert_output_oracles(result)
         return result
 
     def snapshot(self) -> tuple[dict[str, bytes], dict[str, bytes]]:
@@ -147,3 +163,22 @@ def test_failed_marketplace_install_writes_no_ref_pin(
 
     assert not world.pins.exists(), _evidence(failed)
     assert world.snapshot() == before, "I7: a failed install changed durable state"
+
+
+def test_mixed_success_marketplace_install_pins_only_the_installed_plugin(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4322: a partly failed install records pins only for plugins that installed."""
+    world = _World(tmp_path, apm_binary_path)
+    world.apm("marketplace", "update", _ALIAS)
+    assert not world.pins.exists()
+
+    result = world.runner_run("install", f"{_PLUGIN}@{_ALIAS}", f"{_GHOST}@{_ALIAS}", *_FLAGS)
+
+    assert result.returncode in (0, 1), _evidence(result)
+    assert (world.project / ".agents" / "skills" / _PLUGIN / "SKILL.md").is_file(), _evidence(
+        result
+    )
+    assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}, _evidence(
+        result
+    )

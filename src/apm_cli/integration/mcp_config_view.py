@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import yaml
 
 from apm_cli.core.scope import is_user_scope_root, manifest_file
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -476,6 +477,18 @@ class McpConfigDiff:
         return not (self.changed or self.source_only or self.lock_only)
 
 
+# Trust notices already shown in this process (#4256): one install collects
+# the locked MCP view in several passes, but the user needs one notice per server.
+_TRUST_NOTICES_SHOWN: set[str] = set()
+
+
+def _progress_trust_once(logger: Any, message: str) -> None:
+    if message in _TRUST_NOTICES_SHOWN:
+        return
+    _TRUST_NOTICES_SHOWN.add(message)
+    logger.progress(message)
+
+
 def _deduplicate(dependencies: list[Any] | tuple[Any, ...]) -> list[Any]:
     """Return first-wins dependencies using the shared MCP/LSP semantics."""
     return deduplicate_deps(list(dependencies))
@@ -828,6 +841,25 @@ class _CollectedDependencies:
     one_off: list[tuple[str, str]] = field(default_factory=list)
 
 
+def _copy_contradicts_lock(
+    package_key: str, dependency: LockedDependency, modules_root: Path, lockfile: LockFile
+) -> bool:
+    """Whether the apm_modules copy differs from its locked ``content_hash`` (#4389).
+
+    A frozen install then judges this package's declarations from the verified
+    copy it restores (the strict post-restoration check), never from these bytes.
+    """
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    try:
+        package_root = dependency.to_dependency_ref().get_install_path(modules_root)
+    except (OSError, ValueError):
+        return False
+    return package_root.is_dir() and locked_content_mismatch(
+        package_key, dependency, package_root, lockfile=lockfile
+    )
+
+
 def _collect_locked_dependencies(
     lockfile: LockFile | None,
     modules_root: Path,
@@ -919,7 +951,14 @@ def _collect_locked_dependencies(
                 )
             continue
 
-        if allow_pending and not manifest_path.parent.exists() and dependency.source != "local":
+        if (
+            allow_pending
+            and dependency.source != "local"
+            and (
+                not manifest_path.parent.exists()
+                or _copy_contradicts_lock(package_key, dependency, modules_root, lockfile)
+            )
+        ):
             from apm_cli.drift import build_download_ref
 
             try:
@@ -990,11 +1029,13 @@ def _collect_locked_dependencies(
             manifest = load_yaml(manifest_path)
             if not isinstance(manifest, dict):
                 raise ValueError("package manifest must be a mapping")
+            # Collecting declarations only reads: never create user config.
             package = APMPackage.from_mapping(
                 manifest,
                 package_path=manifest_path.parent,
                 source_path=manifest_path.parent,
                 manifest_path=manifest_path,
+                create_config=False,
             )
             authored_declarations = _authored_mcp_declarations(manifest)
         except (OSError, ValueError, UnicodeError, yaml.YAMLError) as exc:
@@ -1069,8 +1110,9 @@ def _collect_locked_dependencies(
                 and dependency.depth == 1
                 and verdict.layer not in ("project-allow", "user-allow")
             ):
-                logger.progress(
-                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'"
+                _progress_trust_once(
+                    logger,
+                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'",
                 )
             collected.append(
                 replace(
@@ -1091,6 +1133,30 @@ def _collect_locked_dependencies(
         for name, roots in direct_roots.items()
     }
     return result
+
+
+class _ParkedNoticeSilenced:
+    """A logger view that drops parked-server notices and keeps every other line.
+
+    ``apm install --frozen`` checks MCP drift before and after hydration; the
+    MCP phase is the one printer of each parked server (#4422).
+    """
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        if str(message).startswith("Parked MCP server"):
+            return
+        self._logger.warning(message, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
+
+
+def without_parked_notices(logger: Any) -> Any:
+    """Return *logger* without parked-server notices (None stays None)."""
+    return None if logger is None else _ParkedNoticeSilenced(logger)
 
 
 def parked_mcp_message(
@@ -1182,7 +1248,9 @@ def _collect_transitive_compat(
 
     if not modules_root.exists():
         return []
-    lockfile = LockFile.read(lock_path) if lock_path is not None and lock_path.exists() else None
+    lockfile = (
+        LockFile.read(lock_path) if lock_path is not None and lockfile_exists(lock_path) else None
+    )
     if lockfile is None:
         return _collect_unlocked_compat(
             modules_root,
