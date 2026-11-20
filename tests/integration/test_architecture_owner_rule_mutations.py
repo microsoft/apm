@@ -1224,6 +1224,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Automatic audit discovery stops enumerating canonical primitive surfaces.",
     ),
     MutationCase(
+        guard_id="ci-validation-topology-promise-receipts-gate",
+        rule_id="ci-validation-topology-promise-receipts-gate",
+        path=".github/workflows/merge-gate.yml",
+        old="Lifecycle Smoke (Linux),Promise Obligation Receipts (Linux)' }}",
+        new="Lifecycle Smoke (Linux)' }}",
+        intent="The receipts gate stops being a required pull_request check in EXPECTED_CHECKS.",
+    ),
+    MutationCase(
         guard_id="contracts-tests-taxonomy-classification",
         rule_id="contracts-tests-taxonomy-classification",
         path="tests/quality/taxonomy_inventory_plugin.py",

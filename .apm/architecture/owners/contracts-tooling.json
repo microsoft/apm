@@ -149,6 +149,18 @@
         "scripts/architecture_linter/checks/contracts_strip_charset.py"
       ],
       "guards": ["contracts-tooling-strip-charset"]
+    },
+    {
+      "id": "ci-validation-topology",
+      "decision": "Which CI jobs gate pull requests and the merge queue, and how required validation is laid out across them",
+      "owner": ".github/workflows/ci.yml (jobs) + .github/workflows/merge-gate.yml (EXPECTED_CHECKS); pinned by tests/quality/test_ci_topology.py",
+      "selectors": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/merge-gate.yml",
+        "tests/quality/test_ci_topology.py",
+        "scripts/architecture_linter/checks/ci_promise_receipts_gate.py"
+      ],
+      "guards": ["ci-validation-topology-promise-receipts-gate"]
     }
   ]
 }

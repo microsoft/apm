@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -384,7 +385,11 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
                 continue
             if repository_modules.intersection(_pytest_targets(job)):
                 ratchet_callers.append((workflow_path.name, job_name))
-    assert ratchet_callers == [("ci.yml", RATCHET_CONTRACT_JOB)]
+    # The promise-obligation receipts gate (#4122) is the one required caller.
+    assert ratchet_callers == [
+        ("ci.yml", RATCHET_CONTRACT_JOB),
+        ("ci.yml", PROMISE_RECEIPTS_JOB),
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -1561,3 +1566,121 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
         jobs[MACOS_ARM_BUILD_JOB]["steps"].append({"run": MACOS_UNIT_COMMAND})
     with pytest.raises((AssertionError, KeyError)):
         _assert_macos_arm_split(release_workflow)
+
+
+# Promise-obligation receipts gate (#4122): every lifecycle shard uploads the
+# oracle receipts its witnesses earned; one required job merges them and runs
+# tests/quality/test_promise_obligations.py with every witness required.
+PROMISE_RECEIPTS_JOB = "promise-obligation-receipts"
+PROMISE_RECEIPTS_CHECK = "Promise Obligation Receipts (Linux)"
+PROMISE_RECEIPTS_MODULE = "tests/quality/test_promise_obligations.py"
+PROMISE_RECEIPTS_UPLOAD_STEP = "Upload lifecycle receipts"
+PROMISE_RECEIPTS_DOWNLOAD_STEP = "Download lifecycle receipts"
+PROMISE_RECEIPTS_RUN_STEP = "Check promise-obligation receipts"
+PROMISE_RECEIPTS_SOURCE = ".pytest_cache/d/lifecycle-receipts/"
+PROMISE_RECEIPTS_DIR = "build/lifecycle-receipts"
+PROMISE_RECEIPTS_ENV = {
+    "APM_LIFECYCLE_RECEIPTS_DIR": PROMISE_RECEIPTS_DIR,
+    "APM_LIFECYCLE_RECEIPTS_REQUIRED": "1",
+}
+EXPECTED_CHECKS_EXPRESSION = re.compile(
+    r"\$\{\{ github\.event_name == 'merge_group' && '([^']*)' \|\| '([^']*)' \}\}"
+)
+
+
+def _expected_checks_by_event(merge_gate: WorkflowNode) -> dict[str, list[str]]:
+    wait_step = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+    match = EXPECTED_CHECKS_EXPRESSION.fullmatch(wait_step["env"]["EXPECTED_CHECKS"])
+    assert match, "EXPECTED_CHECKS must branch merge_group and pull_request check lists"
+    return {"merge_group": match[1].split(","), "pull_request": match[2].split(",")}
+
+
+def _assert_promise_receipts_gate(ci: WorkflowNode, merge_gate: WorkflowNode) -> None:
+    for shard_job in LIFECYCLE_SMOKE_SHARD_JOBS:
+        upload = workflow_step(workflow_job(ci, shard_job), PROMISE_RECEIPTS_UPLOAD_STEP)
+        assert "if" not in upload and "continue-on-error" not in upload
+        assert upload["uses"].startswith("actions/upload-artifact@")
+        assert upload["with"]["name"] == "lifecycle-receipts-${{ env.LIFECYCLE_SHARD }}"
+        assert upload["with"]["path"] == PROMISE_RECEIPTS_SOURCE
+        assert upload["with"].get("include-hidden-files") is True, (
+            "upload-artifact drops the hidden .pytest_cache receipts directory by default"
+        )
+
+    job = workflow_job(ci, PROMISE_RECEIPTS_JOB)
+    assert job["name"] == PROMISE_RECEIPTS_CHECK
+    assert job["needs"] == list(LIFECYCLE_SMOKE_SHARD_JOBS)
+    assert job.get("if") == "always()", "a failed shard must not turn the gate into a skipped pass"
+    assert job["permissions"] == {"contents": "read"}
+    assert "continue-on-error" not in job
+    download = workflow_step(job, PROMISE_RECEIPTS_DOWNLOAD_STEP)
+    assert download["uses"].startswith("actions/download-artifact@")
+    assert download["with"] == {
+        "pattern": "lifecycle-receipts-*",
+        "path": f"{PROMISE_RECEIPTS_DIR}/",
+        "merge-multiple": True,
+    }
+    step = workflow_step(job, PROMISE_RECEIPTS_RUN_STEP)
+    assert "if" not in step and "continue-on-error" not in step
+    assert step["env"] == PROMISE_RECEIPTS_ENV, "every required witness must report"
+    commands = [tokens for tokens in shell_commands(step) if "pytest" in tokens]
+    assert len(commands) == 1
+    tokens = commands[0][commands[0].index("pytest") + 1 :]
+    assert [token for token in tokens if token.startswith("tests/")] == [PROMISE_RECEIPTS_MODULE]
+    assert not any(
+        token.startswith(("-k", "-m", "--deselect", "--ignore", "--co", "--collect-only"))
+        for token in tokens
+    ), "the receipts gate must run the whole obligation module"
+    assert _pytest_targets(job) == (PROMISE_RECEIPTS_MODULE,)
+
+    for event, checks in _expected_checks_by_event(merge_gate).items():
+        assert checks.count(PROMISE_RECEIPTS_CHECK) == 1, (
+            f"{PROMISE_RECEIPTS_CHECK!r} must be required for {event}"
+        )
+
+
+def test_promise_receipts_gate_is_required() -> None:
+    _assert_promise_receipts_gate(
+        load_workflow(REPO_ROOT / ".github/workflows/ci.yml"),
+        load_workflow(REPO_ROOT / ".github/workflows/merge-gate.yml"),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "pr-not-required",
+        "merge-group-not-required",
+        "witnesses-optional",
+        "narrowed-selection",
+        "skipped-on-shard-failure",
+        "missing-shard-need",
+        "hidden-receipts-dropped",
+    ],
+)
+def test_promise_receipts_gate_drift_fails(provisional_ci: WorkflowNode, mutation: str) -> None:
+    merge_gate = deepcopy(load_workflow(REPO_ROOT / ".github/workflows/merge-gate.yml"))
+    wait_env = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")[
+        "env"
+    ]
+    job = workflow_job(provisional_ci, PROMISE_RECEIPTS_JOB)
+    step = workflow_step(job, PROMISE_RECEIPTS_RUN_STEP)
+    removed = f",{PROMISE_RECEIPTS_CHECK}"
+    if mutation == "pr-not-required":
+        wait_env["EXPECTED_CHECKS"] = wait_env["EXPECTED_CHECKS"].replace(
+            f"{removed}' }}}}", "' }}"
+        )
+    elif mutation == "merge-group-not-required":
+        wait_env["EXPECTED_CHECKS"] = wait_env["EXPECTED_CHECKS"].replace(f"{removed},", ",", 1)
+    elif mutation == "witnesses-optional":
+        del step["env"]["APM_LIFECYCLE_RECEIPTS_REQUIRED"]
+    elif mutation == "narrowed-selection":
+        step["run"] += " -k ratchet"
+    elif mutation == "skipped-on-shard-failure":
+        del job["if"]
+    elif mutation == "missing-shard-need":
+        job["needs"].remove(LIFECYCLE_SMOKE_SHARD_JOBS[-1])
+    else:
+        upload_job = workflow_job(provisional_ci, LIFECYCLE_SMOKE_SHARD_JOBS[0])
+        del workflow_step(upload_job, PROMISE_RECEIPTS_UPLOAD_STEP)["with"]["include-hidden-files"]
+    with pytest.raises(AssertionError):
+        _assert_promise_receipts_gate(provisional_ci, merge_gate)

@@ -282,3 +282,47 @@ def test_merged_receipts_hold_the_ratchet() -> None:
     ]
     assert not promotable, f"baseline rows now covered; move them to required: {promotable}"
     assert not problems, "\n".join(problems)
+
+
+def _covering_receipts(catalog) -> list[receipts.Receipt]:
+    """One receipt per required obligation, earned by that obligation's witness."""
+    covering = []
+    for key, witness in sorted(catalog.required.items()):
+        obligation = catalog.obligations[key]
+        params = {
+            "op": obligation.op or "install",
+            "cells": [obligation.cell] if obligation.cell else [],
+        }
+        outcome = "success" if obligation.outcome == "any" else obligation.outcome
+        covering.append(
+            receipts.Receipt(
+                witness, params, "", (), "project", "", obligation.law or "GATE", outcome
+            )
+        )
+    return covering
+
+
+@pytest.mark.parametrize("dropped", [0, -1])
+def test_removing_one_merged_receipt_fails_the_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dropped: int
+) -> None:
+    """Negative control of the required receipts gate (#4122).
+
+    A merged session that covers every required row passes the CI gate; the
+    same session minus one receipt fails it and names the uncovered row.
+    """
+    catalog = load_catalog()
+    covering = _covering_receipts(catalog)
+    removed_key = sorted(catalog.required)[dropped]
+    session = tmp_path / "session-control.jsonl"
+    monkeypatch.setenv(receipts.DIRECTORY_ENV, str(tmp_path))
+    monkeypatch.setenv("APM_LIFECYCLE_RECEIPTS_REQUIRED", "1")
+
+    session.write_text("".join(f"{r.to_json()}\n" for r in covering), encoding="ascii")
+    test_merged_receipts_hold_the_ratchet()
+
+    del covering[dropped]
+    session.write_text("".join(f"{r.to_json()}\n" for r in covering), encoding="ascii")
+    with pytest.raises(AssertionError, match="no oracle receipt covered") as failure:
+        test_merged_receipts_hold_the_ratchet()
+    assert removed_key in str(failure.value)
