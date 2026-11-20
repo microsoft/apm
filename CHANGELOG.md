@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `policy.hash` pin with a `sha384:` or `sha512:` prefix selects that algorithm when `hash_algorithm` is omitted; a prefix that contradicts an explicit `hash_algorithm` is still refused. (#4284)
 - A dependency chain deeper than the transitive depth cap (50) fails the install, naming the chain, instead of dropping the dependency past the cap. (#4284)
 - Registry lock replay accepts the locked archive from any registry declared in `apm.yml` when it matches `resolved_hash`; each registry's credentials go only to its own URL and a hash mismatch still fails. (#4284)
-- Org policy discovery uses the single git remote when there is no `origin`, and with several remotes and no `origin` it stops and names them. (#4284)
+- Org policy discovery uses the single git remote when there is no `origin`, and with several remotes and no `origin` it stops and names them; add an 'origin' remote to proceed. (#4284)
 - `apm install` accepts unchanged skills after a branch or worktree switch, keeps skill files it does not rewrite, and names the recovery when it refuses. (#4258)
 - `apm update` re-verifies each marketplace dependency's recorded provenance against its registered catalog: it restores the catalog origin and digest, and refuses a lockfile whose provenance no longer matches. (#4338)
 - A top-level `workspaces:` key in `apm.yml` now gets a warning that names it as reserved for OpenAPM v0.2, and `dependencies.conflict_resolution: nest` refuses the install before anything is written. (#4283)
