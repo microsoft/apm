@@ -600,6 +600,7 @@
         }
       ],
       "test_seams": [
+        "tests/unit/integration/test_hook_contract_ir.py",
         "tests/unit/integration/test_hook_native_metadata.py",
         "tests/unit/integration/test_cursor_hook_native_contract.py"
       ]
