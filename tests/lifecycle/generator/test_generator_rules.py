@@ -34,7 +34,7 @@ from tests.lifecycle.generator.rules import (
     USER_SCOPE_EVIDENCE,
     classify,
 )
-from tests.lifecycle.generator.space import build_space
+from tests.lifecycle.generator.space import build_space, raw_cells
 from tests.lifecycle.generator.witnesses import implied, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
@@ -354,3 +354,99 @@ def _credited_with(key: str) -> list[str]:
             if isinstance(step, dict) and key in step.get("cells", ()):
                 return list(step.get("unchanged", ()))
     return []
+
+
+# -- definition-rule removals, restated from the rule text (steward T-5 audit) --
+#
+# Each removal rule is restated here from its text and its source evidence,
+# independently of rules.definition_rule, and checked against the committed
+# obligations file both ways: every removal satisfies the rule, and every raw
+# candidate that satisfies it is removed (U6 is checked before U8).
+
+_OBLIGATIONS = Path(__file__).parents[3] / "tests" / "quality" / "lifecycle_obligations.json"
+_MARKETPLACE_ADD_SOURCES = frozenset({"marketplace-git", "marketplace-local", "marketplace-file"})
+
+
+def _u6(cell) -> bool:
+    """pack provenance is the dependencies / marketplace block, never a SRC (pack.py:32-33)."""
+    return cell.get("OP") == "pack" and cell.get("SRC") is not None
+
+
+def _u8(cell) -> str | None:
+    """The U8 clause a cell falls under: a source the command cannot take."""
+    op, src, prim = cell.get("OP"), cell.get("SRC"), cell.get("PRIM")
+    if src is None or _u6(cell):
+        return None
+    if op == "bundle-install" and src != "local-bundle":
+        return "bundle-install from a non-bundle source"  # install.py:1233 detect_local_bundle
+    if op == "install" and src == "local-bundle":
+        return "install of a local bundle is bundle-install"
+    if op == "marketplace" and src not in _MARKETPLACE_ADD_SOURCES:
+        return "marketplace add from a non-marketplace source"  # marketplace/__init__.py:359-360
+    if op == "mcp-install" and src != "registry":
+        return "mcp-install from a non-registry source"  # install.py:997 --registry
+    if src == "registry" and prim not in (None, "mcp"):
+        return "registry source for a non-MCP primitive"
+    return None
+
+
+def _u3(cell) -> bool:
+    """edited is relative to a receipt; unknown provenance has no lock (deployment_ledger.py:588)."""
+    deployed, lock = cell.get("DEPLOYED"), cell.get("LOCK")
+    return (deployed in ("clean", "edited") and lock == "absent") or (
+        deployed == "present-provenance-unknown" and lock not in (None, "absent")
+    )
+
+
+@cache
+def _committed_removed() -> dict[str, tuple[str, ...]]:
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    return {key: tuple(rules) for key, rules in data["removed"].items()}
+
+
+def _removed_by(rule: str) -> set[str]:
+    return {key for key, rules in _committed_removed().items() if rule in rules}
+
+
+@cache
+def _raw() -> dict[str, dict[str, str]]:
+    return {cell_id(family, cell): cell for family, cell in raw_cells()}
+
+
+@pytest.mark.parametrize(
+    ("rule", "holds"),
+    [("U3", _u3), ("U6", _u6), ("U8", lambda cell: _u8(cell) is not None)],
+)
+def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
+    removed = _removed_by(rule)
+    named = {key for key, cell in _raw().items() if holds(cell)}
+    assert removed == named, {
+        "removed but not named": sorted(removed - named)[:10],
+        "named but not removed": sorted(named - removed)[:10],
+    }
+
+
+def test_u8_removals_split_by_the_source_each_command_takes() -> None:
+    clauses: dict[str, int] = {}
+    for key in _removed_by("U8"):
+        clause = _u8(_raw()[key])
+        clauses[clause] = clauses.get(clause, 0) + 1
+    assert clauses == {
+        "bundle-install from a non-bundle source": 63,
+        "mcp-install from a non-registry source": 63,
+        "registry source for a non-MCP primitive": 60,
+        "marketplace add from a non-marketplace source": 45,
+        "install of a local bundle is bundle-install": 9,
+    }
+    assert sum(clauses.values()) == 240
+
+
+def test_every_removed_and_mapped_cell_names_its_rules() -> None:
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    for key, rules in data["removed"].items():
+        assert rules and set(rules) <= set(RULES), key
+    for key, entry in data["mapped"].items():
+        assert entry["rules"] and set(entry["rules"]) <= set(RULES), key
+        assert entry["maps_to"] in data["obligations"] or entry["maps_to"].startswith(
+            ("refusal|", "rule|")
+        ), key
