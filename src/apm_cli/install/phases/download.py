@@ -167,11 +167,13 @@ def _report_cache_mismatch(ctx: InstallContext, dep_key: str, locked_dep, path) 
         )
         + " Re-downloading from the locked source."
     )
-    reported = getattr(ctx, "cache_mismatch_reported", None)
-    if isinstance(reported, set):
-        reported.add(dep_key)
+    logger = getattr(ctx, "logger", None)
     if ctx.diagnostics is not None:
         ctx.diagnostics.warn(message, package=dep_key)
-    logger = getattr(ctx, "logger", None)
     if logger is not None:
         logger.progress(message)
+    # Only a notice that reached a sink counts as reported; otherwise the
+    # integrate phase keeps its fallback report (#4351).
+    reported = getattr(ctx, "cache_mismatch_reported", None)
+    if isinstance(reported, set) and (ctx.diagnostics is not None or logger is not None):
+        reported.add(dep_key)

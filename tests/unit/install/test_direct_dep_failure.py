@@ -135,3 +135,31 @@ class TestDirectDepFailLoud:
         run(ctx)
 
         assert ctx.direct_dep_failed is False
+
+
+def test_cache_mismatch_counts_as_reported_only_when_a_sink_received_it(tmp_path, monkeypatch):
+    """With no diagnostics and no logger, integrate keeps its fallback report (#4351)."""
+    from types import SimpleNamespace
+
+    from apm_cli.install import source_helpers
+    from apm_cli.install.phases import download
+
+    monkeypatch.setattr(source_helpers, "locked_content_mismatch", lambda *a, **k: True)
+    monkeypatch.setattr(source_helpers, "observed_package_hash", lambda *a, **k: "sha256:b")
+    locked = SimpleNamespace(content_hash="sha256:a")
+    silent = SimpleNamespace(
+        diagnostics=None, logger=None, existing_lockfile=None, cache_mismatch_reported=set()
+    )
+    download._report_cache_mismatch(silent, "pkg", locked, tmp_path)
+    assert silent.cache_mismatch_reported == set()
+
+    lines: list[str] = []
+    heard = SimpleNamespace(
+        diagnostics=None,
+        logger=SimpleNamespace(progress=lines.append),
+        existing_lockfile=None,
+        cache_mismatch_reported=set(),
+    )
+    download._report_cache_mismatch(heard, "pkg", locked, tmp_path)
+    assert heard.cache_mismatch_reported == {"pkg"}
+    assert len(lines) == 1
