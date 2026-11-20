@@ -3062,6 +3062,7 @@
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_skipped_as_modified_is_never_stale",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_edit_variants_never_lose_bytes",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_discarded_deploy_then_source_edit_installs",
         "tests/unit/install/phases/test_lockfile_union.py::TestCurrentInstallGovernance::test_row_this_run_retained_is_never_stale"
       ]
     },
