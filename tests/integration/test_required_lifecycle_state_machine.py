@@ -393,6 +393,26 @@ def _run_success(
     return result
 
 
+def _run_refused(
+    scenario: _Scenario,
+    project: LocalPackage,
+    kept: Path,
+    scenario_id: str,
+    *,
+    environment: dict[str, str],
+) -> None:
+    """Plain install keeps an edited managed file it cannot prove it wrote (#4360)."""
+    before = kept.read_bytes()
+    result = scenario.runner.run(
+        _INSTALL_ARGS, scenario_id=scenario_id, cwd=project.root, env=environment
+    )
+    text = " ".join((result.stdout + result.stderr).split())
+    entry = kept.relative_to(project.root).as_posix()
+    assert result.returncode == 1, text
+    assert f"Kept {entry}:" in text and "Move it aside, then run 'apm install'" in text, text
+    assert kept.read_bytes() == before
+
+
 def _codex_header_lifecycle(
     scenario: _Scenario,
     scope: str,
@@ -2948,6 +2968,16 @@ def test_required_tamper_is_detected_and_repair_restores_last_good_state(
         for detail in check.get("details", [])
     )
 
+    # The tampered file has no deployment evidence (#4360): install keeps it
+    # and exits 1; the printed remedy (move it aside, then install) restores it.
+    _run_refused(
+        scenario,
+        consumer,
+        deployed_instruction,
+        "tamper-repair-reinstall-refused",
+        environment=source.environment,
+    )
+    deployed_instruction.unlink()
     _run_success(
         scenario,
         consumer,
