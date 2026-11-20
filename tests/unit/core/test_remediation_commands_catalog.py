@@ -56,6 +56,7 @@ COMPONENT_ONLY: dict[str, str] = {
     "bundle-target-mismatch": _OUTSIDE,
     "claude-plugin-registration-stale": _FAULT,
     "cli-binary-outdated": _NETWORK,
+    "cli-update-check-skipped": _NETWORK,
     "cli-installer-unreachable": _NETWORK,
     "compiled-outputs-orphaned": _OUTSIDE,
     "copilot-plugin-registration-stale": _FAULT,

@@ -392,9 +392,11 @@ def _check_and_notify_updates():
         if is_refused(EgressSurface.VERSION_CHECK):
             context = click.get_current_context(silent=True)
             if context is not None and (context.obj or {}).get("verbose"):
+                from ..core.remediation import CLI_UPDATE_CHECK_SKIPPED
+
+                skipped = "Update check skipped: PROXY_REGISTRY_ONLY is set"
                 _rich_info(
-                    "Update check skipped: PROXY_REGISTRY_ONLY is set"
-                    " (run 'apm self-update --check' to check explicitly)",
+                    " ".join((skipped, f"({CLI_UPDATE_CHECK_SKIPPED.clause()})")),
                     symbol="info",
                 )
             return

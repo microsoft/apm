@@ -627,6 +627,11 @@ OUTSIDE_CONSTRAINT_RELEASE = _entry(
     before="select a newer version explicitly in apm.yml",
 )
 CLI_BINARY_OUTDATED = _entry("cli-binary-outdated", "apm self-update", "update the APM CLI binary")
+CLI_UPDATE_CHECK_SKIPPED = _entry(
+    "cli-update-check-skipped",
+    "apm self-update --check",
+    "check for a newer APM release explicitly",
+)
 CLI_INSTALLER_UNREACHABLE = _entry(
     "cli-installer-unreachable",
     "apm self-update",

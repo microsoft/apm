@@ -195,8 +195,24 @@ class TestCommandLogger:
         logger = CommandLogger("test", verbose=verbose)
         logger.stale_cleanup("/home/user/local-agent", count)
         mock_info.assert_called_once_with(
-            f"Cleaned {count} stale deployed {noun} for /home/user/local-agent",
+            f"Cleaned {count} stale deployed {noun} for _local/local-agent",
             symbol="info",
+        )
+
+    @pytest.mark.parametrize(
+        ("dep_key", "label"),
+        [
+            ("C:\\Users\\me\\local-agent", "_local/local-agent"),
+            ("~/pkgs/local-agent", "_local/local-agent"),
+            ("owner/repo", "owner/repo"),
+            ("<local .apm/>", "<local .apm/>"),
+        ],
+    )
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_never_prints_machine_paths(self, mock_info, dep_key, label):
+        CommandLogger("test").stale_cleanup(dep_key, 2)
+        mock_info.assert_called_once_with(
+            f"Cleaned 2 stale deployed files for {label}", symbol="info"
         )
 
     @pytest.mark.parametrize("count", [0, -1])
@@ -412,7 +428,7 @@ class TestInstallLogger:
         logger = InstallLogger(verbose=verbose)
         logger.stale_cleanup("/home/user/local-agent", 3)
         mock_info.assert_called_once_with(
-            "Cleaned 3 stale deployed files for /home/user/local-agent",
+            "Cleaned 3 stale deployed files for _local/local-agent",
             symbol="info",
         )
         assert logger.stale_cleaned_total == 3
