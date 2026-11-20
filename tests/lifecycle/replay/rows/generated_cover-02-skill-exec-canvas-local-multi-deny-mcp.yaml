@@ -59,7 +59,7 @@ given:
   cells:
   - pair|OP=mcp-install|TGT=multi-unchanged
   - pair|PRIM=mcp|TGT=multi-unchanged
-  - pair|SRC=registry|TGT=multi-unchanged
+  - pair|SRC=mcp-registry|TGT=multi-unchanged
   unchanged:
   - .agents/skills
   - .github/hooks

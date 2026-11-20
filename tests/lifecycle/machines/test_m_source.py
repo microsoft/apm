@@ -11,10 +11,12 @@ CELL: OP x SRC x PRIM (T3, ``t3_cells``) and DRYRUN x OP x SRC (T5, ``t5_cells``
 
 Forms: shorthand, git object (any host shape), local path (diamond parents,
 LSP, canvas), marketplace object, ``plugin@marketplace``, local bundle, native
-Claude plugin, MCP registry server. ``apm lock`` has no ``--dry-run`` flag, so
-its T5 cells are ``real`` only; the local bundle is a side door with no
-manifest entry, so only ``install`` applies to it; an MCP registry server is
-removed by editing ``apm.yml`` (``apm uninstall`` selects APM packages only).
+Claude plugin, package registry object (experimental ``registries``), MCP
+registry server and inline MCP server. ``apm lock`` has no ``--dry-run`` flag,
+so its T5 cells are ``real`` only; the local bundle is a side door with no
+manifest entry, so only ``install`` applies to it; an MCP server is removed by
+editing ``apm.yml`` (``apm uninstall`` refuses it: a U8 refusal cell of the
+covering replay).
 
 A dry-run step must leave every durable byte unchanged (I5 read-only); the real
 command then runs and every package whose lock row, deployed skill or MCP entry
@@ -48,6 +50,8 @@ from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, Observation, check_obligation
 from tests.lifecycle.receipts import current_node
 from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED
+from tests.lifecycle.world import registry
+from tests.lifecycle.world.packages import INERT_COMMAND
 from tests.lifecycle.world.services import (
     API_HOST,
     GITHUB_HOST,
@@ -95,7 +99,9 @@ FORMS = (
     "plugin-at-mkt",
     "bundle",
     "native",
-    "registry",
+    "pkg-registry",
+    "mcp-registry",
+    "inline-mcp",
 )
 SHAPES = ("github", *HOST_ALIASES)
 TARGET_SETS = (("copilot",), ("copilot", "claude"), ("claude",))
@@ -103,8 +109,19 @@ NETWORK = ("online", "offline", "proxy-only")
 REF = "v1.0.0"
 MARKET = MARKETPLACE_NAME
 WORLD_HOSTS = frozenset(
-    {GITHUB_HOST, API_HOST, RAW_HOST, REGISTRY_HOST, *(host for host, _ in HOST_ALIASES.values())}
+    {
+        GITHUB_HOST,
+        API_HOST,
+        RAW_HOST,
+        REGISTRY_HOST,
+        registry.HOST,
+        *(host for host, _ in HOST_ALIASES.values()),
+    }
 )
+# A self-defined MCP server (``install --mcp NAME -- <command>``); its command never runs.
+INLINE_SERVER = "p-inline"
+# MCP server slots -> the server name their ``dependencies.mcp`` entry carries.
+_MCP_SERVERS = {"p-registry": REGISTRY_SERVER, INLINE_SERVER: INLINE_SERVER}
 _CLOSED_PROXY = "http://127.0.0.1:9"
 _NO_DRY_RUN = frozenset({"lock"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
@@ -136,7 +153,7 @@ class Choice:
         """Forms of one identity share a slot: declaring one replaces the other."""
         if self.package == "p-skill":
             return "remote-skill"
-        return self.package if self.form != "plugin-at-mkt" else "remote-exec"
+        return "remote-exec" if self.package == "p-exec" else self.package
 
 
 _SKILL = frozenset({"skill"})
@@ -152,9 +169,15 @@ CHOICES = (
     Choice("local-path", "p-lsp", frozenset({"lsp"})),
     Choice("local-path", "p-canvas", frozenset({"canvas"})),
     Choice("native", "p-native-claude", frozenset({"native"})),
-    Choice("registry", "p-registry", frozenset({"mcp"})),
+    Choice("pkg-registry", "p-skill", _SKILL),
+    Choice("pkg-registry", "p-exec", _EXEC),
+    Choice("mcp-registry", "p-registry", frozenset({"mcp"})),
+    Choice("inline-mcp", INLINE_SERVER, frozenset({"mcp"})),
 )
 _BY_FORM = {choice.form: choice for choice in CHOICES}
+_REGISTRY_SKILL, _REGISTRY_EXEC = (c for c in CHOICES if c.form == "pkg-registry")
+_MCP_FORMS = frozenset({"mcp-registry", "inline-mcp"})
+_CLI_FORMS = frozenset({"plugin-at-mkt", "bundle", *_MCP_FORMS})
 _DIAMOND = frozenset({"p-parent", "p-parent2"})
 # Observed packages and their kinds (registry and bundle deploy no observed surface).
 KINDS: Mapping[str, frozenset[str]] = {
@@ -163,14 +186,14 @@ KINDS: Mapping[str, frozenset[str]] = {
     "p-child": _SKILL,
     **{c.package: c.kinds for c in CHOICES if c.form in ("local-path", "native")},
 }
-_NAMES = sorted({*KINDS, "p-registry"}, key=len, reverse=True)
+_NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
 
 def applies(op: str, form: str) -> bool:
     """Whether *op* acts on a dependency of *form* (see the module docstring)."""
     if form == "bundle":
         return op == "install"
-    return not (form == "registry" and op == "uninstall")
+    return not (form in _MCP_FORMS and op == "uninstall")
 
 
 def t3_cells() -> frozenset[str]:
@@ -388,22 +411,29 @@ class SourceMachine(MachineBase):
             }
         if choice.form == "marketplace-object":
             return {"name": "p-skill", "marketplace": MARKET}
+        if choice.form == "pkg-registry":
+            return {
+                "registry": registry.NAME,
+                "id": f"lifecycle/{choice.package}",
+                "version": "1.0.0",
+            }
         return packages[choice.package].spec
 
     def selector(self, choice: Choice) -> str:
         """The ``apm uninstall`` argument that selects *choice*."""
         if choice.form in ("marketplace-object", "plugin-at-mkt"):
             return f"{choice.package.split('-bundle')[0]}@{MARKET}"
-        if choice.form == "shorthand":
-            return "lifecycle/p-skill"
+        if choice.form in ("shorthand", "pkg-registry"):
+            return f"lifecycle/{choice.package}"
         entry = self.entries[choice.slot]
         return entry["git"] if isinstance(entry, dict) and "git" in entry else str(entry)
 
     def write_slot(self, slot: str, entry: object | None) -> None:
         data = self.bench.manifest()
         deps = data.setdefault("dependencies", {})
-        if slot == "p-registry":
-            deps["mcp"] = [m for m in deps.get("mcp") or [] if REGISTRY_SERVER not in str(m)]
+        if slot in _MCP_SERVERS:
+            server = _MCP_SERVERS[slot]
+            deps["mcp"] = [m for m in deps.get("mcp") or [] if server not in str(m)]
         else:
             old = self.entries.get(slot)
             deps["apm"] = [e for e in deps.get("apm") or [] if e != old]
@@ -549,7 +579,7 @@ class SourceMachine(MachineBase):
 
     @rule(choice=st.sampled_from(CHOICES), dry_run=st.booleans())
     def declare(self, choice: Choice, dry_run: bool) -> None:
-        if choice.form in ("plugin-at-mkt", "bundle", "registry"):
+        if choice.form in _CLI_FORMS:
             self.declare_by_cli(choice, dry_run)
             return
         entry = self.entry(choice)
@@ -563,17 +593,22 @@ class SourceMachine(MachineBase):
         self.converged = False
 
     def declare_by_cli(self, choice: Choice, dry_run: bool) -> None:
-        if choice.form == "registry":
+        if choice.form == "mcp-registry":
             args: tuple[str, ...] = ("--mcp", REGISTRY_SERVER)
+        elif choice.form == "inline-mcp":
+            args = ("--mcp", INLINE_SERVER, "--", INERT_COMMAND, "--stdio")
         elif choice.form == "bundle":
             args = (self.bench.world.packages["p-exec:bundle"].spec,)
         else:
             args = (f"p-exec@{MARKET}",)
-        before = self._apm_entries()
         had = self.slots.get(choice.slot)
+        if had is not None and had.form != choice.form:
+            self.undeclare(choice.slot)  # one identity, one declaring form
+            had = None
+        before = self._apm_entries()
         self.slots[choice.slot] = choice
         self.converged = False
-        step = self.command("install", args, (choice,), dry_run and choice.form != "registry")
+        step = self.command("install", args, (choice,), dry_run and choice.form not in _MCP_FORMS)
         if step.result.returncode != 0:
             if had is None:
                 self.slots.pop(choice.slot)
@@ -681,24 +716,30 @@ def replay_spine(machine: SourceMachine) -> None:
     for choice in CHOICES:
         if choice.form in ("local-path", "native"):
             machine.declare(choice, False)
-    for form in ("plugin-at-mkt", "bundle", "registry"):
+    for form in ("plugin-at-mkt", "bundle", "mcp-registry", "inline-mcp"):
         machine.declare(_BY_FORM[form], True)
-    remote_forms = ("shorthand", "git-object", "marketplace-object")
-    for form in remote_forms:
-        machine.declare(_BY_FORM[form], False)
+    remote_skills = (*(_BY_FORM[f] for f in ("shorthand", "git-object", "marketplace-object")),)
+    remote_skills += (_REGISTRY_SKILL,)
+    for choice in remote_skills:
+        machine.declare(choice, False)
         for op in ("install", "update", "prune", "compile", "lock"):
             machine.reconcile(op, True)
     # p-lsp still survives: the strict known cell #4214 fails this uninstall.
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
         machine.uninstall(slot, True)
-    for form in remote_forms:
-        machine.declare(_BY_FORM[form], False)
+    machine.declare(_REGISTRY_EXEC, False)
+    for op in ("install", "update", "prune", "compile", "lock"):
+        machine.reconcile(op, True)
+    machine.uninstall("remote-exec", True)
+    for choice in remote_skills:
+        machine.declare(choice, False)
         machine.reconcile("install", False)
         machine.uninstall("remote-skill", True)
     for slot in ("p-parent", "p-canvas", "p-native-claude"):
         machine.uninstall(slot, True)
-    machine.undeclare("p-registry")
+    for slot in _MCP_SERVERS:
+        machine.undeclare(slot)
     machine.reconcile("prune", False)
     for shape in HOST_ALIASES:
         machine.host_alias(shape)

@@ -115,16 +115,16 @@ given:
   - pair|OP=pack|TGT=single-unchanged
 - run: apm install --mcp io.github.lifecycle/p-registry --dry-run
   cells:
-  - T3|OP=mcp-install|SRC=registry|PRIM=mcp
+  - T3|OP=mcp-install|SRC=mcp-registry|PRIM=mcp
   - T4|OP=mcp-install|SCOPE=project|LOCK=absent
-  - T5|OP=mcp-install|SRC=registry|DRYRUN=on
+  - T5|OP=mcp-install|SRC=mcp-registry|DRYRUN=on
   - pair|OP=mcp-install|DEPLOYED=absent
   - pair|OP=mcp-install|DRYRUN=on
   - pair|OP=mcp-install|LOCK=absent
   - pair|OP=mcp-install|NET=online
   - pair|OP=mcp-install|PRIM=mcp
   - pair|OP=mcp-install|SCOPE=project
-  - pair|OP=mcp-install|SRC=registry
+  - pair|OP=mcp-install|SRC=mcp-registry
   - pair|OP=mcp-install|TGT=single-unchanged
   - pair|PRIM=mcp|DEPLOYED=absent
   - pair|PRIM=mcp|DRYRUN=on
@@ -132,13 +132,13 @@ given:
   - pair|PRIM=mcp|NET=online
   - pair|PRIM=mcp|SCOPE=project
   - pair|PRIM=mcp|TGT=single-unchanged
-  - pair|SRC=registry|DEPLOYED=absent
-  - pair|SRC=registry|DRYRUN=on
-  - pair|SRC=registry|LOCK=absent
-  - pair|SRC=registry|NET=online
-  - pair|SRC=registry|PRIM=mcp
-  - pair|SRC=registry|SCOPE=project
-  - pair|SRC=registry|TGT=single-unchanged
+  - pair|SRC=mcp-registry|DEPLOYED=absent
+  - pair|SRC=mcp-registry|DRYRUN=on
+  - pair|SRC=mcp-registry|LOCK=absent
+  - pair|SRC=mcp-registry|NET=online
+  - pair|SRC=mcp-registry|PRIM=mcp
+  - pair|SRC=mcp-registry|SCOPE=project
+  - pair|SRC=mcp-registry|TGT=single-unchanged
   unchanged:
   - .agents/skills
   - .github/hooks
@@ -604,8 +604,8 @@ when:
   - pair|OP=mcp-install|PRIM=hook
   - pair|OP=mcp-install|PRIM=lsp
   - pair|OP=mcp-install|PRIM=skill
-  - pair|SRC=registry|DEPLOYED=clean
-  - pair|SRC=registry|LOCK=consistent
+  - pair|SRC=mcp-registry|DEPLOYED=clean
+  - pair|SRC=mcp-registry|LOCK=consistent
   unchanged:
   - .agents/skills
   - .github/hooks
@@ -614,7 +614,7 @@ when:
 - run: apm install --mcp io.github.lifecycle/p-registry --target copilot
   cells:
   - pair|OP=mcp-install|SELECT=on
-  - pair|SRC=registry|SELECT=on
+  - pair|SRC=mcp-registry|SELECT=on
   unchanged:
   - .agents/skills
   - .github/hooks
@@ -623,7 +623,7 @@ when:
 - run: apm install --mcp io.github.lifecycle/p-registry --force
   cells:
   - pair|OP=mcp-install|FORCE=on
-  - pair|SRC=registry|FORCE=on
+  - pair|SRC=mcp-registry|FORCE=on
   unchanged:
   - .agents/skills
   - .github/hooks
@@ -632,7 +632,7 @@ when:
 - run: apm install --mcp io.github.lifecycle/p-registry --no-policy
   cells:
   - pair|OP=mcp-install|NOPOLICY=on
-  - pair|SRC=registry|NOPOLICY=on
+  - pair|SRC=mcp-registry|NOPOLICY=on
   unchanged:
   - .agents/skills
   - .github/hooks

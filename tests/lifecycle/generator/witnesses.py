@@ -38,7 +38,9 @@ FORM_SOURCES: Mapping[str, str] = {
     "plugin-at-mkt": "marketplace-git",
     "bundle": "local-bundle",
     "native": "native-plugin",
-    "registry": "registry",
+    "pkg-registry": "pkg-registry",
+    "mcp-registry": "mcp-registry",
+    "inline-mcp": "inline-mcp",
 }
 # M-SCOPE-LOCK op -> (OP, modifiers).
 LOCK_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {

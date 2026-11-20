@@ -22,6 +22,7 @@ from tests.lifecycle.generator.factors import (
 )
 from tests.lifecycle.generator.rules import (
     EXCEPTION_PARTNERS,
+    RULE_CELL_REFUSALS,
     RULE_CELLS,
     STATE_FACT_RULE_CELLS,
     classify,
@@ -115,8 +116,15 @@ def _resolve(space: Space, family: str, cell: Mapping[str, str]) -> str | None:
 def build_space() -> Space:
     space = Space()
     for key, rule in RULE_CELLS.items():
+        exit_code = RULE_CELL_REFUSALS[key][0] if key in RULE_CELL_REFUSALS else None
         space.obligations[key] = Entry(
-            key, "rule", {}, _strength("rule", key, (rule,)), (rule,), must_cover=True
+            key,
+            "rule",
+            {},
+            _strength("rule", key, (rule,)),
+            (rule,),
+            must_cover=True,
+            exit=exit_code,
         )
     for family, cell in raw_cells():
         space.raw[family] = space.raw.get(family, 0) + 1

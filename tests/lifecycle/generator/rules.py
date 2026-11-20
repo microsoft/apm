@@ -195,13 +195,21 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         (Ev(_INSTALL, 953, '"--mcp"'),),
     ),
     "U8": (
-        "bundle-install comes only from a local bundle; marketplace add takes git, a local "
-        "path or file://; mcp-install resolves from the MCP registry",
+        "the source decides the command: bundle-install is install of a local bundle (install "
+        "x local-bundle maps to it; no other source can state it); install --mcp takes an MCP "
+        "registry name or an inline server (--url, or a command after --), never a package "
+        "source, and an MCP source delivers only MCP; a package registry delivers whole "
+        "packages. Parsed-then-refused shapes are refusal cells, one per message class: "
+        "marketplace add of a source without a catalog, and uninstall of an MCP server "
+        "(a registry name is not found in apm.yml; an inline name is an MCP server)",
         (
             Ev(_INSTALL, 1233, "detect_local_bundle"),
-            Ev("src/apm_cli/commands/marketplace/__init__.py", 359, "a local filesystem path"),
-            Ev("src/apm_cli/commands/marketplace/__init__.py", 360, "file://"),
             Ev(_INSTALL, 997, '"--registry"'),
+            Ev(_INSTALL, 971, '"--url"'),
+            Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
+            Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 698, "is an MCP server, not a package"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
         ),
     ),
     "U9": (
@@ -265,6 +273,20 @@ EXCEPTION_PARTNERS: Mapping[str, Mapping[str, tuple[str, ...] | None]] = {
 # Ops where E3's exception (compile-staging routing) applies to a file primitive.
 FILEROUTE_OPS = frozenset({"compile", "bundle-install"})
 MARKETPLACE_SOURCES = frozenset({"marketplace-git", "marketplace-local", "marketplace-file"})
+# Sources of a single MCP server (install --mcp), not of a package.
+MCP_SOURCES = frozenset({"mcp-registry", "inline-mcp"})
+# U8 refusal cells: the CLI parses these shapes, then refuses them (exit 1).
+MARKETPLACE_ADD_REFUSAL = "rule|U8|marketplace-add-refuses-a-source-without-catalog"
+UNINSTALL_MCP_REFUSALS: Mapping[str, str] = {
+    "mcp-registry": "rule|U8|uninstall-refuses-a-registry-mcp-name",
+    "inline-mcp": "rule|U8|uninstall-refuses-an-inline-mcp-name",
+}
+# Exit code and pinned message of every refusal rule cell.
+RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
+    MARKETPLACE_ADD_REFUSAL: (1, r"No marketplace\.json found in"),
+    UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
+    UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
+}
 
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {
@@ -272,6 +294,7 @@ RULE_CELLS: Mapping[str, str] = {
     "rule|U9|approve-pending-read-only": "U9",
     "rule|U10|compile-validate-reads-mcp": "U10",
     "rule|U10|compile-render-only-non-mutation": "U10",
+    **dict.fromkeys(RULE_CELL_REFUSALS, "U8"),
 }
 # Rule cells whose evidence is a state fact (nothing written).
 STATE_FACT_RULE_CELLS = frozenset(
@@ -279,6 +302,7 @@ STATE_FACT_RULE_CELLS = frozenset(
         "rule|U9|approve-list-read-only",
         "rule|U9|approve-pending-read-only",
         "rule|U10|compile-render-only-non-mutation",
+        *RULE_CELL_REFUSALS,
     }
 )
 
@@ -319,10 +343,8 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U6"
     if src is not None and (
         (op == "bundle-install" and src != "local-bundle")
-        or (op == "install" and src == "local-bundle")
-        or (op == "marketplace" and src not in MARKETPLACE_SOURCES)
-        or (op == "mcp-install" and src != "registry")
-        or (src == "registry" and prim is not None and prim != "mcp")
+        or (op == "mcp-install" and src not in MCP_SOURCES)
+        or (src in MCP_SOURCES and prim is not None and prim != "mcp")
     ):
         return "U8"
     if (deployed in ("clean", "edited") and lock == "absent") or (
@@ -342,6 +364,13 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     if any(name in cell for name in EXCEPTION_FACTORS):
         return None
     op, prim, gate = cell.get("OP"), cell.get("PRIM"), cell.get("GATE")
+    src = cell.get("SRC")
+    if op == "install" and src == "local-bundle":
+        return {**cell, "OP": "bundle-install"}, "U8"
+    if op == "marketplace" and src is not None and src not in MARKETPLACE_SOURCES:
+        return MARKETPLACE_ADD_REFUSAL, "U8"
+    if op == "uninstall" and src in MCP_SOURCES:
+        return UNINSTALL_MCP_REFUSALS[src], "U8"
     policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
     if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
         return None

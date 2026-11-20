@@ -438,15 +438,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
     ),
     KnownOutputCell(
-        "uninstall-unattributed-skill-lines",
-        "I9",
-        "#4219",
-        _runs("uninstall"),
-        r"\|-- (Skill integrated|\d+ skill\(s\) integrated)",
-        # Two survivor skill lines with no package line naming them.
-        output=r"\A(?!.*^  \[\+\] )(?=(?:.*^  \|-- Skill integrated){2})",
-    ),
-    KnownOutputCell(
         "pack-dry-run-plugin-notes-twice",
         "I9",
         "#4291",

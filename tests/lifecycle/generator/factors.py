@@ -35,7 +35,12 @@ SOURCES = (
     "marketplace-local",
     "marketplace-file",
     "local-bundle",
-    "registry",
+    # A REST package registry (experimental ``registries``) delivers whole packages;
+    # an MCP server comes from the MCP registry or is defined inline (``--mcp NAME
+    # --url URL`` or ``--mcp NAME -- <command>``).
+    "pkg-registry",
+    "mcp-registry",
+    "inline-mcp",
     "native-plugin",
 )
 PLAIN_PRIMS = ("skill", "other-file")

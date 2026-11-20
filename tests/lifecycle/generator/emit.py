@@ -88,6 +88,8 @@ def _row_document(row: covering.Row) -> dict[str, object]:
         fields: dict[str, object] = {}
         if step.exit is not None:
             fields["exit"] = step.exit
+        if step.message is not None:
+            fields["message"] = step.message
         if step.cells:
             fields["cells"] = list(step.cells)
             if step.unchanged:

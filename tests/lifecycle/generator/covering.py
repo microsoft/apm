@@ -27,8 +27,14 @@ from tests.lifecycle.generator.factors import (
     cell_id,
     row_targets,
 )
+from tests.lifecycle.generator.rules import (
+    MARKETPLACE_ADD_REFUSAL,
+    RULE_CELL_REFUSALS,
+    UNINSTALL_MCP_REFUSALS,
+)
 from tests.lifecycle.generator.space import Entry
-from tests.lifecycle.world.packages import GIT_PUBLISHED
+from tests.lifecycle.generator.witnesses import implied
+from tests.lifecycle.world.packages import GIT_PUBLISHED, INERT_COMMAND
 from tests.lifecycle.world.services import REGISTRY_SERVER
 
 # Kinds of the world packages a row may use (tests/lifecycle/world/packages.py
@@ -72,6 +78,7 @@ class Step:
     exit: int | None = None
     fixed: tuple[str, ...] = ()  # refusal and rule cells this step witnesses
     unchanged: tuple[str, ...] = ()
+    message: str | None = None  # pinned refusal message (a regex over the output)
     cells: tuple[str, ...] = ()  # credited cells, filled by ``cover``
 
 
@@ -352,7 +359,7 @@ def _apply(state: _State, step: Step, kinds: Mapping[str, tuple[str, ...]]) -> N
 
 def _units(state: _State, step: Step, plan: Plan, kinds) -> list[dict[str, str]]:
     if step.op == "mcp-install":
-        units = [{"SRC": "registry", "PRIM": "mcp"}]
+        units = [{"SRC": "mcp-registry", "PRIM": "mcp"}]
         return units + [
             {"PRIM": kind} for name in state.declared for kind in kinds[name] if kind != "mcp"
         ]
@@ -476,6 +483,7 @@ def cover(obligations: Mapping[str, Entry]) -> list[Row]:
         rows.append(row)
         covered |= new
     rows += refusal_rows(obligations, len(rows) + 1)
+    rows.append(source_refusal_row(obligations, len(rows) + 1))
     return rows
 
 
@@ -542,3 +550,53 @@ def refusal_rows(obligations: Mapping[str, Entry], start: int) -> list[Row]:
         )
         rows.append(row)
     return rows
+
+
+# -- source refusals (U8) ---------------------------------------------------------
+
+INLINE_SERVER = "p-inline"
+INLINE_INSTALL = f"apm install --mcp {INLINE_SERVER} -- {INERT_COMMAND} --stdio"
+# A served repository without a marketplace catalog.
+_NOT_A_CATALOG = "https://github.com/lifecycle/p-skill"
+
+
+def _refusal(line: str, op: str, cell: str) -> Step:
+    exit_code, message = RULE_CELL_REFUSALS[cell]
+    return Step(
+        line,
+        op,
+        exit=exit_code,
+        fixed=(cell,),
+        unchanged=EVERYTHING,
+        cells=(cell,),
+        message=message,
+    )
+
+
+def source_refusal_row(obligations: Mapping[str, Entry], index: int) -> Row:
+    """Declare one MCP server of each MCP source, then the U8 parsed-then-refused shapes."""
+    inline = {"OP": "mcp-install", "SRC": "inline-mcp", "PRIM": "mcp"}
+    inline_cells = tuple(
+        sorted(key for key in implied(inline) if key in obligations and "inline-mcp" in key)
+    )
+    steps = [
+        _cmd("install", "install", "p-skill", mods={"SELECT"}, names=("p-skill",), essential=True),
+        Step(f"apm install --mcp {REGISTRY_SERVER}", "mcp-install", essential=True),
+        Step(INLINE_INSTALL, "mcp-install", essential=True, cells=inline_cells),
+        _refusal(
+            f"apm uninstall {REGISTRY_SERVER}", "uninstall", UNINSTALL_MCP_REFUSALS["mcp-registry"]
+        ),
+        _refusal(
+            f"apm uninstall {INLINE_SERVER}", "uninstall", UNINSTALL_MCP_REFUSALS["inline-mcp"]
+        ),
+        _refusal(f"apm marketplace add {_NOT_A_CATALOG}", "marketplace", MARKETPLACE_ADD_REFUSAL),
+    ]
+    return Row(
+        f"cover-{index:02d}-source-refusals",
+        "refusal",
+        ("p-skill",),
+        row_targets()[0],
+        {},
+        steps,
+        {"OP": "uninstall", "SRC": "mcp-registry"},
+    )

@@ -2,54 +2,55 @@
  "counts": {
   "baseline_by_lane": {
    "T-1": 254,
-   "T-2": 469,
-   "T-3": 231,
-   "T-6a": 193,
-   "T-6b": 135,
+   "T-2": 529,
+   "T-3": 243,
+   "T-6a": 201,
+   "T-6b": 141,
    "T-6c": 28,
-   "T-6e": 40,
-   "T-7b": 59
+   "T-6e": 42,
+   "T-7b": 63
   },
   "exception_pairs": 94,
-  "mapped": 322,
+  "mapped": 404,
   "mapped_by_rule": {
-   "E3": 126,
-   "U1": 73,
-   "U10": 40,
+   "E3": 134,
+   "U1": 84,
+   "U10": 44,
    "U2": 78,
-   "U5": 5
+   "U5": 5,
+   "U8": 59
   },
-  "must_cover": 70,
+  "must_cover": 73,
   "obligations": {
    "T1": 387,
    "T2": 12,
-   "T3": 349,
+   "T3": 401,
    "T4": 80,
-   "T5": 49,
-   "pair": 1448,
+   "T5": 60,
+   "pair": 1532,
    "refusal": 43,
-   "rule": 4
+   "rule": 7
   },
-  "obligations_total": 2372,
+  "obligations_total": 2522,
   "raw_candidates": {
    "T1": 504,
    "T2": 12,
-   "T3": 672,
+   "T3": 840,
    "T4": 96,
-   "T5": 96,
-   "pair": 1584
+   "T5": 120,
+   "pair": 1684
   },
-  "removed": 317,
+  "removed": 380,
   "removed_by_rule": {
    "U3": 5,
-   "U6": 72,
-   "U8": 240
+   "U6": 90,
+   "U8": 285
   },
-  "row_steps": 194,
-  "rows": 15,
+  "row_steps": 200,
+  "rows": 16,
   "status": {
-   "baseline": 1409,
-   "required": 963
+   "baseline": 1501,
+   "required": 1021
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -129,7 +130,9 @@
    "marketplace-local",
    "marketplace-file",
    "local-bundle",
-   "registry",
+   "pkg-registry",
+   "mcp-registry",
+   "inline-mcp",
    "native-plugin"
   ],
   "TGT": [
@@ -928,6 +931,12 @@
     "E3"
    ]
   },
+  "T3|OP=approve-deny|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "T3|OP=approve-deny|SRC=pkg-registry|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
   "T3|OP=audit|SRC=git|PRIM=other-file": {
    "maps_to": "T3|OP=audit|SRC=git|PRIM=skill",
    "rules": [
@@ -970,6 +979,12 @@
     "E3"
    ]
   },
+  "T3|OP=audit|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "T3|OP=audit|SRC=pkg-registry|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
   "T3|OP=compile|SRC=git|PRIM=hook": {
    "maps_to": "rule|U10|compile-render-only-non-mutation",
    "rules": [
@@ -983,6 +998,12 @@
    ]
   },
   "T3|OP=compile|SRC=git|PRIM=mcp": {
+   "maps_to": "rule|U10|compile-validate-reads-mcp",
+   "rules": [
+    "U10"
+   ]
+  },
+  "T3|OP=compile|SRC=inline-mcp|PRIM=mcp": {
    "maps_to": "rule|U10|compile-validate-reads-mcp",
    "rules": [
     "U10"
@@ -1078,6 +1099,12 @@
     "U10"
    ]
   },
+  "T3|OP=compile|SRC=mcp-registry|PRIM=mcp": {
+   "maps_to": "rule|U10|compile-validate-reads-mcp",
+   "rules": [
+    "U10"
+   ]
+  },
   "T3|OP=compile|SRC=native-plugin|PRIM=hook": {
    "maps_to": "rule|U10|compile-render-only-non-mutation",
    "rules": [
@@ -1096,7 +1123,19 @@
     "U10"
    ]
   },
-  "T3|OP=compile|SRC=registry|PRIM=mcp": {
+  "T3|OP=compile|SRC=pkg-registry|PRIM=hook": {
+   "maps_to": "rule|U10|compile-render-only-non-mutation",
+   "rules": [
+    "U10"
+   ]
+  },
+  "T3|OP=compile|SRC=pkg-registry|PRIM=lsp": {
+   "maps_to": "rule|U10|compile-render-only-non-mutation",
+   "rules": [
+    "U10"
+   ]
+  },
+  "T3|OP=compile|SRC=pkg-registry|PRIM=mcp": {
    "maps_to": "rule|U10|compile-validate-reads-mcp",
    "rules": [
     "U10"
@@ -1106,6 +1145,48 @@
    "maps_to": "T3|OP=install|SRC=git|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "T3|OP=install|SRC=local-bundle|PRIM=bin": {
+   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=install|SRC=local-bundle|PRIM=canvas": {
+   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=canvas",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=install|SRC=local-bundle|PRIM=hook": {
+   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=hook",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=install|SRC=local-bundle|PRIM=lsp": {
+   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=lsp",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=install|SRC=local-bundle|PRIM=mcp": {
+   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=mcp",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=install|SRC=local-bundle|PRIM=other-file": {
+   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=other-file",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=install|SRC=local-bundle|PRIM=skill": {
+   "maps_to": "T3|OP=bundle-install|SRC=local-bundle|PRIM=skill",
+   "rules": [
+    "U8"
    ]
   },
   "T3|OP=install|SRC=local-path|PRIM=other-file": {
@@ -1134,6 +1215,12 @@
   },
   "T3|OP=install|SRC=native-plugin|PRIM=other-file": {
    "maps_to": "T3|OP=install|SRC=native-plugin|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
+  "T3|OP=install|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "T3|OP=install|SRC=pkg-registry|PRIM=skill",
    "rules": [
     "E3"
    ]
@@ -1180,6 +1267,144 @@
     "E3"
    ]
   },
+  "T3|OP=lock|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "T3|OP=lock|SRC=pkg-registry|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
+  "T3|OP=marketplace|SRC=git|PRIM=bin": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=git|PRIM=canvas": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=git|PRIM=hook": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=git|PRIM=lsp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=git|PRIM=mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=git|PRIM=other-file": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=git|PRIM=skill": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=inline-mcp|PRIM=mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-bundle|PRIM=bin": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-bundle|PRIM=canvas": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-bundle|PRIM=hook": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-bundle|PRIM=lsp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-bundle|PRIM=mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-bundle|PRIM=other-file": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-bundle|PRIM=skill": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-path|PRIM=bin": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-path|PRIM=canvas": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-path|PRIM=hook": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-path|PRIM=lsp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-path|PRIM=mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-path|PRIM=other-file": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=local-path|PRIM=skill": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
   "T3|OP=marketplace|SRC=marketplace-file|PRIM=other-file": {
    "maps_to": "T3|OP=marketplace|SRC=marketplace-file|PRIM=skill",
    "rules": [
@@ -1196,6 +1421,96 @@
    "maps_to": "T3|OP=marketplace|SRC=marketplace-local|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "T3|OP=marketplace|SRC=mcp-registry|PRIM=mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=bin": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=canvas": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=hook": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=lsp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=other-file": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=skill": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=pkg-registry|PRIM=bin": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=pkg-registry|PRIM=canvas": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=pkg-registry|PRIM=hook": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=pkg-registry|PRIM=lsp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=pkg-registry|PRIM=mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=marketplace|SRC=pkg-registry|PRIM=skill": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
    ]
   },
   "T3|OP=prune|SRC=git|PRIM=other-file": {
@@ -1240,10 +1555,22 @@
     "E3"
    ]
   },
+  "T3|OP=prune|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "T3|OP=prune|SRC=pkg-registry|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
   "T3|OP=uninstall|SRC=git|PRIM=other-file": {
    "maps_to": "T3|OP=uninstall|SRC=git|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "T3|OP=uninstall|SRC=inline-mcp|PRIM=mcp": {
+   "maps_to": "rule|U8|uninstall-refuses-an-inline-mcp-name",
+   "rules": [
+    "U8"
    ]
   },
   "T3|OP=uninstall|SRC=local-bundle|PRIM=other-file": {
@@ -1276,8 +1603,20 @@
     "E3"
    ]
   },
+  "T3|OP=uninstall|SRC=mcp-registry|PRIM=mcp": {
+   "maps_to": "rule|U8|uninstall-refuses-a-registry-mcp-name",
+   "rules": [
+    "U8"
+   ]
+  },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=other-file": {
    "maps_to": "T3|OP=uninstall|SRC=native-plugin|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
+  "T3|OP=uninstall|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "T3|OP=uninstall|SRC=pkg-registry|PRIM=skill",
    "rules": [
     "E3"
    ]
@@ -1320,6 +1659,12 @@
   },
   "T3|OP=update|SRC=native-plugin|PRIM=other-file": {
    "maps_to": "T3|OP=update|SRC=native-plugin|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
+  "T3|OP=update|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "T3|OP=update|SRC=pkg-registry|PRIM=skill",
    "rules": [
     "E3"
    ]
@@ -1426,6 +1771,12 @@
     "U1"
    ]
   },
+  "T5|OP=approve-deny|SRC=inline-mcp|DRYRUN=on": {
+   "maps_to": "refusal|OP=approve-deny|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
   "T5|OP=approve-deny|SRC=local-bundle|DRYRUN=on": {
    "maps_to": "refusal|OP=approve-deny|DRYRUN=on",
    "rules": [
@@ -1456,19 +1807,37 @@
     "U1"
    ]
   },
+  "T5|OP=approve-deny|SRC=mcp-registry|DRYRUN=on": {
+   "maps_to": "refusal|OP=approve-deny|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
   "T5|OP=approve-deny|SRC=native-plugin|DRYRUN=on": {
    "maps_to": "refusal|OP=approve-deny|DRYRUN=on",
    "rules": [
     "U1"
    ]
   },
-  "T5|OP=approve-deny|SRC=registry|DRYRUN=on": {
+  "T5|OP=approve-deny|SRC=pkg-registry|DRYRUN=on": {
    "maps_to": "refusal|OP=approve-deny|DRYRUN=on",
    "rules": [
     "U1"
    ]
   },
+  "T5|OP=install|SRC=local-bundle|DRYRUN=on": {
+   "maps_to": "T5|OP=bundle-install|SRC=local-bundle|DRYRUN=on",
+   "rules": [
+    "U8"
+   ]
+  },
   "T5|OP=lock|SRC=git|DRYRUN=on": {
+   "maps_to": "refusal|OP=lock|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=lock|SRC=inline-mcp|DRYRUN=on": {
    "maps_to": "refusal|OP=lock|DRYRUN=on",
    "rules": [
     "U1"
@@ -1504,14 +1873,44 @@
     "U1"
    ]
   },
+  "T5|OP=lock|SRC=mcp-registry|DRYRUN=on": {
+   "maps_to": "refusal|OP=lock|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
   "T5|OP=lock|SRC=native-plugin|DRYRUN=on": {
    "maps_to": "refusal|OP=lock|DRYRUN=on",
    "rules": [
     "U1"
    ]
   },
-  "T5|OP=lock|SRC=registry|DRYRUN=on": {
+  "T5|OP=lock|SRC=pkg-registry|DRYRUN=on": {
    "maps_to": "refusal|OP=lock|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=marketplace|SRC=git|DRYRUN=on": {
+   "maps_to": "refusal|OP=marketplace|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=marketplace|SRC=inline-mcp|DRYRUN=on": {
+   "maps_to": "refusal|OP=marketplace|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=marketplace|SRC=local-bundle|DRYRUN=on": {
+   "maps_to": "refusal|OP=marketplace|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=marketplace|SRC=local-path|DRYRUN=on": {
+   "maps_to": "refusal|OP=marketplace|DRYRUN=on",
    "rules": [
     "U1"
    ]
@@ -1532,6 +1931,36 @@
    "maps_to": "refusal|OP=marketplace|DRYRUN=on",
    "rules": [
     "U1"
+   ]
+  },
+  "T5|OP=marketplace|SRC=mcp-registry|DRYRUN=on": {
+   "maps_to": "refusal|OP=marketplace|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=marketplace|SRC=native-plugin|DRYRUN=on": {
+   "maps_to": "refusal|OP=marketplace|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=marketplace|SRC=pkg-registry|DRYRUN=on": {
+   "maps_to": "refusal|OP=marketplace|DRYRUN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "T5|OP=uninstall|SRC=inline-mcp|DRYRUN=on": {
+   "maps_to": "rule|U8|uninstall-refuses-an-inline-mcp-name",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T5|OP=uninstall|SRC=mcp-registry|DRYRUN=on": {
+   "maps_to": "rule|U8|uninstall-refuses-a-registry-mcp-name",
+   "rules": [
+    "U8"
    ]
   },
   "pair|FROZEN=on|UPDATE=on": {
@@ -1660,6 +2089,12 @@
     "E3"
    ]
   },
+  "pair|OP=install|SRC=local-bundle": {
+   "maps_to": "pair|OP=bundle-install|SRC=local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
   "pair|OP=lock|DRYRUN=on": {
    "maps_to": "refusal|OP=lock|DRYRUN=on",
    "rules": [
@@ -1718,6 +2153,48 @@
    "maps_to": "refusal|OP=marketplace|SCOPE=user",
    "rules": [
     "U1"
+   ]
+  },
+  "pair|OP=marketplace|SRC=git": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "pair|OP=marketplace|SRC=inline-mcp": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "pair|OP=marketplace|SRC=local-bundle": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "pair|OP=marketplace|SRC=local-path": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "pair|OP=marketplace|SRC=mcp-registry": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "pair|OP=marketplace|SRC=native-plugin": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
+   ]
+  },
+  "pair|OP=marketplace|SRC=pkg-registry": {
+   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
+   "rules": [
+    "U8"
    ]
   },
   "pair|OP=marketplace|UPDATE=on": {
@@ -1838,6 +2315,18 @@
    "maps_to": "pair|OP=uninstall|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "pair|OP=uninstall|SRC=inline-mcp": {
+   "maps_to": "rule|U8|uninstall-refuses-an-inline-mcp-name",
+   "rules": [
+    "U8"
+   ]
+  },
+  "pair|OP=uninstall|SRC=mcp-registry": {
+   "maps_to": "rule|U8|uninstall-refuses-a-registry-mcp-name",
+   "rules": [
+    "U8"
    ]
   },
   "pair|OP=uninstall|UPDATE=on": {
@@ -2115,6 +2604,12 @@
   },
   "pair|SRC=native-plugin|PRIM=other-file": {
    "maps_to": "pair|SRC=native-plugin|PRIM=skill",
+   "rules": [
+    "E3"
+   ]
+  },
+  "pair|SRC=pkg-registry|PRIM=other-file": {
+   "maps_to": "pair|SRC=pkg-registry|PRIM=skill",
    "rules": [
     "E3"
    ]
@@ -5363,6 +5858,13 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=mcp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=bin": {
    "family": "T3",
    "issue": "#4096",
@@ -5579,6 +6081,13 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=mcp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=bin": {
    "family": "T3",
    "issue": "#4096",
@@ -5621,7 +6130,42 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=approve-deny|SRC=registry|PRIM=mcp": {
+  "T3|OP=approve-deny|SRC=pkg-registry|PRIM=bin": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=approve-deny|SRC=pkg-registry|PRIM=canvas": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=approve-deny|SRC=pkg-registry|PRIM=hook": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=approve-deny|SRC=pkg-registry|PRIM=lsp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=approve-deny|SRC=pkg-registry|PRIM=mcp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=approve-deny|SRC=pkg-registry|PRIM=skill": {
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
@@ -5673,6 +6217,13 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T3|OP=audit|SRC=inline-mcp|PRIM=mcp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=bin": {
    "family": "T3",
@@ -5890,6 +6441,13 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T3|OP=audit|SRC=mcp-registry|PRIM=mcp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "T3|OP=audit|SRC=native-plugin|PRIM=bin": {
    "family": "T3",
    "issue": "#4096",
@@ -5932,7 +6490,42 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=audit|SRC=registry|PRIM=mcp": {
+  "T3|OP=audit|SRC=pkg-registry|PRIM=bin": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=audit|SRC=pkg-registry|PRIM=canvas": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=audit|SRC=pkg-registry|PRIM=hook": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=audit|SRC=pkg-registry|PRIM=lsp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=audit|SRC=pkg-registry|PRIM=mcp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=audit|SRC=pkg-registry|PRIM=skill": {
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
@@ -6209,6 +6802,42 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T3|OP=compile|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|pkg-registry|bin"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=compile|SRC=pkg-registry|PRIM=canvas": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=compile|SRC=pkg-registry|PRIM=other-file": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=compile|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|compile|pkg-registry|skill"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T3|OP=install|SRC=git|PRIM=bin": {
    "family": "T3",
    "issue": "#4099",
@@ -6254,6 +6883,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T3|OP=install|SRC=inline-mcp|PRIM=mcp": {
+   "credited_by": [
+    "T3|install|inline-mcp|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=local-path|PRIM=bin": {
    "family": "T3",
@@ -6445,6 +7085,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T3|OP=install|SRC=mcp-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|install|mcp-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T3|OP=install|SRC=native-plugin|PRIM=bin": {
    "family": "T3",
    "issue": "#4096",
@@ -6487,9 +7138,56 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=install|SRC=registry|PRIM=mcp": {
+  "T3|OP=install|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
-    "T3|install|registry|mcp"
+    "T3|install|pkg-registry|bin"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=install|SRC=pkg-registry|PRIM=canvas": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=install|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|install|pkg-registry|hook"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=install|SRC=pkg-registry|PRIM=lsp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=install|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|install|pkg-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=install|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|install|pkg-registry|skill"
    ],
    "family": "T3",
    "issue": "#4096",
@@ -6543,6 +7241,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T3|OP=lock|SRC=inline-mcp|PRIM=mcp": {
+   "credited_by": [
+    "T3|lock|inline-mcp|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=bin": {
    "family": "T3",
@@ -6776,6 +7485,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T3|OP=lock|SRC=mcp-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|lock|mcp-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T3|OP=lock|SRC=native-plugin|PRIM=bin": {
    "family": "T3",
    "issue": "#4096",
@@ -6818,9 +7538,56 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=lock|SRC=registry|PRIM=mcp": {
+  "T3|OP=lock|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
-    "T3|lock|registry|mcp"
+    "T3|lock|pkg-registry|bin"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=lock|SRC=pkg-registry|PRIM=canvas": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=lock|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|lock|pkg-registry|hook"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=lock|SRC=pkg-registry|PRIM=lsp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=lock|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|lock|pkg-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=lock|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|lock|pkg-registry|skill"
    ],
    "family": "T3",
    "issue": "#4096",
@@ -6955,7 +7722,15 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=mcp-install|SRC=registry|PRIM=mcp": {
+  "T3|OP=mcp-install|SRC=inline-mcp|PRIM=mcp": {
+   "family": "T3",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
+  },
+  "T3|OP=mcp-install|SRC=mcp-registry|PRIM=mcp": {
    "family": "T3",
    "issue": "#4099",
    "lane": "T-5",
@@ -7008,6 +7783,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T3|OP=prune|SRC=inline-mcp|PRIM=mcp": {
+   "credited_by": [
+    "T3|prune|inline-mcp|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=local-bundle|PRIM=bin": {
    "family": "T3",
@@ -7241,6 +8027,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T3|OP=prune|SRC=mcp-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|prune|mcp-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T3|OP=prune|SRC=native-plugin|PRIM=bin": {
    "family": "T3",
    "issue": "#4096",
@@ -7283,9 +8080,56 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=prune|SRC=registry|PRIM=mcp": {
+  "T3|OP=prune|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
-    "T3|prune|registry|mcp"
+    "T3|prune|pkg-registry|bin"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=prune|SRC=pkg-registry|PRIM=canvas": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=prune|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|prune|pkg-registry|hook"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=prune|SRC=pkg-registry|PRIM=lsp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=prune|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|prune|pkg-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=prune|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|prune|pkg-registry|skill"
    ],
    "family": "T3",
    "issue": "#4096",
@@ -7617,12 +8461,63 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=uninstall|SRC=registry|PRIM=mcp": {
+  "T3|OP=uninstall|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "T3|uninstall|pkg-registry|bin"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=uninstall|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
+  },
+  "T3|OP=uninstall|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|uninstall|pkg-registry|hook"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=uninstall|SRC=pkg-registry|PRIM=lsp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=uninstall|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|uninstall|pkg-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=uninstall|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|uninstall|pkg-registry|skill"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=git|PRIM=bin": {
    "family": "T3",
@@ -7669,6 +8564,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T3|OP=update|SRC=inline-mcp|PRIM=mcp": {
+   "credited_by": [
+    "T3|update|inline-mcp|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=local-bundle|PRIM=bin": {
    "family": "T3",
@@ -7902,6 +8808,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T3|OP=update|SRC=mcp-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|update|mcp-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T3|OP=update|SRC=native-plugin|PRIM=bin": {
    "family": "T3",
    "issue": "#4096",
@@ -7944,9 +8861,56 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=update|SRC=registry|PRIM=mcp": {
+  "T3|OP=update|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
-    "T3|update|registry|mcp"
+    "T3|update|pkg-registry|bin"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=update|SRC=pkg-registry|PRIM=canvas": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=update|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|update|pkg-registry|hook"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=update|SRC=pkg-registry|PRIM=lsp": {
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T3|OP=update|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|update|pkg-registry|mcp"
+   ],
+   "family": "T3",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "T3|OP=update|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|update|pkg-registry|skill"
    ],
    "family": "T3",
    "issue": "#4096",
@@ -8617,6 +9581,13 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "T5|OP=audit|SRC=inline-mcp|DRYRUN=on": {
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "T5|OP=audit|SRC=local-bundle|DRYRUN=on": {
    "family": "T5",
    "issue": "#4096",
@@ -8653,6 +9624,13 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T5|OP=audit|SRC=mcp-registry|DRYRUN=on": {
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "T5|OP=audit|SRC=native-plugin|DRYRUN=on": {
    "family": "T5",
    "issue": "#4096",
@@ -8660,7 +9638,7 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T5|OP=audit|SRC=registry|DRYRUN=on": {
+  "T5|OP=audit|SRC=pkg-registry|DRYRUN=on": {
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
@@ -8685,6 +9663,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T5|OP=compile|SRC=inline-mcp|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|compile|inline-mcp"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=compile|SRC=local-bundle|DRYRUN=on": {
    "family": "T5",
@@ -8727,6 +9716,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T5|OP=compile|SRC=mcp-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|compile|mcp-registry"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T5|OP=compile|SRC=native-plugin|DRYRUN=on": {
    "credited_by": [
     "T5|dry-run|compile|native"
@@ -8738,9 +9738,9 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T5|OP=compile|SRC=registry|DRYRUN=on": {
+  "T5|OP=compile|SRC=pkg-registry|DRYRUN=on": {
    "credited_by": [
-    "T5|dry-run|compile|registry"
+    "T5|dry-run|compile|pkg-registry"
    ],
    "family": "T5",
    "issue": "#4096",
@@ -8756,6 +9756,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T5|OP=install|SRC=inline-mcp|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|install|inline-mcp"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=install|SRC=local-path|DRYRUN=on": {
    "family": "T5",
@@ -8791,6 +9802,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T5|OP=install|SRC=mcp-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|install|mcp-registry"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T5|OP=install|SRC=native-plugin|DRYRUN=on": {
    "credited_by": [
     "T5|dry-run|install|native"
@@ -8802,9 +9824,9 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T5|OP=install|SRC=registry|DRYRUN=on": {
+  "T5|OP=install|SRC=pkg-registry|DRYRUN=on": {
    "credited_by": [
-    "T5|dry-run|install|registry"
+    "T5|dry-run|install|pkg-registry"
    ],
    "family": "T5",
    "issue": "#4096",
@@ -8813,7 +9835,14 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T5|OP=mcp-install|SRC=registry|DRYRUN=on": {
+  "T5|OP=mcp-install|SRC=inline-mcp|DRYRUN=on": {
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T5|OP=mcp-install|SRC=mcp-registry|DRYRUN=on": {
    "family": "T5",
    "issue": "#4099",
    "lane": "T-5",
@@ -8828,6 +9857,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T5|OP=prune|SRC=inline-mcp|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|prune|inline-mcp"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=prune|SRC=local-bundle|DRYRUN=on": {
    "family": "T5",
@@ -8870,6 +9910,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T5|OP=prune|SRC=mcp-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|prune|mcp-registry"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T5|OP=prune|SRC=native-plugin|DRYRUN=on": {
    "credited_by": [
     "T5|dry-run|prune|native"
@@ -8881,9 +9932,9 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T5|OP=prune|SRC=registry|DRYRUN=on": {
+  "T5|OP=prune|SRC=pkg-registry|DRYRUN=on": {
    "credited_by": [
-    "T5|dry-run|prune|registry"
+    "T5|dry-run|prune|pkg-registry"
    ],
    "family": "T5",
    "issue": "#4096",
@@ -8952,12 +10003,16 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T5|OP=uninstall|SRC=registry|DRYRUN=on": {
+  "T5|OP=uninstall|SRC=pkg-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|uninstall|pkg-registry"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=update|SRC=git|DRYRUN=on": {
    "family": "T5",
@@ -8966,6 +10021,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T5|OP=update|SRC=inline-mcp|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|update|inline-mcp"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=update|SRC=local-bundle|DRYRUN=on": {
    "family": "T5",
@@ -9008,6 +10074,17 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "T5|OP=update|SRC=mcp-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|update|mcp-registry"
+   ],
+   "family": "T5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "T5|OP=update|SRC=native-plugin|DRYRUN=on": {
    "credited_by": [
     "T5|dry-run|update|native"
@@ -9019,9 +10096,9 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T5|OP=update|SRC=registry|DRYRUN=on": {
+  "T5|OP=update|SRC=pkg-registry|DRYRUN=on": {
    "credited_by": [
-    "T5|dry-run|update|registry"
+    "T5|dry-run|update|pkg-registry"
    ],
    "family": "T5",
    "issue": "#4096",
@@ -11646,6 +12723,13 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|OP=approve-deny|SRC=inline-mcp": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "pair|OP=approve-deny|SRC=local-bundle": {
    "family": "pair",
    "issue": "#4096",
@@ -11682,6 +12766,13 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|OP=approve-deny|SRC=mcp-registry": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "pair|OP=approve-deny|SRC=native-plugin": {
    "family": "pair",
    "issue": "#4096",
@@ -11689,7 +12780,7 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|OP=approve-deny|SRC=registry": {
+  "pair|OP=approve-deny|SRC=pkg-registry": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
@@ -11983,6 +13074,13 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|OP=audit|SRC=inline-mcp": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "pair|OP=audit|SRC=local-bundle": {
    "family": "pair",
    "issue": "#4096",
@@ -12019,6 +13117,13 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|OP=audit|SRC=mcp-registry": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "pair|OP=audit|SRC=native-plugin": {
    "family": "pair",
    "issue": "#4096",
@@ -12026,7 +13131,7 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|OP=audit|SRC=registry": {
+  "pair|OP=audit|SRC=pkg-registry": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
@@ -12603,6 +13708,19 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|OP=compile|SRC=inline-mcp": {
+   "credited_by": [
+    "T3|compile|inline-mcp|mcp",
+    "T5|dry-run|compile|inline-mcp",
+    "T5|real|compile|inline-mcp"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=compile|SRC=local-bundle": {
    "family": "pair",
    "issue": "#4096",
@@ -12650,6 +13768,19 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|OP=compile|SRC=mcp-registry": {
+   "credited_by": [
+    "T3|compile|mcp-registry|mcp",
+    "T5|dry-run|compile|mcp-registry",
+    "T5|real|compile|mcp-registry"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=compile|SRC=native-plugin": {
    "credited_by": [
     "T5|dry-run|compile|native",
@@ -12662,11 +13793,14 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|OP=compile|SRC=registry": {
+  "pair|OP=compile|SRC=pkg-registry": {
    "credited_by": [
-    "T3|compile|registry|mcp",
-    "T5|dry-run|compile|registry",
-    "T5|real|compile|registry"
+    "T3|compile|pkg-registry|bin",
+    "T3|compile|pkg-registry|hook",
+    "T3|compile|pkg-registry|mcp",
+    "T3|compile|pkg-registry|skill",
+    "T5|dry-run|compile|pkg-registry",
+    "T5|real|compile|pkg-registry"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -13030,6 +14164,19 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|OP=install|SRC=inline-mcp": {
+   "credited_by": [
+    "T3|install|inline-mcp|mcp",
+    "T5|dry-run|install|inline-mcp",
+    "T5|real|install|inline-mcp"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=install|SRC=local-path": {
    "family": "pair",
    "issue": "#4099",
@@ -13070,6 +14217,19 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|OP=install|SRC=mcp-registry": {
+   "credited_by": [
+    "T3|install|mcp-registry|mcp",
+    "T5|dry-run|install|mcp-registry",
+    "T5|real|install|mcp-registry"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=install|SRC=native-plugin": {
    "credited_by": [
     "T5|dry-run|install|native",
@@ -13082,11 +14242,14 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|OP=install|SRC=registry": {
+  "pair|OP=install|SRC=pkg-registry": {
    "credited_by": [
-    "T3|install|registry|mcp",
-    "T5|dry-run|install|registry",
-    "T5|real|install|registry"
+    "T3|install|pkg-registry|bin",
+    "T3|install|pkg-registry|hook",
+    "T3|install|pkg-registry|mcp",
+    "T3|install|pkg-registry|skill",
+    "T5|dry-run|install|pkg-registry",
+    "T5|real|install|pkg-registry"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -13393,6 +14556,18 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|OP=lock|SRC=inline-mcp": {
+   "credited_by": [
+    "T3|lock|inline-mcp|mcp",
+    "T5|real|lock|inline-mcp"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=lock|SRC=local-bundle": {
    "family": "pair",
    "issue": "#4096",
@@ -13438,6 +14613,18 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|OP=lock|SRC=mcp-registry": {
+   "credited_by": [
+    "T3|lock|mcp-registry|mcp",
+    "T5|real|lock|mcp-registry"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=lock|SRC=native-plugin": {
    "credited_by": [
     "T5|real|lock|native"
@@ -13449,10 +14636,13 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|OP=lock|SRC=registry": {
+  "pair|OP=lock|SRC=pkg-registry": {
    "credited_by": [
-    "T3|lock|registry|mcp",
-    "T5|real|lock|registry"
+    "T3|lock|pkg-registry|bin",
+    "T3|lock|pkg-registry|hook",
+    "T3|lock|pkg-registry|mcp",
+    "T3|lock|pkg-registry|skill",
+    "T5|real|lock|pkg-registry"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14011,7 +15201,15 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "pair|OP=mcp-install|SRC=registry": {
+  "pair|OP=mcp-install|SRC=inline-mcp": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
+  },
+  "pair|OP=mcp-install|SRC=mcp-registry": {
    "family": "pair",
    "issue": "#4099",
    "lane": "T-5",
@@ -14553,6 +15751,19 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|OP=prune|SRC=inline-mcp": {
+   "credited_by": [
+    "T3|prune|inline-mcp|mcp",
+    "T5|dry-run|prune|inline-mcp",
+    "T5|real|prune|inline-mcp"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=prune|SRC=local-bundle": {
    "family": "pair",
    "issue": "#4096",
@@ -14600,6 +15811,19 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|OP=prune|SRC=mcp-registry": {
+   "credited_by": [
+    "T3|prune|mcp-registry|mcp",
+    "T5|dry-run|prune|mcp-registry",
+    "T5|real|prune|mcp-registry"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=prune|SRC=native-plugin": {
    "credited_by": [
     "T5|dry-run|prune|native",
@@ -14612,11 +15836,14 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|OP=prune|SRC=registry": {
+  "pair|OP=prune|SRC=pkg-registry": {
    "credited_by": [
-    "T3|prune|registry|mcp",
-    "T5|dry-run|prune|registry",
-    "T5|real|prune|registry"
+    "T3|prune|pkg-registry|bin",
+    "T3|prune|pkg-registry|hook",
+    "T3|prune|pkg-registry|mcp",
+    "T3|prune|pkg-registry|skill",
+    "T5|dry-run|prune|pkg-registry",
+    "T5|real|prune|pkg-registry"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -15009,12 +16236,21 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|OP=uninstall|SRC=registry": {
+  "pair|OP=uninstall|SRC=pkg-registry": {
+   "credited_by": [
+    "T3|uninstall|pkg-registry|bin",
+    "T3|uninstall|pkg-registry|hook",
+    "T3|uninstall|pkg-registry|mcp",
+    "T3|uninstall|pkg-registry|skill",
+    "T5|dry-run|uninstall|pkg-registry",
+    "T5|real|uninstall|pkg-registry"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=uninstall|TGT=multi-narrowed": {
    "family": "pair",
@@ -15349,6 +16585,19 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|OP=update|SRC=inline-mcp": {
+   "credited_by": [
+    "T3|update|inline-mcp|mcp",
+    "T5|dry-run|update|inline-mcp",
+    "T5|real|update|inline-mcp"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=update|SRC=local-bundle": {
    "family": "pair",
    "issue": "#4096",
@@ -15396,6 +16645,19 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|OP=update|SRC=mcp-registry": {
+   "credited_by": [
+    "T3|update|mcp-registry|mcp",
+    "T5|dry-run|update|mcp-registry",
+    "T5|real|update|mcp-registry"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "pair|OP=update|SRC=native-plugin": {
    "credited_by": [
     "T5|dry-run|update|native",
@@ -15408,11 +16670,14 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|OP=update|SRC=registry": {
+  "pair|OP=update|SRC=pkg-registry": {
    "credited_by": [
-    "T3|update|registry|mcp",
-    "T5|dry-run|update|registry",
-    "T5|real|update|registry"
+    "T3|update|pkg-registry|bin",
+    "T3|update|pkg-registry|hook",
+    "T3|update|pkg-registry|mcp",
+    "T3|update|pkg-registry|skill",
+    "T5|dry-run|update|pkg-registry",
+    "T5|real|update|pkg-registry"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -17717,6 +18982,238 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "pair|SRC=inline-mcp|DEPLOYED=absent": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|DEPLOYED=clean": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|DEPLOYED=edited": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|DEPLOYED=present-provenance-unknown": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|DEPLOYED=unowned": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|compile|inline-mcp",
+    "T5|dry-run|install|inline-mcp",
+    "T5|dry-run|prune|inline-mcp",
+    "T5|dry-run|update|inline-mcp"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "pair|SRC=inline-mcp|FORCE=on": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|FROZEN=on": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|GATE=allowed": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|GATE=denied-dependency": {
+   "family": "pair",
+   "issue": "#4108",
+   "lane": "T-7b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|GATE=denied-executable": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|GATE=none": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|GATE=revoked-after-deploy": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|GATE=unapproved-exec": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|LOCK=absent": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|LOCK=consistent": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|LOCK=newer-generator": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|LOCK=stale": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|NET=offline": {
+   "family": "pair",
+   "issue": "#4104",
+   "lane": "T-6e",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|NET=online": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|NOPOLICY=on": {
+   "family": "pair",
+   "issue": "#4108",
+   "lane": "T-7b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|PRIM=mcp": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
+  },
+  "pair|SRC=inline-mcp|SCOPE=project": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|SCOPE=user": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|SELECT=on": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|TGT=multi-narrowed": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|TGT=multi-unchanged": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|TGT=multi-widened": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|TGT=single-narrowed": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|TGT=single-unchanged": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|TGT=single-widened": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=inline-mcp|UPDATE=on": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "pair|SRC=local-bundle|DEPLOYED=absent": {
    "family": "pair",
    "issue": "#4097",
@@ -19123,6 +20620,243 @@
    "status": "baseline",
    "strength": "e2e"
   },
+  "pair|SRC=mcp-registry|DEPLOYED=absent": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|DEPLOYED=clean": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|DEPLOYED=edited": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|DEPLOYED=present-provenance-unknown": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|DEPLOYED=unowned": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|DRYRUN=on": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|FORCE=on": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|FROZEN=on": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|GATE=allowed": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|GATE=denied-dependency": {
+   "family": "pair",
+   "issue": "#4108",
+   "lane": "T-7b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|GATE=denied-executable": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|GATE=none": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|GATE=revoked-after-deploy": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|GATE=unapproved-exec": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|LOCK=absent": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|LOCK=consistent": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|LOCK=newer-generator": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|LOCK=stale": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|NET=offline": {
+   "family": "pair",
+   "issue": "#4104",
+   "lane": "T-6e",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|NET=online": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|NOPOLICY=on": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|PRIM=mcp": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|SCOPE=project": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|SCOPE=user": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|SELECT=on": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|TGT=multi-narrowed": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|TGT=multi-unchanged": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
+  },
+  "pair|SRC=mcp-registry|TGT=multi-widened": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|TGT=single-narrowed": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|TGT=single-unchanged": {
+   "family": "pair",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "pair|SRC=mcp-registry|TGT=single-widened": {
+   "family": "pair",
+   "issue": "#4100",
+   "lane": "T-6a",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=mcp-registry|UPDATE=on": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
   "pair|SRC=native-plugin|DEPLOYED=absent": {
    "family": "pair",
    "issue": "#4097",
@@ -19390,237 +21124,303 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|DEPLOYED=absent": {
+  "pair|SRC=pkg-registry|DEPLOYED=absent": {
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "pair|SRC=registry|DEPLOYED=clean": {
-   "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "pair|SRC=registry|DEPLOYED=edited": {
-   "family": "pair",
-   "issue": "#4101",
-   "lane": "T-6b",
+   "issue": "#4097",
+   "lane": "T-3",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|DEPLOYED=present-provenance-unknown": {
-   "family": "pair",
-   "issue": "#4101",
-   "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SRC=registry|DEPLOYED=unowned": {
-   "family": "pair",
-   "issue": "#4101",
-   "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SRC=registry|DRYRUN=on": {
-   "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "pair|SRC=registry|FORCE=on": {
-   "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "pair|SRC=registry|FROZEN=on": {
+  "pair|SRC=pkg-registry|DEPLOYED=clean": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|GATE=allowed": {
+  "pair|SRC=pkg-registry|DEPLOYED=edited": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|DEPLOYED=present-provenance-unknown": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|DEPLOYED=unowned": {
+   "family": "pair",
+   "issue": "#4101",
+   "lane": "T-6b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|compile|pkg-registry",
+    "T5|dry-run|install|pkg-registry",
+    "T5|dry-run|prune|pkg-registry",
+    "T5|dry-run|uninstall|pkg-registry",
+    "T5|dry-run|update|pkg-registry"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
+  "pair|SRC=pkg-registry|FORCE=on": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|GATE=denied-dependency": {
+  "pair|SRC=pkg-registry|FROZEN=on": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|GATE=allowed": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|GATE=denied-executable": {
+  "pair|SRC=pkg-registry|GATE=denied-executable": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|GATE=none": {
+  "pair|SRC=pkg-registry|GATE=none": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|GATE=revoked-after-deploy": {
+  "pair|SRC=pkg-registry|GATE=revoked-after-deploy": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|GATE=unapproved-exec": {
+  "pair|SRC=pkg-registry|GATE=unapproved-exec": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|LOCK=absent": {
-   "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "pair|SRC=registry|LOCK=consistent": {
-   "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "pair|SRC=registry|LOCK=newer-generator": {
+  "pair|SRC=pkg-registry|LOCK=absent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|LOCK=stale": {
+  "pair|SRC=pkg-registry|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|NET=offline": {
+  "pair|SRC=pkg-registry|LOCK=newer-generator": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|LOCK=stale": {
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|NET=offline": {
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|NET=online": {
+  "pair|SRC=pkg-registry|NET=online": {
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|NOPOLICY=on": {
+   "family": "pair",
+   "issue": "#4108",
+   "lane": "T-7b",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|pkg-registry|bin",
+    "T3|install|pkg-registry|bin",
+    "T3|lock|pkg-registry|bin",
+    "T3|prune|pkg-registry|bin",
+    "T3|uninstall|pkg-registry|bin",
+    "T3|update|pkg-registry|bin"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|SRC=registry|NOPOLICY=on": {
+  "pair|SRC=pkg-registry|PRIM=canvas": {
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|compile|pkg-registry|hook",
+    "T3|install|pkg-registry|hook",
+    "T3|lock|pkg-registry|hook",
+    "T3|prune|pkg-registry|hook",
+    "T3|uninstall|pkg-registry|hook",
+    "T3|update|pkg-registry|hook"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|SRC=registry|PRIM=mcp": {
+  "pair|SRC=pkg-registry|PRIM=lsp": {
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|compile|pkg-registry|mcp",
+    "T3|install|pkg-registry|mcp",
+    "T3|lock|pkg-registry|mcp",
+    "T3|prune|pkg-registry|mcp",
+    "T3|uninstall|pkg-registry|mcp",
+    "T3|update|pkg-registry|mcp"
+   ],
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|SRC=registry|SCOPE=project": {
+  "pair|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|compile|pkg-registry|skill",
+    "T3|install|pkg-registry|skill",
+    "T3|lock|pkg-registry|skill",
+    "T3|prune|pkg-registry|skill",
+    "T3|uninstall|pkg-registry|skill",
+    "T3|update|pkg-registry|skill"
+   ],
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
+   "issue": "#4096",
+   "lane": "T-2",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|SRC=registry|SCOPE=user": {
+  "pair|SRC=pkg-registry|SCOPE=project": {
+   "family": "pair",
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "pair|SRC=pkg-registry|SCOPE=user": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|SELECT=on": {
+  "pair|SRC=pkg-registry|SELECT=on": {
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
   },
-  "pair|SRC=registry|TGT=multi-narrowed": {
+  "pair|SRC=pkg-registry|TGT=multi-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|TGT=multi-unchanged": {
+  "pair|SRC=pkg-registry|TGT=multi-unchanged": {
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
   },
-  "pair|SRC=registry|TGT=multi-widened": {
+  "pair|SRC=pkg-registry|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|TGT=single-narrowed": {
+  "pair|SRC=pkg-registry|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|TGT=single-unchanged": {
+  "pair|SRC=pkg-registry|TGT=single-unchanged": {
    "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "baseline",
+   "strength": "e2e"
   },
-  "pair|SRC=registry|TGT=single-widened": {
+  "pair|SRC=pkg-registry|TGT=single-widened": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=registry|UPDATE=on": {
+  "pair|SRC=pkg-registry|UPDATE=on": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
@@ -20609,6 +22409,45 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "rule|U8|marketplace-add-refuses-a-source-without-catalog": {
+   "exit": 1,
+   "family": "rule",
+   "issue": "#4099",
+   "lane": "T-5",
+   "must_cover": true,
+   "rules": [
+    "U8"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
+  },
+  "rule|U8|uninstall-refuses-a-registry-mcp-name": {
+   "exit": 1,
+   "family": "rule",
+   "issue": "#4099",
+   "lane": "T-5",
+   "must_cover": true,
+   "rules": [
+    "U8"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
+  },
+  "rule|U8|uninstall-refuses-an-inline-mcp-name": {
+   "exit": 1,
+   "family": "rule",
+   "issue": "#4099",
+   "lane": "T-5",
+   "must_cover": true,
+   "rules": [
+    "U8"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
+  },
   "rule|U9|approve-list-read-only": {
    "family": "rule",
    "issue": "#4099",
@@ -20658,40 +22497,76 @@
   }
  },
  "removed": {
-  "T3|OP=approve-deny|SRC=registry|PRIM=bin": [
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=approve-deny|SRC=registry|PRIM=canvas": [
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=approve-deny|SRC=registry|PRIM=hook": [
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=approve-deny|SRC=registry|PRIM=lsp": [
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=approve-deny|SRC=registry|PRIM=other-file": [
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=approve-deny|SRC=registry|PRIM=skill": [
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=audit|SRC=registry|PRIM=bin": [
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=audit|SRC=registry|PRIM=canvas": [
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=audit|SRC=registry|PRIM=hook": [
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=audit|SRC=registry|PRIM=lsp": [
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=audit|SRC=registry|PRIM=other-file": [
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=audit|SRC=registry|PRIM=skill": [
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=inline-mcp|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=inline-mcp|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=inline-mcp|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=inline-mcp|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=inline-mcp|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=inline-mcp|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=mcp-registry|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=mcp-registry|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=mcp-registry|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=mcp-registry|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=mcp-registry|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
   "T3|OP=bundle-install|SRC=git|PRIM=bin": [
@@ -20713,6 +22588,27 @@
    "U8"
   ],
   "T3|OP=bundle-install|SRC=git|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=inline-mcp|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=inline-mcp|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=inline-mcp|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=inline-mcp|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=inline-mcp|PRIM=mcp": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=inline-mcp|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
   "T3|OP=bundle-install|SRC=local-path|PRIM=bin": [
@@ -20799,6 +22695,27 @@
   "T3|OP=bundle-install|SRC=marketplace-local|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=bundle-install|SRC=mcp-registry|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=mcp-registry|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=mcp-registry|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=mcp-registry|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=mcp-registry|PRIM=mcp": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=mcp-registry|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=bundle-install|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
   "T3|OP=bundle-install|SRC=native-plugin|PRIM=bin": [
    "U8"
   ],
@@ -20820,205 +22737,169 @@
   "T3|OP=bundle-install|SRC=native-plugin|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=bundle-install|SRC=registry|PRIM=bin": [
+  "T3|OP=bundle-install|SRC=pkg-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=bundle-install|SRC=registry|PRIM=canvas": [
+  "T3|OP=bundle-install|SRC=pkg-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=bundle-install|SRC=registry|PRIM=hook": [
+  "T3|OP=bundle-install|SRC=pkg-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=bundle-install|SRC=registry|PRIM=lsp": [
+  "T3|OP=bundle-install|SRC=pkg-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=bundle-install|SRC=registry|PRIM=mcp": [
+  "T3|OP=bundle-install|SRC=pkg-registry|PRIM=mcp": [
    "U8"
   ],
-  "T3|OP=bundle-install|SRC=registry|PRIM=other-file": [
+  "T3|OP=bundle-install|SRC=pkg-registry|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=bundle-install|SRC=registry|PRIM=skill": [
+  "T3|OP=bundle-install|SRC=pkg-registry|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=compile|SRC=registry|PRIM=bin": [
+  "T3|OP=compile|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=compile|SRC=registry|PRIM=canvas": [
+  "T3|OP=compile|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=compile|SRC=registry|PRIM=hook": [
+  "T3|OP=compile|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=compile|SRC=registry|PRIM=lsp": [
+  "T3|OP=compile|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=compile|SRC=registry|PRIM=other-file": [
+  "T3|OP=compile|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=compile|SRC=registry|PRIM=skill": [
+  "T3|OP=compile|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=install|SRC=local-bundle|PRIM=bin": [
+  "T3|OP=compile|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=install|SRC=local-bundle|PRIM=canvas": [
+  "T3|OP=compile|SRC=mcp-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=install|SRC=local-bundle|PRIM=hook": [
+  "T3|OP=compile|SRC=mcp-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=install|SRC=local-bundle|PRIM=lsp": [
+  "T3|OP=compile|SRC=mcp-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=install|SRC=local-bundle|PRIM=mcp": [
+  "T3|OP=compile|SRC=mcp-registry|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=install|SRC=local-bundle|PRIM=other-file": [
+  "T3|OP=compile|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=install|SRC=local-bundle|PRIM=skill": [
+  "T3|OP=install|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=install|SRC=registry|PRIM=bin": [
+  "T3|OP=install|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=install|SRC=registry|PRIM=canvas": [
+  "T3|OP=install|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=install|SRC=registry|PRIM=hook": [
+  "T3|OP=install|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=install|SRC=registry|PRIM=lsp": [
+  "T3|OP=install|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=install|SRC=registry|PRIM=other-file": [
+  "T3|OP=install|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=install|SRC=registry|PRIM=skill": [
+  "T3|OP=install|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=lock|SRC=registry|PRIM=bin": [
+  "T3|OP=install|SRC=mcp-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=lock|SRC=registry|PRIM=canvas": [
+  "T3|OP=install|SRC=mcp-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=lock|SRC=registry|PRIM=hook": [
+  "T3|OP=install|SRC=mcp-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=lock|SRC=registry|PRIM=lsp": [
+  "T3|OP=install|SRC=mcp-registry|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=lock|SRC=registry|PRIM=other-file": [
+  "T3|OP=install|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=lock|SRC=registry|PRIM=skill": [
+  "T3|OP=lock|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=git|PRIM=bin": [
+  "T3|OP=lock|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=git|PRIM=canvas": [
+  "T3|OP=lock|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=git|PRIM=hook": [
+  "T3|OP=lock|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=git|PRIM=lsp": [
+  "T3|OP=lock|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=git|PRIM=mcp": [
+  "T3|OP=lock|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=git|PRIM=other-file": [
+  "T3|OP=lock|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=git|PRIM=skill": [
+  "T3|OP=lock|SRC=mcp-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-bundle|PRIM=bin": [
+  "T3|OP=lock|SRC=mcp-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-bundle|PRIM=canvas": [
+  "T3|OP=lock|SRC=mcp-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-bundle|PRIM=hook": [
+  "T3|OP=lock|SRC=mcp-registry|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-bundle|PRIM=lsp": [
+  "T3|OP=lock|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-bundle|PRIM=mcp": [
+  "T3|OP=marketplace|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-bundle|PRIM=other-file": [
+  "T3|OP=marketplace|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-bundle|PRIM=skill": [
+  "T3|OP=marketplace|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-path|PRIM=bin": [
+  "T3|OP=marketplace|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-path|PRIM=canvas": [
+  "T3|OP=marketplace|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-path|PRIM=hook": [
+  "T3|OP=marketplace|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-path|PRIM=lsp": [
+  "T3|OP=marketplace|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-path|PRIM=mcp": [
+  "T3|OP=marketplace|SRC=mcp-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-path|PRIM=other-file": [
+  "T3|OP=marketplace|SRC=mcp-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=local-path|PRIM=skill": [
+  "T3|OP=marketplace|SRC=mcp-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=bin": [
+  "T3|OP=marketplace|SRC=mcp-registry|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=canvas": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=hook": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=lsp": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=mcp": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=other-file": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=skill": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=registry|PRIM=bin": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=registry|PRIM=canvas": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=registry|PRIM=hook": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=registry|PRIM=lsp": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=registry|PRIM=mcp": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=registry|PRIM=other-file": [
-   "U8"
-  ],
-  "T3|OP=marketplace|SRC=registry|PRIM=skill": [
+  "T3|OP=marketplace|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
   "T3|OP=mcp-install|SRC=git|PRIM=bin": [
@@ -21040,6 +22921,24 @@
    "U8"
   ],
   "T3|OP=mcp-install|SRC=git|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=inline-mcp|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=inline-mcp|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=inline-mcp|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=inline-mcp|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=inline-mcp|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
   "T3|OP=mcp-install|SRC=local-bundle|PRIM=bin": [
@@ -21147,6 +23046,24 @@
   "T3|OP=mcp-install|SRC=marketplace-local|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=mcp-install|SRC=mcp-registry|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=mcp-registry|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=mcp-registry|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=mcp-registry|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=mcp-registry|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
   "T3|OP=mcp-install|SRC=native-plugin|PRIM=bin": [
    "U8"
   ],
@@ -21168,22 +23085,25 @@
   "T3|OP=mcp-install|SRC=native-plugin|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=mcp-install|SRC=registry|PRIM=bin": [
+  "T3|OP=mcp-install|SRC=pkg-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=mcp-install|SRC=registry|PRIM=canvas": [
+  "T3|OP=mcp-install|SRC=pkg-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=mcp-install|SRC=registry|PRIM=hook": [
+  "T3|OP=mcp-install|SRC=pkg-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=mcp-install|SRC=registry|PRIM=lsp": [
+  "T3|OP=mcp-install|SRC=pkg-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=mcp-install|SRC=registry|PRIM=other-file": [
+  "T3|OP=mcp-install|SRC=pkg-registry|PRIM=mcp": [
    "U8"
   ],
-  "T3|OP=mcp-install|SRC=registry|PRIM=skill": [
+  "T3|OP=mcp-install|SRC=pkg-registry|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=mcp-install|SRC=pkg-registry|PRIM=skill": [
    "U8"
   ],
   "T3|OP=pack|SRC=git|PRIM=bin": [
@@ -21205,6 +23125,27 @@
    "U6"
   ],
   "T3|OP=pack|SRC=git|PRIM=skill": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=inline-mcp|PRIM=bin": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=inline-mcp|PRIM=canvas": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=inline-mcp|PRIM=hook": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=inline-mcp|PRIM=lsp": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=inline-mcp|PRIM=mcp": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=inline-mcp|PRIM=other-file": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=inline-mcp|PRIM=skill": [
    "U6"
   ],
   "T3|OP=pack|SRC=local-bundle|PRIM=bin": [
@@ -21312,6 +23253,27 @@
   "T3|OP=pack|SRC=marketplace-local|PRIM=skill": [
    "U6"
   ],
+  "T3|OP=pack|SRC=mcp-registry|PRIM=bin": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=mcp-registry|PRIM=canvas": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=mcp-registry|PRIM=hook": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=mcp-registry|PRIM=lsp": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=mcp-registry|PRIM=mcp": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=mcp-registry|PRIM=other-file": [
+   "U6"
+  ],
+  "T3|OP=pack|SRC=mcp-registry|PRIM=skill": [
+   "U6"
+  ],
   "T3|OP=pack|SRC=native-plugin|PRIM=bin": [
    "U6"
   ],
@@ -21333,82 +23295,139 @@
   "T3|OP=pack|SRC=native-plugin|PRIM=skill": [
    "U6"
   ],
-  "T3|OP=pack|SRC=registry|PRIM=bin": [
+  "T3|OP=pack|SRC=pkg-registry|PRIM=bin": [
    "U6"
   ],
-  "T3|OP=pack|SRC=registry|PRIM=canvas": [
+  "T3|OP=pack|SRC=pkg-registry|PRIM=canvas": [
    "U6"
   ],
-  "T3|OP=pack|SRC=registry|PRIM=hook": [
+  "T3|OP=pack|SRC=pkg-registry|PRIM=hook": [
    "U6"
   ],
-  "T3|OP=pack|SRC=registry|PRIM=lsp": [
+  "T3|OP=pack|SRC=pkg-registry|PRIM=lsp": [
    "U6"
   ],
-  "T3|OP=pack|SRC=registry|PRIM=mcp": [
+  "T3|OP=pack|SRC=pkg-registry|PRIM=mcp": [
    "U6"
   ],
-  "T3|OP=pack|SRC=registry|PRIM=other-file": [
+  "T3|OP=pack|SRC=pkg-registry|PRIM=other-file": [
    "U6"
   ],
-  "T3|OP=pack|SRC=registry|PRIM=skill": [
+  "T3|OP=pack|SRC=pkg-registry|PRIM=skill": [
    "U6"
   ],
-  "T3|OP=prune|SRC=registry|PRIM=bin": [
+  "T3|OP=prune|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=prune|SRC=registry|PRIM=canvas": [
+  "T3|OP=prune|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=prune|SRC=registry|PRIM=hook": [
+  "T3|OP=prune|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=prune|SRC=registry|PRIM=lsp": [
+  "T3|OP=prune|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=prune|SRC=registry|PRIM=other-file": [
+  "T3|OP=prune|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=prune|SRC=registry|PRIM=skill": [
+  "T3|OP=prune|SRC=inline-mcp|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=uninstall|SRC=registry|PRIM=bin": [
+  "T3|OP=prune|SRC=mcp-registry|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=uninstall|SRC=registry|PRIM=canvas": [
+  "T3|OP=prune|SRC=mcp-registry|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=uninstall|SRC=registry|PRIM=hook": [
+  "T3|OP=prune|SRC=mcp-registry|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=uninstall|SRC=registry|PRIM=lsp": [
+  "T3|OP=prune|SRC=mcp-registry|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=uninstall|SRC=registry|PRIM=other-file": [
+  "T3|OP=prune|SRC=mcp-registry|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=uninstall|SRC=registry|PRIM=skill": [
+  "T3|OP=prune|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
-  "T3|OP=update|SRC=registry|PRIM=bin": [
+  "T3|OP=uninstall|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "T3|OP=update|SRC=registry|PRIM=canvas": [
+  "T3|OP=uninstall|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "T3|OP=update|SRC=registry|PRIM=hook": [
+  "T3|OP=uninstall|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "T3|OP=update|SRC=registry|PRIM=lsp": [
+  "T3|OP=uninstall|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "T3|OP=update|SRC=registry|PRIM=other-file": [
+  "T3|OP=uninstall|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "T3|OP=update|SRC=registry|PRIM=skill": [
+  "T3|OP=uninstall|SRC=inline-mcp|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=uninstall|SRC=mcp-registry|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=uninstall|SRC=mcp-registry|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=uninstall|SRC=mcp-registry|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=uninstall|SRC=mcp-registry|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=uninstall|SRC=mcp-registry|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=uninstall|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=inline-mcp|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=inline-mcp|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=inline-mcp|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=inline-mcp|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=inline-mcp|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=inline-mcp|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=mcp-registry|PRIM=bin": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=mcp-registry|PRIM=canvas": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=mcp-registry|PRIM=hook": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=mcp-registry|PRIM=lsp": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=mcp-registry|PRIM=other-file": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
   "T5|OP=bundle-install|SRC=git|DRYRUN=on": [
+   "U8"
+  ],
+  "T5|OP=bundle-install|SRC=inline-mcp|DRYRUN=on": [
    "U8"
   ],
   "T5|OP=bundle-install|SRC=local-path|DRYRUN=on": [
@@ -21423,28 +23442,13 @@
   "T5|OP=bundle-install|SRC=marketplace-local|DRYRUN=on": [
    "U8"
   ],
+  "T5|OP=bundle-install|SRC=mcp-registry|DRYRUN=on": [
+   "U8"
+  ],
   "T5|OP=bundle-install|SRC=native-plugin|DRYRUN=on": [
    "U8"
   ],
-  "T5|OP=bundle-install|SRC=registry|DRYRUN=on": [
-   "U8"
-  ],
-  "T5|OP=install|SRC=local-bundle|DRYRUN=on": [
-   "U8"
-  ],
-  "T5|OP=marketplace|SRC=git|DRYRUN=on": [
-   "U8"
-  ],
-  "T5|OP=marketplace|SRC=local-bundle|DRYRUN=on": [
-   "U8"
-  ],
-  "T5|OP=marketplace|SRC=local-path|DRYRUN=on": [
-   "U8"
-  ],
-  "T5|OP=marketplace|SRC=native-plugin|DRYRUN=on": [
-   "U8"
-  ],
-  "T5|OP=marketplace|SRC=registry|DRYRUN=on": [
+  "T5|OP=bundle-install|SRC=pkg-registry|DRYRUN=on": [
    "U8"
   ],
   "T5|OP=mcp-install|SRC=git|DRYRUN=on": [
@@ -21468,7 +23472,13 @@
   "T5|OP=mcp-install|SRC=native-plugin|DRYRUN=on": [
    "U8"
   ],
+  "T5|OP=mcp-install|SRC=pkg-registry|DRYRUN=on": [
+   "U8"
+  ],
   "T5|OP=pack|SRC=git|DRYRUN=on": [
+   "U6"
+  ],
+  "T5|OP=pack|SRC=inline-mcp|DRYRUN=on": [
    "U6"
   ],
   "T5|OP=pack|SRC=local-bundle|DRYRUN=on": [
@@ -21486,10 +23496,13 @@
   "T5|OP=pack|SRC=marketplace-local|DRYRUN=on": [
    "U6"
   ],
+  "T5|OP=pack|SRC=mcp-registry|DRYRUN=on": [
+   "U6"
+  ],
   "T5|OP=pack|SRC=native-plugin|DRYRUN=on": [
    "U6"
   ],
-  "T5|OP=pack|SRC=registry|DRYRUN=on": [
+  "T5|OP=pack|SRC=pkg-registry|DRYRUN=on": [
    "U6"
   ],
   "pair|LOCK=absent|DEPLOYED=clean": [
@@ -21510,6 +23523,9 @@
   "pair|OP=bundle-install|SRC=git": [
    "U8"
   ],
+  "pair|OP=bundle-install|SRC=inline-mcp": [
+   "U8"
+  ],
   "pair|OP=bundle-install|SRC=local-path": [
    "U8"
   ],
@@ -21522,28 +23538,13 @@
   "pair|OP=bundle-install|SRC=marketplace-local": [
    "U8"
   ],
+  "pair|OP=bundle-install|SRC=mcp-registry": [
+   "U8"
+  ],
   "pair|OP=bundle-install|SRC=native-plugin": [
    "U8"
   ],
-  "pair|OP=bundle-install|SRC=registry": [
-   "U8"
-  ],
-  "pair|OP=install|SRC=local-bundle": [
-   "U8"
-  ],
-  "pair|OP=marketplace|SRC=git": [
-   "U8"
-  ],
-  "pair|OP=marketplace|SRC=local-bundle": [
-   "U8"
-  ],
-  "pair|OP=marketplace|SRC=local-path": [
-   "U8"
-  ],
-  "pair|OP=marketplace|SRC=native-plugin": [
-   "U8"
-  ],
-  "pair|OP=marketplace|SRC=registry": [
+  "pair|OP=bundle-install|SRC=pkg-registry": [
    "U8"
   ],
   "pair|OP=mcp-install|SRC=git": [
@@ -21567,7 +23568,13 @@
   "pair|OP=mcp-install|SRC=native-plugin": [
    "U8"
   ],
+  "pair|OP=mcp-install|SRC=pkg-registry": [
+   "U8"
+  ],
   "pair|OP=pack|SRC=git": [
+   "U6"
+  ],
+  "pair|OP=pack|SRC=inline-mcp": [
    "U6"
   ],
   "pair|OP=pack|SRC=local-bundle": [
@@ -21585,34 +23592,55 @@
   "pair|OP=pack|SRC=marketplace-local": [
    "U6"
   ],
+  "pair|OP=pack|SRC=mcp-registry": [
+   "U6"
+  ],
   "pair|OP=pack|SRC=native-plugin": [
    "U6"
   ],
-  "pair|OP=pack|SRC=registry": [
+  "pair|OP=pack|SRC=pkg-registry": [
    "U6"
   ],
-  "pair|SRC=registry|PRIM=bin": [
+  "pair|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
-  "pair|SRC=registry|PRIM=canvas": [
+  "pair|SRC=inline-mcp|PRIM=canvas": [
    "U8"
   ],
-  "pair|SRC=registry|PRIM=hook": [
+  "pair|SRC=inline-mcp|PRIM=hook": [
    "U8"
   ],
-  "pair|SRC=registry|PRIM=lsp": [
+  "pair|SRC=inline-mcp|PRIM=lsp": [
    "U8"
   ],
-  "pair|SRC=registry|PRIM=other-file": [
+  "pair|SRC=inline-mcp|PRIM=other-file": [
    "U8"
   ],
-  "pair|SRC=registry|PRIM=skill": [
+  "pair|SRC=inline-mcp|PRIM=skill": [
+   "U8"
+  ],
+  "pair|SRC=mcp-registry|PRIM=bin": [
+   "U8"
+  ],
+  "pair|SRC=mcp-registry|PRIM=canvas": [
+   "U8"
+  ],
+  "pair|SRC=mcp-registry|PRIM=hook": [
+   "U8"
+  ],
+  "pair|SRC=mcp-registry|PRIM=lsp": [
+   "U8"
+  ],
+  "pair|SRC=mcp-registry|PRIM=other-file": [
+   "U8"
+  ],
+  "pair|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ]
  },
  "rows": {
-  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "71bcb59d651aafb65d2a4ed16846df76cc65d3fa1eb9f0b32b76e5f395f6c484",
-  "generated_cover-02-skill-exec-canvas-local-multi-deny-mcp.yaml": "8a7c2065dca5b3d78e3fa5b53e621cf5160f1f6637a6234eb13901e24ceafec0",
+  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "8ebe8fa01ad78ed8f2a131ec97446b224190db459d062fc8a8b5b1afd3ab705f",
+  "generated_cover-02-skill-exec-canvas-local-multi-deny-mcp.yaml": "6ca15634aa28ada382be92cef69b5204cf3d0cd7708aec2874ae8f89f4cd9730",
   "generated_cover-03-skill-exec-git-multi-unapproved-mcp.yaml": "fb2e757c7fd58d2af5a66239461d950543caf17c2ea716cd648ae935c570862f",
   "generated_cover-04-lsp-canvas-local-multi-unapproved-mcp.yaml": "d1bad85295426b8f97e8520944da9bec38217a569926d51c2388017ed1c6c692",
   "generated_cover-05-exec-git-single-approve-mcp.yaml": "59fb68afb4b20b6ac46e38480127f89599fbfba9f0091027044f6c78927d3ba9",
@@ -21625,7 +23653,8 @@
   "generated_cover-12-canvas-local-single-unapproved-mcp.yaml": "a7fa2d1dc5dfc640c4c25d82d1e014e4bb934c6ff69596a635175523af1a0eb4",
   "generated_cover-13-refusals.yaml": "6eb1941cb910d494c90ae4dbd1f8ba6730df87fe8ba702ee992e5ba073cc9d77",
   "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
-  "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57"
+  "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
+  "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473"
  },
  "rules": {
   "E1": {
@@ -21700,11 +23729,14 @@
   "U8": {
    "evidence": [
     "src/apm_cli/commands/install.py:1233",
-    "src/apm_cli/commands/marketplace/__init__.py:359",
-    "src/apm_cli/commands/marketplace/__init__.py:360",
-    "src/apm_cli/commands/install.py:997"
+    "src/apm_cli/commands/install.py:997",
+    "src/apm_cli/commands/install.py:971",
+    "src/apm_cli/models/dependency/reference.py:860",
+    "src/apm_cli/marketplace/registration.py:45",
+    "src/apm_cli/commands/uninstall/engine.py:698",
+    "src/apm_cli/commands/uninstall/engine.py:857"
    ],
-   "text": "bundle-install comes only from a local bundle; marketplace add takes git, a local path or file://; mcp-install resolves from the MCP registry"
+   "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, and uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server)"
   },
   "U9": {
    "evidence": [
@@ -21715,5 +23747,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "096a9db44a26d9fa91b0976380f0d6d7ee471396cca58ed432eae8867f20c175"
+ "sha256": "611cff6f5e921cadbd2f46a4d9e71570d35a0e3385c3a4c8b2ac606f52bcbd85"
 }

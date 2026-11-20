@@ -25,14 +25,19 @@ from tests.lifecycle.generator.factors import (
     GATE_AUTHORITY,
     cell_id,
     compile_staged_targets,
+    parse_cell,
 )
 from tests.lifecycle.generator.rules import (
     ACCEPTS_EVIDENCE,
     EVIDENCE_WINDOW,
+    MARKETPLACE_ADD_REFUSAL,
     REFUSAL_EVIDENCE,
+    RULE_CELL_REFUSALS,
     RULES,
+    UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
     classify,
+    refusal_cell,
 )
 from tests.lifecycle.generator.space import build_space, raw_cells
 from tests.lifecycle.generator.witnesses import implied, machine_cells
@@ -111,7 +116,10 @@ def test_a_refusal_never_discharges_a_success_obligation() -> None:
     for row in _generated()[1].values():
         for step in _steps(yaml.safe_load(row)):
             if isinstance(step, dict) and "exit" in step:
-                assert all(cell.startswith("refusal|") for cell in step.get("cells", ())), step
+                assert all(
+                    cell.startswith("refusal|") or cell in RULE_CELL_REFUSALS
+                    for cell in step.get("cells", ())
+                ), step
 
 
 # -- U2: the two deny levels never collapse ------------------------------------
@@ -365,6 +373,7 @@ def _credited_with(key: str) -> list[str]:
 
 _OBLIGATIONS = Path(__file__).parents[3] / "tests" / "quality" / "lifecycle_obligations.json"
 _MARKETPLACE_ADD_SOURCES = frozenset({"marketplace-git", "marketplace-local", "marketplace-file"})
+_MCP_SERVER_SOURCES = frozenset({"mcp-registry", "inline-mcp"})
 
 
 def _u6(cell) -> bool:
@@ -373,20 +382,31 @@ def _u6(cell) -> bool:
 
 
 def _u8(cell) -> str | None:
-    """The U8 clause a cell falls under: a source the command cannot take."""
+    """The U8 removal clause of a cell: a source the CLI grammar cannot state for its command."""
     op, src, prim = cell.get("OP"), cell.get("SRC"), cell.get("PRIM")
     if src is None or _u6(cell):
         return None
     if op == "bundle-install" and src != "local-bundle":
         return "bundle-install from a non-bundle source"  # install.py:1233 detect_local_bundle
+    if op == "mcp-install" and src not in _MCP_SERVER_SOURCES:
+        return "install --mcp from a package source"  # install.py:971 --url, 997 --registry
+    if src in _MCP_SERVER_SOURCES and prim not in (None, "mcp"):
+        return "an MCP server source for a non-MCP primitive"
+    return None
+
+
+def _u8_mapping(cell) -> str | None:
+    """The U8 mapping clause of a cell: same command as another cell, or parsed then refused."""
+    op, src = cell.get("OP"), cell.get("SRC")
+    # A modifier the command does not accept is a U1 usage refusal first.
+    if src is None or _u8(cell) is not None or _u6(cell) or refusal_cell(cell) is not None:
+        return None
     if op == "install" and src == "local-bundle":
-        return "install of a local bundle is bundle-install"
+        return "install of a local bundle is bundle-install"  # install.md: apm install ./b.zip
     if op == "marketplace" and src not in _MARKETPLACE_ADD_SOURCES:
-        return "marketplace add from a non-marketplace source"  # marketplace/__init__.py:359-360
-    if op == "mcp-install" and src != "registry":
-        return "mcp-install from a non-registry source"  # install.py:997 --registry
-    if src == "registry" and prim not in (None, "mcp"):
-        return "registry source for a non-MCP primitive"
+        return "marketplace add of a source without a catalog"  # registration.py:45
+    if op == "uninstall" and src in _MCP_SERVER_SOURCES:
+        return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:698, 857
     return None
 
 
@@ -432,13 +452,37 @@ def test_u8_removals_split_by_the_source_each_command_takes() -> None:
         clause = _u8(_raw()[key])
         clauses[clause] = clauses.get(clause, 0) + 1
     assert clauses == {
-        "bundle-install from a non-bundle source": 63,
-        "mcp-install from a non-registry source": 63,
-        "registry source for a non-MCP primitive": 60,
-        "marketplace add from a non-marketplace source": 45,
-        "install of a local bundle is bundle-install": 9,
+        "bundle-install from a non-bundle source": 81,
+        "install --mcp from a package source": 72,
+        "an MCP server source for a non-MCP primitive": 132,
     }
-    assert sum(clauses.values()) == 240
+    assert sum(clauses.values()) == 285
+
+
+def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    mapped = {key: entry for key, entry in data["mapped"].items() if entry["rules"][0] == "U8"}
+    named = {key for key, cell in _raw().items() if _u8_mapping(cell) is not None}
+    assert set(mapped) == named, sorted(set(mapped) ^ named)[:10]
+    clauses: dict[str, int] = {}
+    for key, entry in mapped.items():
+        family, cell = parse_cell(key)
+        clause = _u8_mapping(cell)
+        clauses[clause] = clauses.get(clause, 0) + 1
+        if cell["OP"] == "install":
+            # The bundle-install cell itself, or the refusal its own modifier lands on.
+            target = cell_id(family, {**cell, "OP": "bundle-install"})
+            assert entry["maps_to"] in (target, data["mapped"].get(target, {}).get("maps_to")), key
+        elif cell["OP"] == "marketplace":
+            assert entry["maps_to"] == MARKETPLACE_ADD_REFUSAL, key
+        else:
+            assert entry["maps_to"] == UNINSTALL_MCP_REFUSALS[cell["SRC"]], key
+    assert clauses == {
+        "install of a local bundle is bundle-install": 9,
+        "marketplace add of a source without a catalog": 44,
+        "uninstall of an MCP server (mcp-registry)": 3,
+        "uninstall of an MCP server (inline-mcp)": 3,
+    }
 
 
 def test_every_removed_and_mapped_cell_names_its_rules() -> None:

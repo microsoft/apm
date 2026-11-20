@@ -19,6 +19,7 @@ the generated rows need, without changing the row schema it reads:
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from functools import cache
@@ -93,6 +94,12 @@ class CoveringReplay(RowReplay):
         before = self.observe()
         super().step(step)
         after = self.observe()
+        if "message" in step:
+            output = f"{self.last.stdout}\n{self.last.stderr}"
+            assert re.search(step["message"], output), (
+                f"I7: {step['run']!r} refused without the pinned message "
+                f"{step['message']!r}:\n{output}"
+            )
         unchanged = tuple(step.get("unchanged", ()))
         for cell in cells:
             credit(cell, before, after, self.last, unchanged, scope=self.row.scope)
