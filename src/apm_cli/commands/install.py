@@ -112,7 +112,7 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
-from apm_cli.install.pipeline_entry import pipeline_preview
+from apm_cli.install.pipeline_entry import install_pipeline_options, pipeline_preview
 from apm_cli.install.repository_access import inaccessible_package_reason
 
 # Re-export DI-seam helpers from the install services module so that test
@@ -1804,31 +1804,12 @@ def _install_apm_packages(ctx, outcome):
             scope=ctx.scope,
         )
 
-    pipeline_options = dict(
-        force=ctx.force,
-        parallel_downloads=ctx.parallel_downloads,
+    pipeline_options = install_pipeline_options(
+        ctx,
+        outcome,
         logger=logger,
-        scope=ctx.scope,
-        auth_resolver=ctx.auth_resolver,
-        target=ctx.target or ctx.runtime,
-        allow_insecure=ctx.allow_insecure,
-        allow_insecure_hosts=ctx.allow_insecure_hosts,
-        marketplace_provenance=outcome.marketplace_provenance if ctx.packages and outcome else None,
-        protocol_pref=ctx.protocol_pref,
-        allow_protocol_fallback=ctx.allow_protocol_fallback,
-        no_policy=ctx.no_policy,
-        audit_override=ctx.audit_override,
-        legacy_skill_paths=ctx.legacy_skill_paths,
-        trust_transitive_mcp=ctx.trust_transitive_mcp,
         install_mcp=should_install_mcp,
-        mcp_runtime=ctx.runtime,
         frozen=frozen_disposition.replay,
-        plan_callback=ctx.plan_callback,
-        skill_subset=ctx.skill_subset,
-        skill_subset_from_cli=ctx.skill_subset_from_cli,
-        refresh=ctx.refresh,
-        trust_bin=ctx.trust_bin,
-        transaction=ctx.transaction,
         lsp_preflight=LspPreflight.for_install(ctx),
     )
 

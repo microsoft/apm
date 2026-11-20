@@ -114,3 +114,36 @@ def preview_declared_policy(ctx: Any, plan: Any, logger: Any) -> None:
         logger=logger,
         dry_run=True,
     )
+
+
+def install_pipeline_options(
+    ctx: Any, outcome: Any, *, logger: Any, install_mcp: bool, frozen: bool, lsp_preflight: Any
+) -> dict[str, Any]:
+    """The keyword options an install and its ``--dry-run`` preview pass the pipeline."""
+    return dict(
+        force=ctx.force,
+        parallel_downloads=ctx.parallel_downloads,
+        logger=logger,
+        scope=ctx.scope,
+        auth_resolver=ctx.auth_resolver,
+        target=ctx.target or ctx.runtime,
+        allow_insecure=ctx.allow_insecure,
+        allow_insecure_hosts=ctx.allow_insecure_hosts,
+        marketplace_provenance=outcome.marketplace_provenance if ctx.packages and outcome else None,
+        protocol_pref=ctx.protocol_pref,
+        allow_protocol_fallback=ctx.allow_protocol_fallback,
+        no_policy=ctx.no_policy,
+        audit_override=ctx.audit_override,
+        legacy_skill_paths=ctx.legacy_skill_paths,
+        trust_transitive_mcp=ctx.trust_transitive_mcp,
+        install_mcp=install_mcp,
+        mcp_runtime=ctx.runtime,
+        frozen=frozen,
+        plan_callback=ctx.plan_callback,
+        skill_subset=ctx.skill_subset,
+        skill_subset_from_cli=ctx.skill_subset_from_cli,
+        refresh=ctx.refresh,
+        trust_bin=ctx.trust_bin,
+        transaction=ctx.transaction,
+        lsp_preflight=lsp_preflight,
+    )
