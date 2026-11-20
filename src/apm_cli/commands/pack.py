@@ -719,19 +719,19 @@ def _emit_drift_recipe(
         pack_command += f" --marketplace-path {shlex.quote(f'{output_format}={output_override}')}"
     stage_command = f"git add -- {shlex.quote(out_path)}"
 
-    logger.info("")
+    click.echo("")  # a blank separator carries no status prefix
     logger.info("    To recover cleanly (fold into the current commit):")
-    logger.info("")
+    click.echo("")
     logger.info(f"      {pack_command}                       # regenerate locally")
     logger.info(f"      {stage_command}")
     logger.info("      git commit --amend --no-edit   # fold into the current commit")
     logger.info("      git push --force-with-lease    # safe re-push")
-    logger.info("")
+    click.echo("")
     logger.info("    Or as a follow-up commit:")
-    logger.info("")
+    click.echo("")
     logger.info(f"      {pack_command} && {stage_command}")
     logger.info("      git commit -m 'chore(marketplace): regen'")
-    logger.info("")
+    click.echo("")
     logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")
     logger.info("    so consumers can resolve packages without running 'apm pack'. CI")
     logger.info("    enforces that the checked-in copy matches the apm.yml source of truth.")
