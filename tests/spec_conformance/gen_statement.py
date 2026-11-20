@@ -74,7 +74,7 @@ def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
                 sys.executable,
                 "-m",
                 "pytest",
-                "tests/spec_conformance",
+                "tests",
                 "--collect-only",
                 "-q",
                 "-p",

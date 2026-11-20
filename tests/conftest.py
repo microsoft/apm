@@ -296,3 +296,15 @@ def _hermetic_mcp_transport_lookup():
     finally:
         mcp_transport_resolution._registry_client = original
         mcp_transport_resolution.clear_registry_info_memo()
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Bind OpenAPM req markers anywhere under tests/ to the conformance map.
+
+    Runs first, so environment-dependent skip markers that other conftests add
+    at collection time never change a requirement's recorded status.
+    """
+    from tests.spec_conformance.coverage_map import record
+
+    record(config, items)

@@ -550,8 +550,10 @@ coupled edits in the same PR:
 2. **Manifest:** update
    `docs/public/specs/manifests/openapm-v0.1.requirements.yml`
    to remain a byte-equivalent projection of the canonical anchors.
-3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
-   `tests/spec_conformance/`. If a real assertion is not yet possible, call
+3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test. The marker
+   binds from any test under `tests/` (an installed-CLI test in
+   `tests/integration/` counts); `tests/spec_conformance/` holds the
+   requirement-specific ones. If a real assertion is not yet possible, call
    `waive("...")` from `_helpers.py` with a one-line rationale. The waiver
    appears in `CONFORMANCE.md` as visible debt, not test coverage.
    Only a behavioral test counts as coverage: one that reaches `apm_cli`
@@ -561,9 +563,11 @@ coupled edits in the same PR:
    fixture shape is reported `text-only` (rule:
    `tests/spec_conformance/_test_kind.py`).
 
-Regenerate the conformance statement after these edits:
+Regenerate the conformance statement after these edits (the full collect-only
+run over `tests/` writes the coverage map):
 
 ```bash
+uv run --extra dev pytest tests --collect-only -q -p no:xdist
 uv run --extra dev python -m tests.spec_conformance.gen_statement
 ```
 
