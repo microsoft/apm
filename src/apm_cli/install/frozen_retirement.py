@@ -18,10 +18,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.exec_gate import WithheldExecutables
     from apm_cli.install.request import InstallRequest
 
 
-def _withheld_sources(
+def _withheld(
     lockfile: LockFile,
     lockfile_dir: Path,
     deploy_root: Path,
@@ -29,7 +30,7 @@ def _withheld_sources(
     *,
     no_policy: bool,
     scope: Any,
-) -> dict[str, str]:
+) -> dict[str, WithheldExecutables]:
     """Ask the exec gate owner why each locked package's executables are withheld.
 
     Modules sit beside the lock, but grants come from the manifest the
@@ -44,11 +45,11 @@ def _withheld_sources(
         manifest_root,
         scope_manifest_path,
     )
-    from apm_cli.install.exec_gate import withheld_executable_sources
+    from apm_cli.install.exec_gate import withheld_executables
     from apm_cli.policy.outcome_routing import resolve_trust_policy
 
     source_root = lockfile_dir if scope is None else get_source_root(scope)
-    return withheld_executable_sources(
+    return withheld_executables(
         lockfile,
         lockfile_dir / APM_MODULES_DIR,
         scope_manifest_path(source_root, user_scope=is_user_scope(scope)),
@@ -190,7 +191,7 @@ def frozen_missing_files_error(
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.errors import FrozenInstallError
 
-    sources = _withheld_sources(
+    retired = _withheld(
         committed,
         lockfile_dir,
         deploy_root,
@@ -198,6 +199,7 @@ def frozen_missing_files_error(
         no_policy=request.no_policy,
         scope=request.scope,
     )
+    sources = {key: entry.source for key, entry in retired.items()}
     candidates = [LockFile.from_yaml(payload) for payload in withheld]
     reasons = []
     for path in missing:
@@ -224,14 +226,66 @@ def frozen_missing_files_error(
     )
 
 
+_VERDICT_REASONS = {"denied": "denied", "gated_pending_approval": "not approved"}
+
+
 def preview_executable_retirements(
     lockfile: LockFile, lockfile_dir: Path, *, no_policy: bool, scope: Any
-) -> list[str]:
-    """Packages whose deployed executables an install would retire now (``--dry-run``)."""
+) -> list[tuple[str, list[str]]]:
+    """Packages whose deployed executables an install would retire now (``--dry-run``).
+
+    Each package's deciding source comes with one line per withheld surface:
+    its verdict and the deployed items the lock records for it (#4454).
+    """
+    from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.policy.ci_checks import resolve_audit_scope
 
     deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_dir, lockfile)
-    sources = _withheld_sources(
+    withheld = _withheld(
         lockfile, lockfile_dir, deploy_root, targets, no_policy=no_policy, scope=scope
     )
-    return [sources[key] for key in sorted(sources)]
+    modules_dir = lockfile_dir / APM_MODULES_DIR
+    preview = []
+    for key in sorted(withheld):
+        dependency = lockfile.dependencies[key]
+        surfaces = []
+        for exec_type, state in withheld[key].types:
+            reason = _VERDICT_REASONS.get(state, state)
+            items = _retired_items(lockfile, dependency, exec_type, modules_dir)
+            label = f"{exec_type} ({reason})"
+            surfaces.append(f"{label}: {', '.join(items)}" if items else label)
+        preview.append((withheld[key].source, surfaces))
+    return preview
+
+
+def _retired_items(
+    lockfile: LockFile, dependency: Any, exec_type: str, modules_dir: Path
+) -> list[str]:
+    """The deployed items of *exec_type* the lock records for *dependency*.
+
+    MCP and LSP servers are matched through the provenance token their
+    integrators record for the declaring package; hooks and bin/ through the
+    package's deployed files.
+    """
+    if exec_type == "mcp":
+        from apm_cli.integration.mcp_config_view import mcp_package_owner
+
+        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
+        owner = mcp_package_owner(dependency.name, package_dir=install_path)
+        return _provenance_names(lockfile.mcp_config_provenance, owner)
+    if exec_type == "lsp":
+        from apm_cli.install.lsp.integration import package_lsp_owner
+
+        owner = package_lsp_owner(dependency.get_unique_key())
+        return _provenance_names(lockfile.lsp_config_provenance, owner)
+    if exec_type not in ("hooks", "bin"):
+        return []
+    return sorted(path for path in dependency.deployed_files if exec_type in path.split("/")[:-1])
+
+
+def _provenance_names(provenance: dict, owner: str) -> list[str]:
+    return sorted(
+        name
+        for name, owners in provenance.items()
+        if owner in ([owners] if isinstance(owners, str) else owners)
+    )

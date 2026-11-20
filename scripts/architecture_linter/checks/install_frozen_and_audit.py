@@ -104,7 +104,7 @@ _RETIREMENT_FRAGMENTS = (
     (_FROZEN_OWNER, "enforce_frozen_presence(request, committed, withheld,"),
     (_FROZEN_RETIREMENT, "= find_missing_deployed_files(deploy_root, committed, targets)"),
     (_FROZEN_RETIREMENT, "raise frozen_missing_files_error("),
-    (_FROZEN_RETIREMENT, "return withheld_executable_sources("),
+    (_FROZEN_RETIREMENT, "return withheld_executables("),
     (_GATE_ORACLE, "if after.state.lockfile_bytes != before.state.lockfile_bytes:"),
     (_GATE_ORACLE, "if after.deployed - before.deployed or retired & model.allowed_surfaces():"),
     (_GATE_ORACLE, "and not _within_retirement(path, retirement)"),

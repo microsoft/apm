@@ -30,10 +30,8 @@ _ALL = (
     "policy-dep-deny",
     "revoke-approval",
 )
-_DRY_RUN = "#4454 dry-run preview of gate removal"
 _USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL = {
-    "G|dry-run|local-deny|bin": _DRY_RUN,
     **{
         f"G|marketplace-install|{change}|bin": _USER_ORG
         for change in ("org-deny", "org-enables-gate", "policy-dep-deny")

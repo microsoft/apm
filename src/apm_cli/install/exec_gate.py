@@ -379,7 +379,19 @@ _ORG_DENY_LAYERS = frozenset({"org-deny-all", "org-deny"})
 _LOCAL_DENY_LAYERS = frozenset({"user-deny", "project-deny"})
 
 
-def withheld_executable_sources(
+@dataclass(frozen=True)
+class WithheldExecutables:
+    """Why the gate withholds one locked package's executables, and which ones.
+
+    ``types`` pairs each withheld declared type with the gate's verdict state
+    (``denied`` or ``gated_pending_approval``).
+    """
+
+    source: str
+    types: tuple[tuple[str, str], ...]
+
+
+def withheld_executables(
     lockfile: Any,
     modules_dir: Path,
     manifest_path: Path,
@@ -387,22 +399,23 @@ def withheld_executable_sources(
     policy_provider: Callable[[], Any],
     targets: list[Any] | None = None,
     fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
-) -> builtins.dict[str, str]:
+) -> builtins.dict[str, WithheldExecutables]:
     """Say why the gate now withholds each locked package's executables (#4043).
 
-    Keys are dependency keys; values name the deciding source: ``org policy
-    denies <pkg>``, ``<pkg> is denied locally`` or ``<pkg> is no longer
-    approved locally``. Only the types the lock records as deployed are
-    judged, so a partially admitted package counts when an approved type is
-    revoked. Packages the gate still allows are absent, as are
-    packages whose decision cannot be read now (an unreadable package, or
-    *policy_provider* raising :class:`ExecPolicyUnavailable`). ``install
-    --frozen`` names retired files with it and ``--dry-run`` previews them.
+    Keys are dependency keys; each value names the deciding source (``org
+    policy denies <pkg>``, ``<pkg> is denied locally`` or ``<pkg> is no
+    longer approved locally``) and the withheld types with their verdicts
+    (#4454). Only the types the lock records as deployed are judged, so a
+    partially admitted package counts when an approved type is revoked.
+    Packages the gate still allows are absent, as are packages whose decision
+    cannot be read now (an unreadable package, or *policy_provider* raising
+    :class:`ExecPolicyUnavailable`). ``install --frozen`` names retired files
+    with it and ``--dry-run`` previews them.
     """
     from apm_cli.copilot_plugins.capability import native_registration_scope
     from apm_cli.install.drift import _build_package_info
     from apm_cli.security.executables import TRUST_ABSENT, exec_trust_context_for_project
-    from apm_cli.security.trust import package_withholding_layers
+    from apm_cli.security.trust import package_withheld_verdicts
 
     trust: list[Any] = []
 
@@ -418,7 +431,7 @@ def withheld_executable_sources(
             )
         return trust[0]
 
-    sources: builtins.dict[str, str] = {}
+    withheld: builtins.dict[str, WithheldExecutables] = {}
     with native_registration_scope(targets):
         for key, dep in sorted((getattr(lockfile, "dependencies", None) or {}).items()):
             if key == "." or dep.exec_status == TRUST_ABSENT:
@@ -431,24 +444,27 @@ def withheld_executable_sources(
                     _build_package_info(dep, install_path), key
                 )
                 exec_types = _recorded_deployed_types(dep, declared)
-                layers = set(
-                    package_withholding_layers(
-                        _trust_ctx() if exec_types else None,
-                        tuple(_candidate_keys(package_key)),
-                        install,
-                        exec_types,
-                        native=native,
-                    )
+                verdicts = package_withheld_verdicts(
+                    _trust_ctx() if exec_types else None,
+                    tuple(_candidate_keys(package_key)),
+                    install,
+                    exec_types,
+                    native=native,
                 )
             except (ExecPolicyUnavailable, OSError, ValueError):
                 continue
+            layers = {verdict.layer for verdict in verdicts.values()}
             if layers & _ORG_DENY_LAYERS:
-                sources[key] = f"org policy denies {key}"
+                source = f"org policy denies {key}"
             elif layers & _LOCAL_DENY_LAYERS:
-                sources[key] = f"{key} is denied locally"
+                source = f"{key} is denied locally"
             elif layers:
-                sources[key] = f"{key} is no longer approved locally"
-    return sources
+                source = f"{key} is no longer approved locally"
+            else:
+                continue
+            types = tuple((exec_type, verdicts[exec_type].state) for exec_type in sorted(verdicts))
+            withheld[key] = WithheldExecutables(source, types)
+    return withheld
 
 
 def recorded_exec_status_is_stale(

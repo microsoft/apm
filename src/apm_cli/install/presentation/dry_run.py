@@ -127,8 +127,10 @@ def render_and_exit(
                 f"Executables that would be retired (decision changed since apm.lock.yaml): "
                 f"{len(retirements)}"
             )
-            for source in retirements:
+            for source, surfaces in retirements:
                 logger.progress(f"  - {source}")
+                for surface in surfaces:
+                    logger.progress(f"      {surface}")
 
     if _dryrun_lock and plan.should_install_mcp and project_root is not None:
         from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves

@@ -1199,10 +1199,27 @@ def package_withholding_layers(
     name where the decision came from (org policy, a local deny, or no
     approval), which ``install --frozen`` and ``--dry-run`` report (#4043).
     """
+    withheld = package_withheld_verdicts(ctx, package_keys, install_path, exec_types, native=native)
+    return tuple(sorted({verdict.layer for verdict in withheld.values()}))
+
+
+def package_withheld_verdicts(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> dict[str, TypeVerdict]:
+    """Return the verdict of each declared type the gate withholds now, by type.
+
+    Empty when the gate is off or every declared type is allowed; ``--dry-run``
+    names each withheld surface with its verdict (#4454).
+    """
     if ctx is None or not exec_types or not ctx.gate_enabled:
-        return ()
+        return {}
     verdicts = package_type_verdicts(ctx, package_keys, install_path, exec_types, native=native)
-    return tuple(sorted({verdict.layer for verdict in verdicts.values() if not verdict.allowed}))
+    return {exec_type: verdict for exec_type, verdict in verdicts.items() if not verdict.allowed}
 
 
 # -------------------------------------------------------------------

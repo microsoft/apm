@@ -4223,6 +4223,17 @@
       ]
     },
     {
+      "issue": 4454,
+      "fixed_in": "Unreleased",
+      "summary": "apm install --dry-run after a gate change (apm deny, a revoked approval, an org executables deny) names each executable the next install retires, per package and type, and writes nothing.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_dry_run_gate_preview_lifecycle.py::test_dry_run_previews_the_gate_removal_the_install_performs",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
       "issue": 4455,
       "fixed_in": "Unreleased",
       "summary": "apm install --dry-run previews the block that org policy applies when no enforceable policy can be resolved under policy.fetch_failure_default=block, naming the reason, and writes nothing.",
