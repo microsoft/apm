@@ -110,6 +110,13 @@
       "guards": ["hooks-integrations-mcp-remote-transport-normalization"]
     },
     {
+      "id": "mcp-json-config-writer",
+      "decision": "Writing a user-editable MCP JSON config file (.github/mcp.json, .mcp.json, ~/.claude.json, the IntelliJ MCP config) in the file's own style: indentation, final newline, line endings and literal non-ASCII kept; only APM's entries change; new or minified files use the caller's default",
+      "owner": "utils/json_config.py (write_json_config, detect_json_config_style, render_json_config)",
+      "selectors": ["src/apm_cli/utils/json_config.py"],
+      "guards": ["hooks-integrations-mcp-json-config-writer"]
+    },
+    {
       "id": "mcp-remote-shape-table",
       "decision": "Per-harness remote MCP output shape (URL key, transport discriminator, unsupported transports and retired APM renders), one evidence-backed row per registered runtime, plus the warn-skip-unclaimed disposition for unsupported transports; an adapter whose row retires earlier shapes keeps native comparison on so those APM writes heal",
       "owner": "adapters/client/_remote_shapes.py (REMOTE_SHAPES, remote_shape_of, skip_unsupported_remote)",
