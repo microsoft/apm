@@ -40,10 +40,13 @@ try:
 except ImportError:
     _MODULE_EXISTS = False
 
-pytestmark = pytest.mark.skipif(
-    not _MODULE_EXISTS,
-    reason="apm_cli.bundle.local_bundle not yet implemented (TDD stub)",
-)
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(
+        not _MODULE_EXISTS,
+        reason="apm_cli.bundle.local_bundle not yet implemented (TDD stub)",
+    ),
+]
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 RATCHET_TEST_SCOPE = "fixture"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

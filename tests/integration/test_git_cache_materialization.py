@@ -31,6 +31,8 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 from apm_cli.models.validation import validate_apm_package
 
+pytestmark = pytest.mark.component
+
 _REPO = "https://github.com/acme/monorepo"
 _ANONYMOUS_BLOB_FETCH_STDERR = (
     "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n"

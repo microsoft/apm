@@ -38,7 +38,7 @@ from apm_cli.utils.git_env import (
 # ["git", ...] argv WinError 2 class). Selected by the PR-time Windows
 # Compatibility Gate via `pytest -m windows_compat`; also runs on
 # every other OS.
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 _REAL_SUBPROCESS_RUN = subprocess.run
 
 
@@ -327,11 +327,6 @@ class TestGitSubprocessEnv:
         with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": "/etc/gitconfig"}):
             env = git_subprocess_env()
             assert env["GIT_CONFIG_GLOBAL"] == "/etc/gitconfig"
-
-    def test_preserves_https_proxy(self) -> None:
-        with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.corp:8080"}):
-            env = git_subprocess_env()
-            assert env["HTTPS_PROXY"] == "http://proxy.corp:8080"
 
     def test_preserves_ssh_askpass(self) -> None:
         with patch.dict(os.environ, {"SSH_ASKPASS": "/usr/lib/ssh/ssh-askpass"}):

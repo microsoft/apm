@@ -14,6 +14,8 @@ from apm_cli.cache.http_cache import (
     HttpCache,
 )
 
+pytestmark = pytest.mark.component
+
 
 class TestHttpCacheHitMiss:
     """Test basic cache hit/miss behavior."""
@@ -22,6 +24,7 @@ class TestHttpCacheHitMiss:
         cache = HttpCache(tmp_path)
         result = cache.get("https://registry.example.com/api/servers/test")
         assert result is None
+        assert list((tmp_path / "http_v1").iterdir()) == []
 
     def test_store_and_hit(self, tmp_path: Path) -> None:
         cache = HttpCache(tmp_path)
@@ -35,6 +38,9 @@ class TestHttpCacheHitMiss:
         assert entry is not None
         assert entry.body == body
         assert entry.etag == '"abc123"'
+        entry_dir = cache._entry_path(url)
+        assert (entry_dir / "body").read_bytes() == body
+        assert json.loads((entry_dir / "meta.json").read_text())["etag"] == '"abc123"'
 
     def test_expired_entry_returns_none(self, tmp_path: Path) -> None:
         cache = HttpCache(tmp_path)
@@ -54,6 +60,7 @@ class TestHttpCacheHitMiss:
 
         result = cache.get(url)
         assert result is None
+        assert json.loads(meta_path.read_text())["expires_at"] < time.time()
 
     def test_hit_updates_recency_without_rewriting_response(self, tmp_path: Path) -> None:
         cache = HttpCache(tmp_path)
@@ -105,10 +112,12 @@ class TestHttpCacheHitMiss:
         else:
             (path / "body").unlink()
 
+        before = path.stat().st_mtime_ns
         with patch("apm_cli.cache.http_cache.os.utime") as touch:
             assert cache.get(url) is None
 
         touch.assert_not_called()
+        assert (path.stat().st_mtime_ns if path.exists() else before) == before
 
 
 class TestHttpCacheConditionalRevalidation:
@@ -121,11 +130,13 @@ class TestHttpCacheConditionalRevalidation:
 
         headers = cache.conditional_headers(url)
         assert headers == {"If-None-Match": '"v1"'}
+        assert json.loads((cache._entry_path(url) / "meta.json").read_text())["etag"] == '"v1"'
 
     def test_conditional_headers_no_entry(self, tmp_path: Path) -> None:
         cache = HttpCache(tmp_path)
         headers = cache.conditional_headers("https://not-cached.example.com/foo")
         assert headers == {}
+        assert not cache._entry_path("https://not-cached.example.com/foo").exists()
 
     def test_refresh_expiry_on_304(self, tmp_path: Path) -> None:
         cache = HttpCache(tmp_path)
@@ -148,6 +159,9 @@ class TestHttpCacheConditionalRevalidation:
         entry = cache.get(url)
         assert entry is not None
         assert entry.body == b"body"
+        refreshed = json.loads(meta_path.read_text())
+        assert refreshed["etag"] == '"v2"'
+        assert refreshed["expires_at"] > time.time()
 
 
 class TestHttpCacheTTLCap:
@@ -190,6 +204,8 @@ class TestHttpCacheSizeCap:
         assert cache.get(urls[1]) is None
         assert cache.get(urls[2]) is not None
         assert cache.get_stats()["total_size_bytes"] <= 10_000
+        assert not cache._entry_path(urls[1]).exists()
+        assert (cache._entry_path(urls[0]) / "body").is_file()
 
     def test_eviction_on_size_cap(self, tmp_path: Path) -> None:
         # Use a very small cap for testing
@@ -207,6 +223,7 @@ class TestHttpCacheSizeCap:
             # Some entries should have been evicted
             stats = cache.get_stats()
             assert stats["total_size_bytes"] <= 1000  # Generous bound
+            assert len([p for p in (tmp_path / "http_v1").iterdir() if p.is_dir()]) < 20
 
 
 class TestHttpCacheClean:
@@ -228,3 +245,5 @@ class TestHttpCacheClean:
         cache.clean_all()
         stats = cache.get_stats()
         assert stats["entry_count"] == 0
+        assert not cache._entry_path("https://example.com/1").exists()
+        assert not cache._entry_path("https://example.com/2").exists()
