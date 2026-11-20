@@ -195,3 +195,14 @@ def test_persona_journey_files_agree_with_the_index() -> None:
             if journey["persona"] == persona
         }
         assert journeys == expected, persona
+
+
+def test_golden_record_mode_runs_without_the_receipt_ratchet() -> None:
+    """Record mode cannot earn O1 receipts, so regen_goldens turns the ratchet off itself."""
+    from tests.lifecycle import conftest as lifecycle_conftest
+    from tests.lifecycle.journeys import regen_goldens
+
+    command = regen_goldens.record_command(["E01"])
+    assert regen_goldens.RECEIPT_PLUGIN == lifecycle_conftest._PLUGIN_NAME
+    disabled = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "-p"]
+    assert f"no:{lifecycle_conftest._PLUGIN_NAME}" in disabled, command
