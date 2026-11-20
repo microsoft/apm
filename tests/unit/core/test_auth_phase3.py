@@ -987,6 +987,39 @@ def _helper_credential(password: str) -> GitHelperCredential:
     return GitHelperCredential(host="dev.azure.com", password=password, username="helper-user")
 
 
+class TestDescribeCredentialTried:
+    """Diagnostics name the credential source tried, never its value (#4174)."""
+
+    def test_names_the_resolved_source_not_the_value(self) -> None:
+        with patch.dict(os.environ, {"GITHUB_APM_PAT_ACME": "sentinel-acme-value"}, clear=True):
+            resolver = AuthResolver()
+            resolver.resolve("acme.ghe.com", org="acme")
+            text = resolver.describe_credential_tried("acme.ghe.com", "acme")
+        assert text == "credential tried: GITHUB_APM_PAT_ACME"
+
+    def test_never_resolves_to_render(self) -> None:
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "sentinel"}, clear=True):
+            resolver = AuthResolver()
+            with patch.object(resolver, "_resolve_token") as resolve_token:
+                text = resolver.describe_credential_tried("github.com", "acme")
+        resolve_token.assert_not_called()
+        assert text == "no credential sent"
+
+    def test_lists_sources_checked_when_none_held_a_credential(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None),
+            patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None),
+        ):
+            resolver = AuthResolver()
+            resolver.resolve("github.com", org="acme")
+            text = resolver.describe_credential_tried("github.com", "acme")
+        assert text == (
+            "no credential found in GITHUB_APM_PAT_ACME, GITHUB_APM_PAT, GITHUB_TOKEN, "
+            "GH_TOKEN, gh auth token, git credential helper"
+        )
+
+
 class TestBuildErrorContextNonADO:
     def test_github_com_with_token_mentions_saml(self) -> None:
         with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_tok"}, clear=True):

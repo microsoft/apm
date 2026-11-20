@@ -1,0 +1,19 @@
+{
+  "changelog": "Installing a dependency whose repository the host answers 404 for now reports `Repository <owner/repo> not found on <host>` once, with `Run 'apm uninstall <owner/repo>'`, instead of a network error. (#4217)",
+  "ledger_row": {
+    "issue": 4199,
+    "fixed_in": "Unreleased",
+    "summary": "A declared dependency whose repository returned 404 was reported as a network error (or an auth failure) with protocol-fallback advice, printed twice under --verbose, and with no runnable next step.",
+    "failure_modes": ["observation", "outcome", "auth"],
+    "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+    "regression_tests": [
+      "tests/integration/test_repository_not_found_lifecycle.py::test_missing_declared_repository_is_not_found_with_runnable_next_step",
+      "tests/unit/core/test_auth_outcome.py::test_repository_not_found_is_neither_network_nor_auth",
+      "tests/unit/core/test_auth_outcome.py::test_public_github_anonymous_git_404_may_hide_a_private_repository"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_repository_not_found_lifecycle.py -k missing_declared -n 0 -p no:cacheprovider -q -> 2 failed: [bare-404] I9 repeated line \"fatal: repository 'https://github.com/fixture/missing.git/' not found\" with 'Could not connect to github.com (network error, not an auth failure)'; [github-wording] 'Authentication failed for clone on github.com. No token available.' repeated",
+  "green": "same command -> 2 passed",
+  "owner": "src/apm_cli/core/auth_outcome.py (is_repository_not_found, Git 404 wording in the classifier, RepositoryNotFoundError) + src/apm_cli/core/auth.py (AuthResolver.build_not_found_message / describe_credential_tried); callers deps/bare_cache.py + deps/clone_engine.py (clone), deps/git_reference_resolver.py (ls-remote), install/phases/resolve.py (direct-dep next step, single print)",
+  "notes": "One fix shared with #4174 (AuthResolver.describe_credential_tried names the credential source from already-resolved contexts only; never runs a helper to render). Hermetic world: scripted HTTPS proxy (tests/utils/local_scripted_https_proxy.py) serving github.com via git http-backend; parametrized on GitHub's 'Repository not found.' body and a bare 404. Hint executed: 'apm uninstall fixture/missing' exits 0, apm.yml keeps only fixture/present, then 'apm install' converges. The inline verbose_detail of the failure in install/phases/resolve.py was removed: the deferred summary prints it once in every mode. Git's \"repository '<url>' not found\" now escalates the public github.com anonymous leg like GitHub's own wording. Not addressed: the 'Protocol fallback' line printed twice after following the fallback advice (the fallback advice is no longer printed for not-found). PR #4143 conflict risk: its contracts-tooling-remediation-advice rule would flag the new 'Run 'apm uninstall ...'' f-string in install/phases/resolve.py; move it to a core/remediation.py catalog entry (e.g. 'dependency-repository-missing', 'apm uninstall {package}', 'remove it from apm.yml') when #4143 lands. PR #4138 conflict risk: docs/src/content/docs/troubleshooting/install-failures.md (one paragraph added) and install/phases/resolve.py. scripts/lint-architecture-boundaries.sh was OOM-killed locally (shared host); not verified locally."
+}

@@ -129,6 +129,7 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _uses_clone_root_probe,
     _validate_package_exists,
+    inaccessible_package_reason,
 )
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -504,9 +505,7 @@ def _resolve_package_references(
                     if not verbose:
                         reason += " (run with --verbose for the git output)"
                 else:
-                    reason = "not accessible or doesn't exist"
-                    if not verbose:
-                        reason += " -- run with --verbose for auth details"
+                    reason = inaccessible_package_reason(dep_ref, package, auth_resolver, verbose)
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)

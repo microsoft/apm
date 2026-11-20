@@ -33,7 +33,11 @@ from typing import TYPE_CHECKING, Protocol
 from git.exc import GitCommandError
 
 from ..core.auth_chain import AdoAuthChainExhaustedError
-from ..core.auth_outcome import classify_auth_outcome
+from ..core.auth_outcome import (
+    RepositoryNotFoundError,
+    classify_auth_outcome,
+    is_repository_not_found,
+)
 from ..models.apm_package import (
     DependencyReference,
     GitReferenceType,
@@ -355,6 +359,16 @@ class GitReferenceResolver:
         is_generic = not is_ado and not is_github
 
         ref_kind = "remote refs" if include_heads else "remote tags"
+        if is_repository_not_found(e):
+            raise RepositoryNotFoundError(
+                host.auth_resolver.build_not_found_message(
+                    dep_host or default_host(),
+                    repo_url_base,
+                    dependency_repository_owner(dep_ref),
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+            ) from e
         error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
         if (
             public_github_https_first
