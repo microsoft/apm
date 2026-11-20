@@ -408,7 +408,8 @@ class TestApproveCmd:
             _write_manifest(".")
             Path("apm_modules").mkdir()
             result = runner.invoke(approve_cmd, ["nonexistent"])
-            assert result.exit_code == 0
+            # Approving nothing is an error, never a silent success (#4154).
+            assert result.exit_code == 1
             assert "not found" in result.output
 
     @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
@@ -426,7 +427,8 @@ class TestApproveCmd:
             store = load_yaml(Path("apm.yml")).get("executables", {})
             assert "hook-pkg" not in str(store.get("allow", {}))
             assert not any("hook-pkg" in key for key in store.get("deny", {}))
-            assert result.exit_code == 0, result.output
+            # approve of a name matching nothing exits 1 (#4154); deny records it.
+            assert result.exit_code == (1 if command is approve_cmd else 0), result.output
 
     @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
     def test_name_matching_two_installed_packages_is_refused(self, command) -> None:

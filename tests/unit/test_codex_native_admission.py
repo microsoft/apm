@@ -39,8 +39,10 @@ def _admit(root: Path, **overrides):
 
 
 def test_native_admission_never_silently_reduces_unapproved_mcp(tmp_path):
-    with pytest.raises(CodexNativeError, match=r"executables\.allow"):
-        _admit(tmp_path, approvals={})
+    """Unapproved MCP parks the whole bundle (#4154); replay still refuses it."""
+    assert _admit(tmp_path, approvals={}).parked is True
+    with pytest.raises(CodexNativeError, match=r"apm approve -g owner/example"):
+        _admit(tmp_path, approvals={}, read_only=True)
 
 
 def test_native_admission_requires_whole_bundle_and_user_scope(tmp_path):
@@ -52,8 +54,9 @@ def test_native_admission_requires_whole_bundle_and_user_scope(tmp_path):
 
 def test_native_admission_gates_hidden_native_root_executables(tmp_path):
     (tmp_path / "hooks").mkdir()
+    assert _admit(tmp_path).parked is True
     with pytest.raises(CodexNativeError, match=r"executables\.allow"):
-        _admit(tmp_path)
+        _admit(tmp_path, read_only=True)
 
 
 def test_native_admission_keeps_canonical_identity(tmp_path):

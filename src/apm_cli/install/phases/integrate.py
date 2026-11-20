@@ -480,7 +480,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     if not ctx.blocked_executables:
         return
     from apm_cli.core.scope import is_user_scope
-    from apm_cli.security.trust import approve_command
+    from apm_cli.security.trust import approve_command, explain_command
 
     if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
         first = ctx.blocked_executables[0].package_name
@@ -492,7 +492,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         remedy = (
             f"Trust the org-vetted set: {approve_command('--recommended', user_scope=user_scope)}"
             f"  |  Trust one: {approve_command(first, user_scope=user_scope)}  |  "
-            f"Inspect: apm policy explain {first}"
+            f"Inspect: {explain_command(first, user_scope=user_scope)}"
         )
         if ctx.logger:
             ctx.logger.warning(msg, symbol="warning")
@@ -550,7 +550,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         logger.info(
             f"Deploy later: {approve_command(first, user_scope=is_user_scope(ctx.scope))} "
             f"(then re-run apm install{' -g' if is_user_scope(ctx.scope) else ''})  |  "
-            f"Why parked?: apm policy explain {first}",
+            f"Why parked?: {explain_command(first, user_scope=is_user_scope(ctx.scope))}",
             symbol="info",
         )
 

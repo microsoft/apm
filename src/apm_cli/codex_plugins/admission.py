@@ -32,6 +32,8 @@ class CodexNativePlugin:
     source_hash: str
     mcp_server_names: tuple[str, ...] = ()
     source_commit: str | None = None
+    # Unapproved executables: nothing deploys or registers until approved (#4154).
+    parked: bool = False
     target_name: ClassVar[str] = "codex"
 
     def source_identity(self) -> dict[str, str | None]:
@@ -61,6 +63,19 @@ def finalize_codex_native(
     scratch_root: Path | None,
 ) -> dict:
     """Queue the admitted source identity only after successful loose cleanup."""
+    if plugin.parked:
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.security.trust import REASON_UNAPPROVED, parked_plugin_message
+
+        message = parked_plugin_message(
+            plugin.dependency_key,
+            REASON_UNAPPROVED,
+            user_scope=is_user_scope(getattr(ctx, "scope", None)),
+        )
+        diagnostics = getattr(ctx, "diagnostics", None)
+        if diagnostics is not None:
+            diagnostics.warn(message, package=plugin.dependency_key)
+        return result
     if reconcile_result is not None and reconcile_result.get("errors", 0):
         raise CodexNativeError(
             "Prior loose hooks could not be removed; fix their ownership conflict "
@@ -115,7 +130,8 @@ def plan_native_codex_plugin(
     if manifest.has_hooks:
         types.add(EXEC_TYPE_HOOKS)
     record_native_exec_status(ctx, dependency_key, package_info, tuple(sorted(types)))
-    if any(not approvals.get(kind, False) for kind in types):
+    parked = any(not approvals.get(kind, False) for kind in types)
+    if parked and read_only:
         from apm_cli.security.trust import approve_command
 
         command = approve_command(dependency_key, user_scope=scope is InstallScope.USER)
@@ -138,4 +154,5 @@ def plan_native_codex_plugin(
         compute_native_bundle_hash(root),
         manifest.mcp_server_names,
         source_commit,
+        parked=parked,
     )

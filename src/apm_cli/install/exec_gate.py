@@ -545,16 +545,17 @@ def log_hooks_skip(
 
     label = package_name or getattr(package_info, "name", "unknown")
     denied = getattr(ctx, "package_denied_exec_types", None) or {}
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.trust import approve_command, explain_command
+
+    user_scope = is_user_scope(getattr(ctx, "scope", None))
     if EXEC_TYPE_HOOKS in denied.get(package_name, frozenset()):
         message = (
             f"{label}: hooks skipped (denied). "
-            f"Run 'apm policy explain {label}' to see which deny applies."
+            f"Run '{explain_command(label, user_scope=user_scope)}' to see which deny applies."
         )
     else:
-        from apm_cli.core.scope import is_user_scope
-        from apm_cli.security.trust import approve_command
-
-        command = approve_command(label, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+        command = approve_command(label, user_scope=user_scope)
         message = (
             f"{label}: hooks skipped (not approved in executables.allow). "
             f"Run '{command}' to approve."

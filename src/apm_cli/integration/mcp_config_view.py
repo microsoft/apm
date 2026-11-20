@@ -1017,10 +1017,11 @@ def parked_mcp_message(
     user_scope: bool = False,
 ) -> str:
     """Return the warning for one dependency MCP server the trust owner parked."""
-    from apm_cli.security.trust import approve_command
+    from apm_cli.security.trust import approve_command, explain_command
 
     name = dependency.name
     approve = approve_command(package, user_scope=user_scope)
+    explain = explain_command(package, user_scope=user_scope)
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         detail = (
             "self-defined"
@@ -1045,13 +1046,10 @@ def parked_mcp_message(
             f"Re-approve: {approve}"
         )
     if reason == REASON_DENIED:
-        return (
-            f"Parked MCP server '{name}' ({package}): denied ({layer})\n"
-            f"    Explain: apm policy explain {package}"
-        )
+        return f"Parked MCP server '{name}' ({package}): denied ({layer})\n    Explain: {explain}"
     return (
         f"Parked MCP server '{name}' ({package}): executables not approved\n"
-        f"    Explain: apm policy explain {package}  |  Approve: {approve}"
+        f"    Explain: {explain}  |  Approve: {approve}"
     )
 
 

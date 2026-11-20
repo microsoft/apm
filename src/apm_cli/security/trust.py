@@ -465,13 +465,18 @@ def approve_command(argument: str, *, user_scope: bool = False) -> str:
     return f"apm approve -g {argument}" if user_scope else f"apm approve {argument}"
 
 
+def explain_command(package: str, *, user_scope: bool = False) -> str:
+    """Return the ``apm policy explain`` command for a parked package's scope."""
+    return f"apm policy explain -g {package}" if user_scope else f"apm policy explain {package}"
+
+
 def parked_hook_message(package: str, item: str, reason: str, *, user_scope: bool = False) -> str:
     """Return the warning for one pinned hook file the trust owner parked."""
     if reason == REASON_DENIED:
         # apm approve cannot clear a deny; point at the deciding layer instead.
         return (
             f"Parked hook file '{item}' ({package}): denied\n"
-            f"    Explain: apm policy explain {package}"
+            f"    Explain: {explain_command(package, user_scope=user_scope)}"
         )
     why = (
         "definition changed since approval"
@@ -743,7 +748,10 @@ def parked_plugin_message(
             "    Ask the publisher to move them out of .apm/ and apm.yml"
         )
     if reason == REASON_DENIED:
-        return f"Parked native plugin {package}: denied\n    Explain: apm policy explain {package}"
+        return (
+            f"Parked native plugin {package}: denied\n"
+            f"    Explain: {explain_command(package, user_scope=user_scope)}"
+        )
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         return (
             f"Parked native plugin {package}: a transitive plugin with MCP servers needs "

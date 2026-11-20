@@ -316,7 +316,7 @@ def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
     return build_exec_trust_context(policy=policy, project_data=project_data)
 
 
-def explain_decision(package: str, *, logger: CommandLogger) -> None:
+def explain_decision(package: str, *, logger: CommandLogger, global_scope: bool = False) -> None:
     """Explain the effective executable-trust decision for a package.
 
     Shows, per executable type the package declares, whether it is allowed,
@@ -329,7 +329,7 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
 
         apm policy explain owner/repo
     """
-    manifest = _find_manifest()
+    manifest = _find_manifest(global_scope=global_scope)
     ctx = _effective_trust_context(manifest, logger=logger)
 
     decl = _find_declaration(_scan_installed_packages(manifest), package)
@@ -354,8 +354,11 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
         if verdict.shadowed:
             _rich_echo(f"          shadowed: {', '.join(verdict.shadowed)}")
     if has_block:
+        from ..security.trust import approve_command
+
+        user_scope = _install_command(manifest).endswith("-g")
         _rich_info(
-            f"To trust it: `apm approve {decl.package_name}` "
+            f"To trust it: `{approve_command(decl.package_name, user_scope=user_scope)}` "
             f"(or `apm approve --user {decl.package_name}` for this machine only).",
             symbol="info",
         )
@@ -853,7 +856,7 @@ def _record_and_save(
             f"Run '{_install_command(manifest)}' to deploy{share}.",
             symbol="info",
         )
-        if not user_scope and not had_pins and has_any_pins(allow):
+        if share and not had_pins and has_any_pins(allow):
             _rich_info(
                 f"Teammates need APM {PINNED_GRANTS_MIN_APM} or later to read pinned approvals.",
                 symbol="info",
