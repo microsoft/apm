@@ -75,6 +75,13 @@ def _snap(project: Path) -> LifecycleStateSnapshot:
     return LifecycleStateSnapshot.capture(project, targets=(_TARGET,))
 
 
+def _assert_lock_matches_deployed(project: Path, snapshot: LifecycleStateSnapshot) -> None:
+    """I1: every deployment record points at a path that exists."""
+    assert snapshot.deployment_records
+    for record in snapshot.deployment_records:
+        assert (project / record.locator.value).exists(), record
+
+
 def test_run_unknown_script_lists_scripts_and_prints_runnable_next_step(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -100,3 +107,33 @@ def test_run_unknown_script_lists_scripts_and_prints_runnable_next_step(
     assert listed.returncode == 0, _evidence(listed)
     for name, command in (("start", "echo started"), ("review", "echo reviewed")):
         assert re.search(rf"\b{name}\b.*{command}", listed.stdout), _evidence(listed)
+
+
+def test_install_skill_miss_lists_skills_and_prints_runnable_next_step(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4206: ``install --skill nope`` names the skills and one runnable step."""
+    world = _World(tmp_path / "world", apm_binary_path)
+    bundle = world.packages.create("bundle")
+    for name in ("alpha", "beta"):
+        world.packages.add_skill(bundle, name, f"---\nname: {name}\ndescription: d\n---\nBody\n")
+    project = world.packages.create("consumer", targets=(_TARGET,))
+    manifest_bytes = project.manifest_path.read_bytes()
+    before = _snap(project.root)
+
+    failed = world.apm(project.root, "install", "../bundle", "--skill", "nope")
+
+    assert failed.returncode == 1, _evidence(failed)  # I8
+    output = " ".join(f"{failed.stdout}\n{failed.stderr}".split())
+    assert "Requested: nope. Available: alpha, beta." in output, _evidence(failed)
+    assert project.manifest_path.read_bytes() == manifest_bytes
+    assert not (project.root / "apm.lock.yaml").exists()
+    assert _snap(project.root) == before, "I7: a failed install changed durable state"
+
+    next_step = _single_next_step(failed)
+    assert next_step == ("install", "../bundle", "--skill", "alpha"), _evidence(failed)
+    installed = world.apm(project.root, *next_step)
+    assert installed.returncode == 0, _evidence(installed)
+    assert (project.root / ".claude/skills/alpha/SKILL.md").is_file(), _evidence(installed)
+    assert not (project.root / ".claude/skills/beta").exists(), _evidence(installed)
+    _assert_lock_matches_deployed(project.root, _snap(project.root))

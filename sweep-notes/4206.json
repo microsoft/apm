@@ -1,0 +1,18 @@
+{
+  "changelog": "`apm install --skill` with no matching skill now ends with one runnable `apm install <package> --skill <available>` command. (#4217)",
+  "ledger_row": {
+    "issue": 4206,
+    "fixed_in": "Unreleased",
+    "summary": "install --skill with no matching skill listed the available skills but printed free-text advice instead of a runnable apm install command.",
+    "failure_modes": ["observation", "outcome"],
+    "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+    "regression_tests": [
+      "tests/integration/test_failure_next_step_lifecycle.py::test_install_skill_miss_lists_skills_and_prints_runnable_next_step",
+      "tests/integration/test_architecture_outcome_guards.py::test_requested_component_miss_names_one_runnable_install"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_failure_next_step_lifecycle.py::test_install_skill_miss_lists_skills_and_prints_runnable_next_step -n 0 -p no:cacheprovider -q -> FAILED: assert len(steps) == 1 (assert 0 == 1; output ended 'Choose an available skill or update the package manifest, then reinstall.')",
+  "green": "same command -> 1 passed; tests/integration/test_architecture_outcome_guards.py -> 23 passed",
+  "owner": "src/apm_cli/install/outcome.py (require_requested_components); caller src/apm_cli/install/template.py passes the reinstall spec",
+  "notes": "Hint executed in the test: 'apm install ../bundle --skill alpha' exits 0, deploys .claude/skills/alpha and not beta, lockfile records match. A partial miss keeps the requested skills that exist; no available skills suggests the plain 'apm install <package>'. Updated tests/integration/test_architecture_outcome_guards.py which pinned the old free-text advice. PR #4143 conflict risk: its contracts-tooling-remediation-advice rule would flag this 'Run 'apm install ...'' f-string in install/outcome.py (not in its baseline). When #4143 lands, move it to a core/remediation.py catalog entry, e.g. _entry('skill-selection-miss', 'apm install {package} --skill {skill}', 'install the available skill')."
+}
