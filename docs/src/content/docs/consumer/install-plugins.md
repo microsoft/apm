@@ -28,7 +28,7 @@ Commit `apm.yml` and `apm.lock.yaml`. Teammates run `apm install`.
 | Lock | `apm.lock.yaml` pins the plugin's commit and records a SHA-256 hash for every file APM deployed. `apm audit` reports drift. |
 | Scan | Every file is scanned for hidden Unicode at install; critical findings block. APM does not inspect what the code does. |
 | Policy | Your organization's `apm-policy.yml` can allow or deny the source before anything is written. |
-| Approve | Hooks, MCP servers, LSP servers and `bin/` deploy unless your project or organization turns on the approval gate; then they wait for `apm approve`. A Claude Code plugin installed whole at user scope is enabled only when one approval pinned to its content covers it ([Approve hooks and MCP servers](../approve-executables/)). |
+| Approve | Hooks, MCP servers, LSP servers and `bin/` deploy unless your project or organization turns on the approval gate; then they wait for `apm approve`. A plugin installed whole (Claude Code at user scope, Claude Code or Copilot at project scope) is enabled only when one approval pinned to its content covers it ([Approve hooks and MCP servers](../approve-executables/)). |
 
 APM decides what gets installed. The harness decides what runs, with its own
 permissions; APM is not a sandbox.
@@ -40,8 +40,9 @@ What APM does depends on the plugin format:
 | Plugin format | What APM does today |
 |---|---|
 | Claude Code plugin at user scope (`apm install -g --target claude`) | Deploys the publisher's files whole to `~/.agents/plugins/<plugin>/` and registers them in Claude Code's settings, so Claude Code loads a real plugin. See [Claude Code plugins at user scope](#claude-code-plugins-at-user-scope). |
-| Claude Code plugin at project scope (`.claude-plugin/plugin.json`, or `plugin.json` without `$schema`) | Splits it into primitives for each selected harness: skills to `.claude/skills/` and `.agents/skills/`, agents and commands to `.claude/`, hooks into `.claude/settings.json` with their scripts under `.claude/hooks/<plugin>/`, MCP servers into `.mcp.json`. Claude Code sees the pieces, not a plugin. |
-| Agent Plugin (`plugin.json` with the Agent Plugins `$schema`) | For GitHub Copilot: keeps it whole in `apm_modules/` and registers it in `.github/copilot/settings.local.json`, so Copilot CLI 1.0.81 or later loads it live. A target list without `copilot` refuses it. |
+| Claude Code plugin at project scope (`.claude-plugin/plugin.json`), when the project targets `claude` or `copilot` | Deploys it whole to the committed `.agents/plugins/<plugin>/` and declares it in `.claude/settings.json` and/or `.github/copilot/settings.json`, so a fresh clone loads it without APM. See [Plugins at project scope](#plugins-at-project-scope). |
+| Other plugins at project scope (`plugin.json` without `$schema`, or no `claude`/`copilot` target) | Splits it into primitives for each selected harness: skills to `.claude/skills/` and `.agents/skills/`, agents and commands to `.claude/`, hooks into `.claude/settings.json` with their scripts under `.claude/hooks/<plugin>/`, MCP servers into `.mcp.json`. The harness sees the pieces, not a plugin. |
+| Agent Plugin (`plugin.json` with the Agent Plugins `$schema`) | For GitHub Copilot: deploys it whole to `.agents/plugins/<plugin>/` and declares it in the committed `.github/copilot/settings.json` (`~/.agents/plugins` and `~/.copilot/settings.json` with `-g`), so Copilot CLI loads it live. A target list without `copilot` refuses it. Registrations an earlier APM wrote to `.github/copilot/settings.local.json` are removed on the next install. |
 | Codex bundle (`.codex-plugin/plugin.json`) | With `apm install -g --target codex` and Codex CLI 0.163.0 or later: registers the whole bundle with Codex at user scope, disabled until you enable it ([details](../installing-from-marketplaces/#codex-compatibility-bundles-through-apm)). |
 
 Exact paths per harness: [Targets matrix](../../reference/targets-matrix/).
@@ -92,15 +93,46 @@ a partial skill selection, symlinks, `monitors/` or `workflows/`, unknown manife
 capabilities, paths outside the plugin, names that collide when case is ignored, or
 plugin `dependencies`. Other packages in the same install continue.
 
+## Plugins at project scope
+
+New in 0.38. In a project that targets `claude` or `copilot`, `apm install`
+keeps a Claude Code plugin whole and commits it, so teammates and CI load it
+without APM:
+
+- **Committed root.** APM copies the approved plugin files from `apm_modules/`
+  (still ignored by git) to `.agents/plugins/<plugin>/` and generates
+  `.agents/plugins/.claude-plugin/marketplace.json`. Commit both.
+- **Relative declaration.** APM writes `extraKnownMarketplaces.apm-p-<hash>`
+  with the path `./.agents/plugins` and `enabledPlugins["<plugin>@apm-p-<hash>"]: true`
+  to `.claude/settings.json` when the dependency targets Claude, and to
+  `.github/copilot/settings.json` when it targets Copilot. The name comes from
+  the `name` in `apm.yml`: the same in every clone, different per project.
+- **Portable lock fingerprint.** The `native_plugin` record covers each file's
+  path and bytes, not the executable bit, so a Windows checkout is not drift.
+- **Same rules as user scope.** Approval, parking, your `false`, exact uninstall
+  and refusals work as above. A plugin APM cannot install whole (a skill
+  selection, symlinks, unknown capabilities) keeps its split install, with a
+  warning naming why. A package whose hooks an earlier split install wrote must
+  be removed with `apm uninstall <package>` and installed again.
+
+Copilot CLI also reads `.claude/settings.json` and `.claude/settings.local.json`.
+When files disagree on a plugin, the later one in this order wins (observed on
+Copilot CLI 1.0.112): `.claude/settings.json`, `.claude/settings.local.json`,
+`.github/copilot/settings.json`, `.github/copilot/settings.local.json`. To turn a
+plugin off only for yourself, set it to `false` in a `.local` file.
+
+Claude Code resolves the relative path against the main checkout, also from a
+git worktree, and loads a newly declared plugin from the next session.
+
 ## Known gaps
 
-At project scope, APM still splits a Claude Code plugin, which changes its layout.
-These cases break or arrive partial there; at user scope the plugin is installed
-whole and they do not apply:
+APM still splits a plugin it cannot install whole, which changes its layout.
+These cases break or arrive partial there; a plugin installed whole is not
+affected:
 
 | Gap | Effect | Workaround |
 |---|---|---|
-| Scripts that expect the plugin root, such as reading `../../.claude-plugin/plugin.json` or a skill path next to the hook ([#2824](https://github.com/microsoft/apm/issues/2824)) | Hook errors or injects the wrong content | Install it at user scope: `apm install -g --target claude` |
+| Scripts that expect the plugin root, such as reading `../../.claude-plugin/plugin.json` or a skill path next to the hook ([#2824](https://github.com/microsoft/apm/issues/2824)) | Hook errors or injects the wrong content | Target `claude` or `copilot` so APM installs it whole |
 | Hooks that read `process.env.CLAUDE_PLUGIN_ROOT` ([#3191](https://github.com/microsoft/apm/issues/3191)) | Hook fails silently | Same |
 | `${CLAUDE_PLUGIN_ROOT}` inside commands ([#3181](https://github.com/microsoft/apm/issues/3181)) | Command points at a missing path | Same |
 | Two plugins ship a skill or agent with the same name ([#1120](https://github.com/microsoft/apm/issues/1120)) | Names collide in `.claude/` | Install one of them, or select skills with `--skill` |
@@ -108,9 +140,9 @@ whole and they do not apply:
 | Codex bundles | User scope, qualified on macOS arm64; the route is planned to change ([#3920](https://github.com/microsoft/apm/issues/3920)) | Use Codex's own `codex plugin add` |
 
 :::note[Planned]
-Whole-plugin installs ship for Claude Code at user scope in 0.37. Project scope and
-the other harnesses are planned. Track
-[#3094](https://github.com/microsoft/apm/issues/3094).
+Whole-plugin installs ship for Claude Code at user scope in 0.37, and for
+Claude Code and Copilot at project scope in 0.38. Other harnesses are planned.
+Track [#3094](https://github.com/microsoft/apm/issues/3094).
 :::
 
 ## Verify
@@ -131,8 +163,8 @@ Work down this list:
    If `claude` is missing, add it to `targets:`
    ([Choose your harnesses](../choose-harnesses/)).
 2. **Look for the plugin or its pieces.** At user scope, `/plugin` lists it under
-   `apm-u-<hash>`; if it is missing, the plugin may be parked (step 3). At project
-   scope, `/plugin` does not list APM-installed Claude plugins. Check `.claude/skills/`,
+   `apm-u-<hash>`, and at project scope under `apm-p-<hash>`; if it is missing,
+   the plugin may be parked (step 3). For a split plugin, check `.claude/skills/`,
    `.claude/agents/`, `.claude/commands/` and `.claude/settings.json`;
    `apm find .claude/skills/<name>/SKILL.md` names the package that
    wrote a file.
