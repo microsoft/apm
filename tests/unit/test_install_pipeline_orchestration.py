@@ -68,19 +68,23 @@ class TestRunPhase:
 
 
 class TestRunInstallPipelineShortCircuit:
-    def _make_apm_package(self, deps=None, dev_deps=None):
+    def _make_apm_package(self, deps=None, dev_deps=None, replace_rules_unset=False):
         pkg = MagicMock()
         pkg.get_apm_dependencies.return_value = deps or []
         pkg.get_dev_apm_dependencies.return_value = dev_deps or []
         pkg.get_mcp_dependencies.return_value = []
-        pkg.replace_rules = None
+        if not replace_rules_unset:
+            pkg.replace_rules = None
         return pkg
 
-    def test_no_deps_no_local_returns_install_result(self, tmp_path):
+    @pytest.mark.parametrize(
+        "replace_rules_unset", [False, True], ids=["replace-rules-none", "replace-rules-unset"]
+    )
+    def test_no_deps_no_local_returns_install_result(self, tmp_path, replace_rules_unset):
         from apm_cli.install.pipeline import run_install_pipeline
         from apm_cli.models.results import InstallResult
 
-        pkg = self._make_apm_package()
+        pkg = self._make_apm_package(replace_rules_unset=replace_rules_unset)
 
         with (
             patch(
@@ -104,11 +108,18 @@ class TestRunInstallPipelineShortCircuit:
 
         assert isinstance(result, InstallResult)
 
-    def test_resolve_phase_returns_no_deps_calls_nothing_to_install(self, tmp_path):
+    @pytest.mark.parametrize(
+        "replace_rules_unset", [False, True], ids=["replace-rules-none", "replace-rules-unset"]
+    )
+    def test_resolve_phase_returns_no_deps_calls_nothing_to_install(
+        self, tmp_path, replace_rules_unset
+    ):
         from apm_cli.install.pipeline import run_install_pipeline
         from apm_cli.models.results import InstallResult
 
-        pkg = self._make_apm_package(deps=[MagicMock()])  # has deps but resolve finds nothing
+        pkg = self._make_apm_package(
+            deps=[MagicMock()], replace_rules_unset=replace_rules_unset
+        )  # has deps but resolve finds nothing
         logger = MagicMock()
 
         mock_ctx = MagicMock()

@@ -303,7 +303,7 @@
 "tests/unit/test_triage_advisory.py::test_local_package_snapshots_match_lockfile": 1.1,
 "tests/unit/test_triage_panel_lock.py": 0.19,
 "tests/unit/test_uninstall_engine_helpers.py": 0.02,
-"tests/unit/test_uninstall_engine_phase3w5.py": 0.01,
+"tests/unit/test_uninstall_engine_validation.py": 0.01,
 "tests/unit/test_windows_installer_binary_test.py": 1.78,
 "tests/unit/test_windows_installer_binary_test.py::test_staged_binary_failure_reports_full_multiline_traceback[powershell]": 2.38,
 "tests/unit/test_windows_unit_diagnostics.py::test_xdist_reports_names_while_blocked_without_capture_or_locals[call]": 1.31,
