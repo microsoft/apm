@@ -26,6 +26,7 @@ from ...bundle.local_bundle import route_agent_plugin_package
 from ...models.apm_package import PackageInfo, validate_apm_package
 from ...models.dependency.reference import DependencyReference
 from ...models.dependency.types import GitReferenceType, ResolvedReference
+from ...utils.credential_rendering import redact_url_userinfo
 from .auth import (
     RegistryAuthContext,
     make_auth_context,
@@ -462,7 +463,7 @@ class RegistryPackageResolver:
         if exc.status == 404:
             msg = (
                 f"registry {dep_ref.registry_name!r} has no package "
-                f"{dep_ref.repo_url!r} (HTTP 404 from {exc.url})"
+                f"{dep_ref.repo_url!r} (HTTP 404 from {redact_url_userinfo(exc.url)})"
             )
             ref = dep_ref.reference or ""
             if ref and not is_semver_range(ref):

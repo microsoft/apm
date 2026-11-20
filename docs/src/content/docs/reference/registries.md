@@ -165,7 +165,7 @@ apm config set registry.corp-main.default true
 
 # Inspect
 apm config get registry.corp-main.url
-apm config get registry.corp-main.token
+apm config get registry.corp-main.token     # prints ******** (set) or Not set
 apm config get registry.corp-main.default
 
 # Remove
@@ -403,7 +403,7 @@ Verify the exact variable name:
 ```bash
 # Registry name corp-main -> APM_REGISTRY_TOKEN_CORP_MAIN
 echo "$APM_REGISTRY_TOKEN_CORP_MAIN" | wc -c   # should be > 1
-apm config get registry.corp-main.token        # config.json fallback
+apm config get registry.corp-main.token        # config.json fallback: ******** (set) or Not set
 ```
 
 Use `apm config set registry.<name>.token` when debugging locally so a missing export does not masquerade as a server-side permission problem.

@@ -2801,6 +2801,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
     ),
     MutationCase(
+        guard_id="transport-platform-credential-value-rendering",
+        rule_id="transport-platform-credential-value-rendering",
+        path="src/apm_cli/commands/config.py",
+        old='                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n',
+        new=(
+            '                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n'
+            '                click.echo(body["token"])\n'
+        ),
+        intent="apm config echoes a stored registry token outside the owner's mask.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
@@ -3307,6 +3318,36 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="skip, adopted = self._check_adopt_or_skip(",
         new="skip, adopted = self._local_collision_check(",
         intent="Rendered rules bypass the shared adopt-or-skip collision owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/commands/approve.py",
+        old="                declaration = native_declaration(declaration, package_dir)\n",
+        new="                pass\n",
+        intent="apm approve no longer sees a native plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/install/exec_gate.py",
+        old=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            "    )\n    if ctx is not None:"
+        ),
+        new=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            '        extra_types=("mcp",),\n    )\n    if ctx is not None:'
+        ),
+        intent="Install adds native plugin types the approve views cannot see (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/security/trust.py",
+        old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
+        new="",
+        intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
     ),
 )
 

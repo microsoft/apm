@@ -28,6 +28,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ...models.dependency.reference import DependencyReference
+from ...utils.credential_rendering import redact_url_userinfo
 
 
 @dataclass(frozen=True)
@@ -263,7 +264,7 @@ def remediation_message(target_url: str) -> str:
 
     return (
         f"error: this project depends on a package from\n"
-        f"  {target_url}\n"
+        f"  {redact_url_userinfo(target_url)}\n"
         f"but no credentials for that registry are configured on this machine.\n"
         f"Add a registry entry whose URL matches (in apm.yml or "
         f"{get_apm_home() / 'config.json'})\n"
