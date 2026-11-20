@@ -3,7 +3,7 @@
 PROMISE: outcome.status_matches_state + idempotency.byte_stable -- an update that changes nothing reports
 nothing updated and leaves every byte in place (source: issue #4166).
 CELL: OP=update SRC=git(ref absent -> remote default branch) PRIM=skill
-SCOPE={project,user} LOCK=present
+SCOPE={project,user} LOCK=present SHAPE={direct, transitive virtual sub-path under a tag}
 owner: dependency-identity-materialization (install/plan.py build_update_plan)
 """
 
@@ -15,24 +15,48 @@ import pytest
 import yaml
 
 from tests.integration.test_required_lifecycle_state_machine import (
+    _OWNER,
     _new_scenario,
     _publish,
     _publish_revision,
+    _skill,
 )
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
 
+def _ref_less_world(scenario, shape: str):
+    """Return (published child, manifest dependency, env) for *shape*."""
+    published = _publish(scenario, "kit", skill="review")
+    if shape == "direct":
+        # No ref: the dependency follows the remote default branch.
+        dependency = {key: value for key, value in published.dependency.items() if key != "ref"}
+        return published, dependency, published.environment
+    # A parent at a tag declares a ref-less virtual sub-path of the child.
+    parent = scenario.sources.create("parent")
+    scenario.sources.add_skill(parent, "parent-skill", _skill("parent-skill"))
+    manifest = yaml.safe_load(parent.manifest_path.read_text(encoding="utf-8"))
+    manifest.setdefault("dependencies", {})["apm"] = [f"{_OWNER}/kit/skills/review"]
+    parent.manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    repository = scenario.repositories.create("parent", source_tree=parent.root)
+    commit = scenario.repositories.commit(repository, message="seed parent")
+    scenario.repositories.tag(repository, "v1.0.0", commit, annotated=True)
+    parent_url = f"https://github.com/{_OWNER}/parent"
+    env = scenario.repositories.url_rewrite_subprocess_env_many(
+        ((published.repository, published.remote_url), (repository, parent_url))
+    )
+    return published, {"git": parent_url, "ref": "v1.0.0"}, env
+
+
+@pytest.mark.parametrize("shape", ["direct", "transitive-subpath"])
 @pytest.mark.parametrize("scope", ["project", "user"])
 def test_update_of_a_ref_less_dependency_reports_nothing_and_changes_no_bytes(
-    tmp_path: Path, apm_binary_path: Path, scope: str
+    tmp_path: Path, apm_binary_path: Path, scope: str, shape: str
 ) -> None:
     scenario = _new_scenario(tmp_path / "world", apm_binary_path)
-    published = _publish(scenario, "alpha", skill="alpha-skill")
-    # No ref: the dependency follows the remote default branch.
-    dependency = {key: value for key, value in published.dependency.items() if key != "ref"}
-    env = dict(published.environment, COLUMNS="400")
+    published, dependency, child_env = _ref_less_world(scenario, shape)
+    env = dict(child_env, COLUMNS="400")
     if scope == "project":
         consumer = scenario.consumers.create("consumer", targets=("copilot",))
         manifest, cwd, flags = consumer.manifest_path, consumer.root, ()
