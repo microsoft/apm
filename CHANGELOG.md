@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm update` and `apm uninstall` remove what the current gates no longer allow, as `apm install` does: update retires a native Claude plugin server whose definition changed since approval, update exits 1 naming an org-policy-denied dependency, and uninstalling another package retires denied, revoked or changed servers. (#PRNUM)
+- `apm update` and `apm uninstall` remove what the current gates no longer allow, as `apm install` does: update retires a native Claude plugin server whose definition changed since approval, update exits 1 naming an org-policy-denied dependency, and uninstalling another package retires denied, revoked or changed servers and the hooks the gates no longer allow. (#PRNUM)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)

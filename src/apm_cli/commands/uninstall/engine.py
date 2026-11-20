@@ -1702,6 +1702,53 @@ def _sync_integrations_after_uninstall(
     )
 
 
+def gate_retired_hook_survivors(
+    lockfile: "LockFile | None",
+    modules_dir: Path,
+    manifest_path: Path,
+    deploy_root: Path,
+    removed_keys: set[str],
+    refreshed: set[str],
+    *,
+    user_scope: bool,
+    logger: CommandLogger,
+) -> tuple[set[str], set[str]]:
+    """Add survivors whose deployed hooks the current gates no longer allow (#4446).
+
+    Returns ``(refresh, exclude)``: *refreshed* plus the survivors to redeploy
+    in full, so the rebuild under install's executables gate leaves their
+    retired hooks out, and the subset the org policy denies outright, which
+    keeps nothing, as the MCP cleanup does for its servers. The verdict is
+    the gate retirement owner's
+    (:func:`~apm_cli.install.exec_gate.gate_retirements`).
+    """
+    from ...install.exec_gate import gate_retirements
+    from ...models.apm_package import APMPackage
+
+    if lockfile is None:
+        return refreshed, set()
+    try:
+        apm_package = APMPackage.from_apm_yml(manifest_path)
+        retirements = gate_retirements(
+            lockfile, modules_dir, apm_package, deploy_root, user_scope=user_scope
+        )
+    except Exception as exc:
+        # Integration cleanup reports an unreadable manifest; nothing to judge here.
+        logger.verbose_detail(f"Gate retirement skipped: {type(exc).__name__}: {exc}")
+        return refreshed, set()
+    if retirements is None:
+        return refreshed, set()
+    # Only survivors: the removed packages' files are already being cleaned.
+    denied = {k: why for k, why in retirements.denied_packages.items() if k not in removed_keys}
+    hooks = {k: why for k, why in retirements.hook_packages.items() if k not in removed_keys}
+    for key, why in sorted(denied.items()):
+        logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
+    for key, why in sorted(hooks.items()):
+        if key not in denied:
+            logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
+    return refreshed | set(denied) | set(hooks), set(denied)
+
+
 def _remove_stale_mcp_from_recorded_targets(
     stale_servers: set[str],
     lockfile: LockFile,

@@ -6,7 +6,9 @@ it judges org-policy dependency denies with ``policy_denied_locked_packages``
 and recorded MCP servers with install's ``McpAdmission.for_project`` through
 ``CurrentMcpConfigView.consent_problems``. ``apm update`` asks it from its plan
 callback, and the uninstall MCP cleanup asks it too, then derives its surviving
-servers with the same admission, never an admit-all admission.
+servers with the same admission, never an admit-all admission. Uninstall also
+asks it which survivors' hooks are retired (``locked_hooks_retired``, install's
+executables verdict) and redeploys those survivors in full.
 """
 
 from __future__ import annotations
@@ -19,16 +21,21 @@ GUARD_GATE_RETIREMENT = "install-deployment-gate-retirement"
 _OWNER = "src/apm_cli/install/exec_gate.py"
 _UPDATE = "src/apm_cli/commands/update.py"
 _UNINSTALL = "src/apm_cli/commands/uninstall/engine.py"
+_UNINSTALL_CLI = "src/apm_cli/commands/uninstall/cli.py"
 
 # (path, function, call qualname suffix that must appear inside it)
 _REQUIRED = (
     (_OWNER, "gate_retirements", "policy_denied_locked_packages"),
     (_OWNER, "gate_retirements", "McpAdmission.for_project"),
     (_OWNER, "gate_retirements", "consent_problems"),
+    (_OWNER, "gate_retirements", "locked_hooks_retired"),
+    (_OWNER, "locked_hooks_retired", "current_exec_decision"),
     (_UPDATE, "_gate_retirements_pending", "gate_retirements"),
     (_UPDATE, "_plan_callback", "_gate_retirements_pending"),
     (_UNINSTALL, "_cleanup_stale_mcp", "gate_retirements"),
     (_UNINSTALL, "_cleanup_stale_mcp", "McpAdmission.for_project"),
+    (_UNINSTALL, "gate_retired_hook_survivors", "gate_retirements"),
+    (_UNINSTALL_CLI, "uninstall", "gate_retired_hook_survivors"),
 )
 _FORBIDDEN = ((_UNINSTALL, "_cleanup_stale_mcp", "McpAdmission.admit_all"),)
 
