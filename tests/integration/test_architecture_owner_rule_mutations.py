@@ -21,6 +21,9 @@ Design notes:
 * Exactly one rule executes per case, so an unrelated startup problem cannot be
   mistaken for teeth: the assertion is a `Violation` carrying that rule's ID,
   never a bare non-zero exit code.
+* Every run in this module shares one session-scoped linter cache
+  (`linter_session`): the tree is walked and each file content parsed once,
+  and each case's override is applied on top.
 * Mutations must stay surgical.  A syntax error, an unreadable file, or a
   deleted module would trip almost any rule for the wrong reason, so
   `test_owner_guard_mutation_is_surgical_and_meaningful` rejects those shapes
@@ -30,6 +33,7 @@ Design notes:
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -40,6 +44,7 @@ from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
+from scripts.architecture_linter.session_cache import LinterSession, linter_session
 from tests.utils.xdist_shared import shared_session_value, sources_digest
 
 pytestmark = [
@@ -49,6 +54,13 @@ pytestmark = [
 ROOT = Path(__file__).resolve().parents[2]
 OWNERS_DIR = ROOT / ".apm/architecture/owners"
 ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm/architecture")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _shared_linter_session() -> Iterator[LinterSession]:
+    """Share one inventory and one parse per file content across this module (#4119)."""
+    with linter_session() as session:
+        yield session
 
 
 @pytest.mark.parametrize(
@@ -1302,6 +1314,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    runner = build_runner_from_context(verbose=verbose, project_root=project_root, events=(event,))",
         new="    runner = LifecycleScriptRunner(scripts=matching, verbose=verbose, project_root=project_root)",
         intent="lifecycle test --execute fires scripts the script gate would withhold.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-linter-cache-content-key",
+        rule_id="contracts-tooling-linter-cache-content-key",
+        path="scripts/architecture_linter/session_cache.py",
+        old="return (relative_path, content_digest(text), self.linter_digest, token)",
+        new="return (relative_path, relative_path, self.linter_digest, token)",
+        intent="Session facts ignore source content, so an override reuses stale facts.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-linter-cache-parse-once",
+        rule_id="contracts-tooling-linter-cache-parse-once",
+        path="scripts/architecture_linter/facts.py",
+        old="reused = self.session.lookup_facts(key)",
+        new="reused = None",
+        intent="The facts provider skips the session and re-parses content it already built.",
     ),
     MutationCase(
         guard_id="contracts-tooling-lockfile-generator-gate",

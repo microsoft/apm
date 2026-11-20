@@ -35,8 +35,6 @@ every registered collector once per AST node, and their output lands in
 from __future__ import annotations
 
 import ast
-import pickle
-import tempfile
 from collections import OrderedDict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -56,6 +54,7 @@ from scripts.architecture_linter.models import (
     NodeRecord,
 )
 from scripts.architecture_linter.registry import OwnerRegistry
+from scripts.architecture_linter.session_cache import FactsKey, LinterSession
 
 if TYPE_CHECKING:
     from scripts.architecture_linter.checks.tree_index import TreeIndex
@@ -483,18 +482,18 @@ class FactsProvider:
         registry: OwnerRegistry | None,
         collectors: Sequence[Collector] = (),
         source_overrides: Mapping[str, str | bytes] | None = None,
+        session: LinterSession | None = None,
     ) -> None:
         self.root = root
         self.inventory = inventory
         self.registry = registry
+        self.session = session if session is not None else LinterSession()
         self.source_cache = SourceCache(root, inventory, source_overrides)
         self.parse_cache = ParseCache()
         self._collectors = tuple(collectors)
         self._file_facts: dict[str, FileFacts] = {}
-        self._spill_directory = tempfile.TemporaryDirectory(prefix="apm-architecture-facts-")
-        self._spill_paths: dict[str, Path] = {}
+        self._cold_keys: dict[str, FactsKey] = {}
         self._transient_facts: OrderedDict[str, FileFacts] = OrderedDict()
-        self._next_spill_id = 0
         self._ast_visits = 0
         self._tree_index_requests: set[str] = set()
         self._tree_index_builds_per_file: dict[str, int] = {}
@@ -512,14 +511,22 @@ class FactsProvider:
         if transient is not None:
             self._transient_facts[relative_path] = transient
             return transient
-        spill_path = self._spill_paths.get(relative_path)
-        if spill_path is not None:
-            facts = self._load_spilled_facts(spill_path)
+        cold_key = self._cold_keys.get(relative_path)
+        if cold_key is not None:
+            facts = self.session.load_cold(cold_key)
             self._remember_transient(relative_path, facts)
             return facts
+        key = self._session_key(relative_path)
+        if key is not None:
+            reused = self.session.lookup_facts(key)
+            if reused is not None:
+                self._keep(relative_path, key, reused)
+                return reused
         facts = _build_file_facts(
             relative_path, self.source_cache, self.parse_cache, self._collectors
         )
+        if key is not None:
+            self.session.record_build(key)
         self._ast_visits += facts.visits
         if facts.tree_index is not None:
             self.tree_index_builds += 1
@@ -531,18 +538,39 @@ class FactsProvider:
                 self.peak_tree_index_nodes,
                 self._tree_index_node_count,
             )
-        if self._should_spill(relative_path, facts):
+        if (
+            key is not None
+            and facts.parse_error is None
+            and self._should_spill(relative_path, facts)
+        ):
             # Keep the built facts reachable until persistence succeeds. A
             # spill error must fail closed without allowing another rule to
             # repeat the AST walk or under-report the build counter.
             self._file_facts[relative_path] = facts
-            self._spill_facts(relative_path, facts)
+            self.session.store_cold(key, facts)
             self.parse_cache.release_tree(relative_path)
             self._file_facts.pop(relative_path)
+            self._cold_keys[relative_path] = key
             self._remember_transient(relative_path, facts)
         else:
             self._file_facts[relative_path] = facts
+            if key is not None and facts.parse_error is None:
+                self.session.store_hot(key, facts)
         return facts
+
+    def _session_key(self, relative_path: str) -> FactsKey | None:
+        """Key readable sources by content; read and decode errors stay run-local."""
+        text, _error = self.source_cache.read(relative_path)
+        if text is None:
+            return None
+        return self.session.facts_key(relative_path, text, self._collectors)
+
+    def _keep(self, relative_path: str, key: FactsKey, facts: FileFacts) -> None:
+        if self.session.has_cold(key):
+            self._cold_keys[relative_path] = key
+            self._remember_transient(relative_path, facts)
+        else:
+            self._file_facts[relative_path] = facts
 
     def lexical_lines(self, relative_path: str) -> tuple[tuple[str, ...], str | None]:
         """Return cached source lines without parsing Python syntax."""
@@ -553,54 +581,6 @@ class FactsProvider:
     def _should_spill(relative_path: str, facts: FileFacts) -> bool:
         """Return whether facts belong to the cold, high-volume test corpus."""
         return relative_path.startswith("tests/") and facts.tree_index is not None
-
-    def _spill_facts(self, relative_path: str, facts: FileFacts) -> None:
-        """Persist one trusted fact set without constructing a second byte copy."""
-        spill_path = Path(self._spill_directory.name) / f"{self._next_spill_id}.pickle"
-        self._next_spill_id += 1
-        payload = (
-            facts.path,
-            facts.exists,
-            facts.is_python,
-            facts.read_error,
-            facts.parse_error,
-            facts.lines,
-            facts.definitions,
-            facts.imports,
-            facts.calls,
-            facts.assignments,
-            facts.literals,
-            facts.tree_index,
-            dict(facts.extra),
-            facts.visits,
-        )
-        with spill_path.open("wb") as handle:
-            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        self._spill_paths[relative_path] = spill_path
-
-    @staticmethod
-    def _load_spilled_facts(spill_path: Path) -> FileFacts:
-        """Load facts written by this process to its private temporary folder."""
-        with spill_path.open("rb") as handle:
-            payload = pickle.load(handle)  # noqa: S301 - private same-process cache
-        if not isinstance(payload, tuple) or len(payload) != 14:
-            raise RuntimeError(f"malformed architecture fact spill: {spill_path.name}")
-        return FileFacts(
-            path=payload[0],
-            exists=payload[1],
-            is_python=payload[2],
-            read_error=payload[3],
-            parse_error=payload[4],
-            lines=payload[5],
-            definitions=payload[6],
-            imports=payload[7],
-            calls=payload[8],
-            assignments=payload[9],
-            literals=payload[10],
-            tree_index=payload[11],
-            extra=MappingProxyType(payload[12]),
-            visits=payload[13],
-        )
 
     def _remember_transient(self, relative_path: str, facts: FileFacts) -> None:
         """Keep only enough cold facts for adjacent facts/tree-index requests."""

@@ -15,6 +15,14 @@ The six group-module imports are intentionally six separate, literal import
 statements (not a loop over a name list) so a missing module fails exactly
 where it is imported, with its own catchable `ImportError`, and every other
 group's import is attempted independently.
+
+Caching is session-scoped: every run takes its inventory, registry
+validation and file facts from the
+:class:`~scripts.architecture_linter.session_cache.LinterSession` returned by
+`current_session()`. Outside `linter_session()` that session is private to
+the run; inside it (the owner mutation matrix) runs share one inventory and
+one parse per file content, keyed by source and linter-source hashes, with
+`source_overrides` applied on top. Findings are identical either way.
 """
 
 from __future__ import annotations
@@ -31,7 +39,6 @@ from scripts.architecture_linter.diagnostics import DiagnosticCollector
 from scripts.architecture_linter.facts import Collector, FactsProvider
 from scripts.architecture_linter.inventory import (
     EXCLUDED_ROOTS,
-    build_inventory,
     is_safe_repository_relative_path,
 )
 from scripts.architecture_linter.models import (
@@ -53,6 +60,7 @@ from scripts.architecture_linter.registry import (
     load_registry_documents,
     validate_shard_name,
 )
+from scripts.architecture_linter.session_cache import LinterSession, current_session
 
 # The exact, ordered set of rule-group modules this engine hosts. Order is
 # fixed (not alphabetized) and drives every deterministic iteration below.
@@ -352,16 +360,31 @@ def _load_registry(
     if read_errors:
         return None, Failure("registry", "; ".join(read_errors))
 
-    try:
-        registry = load_registry_documents(
-            index_bytes,
-            shard_contents,
-            provider.inventory,
-            known_guard_ids=known_guard_ids,
-            owner_specific_guard_ids=owner_specific_guard_ids,
-        )
-    except RegistryError as exc:
-        return None, Failure("registry", str(exc))
+    def build() -> tuple[OwnerRegistry | None, str | None]:
+        try:
+            return (
+                load_registry_documents(
+                    index_bytes,
+                    shard_contents,
+                    provider.inventory,
+                    known_guard_ids=known_guard_ids,
+                    owner_specific_guard_ids=owner_specific_guard_ids,
+                ),
+                None,
+            )
+        except RegistryError as exc:
+            return None, str(exc)
+
+    snapshot = (
+        index_bytes,
+        tuple(sorted(shard_contents.items())),
+        provider.inventory,
+        known_guard_ids,
+        owner_specific_guard_ids,
+    )
+    registry, error = provider.session.registry(snapshot, build)
+    if error is not None:
+        return None, Failure("registry", error)
     return registry, None
 
 
@@ -480,9 +503,10 @@ def _run(
     start = time.perf_counter()
     collector = DiagnosticCollector()
     group_imports = _group_imports()
+    session: LinterSession = current_session()
 
     try:
-        inventory = build_inventory(root)
+        inventory = session.inventory(root)
     except Exception as exc:  # startup failure must not crash the CLI.
         collector.add_failure(Failure("inventory", str(exc)))
         metrics = RunMetrics(
@@ -540,6 +564,7 @@ def _run(
         registry=None,
         collectors=tuple(all_collectors),
         source_overrides=source_overrides,
+        session=session,
     )
     registry: OwnerRegistry | None = None
     if not duplicate_guards:
@@ -678,7 +703,8 @@ def run_selected_rules(
     against optional in-memory source overrides without paying for every
     unrelated rule. Its exit code is always ``2`` ("incomplete"), even when the
     selected rules report no findings, so it can never masquerade as a clean
-    full lint.
+    full lint. Inside `linter_session()` consecutive calls share the
+    session-scoped inventory and parse cache.
     """
     return _run(
         root,

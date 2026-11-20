@@ -431,6 +431,7 @@ jobs:
         uv run --frozen --extra dev pytest -p no:cacheprovider -q
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
+        tests/perf/test_architecture_linter_scaling.py::test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n
 
   test-architecture:
     name: Test Architecture Ratchets
