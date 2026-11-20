@@ -11,14 +11,12 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.results import InstallResult
-
-pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,6 +60,7 @@ def _mock_locked_dep(repo_url, sha, ref="main"):
 
 # Common patch targets -- the update() function uses lazy imports.
 _PATCH_ENGINE = "apm_cli.commands.install._install_apm_dependencies"
+_PATCH_DEPS_AVAILABLE = "apm_cli.commands.install.APM_DEPS_AVAILABLE"
 _PATCH_APM_PACKAGE = "apm_cli.commands.deps.cli.APMPackage"
 _PATCH_LOCKFILE = "apm_cli.deps.lockfile.LockFile"
 _PATCH_GET_LOCKFILE_PATH = "apm_cli.deps.lockfile.get_lockfile_path"
@@ -556,3 +555,27 @@ class TestDepsUpdateCommand:
             assert result.exit_code == 0
             _, kwargs = mock_engine.call_args
             assert kwargs["only_packages"] == ["org/pkg-a", "org/pkg-b"]
+
+
+class TestDeadCodeRemoval:
+    """Verify broken update helpers have been removed."""
+
+    def test_update_single_package_removed(self):
+        """_update_single_package deleted from _utils.py."""
+        from apm_cli.commands.deps import _utils as utils
+
+        assert not hasattr(utils, "_update_single_package")
+
+    def test_update_all_packages_removed(self):
+        """_update_all_packages deleted from _utils.py."""
+        from apm_cli.commands.deps import _utils as utils
+
+        assert not hasattr(utils, "_update_all_packages")
+
+    def test_not_in_package_exports(self):
+        """Dead functions not exported from __init__.py."""
+        import apm_cli.commands.deps as deps_mod
+
+        all_names = getattr(deps_mod, "__all__", [])
+        assert "_update_single_package" not in all_names
+        assert "_update_all_packages" not in all_names

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
+pytestmark = pytest.mark.windows_compat
 
 ROOT = Path(__file__).resolve().parents[2]
 TRACEBACK_LINES = (

@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.component
-
 ROOT = Path(__file__).resolve().parents[2]
 MIRROR_ENV_VARS = {
     "APM_RELEASE_BASE_URL",

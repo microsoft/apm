@@ -15,8 +15,6 @@ import pytest
 
 from apm_cli import config as config_mod
 
-pytestmark = pytest.mark.component
-
 
 def test_apm_home_selects_config_path_in_fresh_process(tmp_path):
     """Process-level APM_HOME redirects config without touching ~/.apm."""

@@ -12,7 +12,7 @@ from typing import Literal
 
 import pytest
 
-INSTALLER = Path(__file__).resolve().parents[2] / "install.sh"
+INSTALLER = Path(__file__).resolve().parents[3] / "install.sh"
 pytestmark = [
     pytest.mark.component,
     pytest.mark.skipif(sys.platform == "win32", reason="Unix installer filesystem contract"),

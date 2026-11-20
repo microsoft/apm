@@ -19,13 +19,9 @@ import subprocess
 import sys
 from unittest.mock import patch
 
-import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
 from apm_cli.deps.git_auth_env import GitAuthEnvBuilder
-
-pytestmark = pytest.mark.component
 
 
 class _FakeTokenManager:

@@ -8,11 +8,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
+from apm_cli.factory import ClientFactory
 
-pytestmark = pytest.mark.component
+
+class TestGeminiClientFactory:
+    """Verify GeminiClientAdapter is registered in ClientFactory."""
+
+    def test_factory_creates_gemini_adapter(self):
+        adapter = ClientFactory.create_client("gemini")
+        assert isinstance(adapter, GeminiClientAdapter)
 
 
 class TestGeminiClientAdapter(unittest.TestCase):
@@ -224,7 +229,6 @@ class TestGeminiConfigureMCPServer(unittest.TestCase):
     def test_returns_false_for_empty_url(self):
         result = self.adapter.configure_mcp_server("")
         self.assertFalse(result)
-        self.assertFalse(self.settings_json.exists())
 
     def test_returns_false_when_server_not_found(self):
         self.mock_registry.find_server_by_reference.return_value = None

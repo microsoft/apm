@@ -29,10 +29,10 @@ from apm_cli.marketplace.errors import (
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.semver import (
     SemVer,  # noqa: F401
+    parse_semver,
+    satisfies_range,
 )
 from tests.utils.metadata_transport import patch_metadata_urlopen
-
-pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,6 +40,8 @@ pytestmark = pytest.mark.component
 
 _SHA_A = "a" * 40
 _SHA_B = "b" * 40
+_SHA_C = "c" * 40
+_SHA_D = "d" * 40
 
 _GOLDEN_PATH = (
     Path(__file__).resolve().parent.parent.parent / "fixtures" / "marketplace" / "golden.json"
@@ -162,9 +164,129 @@ def _build_with_host_mock(
 # ---------------------------------------------------------------------------
 
 
+class TestParseSemver:
+    """Tests for internal semver parser."""
+
+    def test_basic(self) -> None:
+        sv = parse_semver("1.2.3")
+        assert sv is not None
+        assert (sv.major, sv.minor, sv.patch) == (1, 2, 3)
+        assert sv.prerelease == ""
+        assert not sv.is_prerelease
+
+    def test_prerelease(self) -> None:
+        sv = parse_semver("1.0.0-alpha.1")
+        assert sv is not None
+        assert sv.prerelease == "alpha.1"
+        assert sv.is_prerelease
+
+    def test_build_metadata(self) -> None:
+        sv = parse_semver("1.0.0+build.42")
+        assert sv is not None
+        assert sv.build_meta == "build.42"
+        assert not sv.is_prerelease
+
+    def test_full(self) -> None:
+        sv = parse_semver("1.0.0-rc.1+build.5")
+        assert sv is not None
+        assert sv.prerelease == "rc.1"
+        assert sv.build_meta == "build.5"
+
+    def test_invalid(self) -> None:
+        assert parse_semver("not-a-version") is None
+        assert parse_semver("1.2") is None
+        assert parse_semver("") is None
+
+
+class TestSemverComparison:
+    """Tests for SemVer ordering."""
+
+    def test_basic_order(self) -> None:
+        assert parse_semver("1.0.0") < parse_semver("2.0.0")  # type: ignore[operator]
+        assert parse_semver("1.0.0") < parse_semver("1.1.0")  # type: ignore[operator]
+        assert parse_semver("1.0.0") < parse_semver("1.0.1")  # type: ignore[operator]
+
+    def test_prerelease_less_than_release(self) -> None:
+        assert parse_semver("1.0.0-alpha") < parse_semver("1.0.0")  # type: ignore[operator]
+
+    def test_prerelease_ordering(self) -> None:
+        assert parse_semver("1.0.0-alpha") < parse_semver("1.0.0-beta")  # type: ignore[operator]
+
+    def test_equality(self) -> None:
+        assert parse_semver("1.0.0") == parse_semver("1.0.0")
+
+
 # ---------------------------------------------------------------------------
 # satisfies_range
 # ---------------------------------------------------------------------------
+
+
+class TestSatisfiesRange:
+    """Tests for semver range matching."""
+
+    def test_exact(self) -> None:
+        sv = parse_semver("1.2.3")
+        assert sv is not None
+        assert satisfies_range(sv, "1.2.3")
+        assert not satisfies_range(sv, "1.2.4")
+
+    def test_caret_major(self) -> None:
+        """^1.2.3 := >=1.2.3, <2.0.0"""
+        assert satisfies_range(parse_semver("1.2.3"), "^1.2.3")  # type: ignore[arg-type]
+        assert satisfies_range(parse_semver("1.9.9"), "^1.2.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("2.0.0"), "^1.2.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.2.2"), "^1.2.3")  # type: ignore[arg-type]
+
+    def test_caret_zero_minor(self) -> None:
+        """^0.2.3 := >=0.2.3, <0.3.0"""
+        assert satisfies_range(parse_semver("0.2.3"), "^0.2.3")  # type: ignore[arg-type]
+        assert satisfies_range(parse_semver("0.2.9"), "^0.2.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("0.3.0"), "^0.2.3")  # type: ignore[arg-type]
+
+    def test_caret_zero_zero(self) -> None:
+        """^0.0.3 := >=0.0.3, <0.0.4"""
+        assert satisfies_range(parse_semver("0.0.3"), "^0.0.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("0.0.4"), "^0.0.3")  # type: ignore[arg-type]
+
+    def test_tilde(self) -> None:
+        """~1.2.3 := >=1.2.3, <1.3.0"""
+        assert satisfies_range(parse_semver("1.2.3"), "~1.2.3")  # type: ignore[arg-type]
+        assert satisfies_range(parse_semver("1.2.9"), "~1.2.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.3.0"), "~1.2.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.2.2"), "~1.2.3")  # type: ignore[arg-type]
+
+    def test_gte(self) -> None:
+        assert satisfies_range(parse_semver("2.0.0"), ">=1.0.0")  # type: ignore[arg-type]
+        assert satisfies_range(parse_semver("1.0.0"), ">=1.0.0")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("0.9.0"), ">=1.0.0")  # type: ignore[arg-type]
+
+    def test_gt(self) -> None:
+        assert satisfies_range(parse_semver("2.0.0"), ">1.0.0")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.0.0"), ">1.0.0")  # type: ignore[arg-type]
+
+    def test_lte(self) -> None:
+        assert satisfies_range(parse_semver("1.0.0"), "<=1.0.0")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.0.1"), "<=1.0.0")  # type: ignore[arg-type]
+
+    def test_lt(self) -> None:
+        assert satisfies_range(parse_semver("0.9.0"), "<1.0.0")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.0.0"), "<1.0.0")  # type: ignore[arg-type]
+
+    def test_wildcard_x(self) -> None:
+        assert satisfies_range(parse_semver("1.2.0"), "1.2.x")  # type: ignore[arg-type]
+        assert satisfies_range(parse_semver("1.2.9"), "1.2.x")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.3.0"), "1.2.x")  # type: ignore[arg-type]
+
+    def test_wildcard_star(self) -> None:
+        assert satisfies_range(parse_semver("1.2.0"), "1.2.*")  # type: ignore[arg-type]
+
+    def test_combined_range(self) -> None:
+        """Space-separated constraints are AND-ed."""
+        assert satisfies_range(parse_semver("1.5.0"), ">=1.0.0 <2.0.0")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("2.0.0"), ">=1.0.0 <2.0.0")  # type: ignore[arg-type]
+
+    def test_empty_range(self) -> None:
+        assert satisfies_range(parse_semver("1.0.0"), "")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

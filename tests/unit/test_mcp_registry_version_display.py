@@ -16,8 +16,7 @@ from rich.console import Console
 from rich.theme import Theme
 
 from apm_cli.commands.mcp import mcp
-
-pytestmark = pytest.mark.component
+from apm_cli.registry.integration import RegistryIntegration
 
 _SEARCH = "apm_cli.registry.client.SimpleRegistryClient.search_servers"
 _FIND = "apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference"
@@ -51,6 +50,46 @@ def _isolate_registry_url(monkeypatch):
 # ---------------------------------------------------------------------------
 # RegistryIntegration conversion
 # ---------------------------------------------------------------------------
+
+
+class TestRegistryIntegrationVersion:
+    def test_basic_conversion_keeps_v0_1_version(self):
+        with patch(_SEARCH, return_value=[dict(V01_SERVER)]):
+            results = RegistryIntegration().search_packages("github-mcp-server")
+
+        assert results[0]["version"] == "2.0.3"
+        assert "version_detail" not in results[0]
+
+    def test_detailed_conversion_keeps_v0_1_version(self):
+        with patch(_FIND, return_value=dict(V01_SERVER)):
+            detail = RegistryIntegration().get_package_info(V01_SERVER["name"])
+
+        assert detail["version"] == "2.0.3"
+        assert "version_detail" not in detail
+
+    def test_legacy_version_detail_conversion_unchanged(self):
+        with patch(_FIND, return_value=dict(LEGACY_SERVER)):
+            detail = RegistryIntegration().get_package_info(LEGACY_SERVER["name"])
+
+        assert detail["version_detail"] == LEGACY_SERVER["version_detail"]
+        assert detail["versions"] == [
+            {"version": "1.2.3", "release_date": "2025-01-01", "is_latest": True}
+        ]
+        assert "version" not in detail
+
+    def test_unversioned_record_has_no_version(self):
+        with patch(_SEARCH, return_value=[dict(UNVERSIONED_SERVER)]):
+            results = RegistryIntegration().search_packages("unversioned")
+
+        assert "version" not in results[0]
+
+    @pytest.mark.parametrize("bad_version", [None, "", 3, {"v": "1"}])
+    def test_non_string_or_empty_version_is_ignored(self, bad_version):
+        server = dict(UNVERSIONED_SERVER, version=bad_version)
+        with patch(_SEARCH, return_value=[server]):
+            results = RegistryIntegration().search_packages("unversioned")
+
+        assert "version" not in results[0]
 
 
 # ---------------------------------------------------------------------------

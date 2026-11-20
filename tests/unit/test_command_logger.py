@@ -11,8 +11,6 @@ from apm_cli.core.command_logger import (
     _ValidationOutcome,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestValidationOutcome:
     def test_all_failed(self):
@@ -701,3 +699,17 @@ class TestInstallLogger:
         logger = InstallLogger(verbose=False)
         logger.package_type_info("GitHub repository (rules-only)")
         mock_echo.assert_not_called()
+
+
+class TestVerboseFlagAcceptance:
+    """Verify CLI commands accept --verbose without crashing on unknown option."""
+
+    def test_uninstall_accepts_verbose_flag(self):
+        from click.testing import CliRunner
+
+        from apm_cli.commands.uninstall.cli import uninstall
+
+        runner = CliRunner()
+        result = runner.invoke(uninstall, ["some-package", "--verbose"])
+        # exit code 2 = click UsageError (unknown option) — must not happen
+        assert result.exit_code != 2

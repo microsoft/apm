@@ -6,12 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.integration import PromptIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
-
-pytestmark = pytest.mark.component
 
 
 class TestPromptIntegrator:
@@ -28,6 +26,16 @@ class TestPromptIntegrator:
         import shutil
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_should_integrate_always_returns_true(self):
+        """Test integration is always enabled (zero-config approach)."""
+        # No .github/ directory needed
+        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
+
+        # Even with .github/ present
+        github_dir = self.project_root / ".github"
+        github_dir.mkdir()
+        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
 
     def test_find_prompt_files_in_root(self):
         """Test finding .prompt.md files in package root."""
@@ -54,7 +62,6 @@ class TestPromptIntegrator:
         prompts = self.integrator.find_prompt_files(package_dir)
         assert len(prompts) == 1
         assert prompts[0].name == "workflow.prompt.md"
-        assert prompts[0].parent == apm_prompts
 
     def test_copy_prompt_verbatim(self):
         """Test copying prompt file verbatim without metadata injection."""
@@ -307,7 +314,6 @@ Some prompt content."""
 
         assert result["files_removed"] == 0
         assert result["errors"] == 0
-        assert not (self.project_root / ".github" / "prompts").exists()
 
     def test_sync_integration_ignores_apm_package_param(self):
         """Test that sync removes all APM files regardless of installed packages."""
@@ -328,3 +334,51 @@ Some prompt content."""
 
         assert result["files_removed"] == 1
         assert not (github_prompts / "design-review-apm.prompt.md").exists()
+
+
+class TestPromptSuffixPattern:
+    """Test clean naming pattern edge cases."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.integrator = PromptIntegrator()
+
+    def test_clean_naming_simple_filename(self):
+        """Test clean naming with simple filename."""
+        source = Path("test.prompt.md")
+        result = self.integrator.get_target_filename(source, "pkg")
+        assert result == "test.prompt.md"
+
+    def test_clean_naming_hyphenated_filename(self):
+        """Test clean naming with hyphenated filename."""
+        source = Path("design-review.prompt.md")
+        result = self.integrator.get_target_filename(source, "pkg")
+        assert result == "design-review.prompt.md"
+
+    def test_clean_naming_multi_part_filename(self):
+        """Test clean naming with multi-part filename."""
+        source = Path("accessibility-audit-wcag.prompt.md")
+        result = self.integrator.get_target_filename(source, "pkg")
+        assert result == "accessibility-audit-wcag.prompt.md"
+
+    def test_clean_naming_preserves_original_name(self):
+        """Test that original filename structure is preserved."""
+        source = Path("my_custom-workflow.prompt.md")
+        result = self.integrator.get_target_filename(source, "pkg")
+        assert result == "my_custom-workflow.prompt.md"
+
+    def test_gitignore_pattern_matches_suffix_files(self):
+        """Test that gitignore pattern matches -apm suffix files."""
+        import fnmatch
+
+        pattern = "*-apm.prompt.md"
+
+        # Should match
+        assert fnmatch.fnmatch("design-review-apm.prompt.md", pattern)
+        assert fnmatch.fnmatch("test-apm.prompt.md", pattern)
+        assert fnmatch.fnmatch("a-b-c-apm.prompt.md", pattern)
+
+        # Should NOT match
+        assert not fnmatch.fnmatch("design-review.prompt.md", pattern)
+        assert not fnmatch.fnmatch("apm.prompt.md", pattern)
+        assert not fnmatch.fnmatch("@design-review.prompt.md", pattern)

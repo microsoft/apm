@@ -39,8 +39,6 @@ from tests.workflow_contracts import (
     workflow_step,
 )
 
-pytestmark = pytest.mark.component
-
 ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 MERGE_GATE_WORKFLOW = ROOT / ".github" / "workflows" / "merge-gate.yml"

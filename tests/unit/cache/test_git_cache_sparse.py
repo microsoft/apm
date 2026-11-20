@@ -16,8 +16,6 @@ from apm_cli.cache.git_cache import (
     _variant_key,
 )
 
-pytestmark = pytest.mark.component
-
 
 @pytest.fixture(autouse=True)
 def _allow_bare_repos(monkeypatch):

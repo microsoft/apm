@@ -11,10 +11,6 @@ from __future__ import annotations
 import subprocess
 import sys
 
-import pytest
-
-pytestmark = pytest.mark.component
-
 
 def _import_probe(module: str) -> str:
     code = (
