@@ -873,9 +873,9 @@ def _handle_mcp_install(  # noqa: PLR0913
     "--frozen/--no-frozen",
     default=None,
     help=(
-        "Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (Git "
-        "source, ref, host provider, transport, MCP config) or deployed files do not match its "
-        "hashes. Default when CI is truthy. Mutually exclusive with --update, --mcp, and packages."
+        "Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (Git source, ref, "
+        "host provider, transport, MCP config), or when deployed files do not match the hashes it records. "
+        "Default when CI is truthy. Mutually exclusive with --update, --mcp, and positional packages."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")

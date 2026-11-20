@@ -781,7 +781,6 @@ class TestOutermost:
         ]
 
 
-@pytest.mark.req("req-lk-018")
 class TestResolveFrozen:
     """req-lk-018: a truthy CI selects frozen unless the invocation is explicitly non-frozen."""
 

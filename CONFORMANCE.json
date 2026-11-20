@@ -471,16 +471,30 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen"
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen[1]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen[TRUE]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen[true]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[empty]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[explicit-no-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[false]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[unset]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[zero]"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-018",
       "keyword": "SHOULD",
       "section": "5.5",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 9,
       "tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen[1]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen[TRUE]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen[true]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[empty]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[explicit-no-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[false]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[unset]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_without_truthy_ci_or_with_no_frozen_resolves[zero]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
       ],
       "waivers": [
@@ -3192,11 +3206,11 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 98,
+      "active": 99,
       "skipped": 3,
       "text-only": 5,
       "unbound": 0,
-      "xfail": 9
+      "xfail": 8
     },
     "governance": {
       "active": 19,
