@@ -28,6 +28,8 @@ import pytest
 
 from .conftest import make_http_script
 
+pytestmark = pytest.mark.component
+
 # (label, url) -- destinations a hardened executor must refuse.
 INTERNAL_TARGETS = [
     ("aws-imds-link-local", "https://169.254.169.254/latest/meta-data/iam/"),

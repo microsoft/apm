@@ -6,7 +6,11 @@ Issue #1391: VS Code adapter drops Docker `runtimeArguments` with `variables`.
 import unittest
 from unittest.mock import ANY, patch
 
+import pytest
+
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

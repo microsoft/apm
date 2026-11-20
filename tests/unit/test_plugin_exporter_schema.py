@@ -26,6 +26,8 @@ from apm_cli.bundle.plugin_exporter import export_plugin_bundle
 # don't duplicate the apm.yml + lockfile + .apm/ scaffolding.
 from tests.unit.test_plugin_exporter import _setup_plugin_project
 
+pytestmark = pytest.mark.component
+
 _PLUGIN_SCHEMA_PATH = (
     Path(__file__).parent.parent / "fixtures" / "schemas" / "claude-code-plugin.schema.json"
 )

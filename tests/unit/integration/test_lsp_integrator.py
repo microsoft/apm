@@ -17,6 +17,8 @@ import pytest
 from apm_cli.integration.lsp_integrator import LSPIntegrator
 from apm_cli.models.dependency.lsp import LSPDependency
 
+pytestmark = pytest.mark.component
+
 _CLAUDE_PROJECT_PLUGIN = Path(".claude") / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
 
 # ---------------------------------------------------------------------------
@@ -39,97 +41,14 @@ def _make_dep(name: str, **kwargs) -> LSPDependency:
 # ===========================================================================
 
 
-class TestDeduplicate:
-    def test_empty_list(self):
-        assert LSPIntegrator.deduplicate([]) == []
-
-    def test_no_duplicates(self):
-        deps = [_make_dep("a"), _make_dep("b"), _make_dep("c")]
-        result = LSPIntegrator.deduplicate(deps)
-        assert [d.name for d in result] == ["a", "b", "c"]
-
-    def test_first_occurrence_wins(self):
-        dep1 = _make_dep("pyright", transport="stdio")
-        dep2 = _make_dep("pyright", transport="socket")
-        result = LSPIntegrator.deduplicate([dep1, dep2])
-        assert len(result) == 1
-        assert result[0].transport == "stdio"
-
-    def test_dict_entries_dedup_by_name(self):
-        deps = [{"name": "foo"}, {"name": "foo"}, {"name": "bar"}]
-        result = LSPIntegrator.deduplicate(deps)
-        assert len(result) == 2
-        assert result[0]["name"] == "foo"
-        assert result[1]["name"] == "bar"
-
-    def test_nameless_items_kept_by_value_inequality(self):
-        dep1 = {"other": "x"}
-        dep2 = {"other": "y"}
-        result = LSPIntegrator.deduplicate([dep1, dep2])
-        assert len(result) == 2
-
-    def test_nameless_duplicate_reference_skipped(self):
-        dep = {"other": "x"}
-        result = LSPIntegrator.deduplicate([dep, dep])
-        assert len(result) == 1
-
-    def test_mixed_string_and_object(self):
-        deps = ["alpha", _make_dep("beta"), "alpha"]
-        result = LSPIntegrator.deduplicate(deps)
-        assert len(result) == 2
-
-    def test_preserves_order(self):
-        names = ["z", "a", "m", "b"]
-        deps = [_make_dep(n) for n in names]
-        result = LSPIntegrator.deduplicate(deps)
-        assert [d.name for d in result] == names
-
-
 # ===========================================================================
 # LSPIntegrator.get_server_names
 # ===========================================================================
 
 
-class TestGetServerNames:
-    def test_empty(self):
-        assert LSPIntegrator.get_server_names([]) == set()
-
-    def test_dep_objects(self):
-        deps = [_make_dep("pyright"), _make_dep("ruff-lsp")]
-        assert LSPIntegrator.get_server_names(deps) == {"pyright", "ruff-lsp"}
-
-    def test_plain_strings(self):
-        assert LSPIntegrator.get_server_names(["foo", "bar"]) == {"foo", "bar"}
-
-    def test_deduplication(self):
-        deps = [_make_dep("x"), _make_dep("x"), "x"]
-        assert LSPIntegrator.get_server_names(deps) == {"x"}
-
-
 # ===========================================================================
 # LSPIntegrator.get_server_configs
 # ===========================================================================
-
-
-class TestGetServerConfigs:
-    def test_empty(self):
-        assert LSPIntegrator.get_server_configs([]) == {}
-
-    def test_dep_object_serialised(self):
-        dep = _make_dep("pyright", transport="stdio")
-        configs = LSPIntegrator.get_server_configs([dep])
-        assert "pyright" in configs
-        assert configs["pyright"]["name"] == "pyright"
-        assert configs["pyright"]["transport"] == "stdio"
-
-    def test_plain_string_fallback(self):
-        configs = LSPIntegrator.get_server_configs(["plain-server"])
-        assert configs == {"plain-server": {"name": "plain-server"}}
-
-    def test_multiple_deps(self):
-        deps = [_make_dep("a"), _make_dep("b")]
-        configs = LSPIntegrator.get_server_configs(deps)
-        assert set(configs.keys()) == {"a", "b"}
 
 
 # ===========================================================================

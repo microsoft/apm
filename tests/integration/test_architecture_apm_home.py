@@ -26,7 +26,7 @@ def test_apm_home_owner_boundary_is_clean() -> None:
 def test_apm_home_guard_rejects_parallel_environment_lookup() -> None:
     source = (_ROOT / _LIFECYCLE_PATH).read_text(encoding="utf-8")
     mutated = source.replace(
-        'return get_apm_home() / "apm.yml"',
+        "return get_manifest_path(InstallScope.USER)",
         'return Path(os.environ.get("APM_HOME", "~/.apm")) / "apm.yml"',
         1,
     )

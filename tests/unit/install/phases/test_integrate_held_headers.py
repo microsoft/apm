@@ -14,6 +14,8 @@ import pytest
 
 from apm_cli.install.phases import integrate
 
+pytestmark = pytest.mark.component
+
 _COUNTERS = (
     "installed_count",
     "unpinned_count",

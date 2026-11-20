@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
 from apm_cli.policy.inheritance import merge_policies
 from apm_cli.policy.parser import load_policy, validate_policy
 from apm_cli.policy.schema import (
@@ -26,6 +28,8 @@ from apm_cli.policy.schema import (
     IntegrityPolicy,
     SecurityPolicy,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestIntegritySchemaDefaults(unittest.TestCase):

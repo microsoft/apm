@@ -31,6 +31,8 @@ from click.testing import CliRunner
 
 from .conftest import write_apm_yml
 
+pytestmark = pytest.mark.component
+
 NON_DICT_TOP_LEVELS = {
     "list": "- a\n- b\n- c\n",
     "string": '"just a string"\n',

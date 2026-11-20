@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.deps.egress_route import EgressSurface, is_proxy_only
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
@@ -284,17 +285,19 @@ def _resolve_download_strategy(
                 observed_package_hash,
             )
 
-            _hash_msg = (
-                locked_content_mismatch_line(
-                    dep_ref.get_unique_key(),
-                    _dep_locked_chk.content_hash,
-                    observed_package_hash(_dep_locked_chk, install_path),
+            # The download phase owns this notice; report here only when it did not (#4351).
+            if dep_ref.get_unique_key() not in getattr(ctx, "cache_mismatch_reported", ()):
+                _hash_msg = (
+                    locked_content_mismatch_line(
+                        dep_ref.get_unique_key(),
+                        _dep_locked_chk.content_hash,
+                        observed_package_hash(_dep_locked_chk, install_path),
+                    )
+                    + " Re-downloading from the locked source."
                 )
-                + " Re-downloading from the locked source."
-            )
-            diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
-            if logger:
-                logger.progress(_hash_msg)
+                diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
+                if logger:
+                    logger.progress(_hash_msg)
             safe_rmtree(install_path, ctx.apm_modules_dir)
             skip_download = False
 
@@ -306,7 +309,7 @@ def _resolve_download_strategy(
     if (
         skip_download
         and ctx.registry_config
-        and ctx.registry_config.enforce_only
+        and is_proxy_only(EgressSurface.SOURCE_ARCHIVE)
         and not dep_ref.is_local
     ):
         if not _dep_locked_chk or _dep_locked_chk.registry_prefix is None:

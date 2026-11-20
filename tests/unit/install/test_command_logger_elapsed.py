@@ -11,7 +11,11 @@ The summary must:
 
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.core.command_logger import InstallLogger
+
+pytestmark = pytest.mark.unit
 
 
 @patch("apm_cli.core.command_logger._rich_success")

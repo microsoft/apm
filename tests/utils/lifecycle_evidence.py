@@ -9,6 +9,7 @@ import hashlib
 import importlib
 import itertools
 import json
+import os
 import re
 import subprocess
 import sys
@@ -417,14 +418,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
-        "install-empty-org-policy-notice-per-phase",
-        "I9",
-        "#4241",
-        _runs("install"),
-        r"\[!\] Org policy at \S+ is present but empty",
-        output=r"\A(?=.*^\[!\] Org policy at \S+ is present but empty).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
         "install-org-policy-banner-when-mcp-blocked",
         "I9",
         "#4267",
@@ -458,6 +451,22 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         r"repeats a (line|diagnostic): '\|-- ",
         # Survivor tree lines with no package line naming them, one of them repeated.
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
+    ),
+    KnownOutputCell(
+        "pack-dry-run-plugin-notes-twice",
+        "I9",
+        "#4291",
+        _runs("pack", "--dry-run"),
+        r"Left out of the plugin|Would write plugin manifest",
+        output=r"^\[!\] Left out of the plugin: ",
+    ),
+    KnownOutputCell(
+        "install-frozen-parked-mcp-notice-per-phase",
+        "I9",
+        "#4299",
+        _runs("install", "--frozen"),
+        r"Parked MCP server .*: denied",
+        output=r"^\[!\] Parked MCP server .*: denied.*^\+- MCP Servers",
     ),
     KnownOutputCell(
         "install-hook-line-per-target",
@@ -544,12 +553,15 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
     KnownOutputCell(
-        "install-echoes-non-ascii-path",
+        "command-echoes-non-ascii-path",
         "I6",
         "#4330",
-        _runs("install"),
+        # Any command that echoes a user path (install, deps list, export-patch, ...).
+        lambda _args, _scenario: True,
         r"stdout has characters outside printable ASCII",
-        output=r"[^\x00-\x7f]",
+        # A path (after a separator) with a non-ASCII character the test's own
+        # working directory does not explain; the cwd echo itself passes I6.
+        output=r"[/\\][^\n]*?[^\x00-\x7f]",
     ),
     KnownOutputCell(
         "uninstall-duplicate-declaration-lines",
@@ -558,14 +570,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("uninstall"),
         r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-adapter-unreadable-config-warning-twice",
-        "I9",
-        "#4332",
-        _runs("install"),
-        r"stderr repeats a line: 'WARNING apm_cli\.adapters\.client\.\w+ Could not read",
-        output=r"as a JSON object -- skipping config write",
     ),
     KnownOutputCell(
         "update-deny-all-lifecycle-notice-repeats",
@@ -582,28 +586,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-hook-summary-line-twice",
-        "I9",
-        "#4336",
-        _runs("install"),
-        r"repeats a line: '\|   \w+: runs ",
-        # Not the per-target shape #4243 owns.
-        output=(
-            r"\A(?!.*(?:^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, "
-            r"\.windsurf/hooks\.json$|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n"
-            r"  \|   Hook file integrated: ))"
-            r".*^\s*(\|   \w+: runs [^\n]*)$.*^\s*\1$"
-        ),
-    ),
-    KnownOutputCell(
-        "install-frozen-parked-mcp-notice-per-phase",
-        "I9",
-        "#4299",
-        _runs("install", "--frozen"),
-        r"Parked MCP server",
-        output=r"^\s*(\[!\] Parked MCP server [^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
@@ -785,8 +767,21 @@ def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]
             OutputViolation("I8", f"exit code {result.returncode} is outside {sorted(contract)}")
         )
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
+        if stream == "stderr" and _diagnostic_run(args):
+            # A verbose or debug run asked for Python logging records; they are
+            # diagnostics, not user output, so I9 does not judge their repeats.
+            text = "\n".join(line for line in text.splitlines() if not _LOG_RECORD.match(line))
         found.extend(_noise_violations(stream, text))
     return found
+
+
+# A Python logging record on stderr: "DEBUG apm_cli.core.token_manager ...".
+_LOG_RECORD = re.compile(r"^(?:DEBUG|INFO) [A-Za-z_][\w.]* ")
+
+
+def _diagnostic_run(args: Sequence[str]) -> bool:
+    """True when the run itself enabled verbose or debug output."""
+    return bool({"-v", "--verbose"} & set(args)) or bool(os.environ.get("APM_DEBUG"))
 
 
 def apm_args(command: Sequence[str]) -> tuple[str, ...]:
@@ -818,6 +813,11 @@ def owned_duplicate_lines(result: Any, scenario_id: str = "") -> frozenset[str]:
     return frozenset(owned)
 
 
+def _without_echoed_non_ascii(stdout: str, echoed: str) -> str:
+    """*stdout* without the non-ASCII characters of the test's own path (they pass I6)."""
+    return stdout.translate({ord(c): None for c in echoed if not " " <= c <= "~"})
+
+
 def check_cli_output(
     args: Sequence[str],
     result: Any,
@@ -832,9 +832,10 @@ def check_cli_output(
         return
     expected = _EXPECTED_VIOLATIONS.get()
     violations = [v for v in output_violations(args, result) if v.law not in expected]
+    cell_stdout = _without_echoed_non_ascii(result.stdout, str(getattr(result, "cwd", "")))
     problems: list[str] = []
     for cell in KNOWN_OUTPUT_CELLS if known_cells is None else known_cells:
-        if cell.law in expected or not cell.covers(args, scenario_id, result.stdout):
+        if cell.law in expected or not cell.covers(args, scenario_id, cell_stdout):
             continue
         owned = [v for v in violations if v.law == cell.law and re.search(cell.message, v.message)]
         if not owned:

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from ..agent_plugins.errors import AgentPluginError
 from ..agent_plugins.loader import detect_agent_plugin
-from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from ..constants import APM_DIR, SKILL_MD_FILENAME
 
 if TYPE_CHECKING:
     from ..agent_plugins import AgentPlugin, AgentPluginDetection
@@ -360,6 +360,8 @@ def validate_apm_package(
     Returns:
         ValidationResult: Validation results with any errors/warnings
     """
+    from apm_cli.core.scope import manifest_file
+
     result = ValidationResult()
 
     # Check if directory exists
@@ -396,7 +398,7 @@ def validate_apm_package(
         # Two sub-cases of INVALID:
         # 1. apm.yml present but no .apm/ directory (or .apm is a file)
         # 2. Nothing recognizable at all
-        apm_yml_path = package_path / APM_YML_FILENAME
+        apm_yml_path = manifest_file(package_path)
         if apm_yml_path.exists():
             apm_path = package_path / APM_DIR
             if apm_path.exists() and not apm_path.is_dir():
@@ -464,7 +466,7 @@ def validate_apm_package(
         )
 
     # Standard APM package or HYBRID validation (has apm.yml)
-    apm_yml_path = package_path / APM_YML_FILENAME
+    apm_yml_path = manifest_file(package_path)
 
     # HYBRID packages: if .apm/ exists, fall through to standard validation
     # (back-compat for packages that ship both .apm/ primitives AND SKILL.md).
@@ -655,7 +657,9 @@ def _validate_skill_bundle(
     from .apm_package import APMPackage
 
     skills_dir = package_path / "skills"
-    apm_yml_path = package_path / APM_YML_FILENAME
+    from apm_cli.core.scope import manifest_file
+
+    apm_yml_path = manifest_file(package_path)
 
     # Enumerate nested skill dirs
     nested_dirs = [

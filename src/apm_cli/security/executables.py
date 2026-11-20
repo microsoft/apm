@@ -25,6 +25,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.scope import manifest_file
+
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
 EXEC_TYPE_MCP = "mcp"
@@ -726,7 +728,7 @@ def scan_package_executables(
     mcp_details: list[str] = []
     lsp_count = 0
     lsp_details: list[str] = []
-    apm_yml = install_path / "apm.yml"
+    apm_yml = manifest_file(install_path)
     data = manifest_data
     if data is None and apm_yml.is_file():
         try:
@@ -1264,13 +1266,6 @@ def exec_trust_context_for_project(
     return ctx
 
 
-def project_manifest_path(project_root: Path) -> Path:
-    """Return the project-scope manifest that holds *project_root*'s trust layer."""
-    from apm_cli.constants import APM_YML_FILENAME
-
-    return Path(project_root) / APM_YML_FILENAME
-
-
 def effective_exec_map_for_project(
     project_root: Path,
     *,
@@ -1278,11 +1273,14 @@ def effective_exec_map_for_project(
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
     migrate_user_legacy: bool = True,
+    user_scope: bool = False,
 ) -> EffectiveExecMap:
     """Materialize the canonical trust context for one project."""
+    from apm_cli.core.scope import scope_manifest_path
+
     return materialize_exec_map(
         exec_trust_context_for_project(
-            project_manifest_path(project_root),
+            scope_manifest_path(project_root, user_scope=user_scope),
             policy=policy,
             fallback_allow_executables=fallback_allow_executables,
             logger=logger,
@@ -1305,8 +1303,8 @@ def resolve_project_exec_allow_map(
     Reuses a map the caller already resolved (``executable_context`` is
     ``(map, resolved)``); otherwise resolves org policy (unless disabled),
     project, and user layers through :func:`effective_exec_map_for_project`.
-    Org policy is discovered from *project_root*; the grants are read from
-    the scope's manifest (``$APM_HOME/apm.yml`` at user scope).
+    Org policy and the grants both come from the scope's manifest root
+    (``$APM_HOME`` at user scope, which has no git remote).
     """
     allow_map, resolved = executable_context
     if resolved:
@@ -1314,10 +1312,13 @@ def resolve_project_exec_allow_map(
     from apm_cli.core.scope import manifest_root
     from apm_cli.policy.outcome_routing import resolve_trust_policy
 
-    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)
+    policy = resolve_trust_policy(
+        manifest_root(project_root, user_scope=user_scope), no_policy=no_policy, logger=logger
+    )
 
     return effective_exec_map_for_project(
-        manifest_root(project_root, user_scope=user_scope),
+        project_root,
+        user_scope=user_scope,
         policy=policy,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         logger=logger,

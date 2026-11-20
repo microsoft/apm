@@ -8,7 +8,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.component
 
 # Add src to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))

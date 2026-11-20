@@ -6,6 +6,8 @@ import pytest
 
 from apm_cli.marketplace.output_mappers import sanitize_marketplace_name
 
+pytestmark = pytest.mark.unit
+
 
 class TestSanitizeMarketplaceName:
     """Verify sanitize_marketplace_name produces valid kebab-case output."""

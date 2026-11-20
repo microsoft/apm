@@ -17,6 +17,8 @@ from apm_cli.deps.registry.outdated import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _ctx(
     *,

@@ -8,6 +8,8 @@ import pytest
 from apm_cli.core.errors import AmbiguousHarnessError, NoHarnessError
 from apm_cli.core.target_detection import resolve_effective_target_decision
 
+pytestmark = pytest.mark.component
+
 
 def _resolve(
     project_root: Path,

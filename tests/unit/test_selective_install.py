@@ -9,6 +9,10 @@ would also install unrelated packages like `design-guidelines` from apm.yml.
 
 import builtins
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestFilterMatchingLogic:
     """Test the filter matching logic used in _install_apm_dependencies.

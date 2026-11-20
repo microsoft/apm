@@ -22,6 +22,8 @@ from apm_cli.deps.git_remote_ops import (
 )
 from apm_cli.models.apm_package import GitReferenceType, RemoteRef
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

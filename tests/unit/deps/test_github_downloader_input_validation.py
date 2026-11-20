@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import base64
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,13 +44,15 @@ from apm_cli.deps.github_downloader_validation import (
     _build_validation_attempts,
     _directory_exists_at_ref,
     _is_sha_pin,
-    _path_exists_in_tree_at_ref,
     _ref_exists_via_ls_remote,
     _split_owner_repo,
     _ssh_attempt_allowed,
     validate_virtual_package_exists,
 )
+from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -178,6 +179,18 @@ class TestValidateVirtualFile:
 
         assert result is False
         mock_raw.assert_not_called()
+
+    def test_virtual_file_probe_propagates_confirmed_throttle(self) -> None:
+        """A typed throttle is indeterminate, not a virtual-path false negative."""
+        dl = _make_downloader()
+        dep = _make_github_dep(is_file=True)
+        throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
+
+        with patch.object(dl, "download_raw_file", side_effect=throttle):
+            with pytest.raises(GitHubThrottleError) as exc_info:
+                validate_virtual_package_exists(dl, dep)
+
+        assert exc_info.value is throttle
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +519,7 @@ class TestBuildValidationAttempts:
         dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
         dl.auth_resolver.resolve_for_dep.return_value.host_info.kind = "github"
         dl.auth_resolver.git_env_for_remote.return_value = {"CANONICAL": "github"}
+        dl.auth_resolver.build_native_git_credential_env.return_value = {"NATIVE_HELPER": "github"}
         dep = self._make_dep()
         dep.is_azure_devops.return_value = False
         dl.auth_resolver.classify_host.return_value = MagicMock(kind="github")
@@ -516,6 +530,11 @@ class TestBuildValidationAttempts:
         assert auth_attempts[0].env == {"CANONICAL": "github"}
         dl.auth_resolver.git_env_for_remote.assert_any_call(
             dl.auth_resolver.resolve_for_dep.return_value,
+            "https://github.com/owner/repo.git",
+        )
+        assert attempts[1].env == {"NATIVE_HELPER": "github"}
+        dl.auth_resolver.build_native_git_credential_env.assert_called_once_with(
+            dl.auth_resolver.classify_host.return_value,
             "https://github.com/owner/repo.git",
         )
 
@@ -688,95 +707,6 @@ class TestRefExistsViaLsRemote:
 # ---------------------------------------------------------------------------
 # _path_exists_in_tree_at_ref
 # ---------------------------------------------------------------------------
-
-
-class TestPathExistsInTreeAtRef:
-    def _log(self, _msg: str) -> None:
-        pass
-
-    def _winning_attempt(self) -> AttemptSpec:
-        return AttemptSpec("ssh", "git@github.com:owner/repo.git", {})
-
-    def test_fetch_failure_returns_false(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "subprocess.run",
-                side_effect=[
-                    MagicMock(),
-                    MagicMock(),
-                    subprocess.CalledProcessError(128, ["git", "fetch"]),
-                ],
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is False
-
-    def test_ls_tree_empty_output_returns_false(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "subprocess.run",
-                return_value=MagicMock(stdout=""),
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is False
-
-    def test_ls_tree_with_output_returns_true(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "subprocess.run",
-                return_value=MagicMock(stdout="040000 tree abc123\tskills/foo\n"),
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is True
-
-    def test_ls_tree_exception_returns_false(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "subprocess.run",
-                side_effect=[
-                    MagicMock(),
-                    MagicMock(),
-                    MagicMock(),
-                    subprocess.CalledProcessError(128, ["git", "ls-tree"]),
-                ],
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is False
 
 
 # ---------------------------------------------------------------------------
