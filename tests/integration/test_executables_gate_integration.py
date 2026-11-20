@@ -195,8 +195,14 @@ class TestNonInteractiveExecutablePromptIntegration:
         logger.info.assert_called_once()
         remedy = logger.info.call_args.args[0]
         assert "apm policy explain owner/repo" in remedy
-        # M4 (#1873): non-interactive remedy leads with the bulk one-liner.
-        assert "apm approve --recommended" in remedy
+        # The bulk one-liner appears only with an org recommend set (#3994).
+        assert "apm approve --recommended" not in remedy
+
+        logger.reset_mock()
+        policy = SimpleNamespace(executables=SimpleNamespace(recommend=("owner/repo",)))
+        ctx.policy_fetch = SimpleNamespace(policy=policy)
+        _run_executable_approval_prompt(ctx)
+        assert "apm approve --recommended" in logger.info.call_args.args[0]
 
     def test_interactive_decline_surfaces_parked_remedy(self, monkeypatch) -> None:
         # M3 (#1873): declining at the interactive prompt must still print a

@@ -591,3 +591,18 @@ class TestRichErrorNarrowWidthWrapping:
         normalized = " ".join(rendered.split())
         assert "Claude import" in normalized
         assert "No import setting was changed" in normalized
+
+
+def test_warning_never_wraps_remediation_command(monkeypatch, capsys):
+    """A command hint on a continuation line stays copy-pasteable (#3994)."""
+    from apm_cli.utils.console import _reset_console, _rich_warning
+
+    monkeypatch.setenv("COLUMNS", "40")
+    _reset_console()
+    command = "apm approve github.com/acme/a-long-package-name/sub/path"
+    try:
+        _rich_warning(f"Parked MCP server 'x' needs approval\n    Approve: {command}")
+        out = capsys.readouterr().out
+    finally:
+        _reset_console()
+    assert f"    Approve: {command}\n" in out

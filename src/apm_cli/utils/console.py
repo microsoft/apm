@@ -235,8 +235,15 @@ def _rich_error(message: str, symbol: str = None, *, err: bool = False):  # noqa
 
 
 def _rich_warning(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013
-    """Display warning message with yellow color (``err=True`` writes to stderr)."""
-    _rich_echo(message, color="yellow", symbol=symbol, err=err)
+    """Display warning message with yellow color (``err=True`` writes to stderr).
+
+    Continuation lines carry remediation commands; they are never hard-wrapped,
+    so a command and its argument stay on one copy-pasteable line.
+    """
+    head, sep, rest = message.partition("\n")
+    _rich_echo(head, color="yellow", symbol=symbol, err=err)
+    if sep:
+        _rich_echo(rest, color="yellow", soft_wrap=True, err=err)
 
 
 def _rich_info(

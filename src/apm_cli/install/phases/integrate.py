@@ -481,17 +481,17 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     if not ctx.blocked_executables:
         return
 
+    from apm_cli.security.executables import trust_remedy
+
+    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    recommend = tuple(getattr(getattr(policy, "executables", None), "recommend", None) or ())
     if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
         first = ctx.blocked_executables[0].package_name
         msg = (
             f"{len(ctx.blocked_executables)} package(s) have executable primitives "
             "parked pending approval; install completed without deploying them."
         )
-        remedy = (
-            "Trust the org-vetted set: apm approve --recommended  |  "
-            f"Trust one: apm approve {first}  |  "
-            f"Inspect: apm policy explain {first}"
-        )
+        remedy = trust_remedy(first, recommend)
         if ctx.logger:
             ctx.logger.warning(msg, symbol="warning")
             ctx.logger.info(remedy, symbol="info")
@@ -516,6 +516,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     updated = prompt_executable_approval(
         ctx.blocked_executables,
         allow_executables=allow_exec,
+        recommend=recommend,
     )
 
     # Persist new approvals to the personal config if the user approved

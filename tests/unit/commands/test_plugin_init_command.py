@@ -46,6 +46,10 @@ class TestPluginInitCommand:
                 assert "apm install --dev" in result.output
                 assert "apm pack --format agent-plugin" in result.output
                 assert "apm pack --format claude-plugin" in result.output
+                # pack needs apm.lock.yaml, so install comes first (#3994).
+                assert result.output.index("Lock before packing") < result.output.index(
+                    "apm pack --format agent-plugin"
+                )
                 assert "apm pack --plugin" not in result.output
                 # Consumer-only hints absent in plugin mode
                 assert "apm marketplace init" not in result.output

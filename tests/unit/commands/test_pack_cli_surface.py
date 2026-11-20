@@ -226,7 +226,8 @@ class TestRenderBundleResult:
         logger = _RecordingLogger()
         result = _pack_result(files=["file.md"], bundle_path="build/my-bundle")
         _render_bundle_result(logger, result, "apm", None, False)
-        assert any("apm install" in i for i in logger.infos)
+        # A bare 'build/x' parses as owner/repo, so the line spells a path (#3994).
+        assert "Share with: apm install ./build/my-bundle" in logger.infos
 
     def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
         logger = _RecordingLogger()

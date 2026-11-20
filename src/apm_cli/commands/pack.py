@@ -815,7 +815,10 @@ def _render_bundle_result(
         # project.  Print a copy-pasteable share line so packing creates
         # the social hand-off naturally.
         if pack_result.bundle_path:
-            logger.info(f"Share with: apm install {pack_result.bundle_path}")
+            # A bare 'build/x' would parse as owner/repo; spell it as a path.
+            share = Path(pack_result.bundle_path)
+            share_arg = str(share) if share.is_absolute() else f"./{share.as_posix()}"
+            logger.info(f"Share with: apm install {share_arg}")
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
