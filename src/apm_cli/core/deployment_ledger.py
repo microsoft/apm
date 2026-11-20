@@ -442,9 +442,9 @@ class DeploymentMaterializationSession:
 
         An APM before 0.37 did not require receipt evidence, so its lock hash
         is the record of what it deployed. It counts only for such a lock,
-        only when the file still holds those bytes, and only when the file
-        is committed unchanged in git, so a forged lock cannot vouch for an
-        uncommitted edit.
+        only when the file still holds those bytes, and only when git does
+        not hold an uncommitted change to it, so a forged lock cannot vouch
+        for a staged or unstaged edit.
         """
         from apm_cli.utils.content_hash import compute_file_hash
 
@@ -453,7 +453,7 @@ class DeploymentMaterializationSession:
             return (
                 recorded is not None
                 and compute_file_hash(path) == recorded
-                and git_tracked_clean(path)
+                and git_permits_legacy_adoption(path)
             )
         except OSError:
             return False
@@ -723,31 +723,34 @@ def _predates_receipt_evidence(version: str | None) -> bool:
     return tuple(parts) < _LOCK_HASH_EVIDENCE_BEFORE
 
 
-def git_tracked_clean(path: Path) -> bool:
-    """Whether git tracks *path* with no staged, unstaged or unmerged change.
+def git_permits_legacy_adoption(path: Path) -> bool:
+    """Whether git lets a pre-0.37 lock hash vouch for *path* (#4398).
 
-    Outside a work tree, or on any git error, the answer is ``False``.
+    A forger can only know committed bytes, and those stay recoverable, so a
+    file git tracks unchanged qualifies, as does one git does not track at all
+    (untracked, ignored, or no repository). A tracked file with a staged or
+    unstaged change that exactly matches the lock is suspicious and does not.
+    Any other git error fails closed.
     """
     import subprocess
 
-    cwd = path.parent
+    env = {**os.environ, "LC_ALL": "C"}
+
+    def git(*args: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            ["git", *args], cwd=path.parent, env=env, capture_output=True, check=False, timeout=30
+        )
+
     try:
-        tracked = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", path.name],
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
+        inside = git("rev-parse", "--is-inside-work-tree")
+        if inside.returncode != 0:
+            return b"not a git repository" in inside.stderr.lower()
+        tracked = git("ls-files", "--error-unmatch", "--", path.name)
         if tracked.returncode != 0:
-            return False
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--", path.name],
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
+            return b"did not match any file" in tracked.stderr.lower()
+        status = git("status", "--porcelain", "--", path.name)
+    except FileNotFoundError:
+        return True  # no git installed: nothing can track the file
     except (OSError, subprocess.SubprocessError):
         return False
     return status.returncode == 0 and not status.stdout.strip()

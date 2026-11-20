@@ -45,6 +45,7 @@ RE_RENDERED = (".codex/agents/editor.toml", ".cursor/rules/everywhere.mdc")
 # A file whose 0.37 render equals the bytes 0.35.1 wrote.
 UNCHANGED_RENDER = ".cursor/rules/python.mdc"
 _IGNORED = {"apm_modules", ".git", ".apm-local"}
+_DEPLOY_ROOTS = (".agents/", ".claude/", ".codex/", ".cursor/")
 _USER_EDIT = "\n# local note\n"
 
 
@@ -67,7 +68,9 @@ def _unproven_line(path: str) -> str:
 
 
 class _World:
-    def __init__(self, tmp_path: Path, apm_binary_path: Path, fixture: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, apm_binary_path: Path, fixture: Path, git: str = "committed"
+    ) -> None:
         self.env_root = IsolatedApmEnvironment.create(
             tmp_path / "isolated", base_env=dict(os.environ)
         )
@@ -78,6 +81,12 @@ class _World:
         shutil.copytree(fixture / "project", clone / "project")
         self.project = clone / "project"
         self.runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=240)
+        if git == "none":
+            return
+        if git == "ignored":
+            # A common setup: the deployed outputs are not committed.
+            with (self.project / ".gitignore").open("a", encoding="utf-8") as handle:
+                handle.write("\n".join(_DEPLOY_ROOTS) + "\n")
         self._git("init", "-q")
         self._git("add", "-A")
         self._git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "v035")
@@ -143,11 +152,18 @@ def _assert_lock_matches_disk(world: _World) -> None:
             assert compute_file_hash(world.project / path) == digest, path
 
 
+@pytest.mark.parametrize("git", ["committed", "nogit", "gitignored"])
 def test_c1_unedited_pre036_files_re_render_silently_once(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, git: str
 ) -> None:
+    """Committed, outside any repository, or with gitignored outputs: all upgrade."""
     expected = _fresh_render(tmp_path, apm_binary_path, FIXTURE_035)
-    world = _World(tmp_path / "c1", apm_binary_path, FIXTURE_035)
+    world = _World(
+        tmp_path / "c1",
+        apm_binary_path,
+        FIXTURE_035,
+        git={"committed": "committed", "nogit": "none", "gitignored": "ignored"}[git],
+    )
     before = world.snapshot()
     for path in RE_RENDERED:
         assert before[path] != expected[path], f"fixture no longer exercises {path}"
@@ -263,7 +279,7 @@ def _stamped_world(tmp_path: Path, apm_binary_path: Path, stamp: str) -> _World:
     [
         ("v0.35.1", "tracked-dirty", False),
         ("v0.35.1", "tracked-staged", False),
-        ("v0.35.1", "untracked", False),
+        ("v0.35.1", "untracked", True),
         ("v0.35.1", "tracked-clean", True),
         ("v0.36.1", "tracked-dirty", False),
         ("v0.36.1", "tracked-clean", True),
@@ -285,8 +301,8 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
     tmp_path: Path, apm_binary_path: Path, stamp: str, git_state: str, overwritten: bool
 ) -> None:
     """A lock hash forged to match a local edit is evidence only for a lock stamped
-    before 0.37, and only while git holds the edit (tracked and clean); otherwise
-    the edit is kept."""
+    before 0.37, and only when git holds no uncommitted change to the file (tracked
+    and clean, or untracked); a staged or unstaged change is kept."""
     fixture = FIXTURE_036 if stamp == "candidate" else FIXTURES / stamp
     expected = _fresh_render(tmp_path, apm_binary_path, fixture)
     world = _stamped_world(tmp_path, apm_binary_path, stamp)
@@ -304,8 +320,9 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
         assert code == 0, f"{out}\n{err}"
         assert _kept_lines(out + err) == []
         assert target.read_bytes() == expected[_C3_EDITED]
-        # The overwritten edit stays recoverable from git.
-        assert world._git("show", f"HEAD:{_C3_EDITED}").encode("utf-8") == edited_bytes
+        if git_state == "tracked-clean":
+            # The overwritten edit stays recoverable from git.
+            assert world._git("show", f"HEAD:{_C3_EDITED}").encode("utf-8") == edited_bytes
         _assert_lock_matches_disk(world)
     else:
         assert code == 1, f"{out}\n{err}"
