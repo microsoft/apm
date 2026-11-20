@@ -13,6 +13,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from ..core.remediation import (
+    CONTENT_HASHES_MISSING,
+    REQUIRED_PACKAGE_UNLOCKED,
+    UNMANAGED_FILE_TRACK,
+)
 from .models import (
     CheckResult,
     CIAuditResult,
@@ -327,8 +332,8 @@ def _check_required_packages_deployed(
             absent.append(
                 PolicySubject(
                     pkg_name,
-                    "required package absent from the lockfile -- run "
-                    "`apm install --no-policy` to repair it, then reinstall normally",
+                    "required package absent from the lockfile -- "
+                    f"{REQUIRED_PACKAGE_UNLOCKED.clause()}",
                     remedy=None,
                 )
             )
@@ -342,8 +347,8 @@ def _check_required_packages_deployed(
     messages: list[str] = []
     if absent:
         messages.append(
-            f"{len(absent)} required package(s) absent from the lockfile. Hint: run "
-            "`apm install --no-policy` to repair the lockfile, then reinstall normally."
+            f"{len(absent)} required package(s) absent from the lockfile. "
+            f"Hint: {REQUIRED_PACKAGE_UNLOCKED.sentence()}"
         )
     if unresolved:
         messages.append(
@@ -1006,7 +1011,7 @@ _MAX_UNMANAGED_SCAN_FILES = 10_000
 # Appended once to a non-empty unmanaged-files report so a flagged file is
 # self-resolving: the reader learns how to track it or how to suppress it.
 _UNMANAGED_NEXT_ACTION = (
-    "Next: run 'apm install <ref>' to track a flagged file, "
+    f"Next: {UNMANAGED_FILE_TRACK.clause()}, "
     "or add a glob to unmanaged_files.exclude to suppress it."
 )
 
@@ -1402,7 +1407,7 @@ def _check_dependency_content_hashes(
             passed=False,
             message=(
                 "Locked dependencies are missing required content hashes -- "
-                "run 'apm install' to regenerate them"
+                f"{CONTENT_HASHES_MISSING.clause()}"
             ),
             details=[str(exc)],
         )

@@ -87,7 +87,8 @@ def test_frozen_recovery_preserves_selected_install_scope(
     reasons: list[str], lock_state: str
 ) -> None:
     tip = frozen_install_tip(FrozenInstallError("Cannot replay", reasons=reasons))
-    assert "rerun 'apm install' without --frozen" in tip
+    assert "'apm install' to create or repair" in tip
+    assert "without --frozen" in tip
     assert lock_state in tip
     assert "--root DIR or --global" in tip
     assert "apm update" not in tip

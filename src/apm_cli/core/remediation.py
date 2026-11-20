@@ -1020,6 +1020,89 @@ GITHUB_GITLAB_HOST_CONFLICT = _entry(
 
 # -- install/policy (W4) -------------------------------------------------------
 # -- W4 frozen-policy --
+# Advice printed by policy/ and install/{service,integrity,errors,local_edits}.py
+# and install/phases/content_hash_stream.py. Keep W4 frozen-policy additions here.
+_UNFROZEN = "without --frozen, keeping --root DIR or --global if specified"
+FROZEN_LOCK_STATE_DRIFT = _entry(
+    "frozen-lock-state-drift",
+    "apm install",
+    f"create or repair {{lock_state}} ({_UNFROZEN})",
+)
+FROZEN_SELECTIONS_CHANGED = _entry(
+    "frozen-selections-changed",
+    "apm install",
+    f"record the resolved dependency selections ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
+)
+DEPENDENCY_SELECTION_CHANGED = _entry(
+    "dependency-selection-changed",
+    "apm install",
+    "record the resolved selection",
+    then="commit apm.lock.yaml",
+)
+FROZEN_OPERATION_REJECTED = _entry(
+    "frozen-operation-rejected",
+    "apm install",
+    "refresh apm.lock.yaml (without --frozen)",
+    before="update apm.yml first",
+    then="retry the frozen install",
+)
+FROZEN_LOCAL_CONTENT_CHANGED = _entry(
+    "frozen-local-content-changed",
+    "apm install",
+    "accept and record the local content change (without --frozen)",
+)
+FROZEN_LOCKFILE_WITHHELD = _entry(
+    "frozen-lockfile-withheld",
+    "apm install",
+    f"record what this install deployed in apm.lock.yaml ({_UNFROZEN})",
+    then="commit the deployed files and apm.lock.yaml",
+)
+LOCAL_EDITS_EXPORT = _entry(
+    "local-edits-export", "apm export-patch", "export the local edits as upstream patches"
+)
+RENDERING_CHANGED = _entry(
+    "rendering-changed", "apm install", "adopt the new rendering", then="commit the result"
+)
+CONTENT_HASH_UNVERIFIED = _entry(
+    "content-hash-unverified",
+    "apm install",
+    "record verified content hashes in apm.lock.yaml",
+    before="reinstall {package} so its bytes are verified",
+)
+DEPLOYMENT_OWNERSHIP_MISSING = _entry(
+    "deployment-ownership-missing", "apm install", "record the missing deployment ownership"
+)
+MANAGED_PATHS_UNRESOLVED = _entry(
+    "managed-paths-unresolved", "apm install", "restore the unsafe or unresolved managed paths"
+)
+LOCAL_DEPENDENCY_GRAPH_CORRUPT = _entry(
+    "local-dependency-graph-corrupt",
+    "apm install",
+    "regenerate the local dependency graph in apm.lock.yaml",
+)
+DRIFT_CACHE_UNPOPULATED = _entry(
+    "drift-cache-unpopulated", "apm install", "populate the install cache drift replay reads"
+)
+BUNDLE_HOOKS_UNADMITTED = _entry(
+    "bundle-hooks-unadmitted", "apm install", "retire the unadmitted bundle hooks"
+)
+BUNDLE_HOOKS_APPROVED = _entry(
+    "bundle-hooks-approved",
+    "apm install <bundle>",
+    "redeploy the bundle with its approved hooks",
+    before="approve the bundle",
+)
+REQUIRED_PACKAGE_UNLOCKED = _entry(
+    "required-package-unlocked",
+    "apm install --no-policy",
+    "record the required packages in the lockfile",
+    then="reinstall normally",
+)
+UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "track a flagged file")
+CONTENT_HASHES_MISSING = _entry(
+    "content-hashes-missing", "apm install", "regenerate the missing content hashes"
+)
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
 # -- end W4 drift-trust --
