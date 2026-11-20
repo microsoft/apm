@@ -304,11 +304,12 @@ class DeploymentMaterializationSession:
     def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
         """Return a prior rendered hash only for a currently authorized physical member.
 
-        A receipt is trusted only when it is bound to the current lock claim:
-        same owner, same claim signature, and the hash the lock records for the
-        path (when it records one). A receipt written under another checkout's
-        lock therefore never vouches for, or refuses, the bytes now on disk.
-        The lock can only withdraw trust here; it never grants it.
+        A receipt is trusted only when it is bound to the current lock claim
+        (same owner and claim signature) and either the file still holds the
+        receipted bytes or the lock records the receipted hash for the path.
+        A receipt written under another checkout's lock therefore never
+        vouches for, or refuses, different bytes now on disk. The lock can
+        only withdraw trust here; it never grants it.
         """
         from apm_cli.install.deployed_paths import deployed_path_entry
 
@@ -340,15 +341,22 @@ class DeploymentMaterializationSession:
             not self._claims.get(value)
             or record.active_owner not in self._valid_owners
             or self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]
-            or not self._claim_hash_matches(value, record.content_hash)
         ):
+            return None
+        claimed = {claim.content_hash for claim in self._claims[value]} - {None}
+        if claimed and record.content_hash not in claimed and not self._holds(path, record):
             return None
         return record.content_hash
 
-    def _claim_hash_matches(self, value: str, content_hash: str | None) -> bool:
-        """Return whether the current lock claim records this receipt's hash, if any."""
-        claimed = {record.content_hash for record in self._claims.get(value, ())} - {None}
-        return not claimed or content_hash in claimed
+    @staticmethod
+    def _holds(path: Path, record: DeploymentRecord) -> bool:
+        """Return whether *path* still holds exactly the receipted bytes."""
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            return path.is_file() and compute_file_hash(path) == record.content_hash
+        except OSError:
+            return False
 
     def _claim_signature(self, value: str) -> str:
         """Bind to canonical ownership metadata, independently of the actual adapter writer."""

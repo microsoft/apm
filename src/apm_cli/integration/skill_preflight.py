@@ -131,11 +131,12 @@ class SkillConflict:
     path: str
     targets: tuple[str, ...]
     untrusted: bool = False
+    directory: str | None = None
 
     def message(self) -> str:
         """Name the source, local file and affected targets in ordinary output."""
         if self.untrusted:
-            return printable_ascii_text(untrusted_baseline_message(self.path))
+            return printable_ascii_text(untrusted_baseline_message(self.path, self.directory))
         return printable_ascii_text(
             f"Installation refused: skill '{self.skill}' from '{self.package}' "
             f"(source: {self.source}) conflicts with unmanaged file '{self.path}'. "
@@ -337,6 +338,7 @@ def find_unmanaged_conflicts(
                             relative_target,
                             affected,
                             untrusted=not unmanaged,
+                            directory=deployed_path_entry(destination, project_root, [target]),
                         )
                     )
     return tuple(conflicts)

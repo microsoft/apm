@@ -273,7 +273,6 @@ def _session_conflicts(
 
     integrator = SkillIntegrator()
     integrator._materialization_session = SimpleNamespace(
-        has_receipt=lambda _path: False,
         baseline=lambda _path, _targets: baseline,
         locked_sources=LockedSkillSources(lambda _owner, _scratch: locked),
     )
@@ -323,7 +322,9 @@ def test_managed_file_without_trusted_baseline_is_refused_before_writes(
         if case != "unmanaged":
             assert conflicts[0].message() == (
                 f"Skipped {entry}: no trustworthy local deployment baseline. Move the "
-                "conflicting file aside and retry; use --force only to intentionally overwrite it."
+                "conflicting file aside and retry; use --force only to intentionally overwrite it. "
+                "To redeploy the skill, move .agents/skills/review/ aside (or delete it if it "
+                "holds no edits), then run 'apm install'."
             )
     else:
         assert conflicts == ()

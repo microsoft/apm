@@ -91,8 +91,8 @@ def adoptable_skill_members(
 ) -> frozenset[Path]:
     """Return destination members when the tree equals this install's output, else empty.
 
-    A member with a *trusted* receipt hash matches only when its bytes still
-    equal that receipt; every other member must equal the render. Call before
+    A member matches when its bytes equal the render or its own *trusted*
+    receipt (bytes this installation wrote there). Call before
     copying so earlier writes in the same pass cannot complete a tree that
     was not identical on disk.
     """
@@ -118,9 +118,7 @@ def adoptable_skill_members(
             if member.is_symlink() or not member.is_file() or not target.is_file():
                 return frozenset()
             receipted = trusted(target) if trusted is not None else None
-            if receipted is not None:
-                if compute_file_hash(target) != receipted:
-                    return frozenset()
+            if receipted is not None and compute_file_hash(target) == receipted:
                 continue
             if target.read_bytes() != _expected_bytes(resolve_links, member, target, source):
                 return frozenset()
@@ -172,14 +170,16 @@ def adoption_baselines(
 
 
 def all_files_trusted(destination: Path, trusted: Callable[[Path], str | None]) -> bool:
-    """Return whether every file under *destination* has a trusted receipt."""
+    """Return whether every file under *destination* still holds its trusted receipt."""
     if destination.is_symlink() or not destination.is_dir():
         return True
-    return all(
-        trusted(Path(directory) / name) is not None
-        for directory, _directories, filenames in os.walk(destination)
-        for name in filenames
-    )
+    for directory, _directories, filenames in os.walk(destination):
+        for name in filenames:
+            path = Path(directory) / name
+            receipted = trusted(path)
+            if receipted is None or path.is_symlink() or compute_file_hash(path) != receipted:
+                return False
+    return True
 
 
 def installing_commit(package_info: Any) -> str | None:
@@ -323,9 +323,9 @@ def skill_tree_baselines(
     rendered under the same copy filter. *plan*, *owner*, *targets* and
     *commit* default to the integrator's current package. Only receipts the
     session trusts for the current lock claim count: a tree whose files all
-    carry one needs no adoption, and a receipted member matches only its own
-    receipt. A missing or untrusted receipt (another worktree or checkout)
-    falls through to the renders.
+    still hold them needs no adoption. A missing, untrusted or no longer
+    matching receipt (another worktree or checkout) falls through to the
+    renders, so bytes equal to what APM renders are never refused or kept.
     """
     session = integrator._materialization_session
     if session is None or force:

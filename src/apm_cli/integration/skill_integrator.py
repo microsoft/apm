@@ -439,6 +439,11 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
+    def kept_values(self) -> frozenset[str]:
+        """Return lock values of declared skill members this batch left unwritten."""
+        session = self._materialization_session
+        return session.kept_values() if session is not None else frozenset()
+
     def _skill_member_skipped(self, path: Path) -> None:
         self._skill_can_complete = False
         # A declared member left on disk is kept, never cleaned as stale.
@@ -527,7 +532,7 @@ class SkillIntegrator(BaseIntegrator):
             is_managed=managed,
             recorded_hashes=hashes,
             baseline_hash=(
-                (lambda path: session.baseline(path, targets) or adopted.get(path))
+                (lambda path: adopted.get(path) or session.baseline(path, targets))
                 if session is not None
                 else None
             ),

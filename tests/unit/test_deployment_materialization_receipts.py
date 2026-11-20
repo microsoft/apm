@@ -61,9 +61,10 @@ def _receipt_evidence(root: Path):
     )
 
 
-def test_receipt_outlives_checked_out_hash_without_adopting_disk(
+def test_receipt_outlives_checked_out_hash_only_while_disk_holds_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A receipt for another lock's hash vouches only for its own bytes, never the disk's."""
     root, path, lock = _fixture(tmp_path, monkeypatch)
     old_hash = compute_file_hash(path)
     session = _session(root, lock)
@@ -84,7 +85,7 @@ def test_receipt_outlives_checked_out_hash_without_adopting_disk(
     )
     assert _session(root, lock).baseline(path, [TARGET]) == old_hash
     path.write_text("user edit\n", encoding="utf-8")
-    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    assert _session(root, lock).baseline(path, [TARGET]) is None
     assert compute_file_hash(path) != old_hash
 
 
@@ -1023,7 +1024,7 @@ def test_non_skill_write_records_receipt_under_target_root(
     session.flush()
     state = json.loads(session.state_path.read_text(encoding="utf-8"))
     assert rule.resolve().as_posix() in state["destinations"].values()
-    assert _session(root, lock).has_receipt(rule)
+    assert rule.resolve().as_posix() in _session(root, lock).receipt_hashes()
 
 
 def test_write_outside_every_target_root_is_refused(
