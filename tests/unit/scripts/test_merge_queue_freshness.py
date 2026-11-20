@@ -9,7 +9,7 @@ import pytest
 
 from scripts import merge_queue_freshness
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-outcome.status_matches_state")]
 
 NOW = datetime(2026, 11, 20, 8, 0, tzinfo=UTC)
 REPO = "o/r"
