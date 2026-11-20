@@ -1844,58 +1844,88 @@ class TestRegistryConfig:
         assert any("ARTIFACTORY_BASE_URL" in str(warning.message) for warning in w)
         assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
 
-    def test_http_url_with_token_warns(self):
-        """PROXY_REGISTRY_TOKEN over http://  emits a UserWarning."""
-        import warnings
+    @staticmethod
+    def _proxy_config(env: dict) -> tuple[object, list[str]]:
+        """Build RegistryConfig from *env*, collecting the [!] lines it prints."""
+        from apm_cli.deps import registry_proxy
 
-        from apm_cli.deps.registry_proxy import RegistryConfig
-
+        printed: list[str] = []
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
-                    "PROXY_REGISTRY_TOKEN": "secret",
-                },
-                clear=True,
+            patch.dict(os.environ, env, clear=True),
+            patch.object(registry_proxy, "_emitted_warnings", set()),
+            patch(
+                "apm_cli.utils.console._rich_warning",
+                side_effect=lambda message, *a, **k: printed.append(message),
             ),
-            warnings.catch_warnings(record=True) as w,
         ):
-            warnings.simplefilter("always")
-            cfg = RegistryConfig.from_env()
+            cfg = registry_proxy.RegistryConfig.from_env()
+        return cfg, printed
+
+    def test_http_url_to_a_public_host_does_not_send_the_token(self):
+        """PROXY_REGISTRY_TOKEN is not sent over http:// to a public host."""
+        cfg, printed = self._proxy_config(
+            {
+                "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
+                "PROXY_REGISTRY_TOKEN": "secret",
+            }
+        )
         assert cfg is not None
         assert cfg.scheme == "http"
-        assert cfg.token == "secret"
-        assert any(
-            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
-            for warning in w
+        assert cfg.token is None
+        assert "Authorization" not in cfg.headers_for("http", "art.example.com")
+        assert len(printed) == 1, printed
+        assert "http://art.example.com/artifactory/github" in printed[0]
+        assert "PROXY_REGISTRY_ALLOW_HTTP=1" in printed[0]
+        assert "secret" not in printed[0]
+
+    def test_http_url_sends_the_token_with_the_explicit_opt_in(self):
+        """PROXY_REGISTRY_ALLOW_HTTP=1 authorizes sending the token over http://."""
+        cfg, printed = self._proxy_config(
+            {
+                "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
+                "PROXY_REGISTRY_TOKEN": "secret",
+                "PROXY_REGISTRY_ALLOW_HTTP": "1",
+            }
         )
-
-    def test_http_url_with_token_silenced_by_allow_http(self):
-        """PROXY_REGISTRY_ALLOW_HTTP=1 silences the plaintext-token warning."""
-        import warnings
-
-        from apm_cli.deps.registry_proxy import RegistryConfig
-
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
-                    "PROXY_REGISTRY_TOKEN": "secret",
-                    "PROXY_REGISTRY_ALLOW_HTTP": "1",
-                },
-                clear=True,
-            ),
-            warnings.catch_warnings(record=True) as w,
-        ):
-            warnings.simplefilter("always")
-            cfg = RegistryConfig.from_env()
         assert cfg is not None
-        assert not any(
-            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
-            for warning in w
+        assert cfg.token == "secret"
+        assert printed == []
+
+    @pytest.mark.parametrize(
+        ("host", "sent"),
+        [
+            ("localhost", True),
+            ("127.0.0.1", True),
+            ("10.1.2.3", True),
+            ("172.16.0.5", True),
+            ("172.31.255.1", True),
+            ("192.168.1.10", True),
+            ("172.32.0.1", False),
+            ("8.8.8.8", False),
+            ("proxy.corp.internal", False),
+        ],
+    )
+    def test_http_url_sends_the_token_only_to_a_local_network_host(self, host, sent):
+        cfg, printed = self._proxy_config(
+            {
+                "PROXY_REGISTRY_URL": f"http://{host}/artifactory/github",
+                "PROXY_REGISTRY_TOKEN": "secret",
+            }
         )
+        assert cfg is not None
+        assert (cfg.token == "secret") is sent
+        assert (printed == []) is sent
+
+    def test_https_url_always_sends_the_token(self):
+        cfg, printed = self._proxy_config(
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github",
+                "PROXY_REGISTRY_TOKEN": "secret",
+            }
+        )
+        assert cfg is not None
+        assert cfg.token == "secret"
+        assert printed == []
 
     def test_http_url_without_token_does_not_warn(self):
         """No warning when PROXY_REGISTRY_TOKEN is unset, even on http://."""

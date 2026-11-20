@@ -207,8 +207,8 @@
     },
     {
       "id": "credential-origin-scope",
-      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops)",
-      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
+      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, and over http:// only to a loopback or RFC 1918 host or with PROXY_REGISTRY_ALLOW_HTTP=1 (#4314), credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops)",
+      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for, http_token_allowed); utils/net.py (is_local_network_host); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
       "selectors": [
         "src/apm_cli/utils/http_credentials.py",
         "src/apm_cli/deps/registry_proxy.py"
@@ -216,7 +216,8 @@
       "guards": [
         "transport-platform-authenticated-egress-credential-headers",
         "transport-platform-credential-origin-scope",
-        "transport-platform-origin-bounded-redirect"
+        "transport-platform-origin-bounded-redirect",
+        "transport-platform-proxy-http-token"
       ]
     },
     {

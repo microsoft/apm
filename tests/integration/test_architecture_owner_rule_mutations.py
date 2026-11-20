@@ -3092,6 +3092,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Registry requests bypass the origin-bounded redirect owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-proxy-http-token",
+        rule_id="transport-platform-proxy-http-token",
+        path="src/apm_cli/deps/registry_proxy.py",
+        old="        if token and not http_token_allowed(parsed.scheme, host):",
+        new="        if False and token and not http_token_allowed(parsed.scheme, host):",
+        intent="The proxy token is attached over http to any host without the owner's verdict.",
+    ),
+    MutationCase(
         guard_id="transport-platform-ref-freshness",
         rule_id="transport-platform-ref-freshness",
         path="src/apm_cli/install/helpers/ref_seed.py",

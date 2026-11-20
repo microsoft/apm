@@ -42,6 +42,9 @@ from scripts.architecture_linter.checks.transport_network_and_runtime import (
 from scripts.architecture_linter.checks.transport_origin_bounded_redirect import (
     RULES as _REDIRECT_RULES,
 )
+from scripts.architecture_linter.checks.transport_proxy_http_token import (
+    RULES as _PROXY_HTTP_TOKEN_RULES,
+)
 from scripts.architecture_linter.checks.transport_revision_pins import (
     COLLECTORS as _REVISION_PIN_COLLECTORS,
 )
@@ -69,6 +72,7 @@ RULES = (
     + _REDIRECT_RULES
     + _CREDENTIAL_RENDERING_RULES
     + _ARCHIVE_LIMIT_RULES
+    + _PROXY_HTTP_TOKEN_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS

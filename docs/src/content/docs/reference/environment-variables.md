@@ -68,7 +68,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `PROXY_REGISTRY_URL` | Enterprise package proxy base URL. See [Registry proxy](../../enterprise/registry-proxy/). | unset | When set, APM resolves package downloads through the proxy. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token for `PROXY_REGISTRY_URL`. | unset | Required for authenticated proxies. |
-| `PROXY_REGISTRY_ALLOW_HTTP` | Set to `1` to silence the plaintext-token warning when `PROXY_REGISTRY_TOKEN` is sent to an `http://` `PROXY_REGISTRY_URL`. | unset | `http://` proxy URLs are accepted without it; use only for a trusted internal proxy. |
+| `PROXY_REGISTRY_ALLOW_HTTP` | Set to `1` to authorize sending `PROXY_REGISTRY_TOKEN` over `http://` to a host that is not loopback or a private network address. | unset | Without it, the token is sent over `http://` only to loopback or private network hosts. Use only for a trusted internal proxy. |
 | `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any dependency content not served by the proxy, including marketplace catalogs and lookups in the default MCP registry. Policy fetches stay direct. | unset | Air-gapped deployments. |
 | `APM_REGISTRY_TOKEN_<NAME>` | Bearer token for configured package registry `<NAME>`. | unset | `<NAME>` is the registry name uppercased, with `-` and `.` replaced by `_`. |
 | `APM_REGISTRY_USER_<NAME>` / `APM_REGISTRY_PASS_<NAME>` | Basic-auth credentials for configured package registry `<NAME>`. | unset | Used when a bearer token is not supplied. |
