@@ -170,15 +170,16 @@ def test_cursor_rules_installed_lifecycle(
     manifest_before = (state_root / "apm.yml").read_bytes()
     claims_before = {record["value"] for record in lock()["deployments"]}
     owner = records[".cursor/rules/style.mdc"]["owners"][0]
+    before = snapshot()
     removal = run("uninstall", *scope, owner, expected_returncode=1)
-    assert "Retained user-edited file" in removal.stdout
+    text = " ".join(removal.stdout.split())
+    assert "Uninstall refused" in text, text
+    assert ".cursor/rules/edited.mdc: edited since APM deployed it" in text, text
+    # Without deletion evidence nothing changes (#3701).
     assert (state_root / "apm.yml").read_bytes() == manifest_before
-    # The refusal drops already-removed files from the lockfile (#3656).
-    claims = {record["value"] for record in lock()["deployments"]}
-    assert ".cursor/rules/edited.mdc" in claims and claims < claims_before
-    assert all((target_root.parent / value).exists() for value in claims if "://" not in value)
-    assert not style.exists()
-    assert not (rules / "always.mdc").exists()
+    assert {record["value"] for record in lock()["deployments"]} == claims_before
+    assert snapshot() == before
+    assert style.exists()
     assert collision.read_text(encoding="utf-8") == _USER_COLLISION
     assert not (target_root / "agents/reviewer.md").exists()
     assert user_rule.read_text(encoding="utf-8") == _USER_RULE

@@ -359,7 +359,7 @@ def test_shared_local_slot_rename_failure_restores_original_until_retry(
 def test_user_edited_target_refusal_retains_ownership_after_package_deletion(
     tmp_path: Path,
 ) -> None:
-    """A refused target cleanup remains owned after package deletion and retries."""
+    """An edited target refuses uninstall before any change, then retries (#3701)."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "target-refusal", base_env=os.environ)
     env = _child_env(isolated)
     factory = LocalPackageFactory(isolated.work_root)
@@ -392,7 +392,7 @@ def test_user_edited_target_refusal_retains_ownership_after_package_deletion(
     output = failed.stdout + failed.stderr
     assert failed.returncode != 0, output
     assert "Uninstall complete" not in output
-    assert not materialized.exists()
+    assert materialized.exists()
     after = LifecycleStateSnapshot.capture(consumer.root, targets=("copilot",))
     _assert_same_lifecycle_state(before, after)
     assert target.read_bytes() == user_bytes

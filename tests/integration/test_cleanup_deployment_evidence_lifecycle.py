@@ -297,6 +297,7 @@ def test_uninstall_refusal_changes_nothing_and_its_remedy_runs(
     (clone / _INSTRUCTION).write_bytes(user_bytes)
     world.evict_machine_state()
     world.make_source_unreachable()
+    robust_rmtree(clone / "apm_modules")
     before = _snapshot(clone)
 
     refused = world.apm(clone, "uninstall", _DEP, expect=1)
@@ -411,17 +412,18 @@ def test_cowork_row_removed_only_with_valid_provenance(
         skill.write_bytes(b"---\nname: demo\ndescription: Demo\n---\nMine now.\n")
     before = skill.read_bytes()
 
-    output = world.apm(cwd, "uninstall", "-g", "test/cowork-kit")
+    output = world.apm(
+        cwd, "uninstall", "-g", "test/cowork-kit", expect=0 if provenance == "receipt" else 1
+    )
 
     if provenance == "receipt":
         assert not skill.exists()
         return
     # The drift replay renders no experimental external target, so a cowork
-    # row without a matching receipt has no evidence and is kept, named.
+    # row without a matching receipt has no evidence: uninstall refuses and
+    # changes nothing, naming the file.
     assert skill.read_bytes() == before
-    expected = (
-        "file has been edited since APM deployed it" if provenance == "edited" else _NO_EVIDENCE
-    )
+    expected = "edited since APM deployed it" if provenance == "edited" else _NO_EVIDENCE
     assert "cowork://skills/demo/SKILL.md" in output and expected in output, output
 
 

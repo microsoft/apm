@@ -850,7 +850,7 @@ class TestGlobalUninstallLifecycle:
         assert result.returncode != 0, combined
         assert "Uninstall complete" not in combined
         assert ".config/opencode/agents/orphan.md" in combined
-        assert "retry uninstall" in combined
+        assert "rerun 'apm uninstall -g'" in " ".join(combined.split())
         assert removed_file.read_bytes() == edited_bytes
         assert survivor_file.read_bytes() == survivor_before
         assert manifest_path.read_bytes() == manifest_before
