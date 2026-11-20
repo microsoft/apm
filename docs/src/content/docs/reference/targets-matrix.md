@@ -229,7 +229,7 @@ Gemini CLI.
 Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
 - **Detection.** None -- explicit-only for auto-detection. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity` or list it in `apm.yml` `targets:`; it is not part of `--target all`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
-- **Deploy directory.** `.agents/` (project scope); `~/.gemini/antigravity-cli/` (user scope, skills only; instructions and hooks are project-scope only; user MCP goes to `~/.gemini/config/mcp_config.json`).
+- **Deploy directory.** `.agents/` (project scope); `~/.gemini/config/` (user scope, skills only, deployed to `~/.gemini/config/skills/` where the Antigravity App, CLI and IDE read them; instructions and hooks are project-scope only; user MCP goes to `~/.gemini/config/mcp_config.json`). Skills an earlier APM release recorded under `~/.gemini/antigravity-cli/skills/` are removed on the next `apm install -g --target antigravity`; files APM did not record there are left untouched.
 - **Supported primitives.** instructions, skills, hooks, mcp.
 - **File conventions.**
   - instructions: `.agents/rules/<name>.md` (formatted natively with `trigger: glob` and `globs` frontmatter mapped from the package `applyTo` patterns)

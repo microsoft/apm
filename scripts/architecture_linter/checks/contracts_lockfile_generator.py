@@ -34,6 +34,16 @@ _ROUTES = (
     ("src/apm_cli/commands/audit.py", "audit", "require_current_cli"),
     ("src/apm_cli/commands/deps/cli.py", "update", "require_current_cli"),
 )
+_RENDER_ROUTES = (
+    (_OWNER, "require_current_cli", "refusal_exit"),
+    ("src/apm_cli/commands/pack.py", "pack_cmd", "refusal_exit"),
+    ("src/apm_cli/commands/install.py", "install", "refusal_exit"),
+)
+# Callers that render a caught refusal themselves; every other command uses
+# require_current_cli, so all refusals share one renderer (#3967).
+_RAW_GATE_CALLERS = frozenset(
+    {_OWNER, "src/apm_cli/commands/install.py", "src/apm_cli/commands/pack.py"}
+)
 _ENRICHMENT = "src/apm_cli/bundle/lockfile_enrichment.py"
 _STAMP_ROUTES = (
     (_LOCKFILE, "write", "installed_apm_version"),
@@ -94,8 +104,25 @@ def _route_findings(
 
 
 def _check(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Require each gate site to call the canonical owner inside its definition."""
-    return tuple(_route_findings(provider, RULE_ID, _ROUTES))
+    """Require each gate site to call the canonical owner and render its refusal."""
+    findings = _route_findings(provider, RULE_ID, _ROUTES + _RENDER_ROUTES)
+    for path in inventory_paths(provider, prefixes=("src/apm_cli/",)):
+        if not path.endswith(".py") or path in _RAW_GATE_CALLERS:
+            continue
+        facts, failures = checked_facts(provider, path, RULE_ID, require_python=True)
+        findings.extend(failures)
+        findings.extend(
+            violation(
+                RULE_ID,
+                path,
+                "gate commands through require_current_cli so refusals render one way",
+                line=call.line,
+                column=call.column,
+            )
+            for call in facts.calls
+            if call.qualname.rsplit(".", 1)[-1] == "check_current_cli"
+        )
+    return tuple(findings)
 
 
 def _check_stamp(provider: FactsProvider) -> tuple[Violation, ...]:

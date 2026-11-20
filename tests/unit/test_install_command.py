@@ -2320,7 +2320,7 @@ class TestInstallMcpFlag:
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
             patch(
-                "apm_cli.integration.mcp_integrator_install.discover_user_scope_mcp_runtimes",
+                "apm_cli.integration.mcp_user_scope_runtimes.discover_user_scope_mcp_runtimes",
                 return_value=(["claude"], []),
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator") as integrator,
@@ -2615,7 +2615,7 @@ class TestInstallMcpFlag:
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
             patch(
-                "apm_cli.integration.mcp_integrator_install.discover_user_scope_mcp_runtimes",
+                "apm_cli.integration.mcp_user_scope_runtimes.discover_user_scope_mcp_runtimes",
                 return_value=(["claude"], []),
             ),
             patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,

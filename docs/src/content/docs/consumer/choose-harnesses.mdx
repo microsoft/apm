@@ -161,7 +161,9 @@ apm compile
 `apm compile` merges your instructions into those root files. It writes
 `CLAUDE.md` when `.claude/rules/` does not already carry the
 instructions. Commit the generated file and rerun `apm compile` when
-instructions change. Flags: [`apm compile`](../../reference/cli/compile/).
+instructions change. `apm uninstall` and `apm prune` print a matching hint
+when a removed package's instructions are still in the root file. Flags:
+[`apm compile`](../../reference/cli/compile/).
 
 ## Verify
 

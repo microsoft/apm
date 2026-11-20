@@ -364,7 +364,7 @@ def _run_mcp_lsp_integration(
             pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
-        logger.error(
+        logger.refusal(
             "MCP server(s) blocked by org policy. "
             "APM packages remain installed; MCP configs were NOT written."
         )
@@ -942,7 +942,7 @@ def _run_dep_update_locked(
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
-        _rich_error(str(e))
+        _rich_error(str(e), err=isinstance(e, PolicyViolationError))
         sys.exit(1)
     except click.UsageError:
         raise

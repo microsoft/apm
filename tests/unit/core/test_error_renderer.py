@@ -186,3 +186,14 @@ def test_renderers_leave_status_symbols_to_the_cli_output_owner():
     ]
     for message in messages:
         assert not re.match(r"\s*\[[x!i+*>]\]", message), message
+
+
+def test_no_harness_error_lists_every_detection_signal() -> None:
+    """The scanned-markers list is derived from SIGNAL_WHITELIST, never hand-kept (C5d)."""
+    from apm_cli.core.errors import render_no_harness_error
+    from apm_cli.core.target_detection import SIGNAL_WHITELIST
+
+    rendered = render_no_harness_error()
+    for _target, _kind, path in SIGNAL_WHITELIST:
+        assert path in rendered
+    assert ".github/mcp.json" in rendered and ".grok/" in rendered

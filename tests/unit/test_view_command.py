@@ -774,6 +774,49 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
         assert "my-plugin" in result.output
         assert "acme-tools" in result.output
 
+    def test_marketplace_ref_hint_names_a_refused_entry_as_refused(self):
+        """View never suggests installing an entry install refuses (#1326; A6, N3)."""
+        from types import SimpleNamespace
+
+        from apm_cli.marketplace.models import (
+            MarketplaceManifest,
+            MarketplacePlugin,
+            MarketplaceSource,
+        )
+
+        plugin = MarketplacePlugin(
+            name="x", source={"type": "github", "repo": "acme/tools"}, version="1.0.0"
+        )
+        manifest = MarketplaceManifest(name="corp-mkt", plugins=(plugin,))
+        source = MarketplaceSource(name="corp-mkt", owner="corp", repo="marketplace")
+        risky = SimpleNamespace(
+            canonical="acme/tools", plugin=plugin, cross_repo_misconfig_risk=object()
+        )
+
+        def _refuse(resolution):
+            from apm_cli.marketplace.errors import DependencyConfusionError
+
+            raise DependencyConfusionError.__new__(DependencyConfusionError)
+
+        with (
+            patch("apm_cli.marketplace.registry.get_marketplace_by_name", return_value=source),
+            patch("apm_cli.marketplace.client.fetch_or_cache", return_value=manifest),
+            patch(
+                "apm_cli.marketplace.resolver.resolve_marketplace_plugin", return_value=risky
+            ) as resolve,
+            patch(
+                "apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution",
+                side_effect=_refuse,
+            ),
+            _force_rich_fallback(),
+        ):
+            result = self.runner.invoke(cli, ["view", "x@corp-mkt"])
+
+        assert result.exit_code == 0, result.output
+        resolve.assert_called_once_with("x", "corp-mkt")
+        assert "apm install x@corp-mkt" not in result.output
+        assert "Install: refused" in result.output
+
     def test_marketplace_ref_does_not_require_apm_modules(self):
         """``apm view plugin@mkt`` works without apm_modules/ directory."""
         from apm_cli.marketplace.models import (
