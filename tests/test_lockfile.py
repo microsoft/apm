@@ -242,6 +242,7 @@ class TestLockFile:
         dep = DependencyReference.parse("github.com/team/skills")
         assert dep.get_unique_key() == "team/skills"
 
+    @pytest.mark.req("req-lk-001")
     def test_to_yaml(self):
         lock = LockFile(apm_version="1.0.0")
         lock.add_dependency(LockedDependency(repo_url="owner/repo"))

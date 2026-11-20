@@ -326,6 +326,7 @@ class TestCloneWithFallbackEnv:
         assert "ghp_TESTTOKEN" not in first_url
         assert _url_host(first_url) == "github.com"
 
+    @pytest.mark.req("req-sc-008")
     def test_insecure_http_dep_is_strict_by_default(self):
         """HTTP deps stay on HTTP unless protocol fallback is enabled."""
         dl = _make_downloader(github_token="ghp_TESTTOKEN")

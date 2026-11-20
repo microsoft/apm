@@ -118,7 +118,7 @@
       "properties": ["lockfile.frozen_preserves_bytes", "outcome.status_matches_state"],
       "regression_tests": [
         "tests/integration/test_frozen_no_rewrite_e2e.py::test_frozen_install_fails_on_unrecorded_skill_without_rewriting_lockfile",
-        "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay"
+        "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay"
       ]
     },
     {
@@ -641,6 +641,17 @@
       ]
     },
     {
+      "issue": 4187,
+      "fixed_in": "Unreleased",
+      "summary": "audit --ci and install --frozen reach one verdict on locked package content hashes.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state", "source.ref_cache_coherent", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_locked_package_hash_parity_lifecycle.py::test_audit_ci_and_frozen_install_agree_on_locked_content_hash",
+        "tests/integration/test_registry_locked_content_hash_parity_lifecycle.py::test_audit_ci_and_frozen_install_agree_on_registry_content_hash"
+      ]
+    },
+    {
       "issue": 4188,
       "fixed_in": "Unreleased",
       "summary": "install --frozen and audit --ci disagreed on executable approval pins, and a hook whose pin no longer matched kept its config entries after install.",
@@ -942,12 +953,12 @@
         ]
       },
       "witnesses": [
-        {"id":"deterministic-project","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[project]","kind":"deterministic","dimensions":{"variant":"project"},"trajectory":["project"]},
-        {"id":"deterministic-global-canonical","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-canonical]","kind":"deterministic","dimensions":{"variant":"global-canonical"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
-        {"id":"deterministic-global-aliased","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-aliased]","kind":"deterministic","dimensions":{"variant":"global-aliased"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
-        {"id":"generated-project","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[project]","kind":"generated","dimensions":{"variant":"project"},"trajectory":["project"]},
-        {"id":"generated-global-canonical","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-canonical]","kind":"generated","dimensions":{"variant":"global-canonical"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
-        {"id":"generated-global-aliased","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-aliased]","kind":"generated","dimensions":{"variant":"global-aliased"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"deterministic-project","nodeid":"tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay[project]","kind":"deterministic","dimensions":{"variant":"project"},"trajectory":["project"]},
+        {"id":"deterministic-global-canonical","nodeid":"tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay[global-canonical]","kind":"deterministic","dimensions":{"variant":"global-canonical"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"deterministic-global-aliased","nodeid":"tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay[global-aliased]","kind":"deterministic","dimensions":{"variant":"global-aliased"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"generated-project","nodeid":"tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_sequences_preserve_reference_model[project]","kind":"generated","dimensions":{"variant":"project"},"trajectory":["project"]},
+        {"id":"generated-global-canonical","nodeid":"tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-canonical]","kind":"generated","dimensions":{"variant":"global-canonical"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"generated-global-aliased","nodeid":"tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-aliased]","kind":"generated","dimensions":{"variant":"global-aliased"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
         {"id":"deterministic-external-roots-false","nodeid":"tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[False]","kind":"deterministic","dimensions":{"aliased_home":false},"trajectory":["required-global-start","global-readers","required-cache-readers","project-only-readers","required-global-update","semver","global-clean-audit","required-audit-matrix","global-clean-repair","global-remove","global-reinstall","global-remove"]},
         {"id":"deterministic-external-roots-true","nodeid":"tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[True]","kind":"deterministic","dimensions":{"aliased_home":true},"trajectory":["required-global-start","global-readers","required-cache-readers","project-only-readers","required-global-update","semver","global-clean-audit","required-audit-matrix","global-clean-repair","global-remove","global-reinstall","global-remove"]},
         {"id":"deterministic-project-semver","nodeid":"tests/integration/test_required_lifecycle_state_machine.py::test_required_frozen_semver_transport_refusal_recovers","kind":"deterministic","dimensions":{},"trajectory":["semver"]}

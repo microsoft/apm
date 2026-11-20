@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "description": "Generated obligations of the lifecycle security tables and journey step oracles (tests/lifecycle/obligation_space.py over tests/quality/security_obligations.json and tests/lifecycle/journeys/index.yaml). required maps an id to the witness test whose oracle receipts must cover it (oracles.check_obligation). known_failing maps an id to the tracking issue of a strict expected failure; it earns no receipt. Every other id is in the derived baseline, owned by its lane. The 0.37 release needs an empty baseline.",
+  "required": {},
+  "known_failing": {}
+}

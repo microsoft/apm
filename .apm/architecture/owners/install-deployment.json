@@ -354,10 +354,10 @@
     },
     {
       "id": "package-content-hash",
-      "decision": "How a package tree is digested, which stream a lock row's content_hash uses (framed in lockfile version 4, legacy in 1-3), and when a writable install promotes a lockfile to version 4 from verified bytes (#4000)",
-      "owner": "utils/content_hash.py (_frame_entry, compute_package_digests, compute_package_hash, verify_package_hash; one framing for package and native plugin fingerprints); deps/lockfile.py names the framed version; install/source_helpers.py record_package_digests is the sole recorder; install/phases/content_hash_stream.py promote_content_hashes is the sole promoter; deps/lockfile.py records_framed_content_hashes owns the recording stream",
+      "decision": "How a package tree is digested, which stream a lock row's content_hash uses (framed in lockfile version 4, legacy in 1-3), and when a writable install promotes a lockfile to version 4 from verified bytes (#4000), and whether package bytes at the locked commit contradict a lock row's content_hash, so install --frozen and audit --ci reach one verdict (#4187)",
+      "owner": "utils/content_hash.py (_frame_entry, compute_package_digests, compute_package_hash, verify_package_hash; one framing for package and native plugin fingerprints); deps/lockfile.py names the framed version; install/source_helpers.py record_package_digests is the sole recorder; install/phases/content_hash_stream.py promote_content_hashes is the sole promoter; deps/lockfile.py records_framed_content_hashes owns the recording stream; install/source_helpers.py locked_content_mismatch is the one locked content verdict, asked by install/sources.py fresh downloads and every audit --ci replay path (install/drift.py _verify_remote_cache_candidate and _materialize_install_path, install/audit_replay.py _live_copies_stale)",
       "selectors": ["src/apm_cli/deps/carried_license.py", "src/apm_cli/install/legacy_plugin_compat.py"],
-      "guards": ["install-deployment-package-content-hash"]
+      "guards": ["install-deployment-locked-content-verdict", "install-deployment-package-content-hash"]
     },
     {
       "id": "policy-outcome-routing",

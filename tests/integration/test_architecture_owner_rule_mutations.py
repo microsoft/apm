@@ -1982,6 +1982,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-locked-content-verdict",
+        rule_id="install-deployment-locked-content-verdict",
+        path="src/apm_cli/install/drift.py",
+        old=(
+            "    if locked_content_mismatch(\n"
+            "        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info\n"
+            "    ):\n"
+        ),
+        new="    if False:\n",
+        intent="The audit --ci scratch replay stops asking install's locked content verdict.",
+    ),
+    MutationCase(
         guard_id="install-deployment-locked-copy-validity",
         rule_id="install-deployment-locked-copy-validity",
         path="src/apm_cli/install/phases/integrate.py",
@@ -4738,8 +4750,8 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
             id="mcp-install-raw-selection",
         ),
         pytest.param(
-            "src/apm_cli/install/local_bundle_handler.py",
-            "effective_target=deployment_decision.canonical_targets,",
+            "src/apm_cli/install/bundle_admission.py",
+            "effective_target=target_decision.canonical_targets,",
             "effective_target=[resolved.name for resolved in targets],",
             id="local-bundle-raw-names",
         ),
