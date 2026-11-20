@@ -66,6 +66,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "remote-dependency-unpinned": _LOCKFILE_EDIT,
     "replacement-sources-unrecorded": "needs apm.yml replacement rules that diverge from "
     "apm.lock.yaml, which the shared published-package world does not declare",
+    "replay-cache-content-stale": "needs an apm_modules copy at the locked commit whose bytes "
+    "contradict the locked content hash",
     "replay-cache-stale": "needs an apm_modules copy whose pin marker contradicts the locked "
     "commit",
     "user-package-copies-stale": _USER_SCOPE,

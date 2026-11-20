@@ -242,7 +242,7 @@ def _verify_remote_cache_candidate(
     if locked_content_mismatch(lock_dep.get_unique_key(), lock_dep, candidate, lockfile=lockfile):
         raise CacheMissError(
             f"{candidate} does not hold the locked content of {lock_dep.get_unique_key()}; "
-            "run 'apm install' to refresh apm_modules cache"
+            f"{_advice.REPLAY_CACHE_CONTENT_STALE.clause()}"
         )
 
 

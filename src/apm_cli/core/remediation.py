@@ -1145,6 +1145,11 @@ REPLAY_CACHE_MISSING = _entry(
 REPLAY_CACHE_STALE = _entry(
     "replay-cache-stale", "apm install", "refresh the apm_modules cache to the locked commit"
 )
+REPLAY_CACHE_CONTENT_STALE = _entry(
+    "replay-cache-content-stale",
+    "apm install",
+    "refresh the apm_modules cache to the locked content",
+)
 HOOKS_UNAPPROVED = _entry(
     "hooks-unapproved",
     "apm approve {package}",
