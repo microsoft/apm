@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_agent_render_adopt import (
     GUARD_AGENT_RENDER_ADOPT,
+    GUARD_COMMAND_RENDER_ADOPT,
     check_agent_render_then_adopt,
+    check_command_render_then_adopt,
 )
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
@@ -367,6 +369,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_AGENT_RENDER_ADOPT,
         "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
         check_agent_render_then_adopt,
+    ),
+    _rule(
+        GUARD_COMMAND_RENDER_ADOPT,
+        "Command adoption compares the rendered command via _check_adopt_or_skip.",
+        check_command_render_then_adopt,
     ),
     _rule(
         GUARD_CONSUMER_MANIFEST_REWRITE,

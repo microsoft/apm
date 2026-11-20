@@ -748,15 +748,34 @@ class TestCommandIntegratorAdopt:
 
         return pkg_dir, target, _make_package_info(pkg_dir)
 
-    def test_adopt_fires_before_format_dispatch_when_bytes_identical(self, tmp_path: Path) -> None:
-        """Adopt check fires before format dispatch when source and on-disk
-        file are byte-identical (proves the check is wired, not dead-code).
-        """
+    def test_adopt_fires_when_the_target_holds_the_rendered_command(self, tmp_path: Path) -> None:
+        """An unrecorded command file holding the rendered command is adopted."""
         body = b"---\ndescription: cmd\n---\n# Cmd\n"
         _pkg_dir, target, pkg_info = self._build(tmp_path, body)
-        # Pre-place the target with the SAME bytes as the source file.
-        # This simulates a scenario where the on-disk file matches the source
-        # (e.g. a copy-through format or a manually placed file).
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"], pkg_info, tmp_path, force=False, managed_files=None
+        )
+        rendered = target.read_bytes()
+        assert rendered != body
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        assert target in result.target_paths
+        assert result.files_adopted == 1
+        assert result.files_integrated == 0
+        assert target.read_bytes() == rendered
+
+    def test_raw_prompt_bytes_are_not_adopted_as_a_command(self, tmp_path: Path) -> None:
+        """A file holding the raw prompt is not the rendered command, so it is skipped."""
+        body = b"---\ndescription: cmd\n---\n# Cmd\n"
+        _pkg_dir, target, pkg_info = self._build(tmp_path, body)
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(body)
 
         result = CommandIntegrator().integrate_commands_for_target(
@@ -767,12 +786,8 @@ class TestCommandIntegratorAdopt:
             managed_files=None,
         )
 
-        assert target in result.target_paths, (
-            "Adopt must fire when target bytes match source bytes -- "
-            "the adopt check runs before format dispatch."
-        )
-        assert result.files_adopted == 1
-        assert result.files_integrated == 0
+        assert result.files_adopted == 0
+        assert target.read_bytes() == body
 
     def test_divergent_content_skipped_not_adopted(self, tmp_path: Path) -> None:
         """When on-disk bytes differ from source, adopt does not fire."""
