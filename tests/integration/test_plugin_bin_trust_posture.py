@@ -20,6 +20,7 @@ from apm_cli.integration.dispatch import get_dispatch_table
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import PackageInfo, PackageType, validate_apm_package
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX mode hardening only")
@@ -183,6 +184,7 @@ def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path)
         package_name="owner/clean-tool",
         scope=InstallScope.USER,
         trust_bin=True,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
     clean_deployed = project_root / ".claude" / "skills" / "clean-tool" / "bin" / "tool"
     assert clean_deployed.is_file()
@@ -200,6 +202,7 @@ def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path)
         package_name="owner/hostile-tool",
         scope=InstallScope.USER,
         trust_bin=True,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     deployed = project_root / ".claude" / "skills" / "hostile-tool" / "bin" / "tool"
@@ -284,4 +287,4 @@ def test_resolve_bin_skip(
     expected: tuple[bool, str | None],
 ) -> None:
     """allowExecutables approval should override trust posture when bin/ is blocked."""
-    assert _resolve_bin_skip(bin_approved, trust_bin) == expected
+    assert _resolve_bin_skip(bin_approved, trust_bin, non_interactive=False) == expected

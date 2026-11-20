@@ -1011,6 +1011,15 @@ def exec_map_authorizes_all(allow_map: object) -> bool:
     return isinstance(allow_map, EffectiveExecMap) and allow_map.authorized_by is not None
 
 
+def closed_exec_map(allow_map: object) -> object:
+    """Return *allow_map*, or an empty grant map when it is missing.
+
+    Item admission reads ``None`` as "gate off"; a missing map handed to it
+    becomes a gate-on map with no grants, so it admits nothing.
+    """
+    return EffectiveExecMap() if allow_map is None else allow_map
+
+
 def declared_project_exec_map(raw_allow: object) -> dict[str, dict[str, bool]]:
     """Return the map a project's own declared grants imply, without other layers.
 

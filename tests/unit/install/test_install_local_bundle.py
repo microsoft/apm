@@ -852,8 +852,28 @@ class TestLocalBundlePathRouting:
 
         for target in (KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]):
             prefixes = frozenset({f"{target.root_dir}/"})
-            assert bundle_deploy_relative_path(rel, prefixes, prefixes, target=target) is None
-            assert bundle_deploy_skip_warning(rel, prefixes, prefixes, target=target) is None
+            assert (
+                bundle_deploy_relative_path(
+                    rel,
+                    prefixes,
+                    prefixes,
+                    target=target,
+                    hooks_approved=True,
+                    canvas_approved=True,
+                )
+                is None
+            )
+            assert (
+                bundle_deploy_skip_warning(
+                    rel,
+                    prefixes,
+                    prefixes,
+                    target=target,
+                    hooks_approved=True,
+                    canvas_approved=True,
+                )
+                is None
+            )
 
     def test_target_rooted_hook_files_keep_routing(self) -> None:
         """Deployed-layout bundles keep their target hook files (not plugin hooks)."""
@@ -863,7 +883,14 @@ class TestLocalBundlePathRouting:
         target = KNOWN_TARGETS["copilot"]
         prefixes = frozenset({".github/"})
         assert (
-            bundle_deploy_relative_path(".github/hooks/pkg.json", prefixes, prefixes, target=target)
+            bundle_deploy_relative_path(
+                ".github/hooks/pkg.json",
+                prefixes,
+                prefixes,
+                target=target,
+                hooks_approved=True,
+                canvas_approved=True,
+            )
             == "hooks/pkg.json"
         )
 
@@ -890,8 +917,15 @@ class TestLocalBundlePathRouting:
         for name in ("claude", "copilot", "cursor"):
             target = KNOWN_TARGETS[name]
             allowed = target_bundle_deploy_prefixes(target)
-            assert bundle_deploy_relative_path(rel, allowed, known, target=target) is None
-            warning = bundle_deploy_skip_warning(rel, allowed, known, target=target)
+            assert (
+                bundle_deploy_relative_path(
+                    rel, allowed, known, target=target, hooks_approved=True, canvas_approved=True
+                )
+                is None
+            )
+            warning = bundle_deploy_skip_warning(
+                rel, allowed, known, target=target, hooks_approved=True, canvas_approved=True
+            )
             if warning is not None:
                 assert "not a primitive file" in warning
 
@@ -907,12 +941,12 @@ class TestLocalBundlePathRouting:
         rel = ".github/hooks/pkg.json"
         assert (
             bundle_deploy_relative_path(
-                rel, prefixes, prefixes, target=target, hooks_approved=False
+                rel, prefixes, prefixes, target=target, hooks_approved=False, canvas_approved=True
             )
             is None
         )
         warning = bundle_deploy_skip_warning(
-            rel, prefixes, prefixes, target=target, hooks_approved=False
+            rel, prefixes, prefixes, target=target, hooks_approved=False, canvas_approved=True
         )
         assert warning is not None and "not approved" in warning
 
@@ -935,12 +969,12 @@ class TestLocalBundlePathRouting:
         prefixes = frozenset({".github/"})
         assert (
             bundle_deploy_relative_path(
-                rel, prefixes, prefixes, target=target, canvas_approved=False
+                rel, prefixes, prefixes, target=target, canvas_approved=False, hooks_approved=True
             )
             is None
         )
         warning = bundle_deploy_skip_warning(
-            rel, prefixes, prefixes, target=target, canvas_approved=False
+            rel, prefixes, prefixes, target=target, canvas_approved=False, hooks_approved=True
         )
         assert warning is not None and "not approved" in warning
 
@@ -952,7 +986,12 @@ class TestLocalBundlePathRouting:
         prefixes = frozenset({".github/"})
         assert (
             bundle_deploy_relative_path(
-                ".github/prompts/review.prompt.md", prefixes, prefixes, target=target
+                ".github/prompts/review.prompt.md",
+                prefixes,
+                prefixes,
+                target=target,
+                hooks_approved=True,
+                canvas_approved=True,
             )
             == "prompts/review.prompt.md"
         )
@@ -966,6 +1005,8 @@ class TestLocalBundlePathRouting:
                 ".grok/../outside.txt",
                 frozenset({".grok/"}),
                 frozenset({".grok/"}),
+                hooks_approved=True,
+                canvas_approved=True,
             )
 
 

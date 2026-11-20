@@ -124,7 +124,11 @@ def check_executable_approval(
             from apm_cli.security.trust import package_exec_status
 
             status = package_exec_status(
-                ctx.exec_trust_ctx, tuple(candidate_keys), _install, _decl.exec_types
+                ctx.exec_trust_ctx,
+                tuple(candidate_keys),
+                _install,
+                _decl.exec_types,
+                native=False,
             )
             if status is not None:
                 ctx.package_exec_status[package_name] = status
@@ -147,13 +151,14 @@ def _native_approval(
         TRUST_DENIED,
         TRUST_DEPLOYED,
         TRUST_GATED,
+        closed_exec_map,
         scan_package_executables,
     )
     from apm_cli.security.trust import REASON_DENIED, admit_native_plugin
 
     install = Path(package_info.install_path)
     verdict = admit_native_plugin(
-        _closed_if_missing(allow_executables),
+        closed_exec_map(allow_executables),
         candidate_keys,
         install,
         transitive=_is_transitive(package_info, ctx),
@@ -232,12 +237,13 @@ def plugin_admission(
         return None
     if not native_install(package_info):
         return None
+    from apm_cli.security.executables import closed_exec_map
     from apm_cli.security.trust import admit_native_plugin
 
     pkg_key = resolve_package_key(package_info, package_name)
     keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
     return admit_native_plugin(
-        _closed_if_missing(allow_executables),
+        closed_exec_map(allow_executables),
         keys,
         Path(package_info.install_path),
         transitive=_is_transitive(package_info, ctx),
@@ -263,13 +269,6 @@ def hook_file_admission(
     pkg_key = resolve_package_key(package_info, package_name)
     keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
     return hook_file_filter(allow_executables, keys, Path(package_info.install_path))
-
-
-def _closed_if_missing(allow_executables: Any) -> Any:
-    """A missing map is an empty grant map: the trust owner admits nothing from it."""
-    from apm_cli.security.executables import EffectiveExecMap
-
-    return EffectiveExecMap() if allow_executables is None else allow_executables
 
 
 def _candidate_keys(pkg_key: str) -> list[str]:

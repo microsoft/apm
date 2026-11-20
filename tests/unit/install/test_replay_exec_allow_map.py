@@ -8,6 +8,12 @@ from types import SimpleNamespace
 import pytest
 
 from apm_cli.install.exec_gate import ReplayExecAllowMap
+from apm_cli.security.executables import AUTHORIZED_REPLAY
+
+
+def _replay_authorized(allow) -> bool:
+    """Already-authorized replay is an explicit authorization, never None."""
+    return allow is not None and allow.authorized_by == AUTHORIZED_REPLAY
 
 
 @pytest.fixture
@@ -40,7 +46,7 @@ def test_deployed_entries_replay_ungated(
 ) -> None:
     provider_calls: list[int] = []
     gate = ReplayExecAllowMap(project, lambda: provider_calls.append(1))
-    assert gate.for_dependency(SimpleNamespace(exec_status=status)) is None
+    assert _replay_authorized(gate.for_dependency(SimpleNamespace(exec_status=status)))
     assert provider_calls == []
     assert discovered == []
 
@@ -126,9 +132,9 @@ def test_deployed_entry_still_allowed_replays_ungated(
     )
     package = _hook_package(tmp_path / "hooky")
     gate = ReplayExecAllowMap(project, lambda: None)
-    assert gate.for_dependency(package.lock_dep, package.package_info) is None
+    assert _replay_authorized(gate.for_dependency(package.lock_dep, package.package_info))
     package.lock_dep.exec_status = None
-    assert gate.for_dependency(package.lock_dep, package.package_info) is None
+    assert _replay_authorized(gate.for_dependency(package.lock_dep, package.package_info))
 
 
 def test_project_self_entry_replays_ungated_under_deny(
@@ -137,7 +143,7 @@ def test_project_self_entry_replays_ungated_under_deny(
     package = _hook_package(tmp_path / "hooky")
     package.lock_dep.local_path = "."
     gate = ReplayExecAllowMap(project, lambda: None)
-    assert gate.for_dependency(package.lock_dep, package.package_info) is None
+    assert _replay_authorized(gate.for_dependency(package.lock_dep, package.package_info))
 
 
 @pytest.mark.parametrize(

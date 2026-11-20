@@ -19,6 +19,7 @@ from apm_cli.integration.canvas_integrator import (
     is_canvas_bundle_path,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 # ---------------------------------------------------------------------------
@@ -617,6 +618,7 @@ def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
         package_name="owner/dep",
         ctx=SimpleNamespace(verbose=False),
         is_first_party=True,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     assert result["canvases"] == 1
@@ -643,6 +645,7 @@ def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
         diagnostics=diags,
         package_name="owner/dep",
         ctx=SimpleNamespace(verbose=False),
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         # allow_executables=None means no enforcement; canvas deploys freely
     )
 

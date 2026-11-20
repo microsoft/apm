@@ -459,9 +459,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         # named _local must not bypass canvas trust via the name alone).
         if _prim_name == "canvas" and not is_first_party:
             from apm_cli.install.exec_gate import resolve_package_key as _rpk
-            from apm_cli.security.executables import EXEC_TYPE_CANVAS, package_type_approved
+            from apm_cli.security.executables import (
+                EXEC_TYPE_CANVAS,
+                exec_map_authorizes_all,
+                package_type_approved,
+            )
 
-            _dep_canvas_ok = package_type_approved(
+            _dep_canvas_ok = exec_map_authorizes_all(allow_executables) or package_type_approved(
                 allow_executables,
                 (_rpk(package_info, package_name), package_name),
                 EXEC_TYPE_CANVAS,

@@ -118,6 +118,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     'owner = getattr(dependency, "resolved_by", None)',
                     'approval_keys = getattr(dependency, "approval_keys", ())',
                     "def denied_exec_types(",
+                    "def authorized_exec_map(",
+                    "def exec_map_authorizes_all(",
+                    "def package_type_approved(",
+                    "def compose_trust_bin(",
                 ),
                 _APPROVE_COMMAND: (
                     "approval = locked_dependency_approval(locked",
@@ -162,8 +166,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "approval_key=bundle_approval_key,",
                 ),
                 _INSTALL_SERVICES: (
-                    "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
-                    "_is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)",
+                    # Bundle hooks and canvas are approved for the exact bundle content.
+                    "_bundle_keys = () if approval_key is None else (approval_key,)",
+                    "package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)",
+                    "allow_executables, _bundle_keys, EXEC_TYPE_CANVAS",
                     # A gated package's hooks retire through the hook owner (#3924).
                     "reconcile_package_targets(package_info, project_root, targets),",
                 ),

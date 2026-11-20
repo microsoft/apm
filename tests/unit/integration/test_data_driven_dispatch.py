@@ -20,6 +20,7 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 # ------------------------------------------------------------------
 # Helpers
@@ -118,6 +119,7 @@ def _dispatch(targets, project_root: Path, integrators=None):
         managed_files=set(),
         diagnostics=None,
         integrators=_to_bundle(integrators),
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     ), integrators
 
 
