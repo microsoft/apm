@@ -204,6 +204,8 @@ def _copy_candidate(destination: Path) -> None:
         "tests/unit/deps/__init__.py",
         "tests/integration/__init__.py",
         "tests/conftest.py",
+        # Read by the root conftest's state-leak detector (tests/utils/state_leaks.py).
+        "tests/fixtures/test_state_leak_baseline.json",
         "tests/integration/conftest.py",
         UNIT_CONTRACT,
         GIT_CONTRACT,
