@@ -23649,7 +23649,7 @@
   "E3": {
    "evidence": [
     "src/apm_cli/install/services.py:823",
-    "src/apm_cli/install/services.py:1050"
+    "src/apm_cli/install/services.py:1025"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23693,28 +23693,28 @@
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:165"
+    "src/apm_cli/commands/pack.py:170"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:35",
-    "src/apm_cli/commands/pack.py:36"
+    "src/apm_cli/commands/pack.py:36",
+    "src/apm_cli/commands/pack.py:37"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:956"
+    "src/apm_cli/commands/install.py:965"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1236",
-    "src/apm_cli/commands/install.py:1000",
-    "src/apm_cli/commands/install.py:974",
+    "src/apm_cli/commands/install.py:1245",
+    "src/apm_cli/commands/install.py:1009",
+    "src/apm_cli/commands/install.py:983",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:701",
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "a9061ec76453bbf30a3e2b08509155781aec75f5b15071cf2a1dfe8b6fbeb51b"
+ "sha256": "eb9de212d825570161691df1bac240decbb69b95042557f874ad657f53852ca9"
 }
