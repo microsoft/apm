@@ -195,6 +195,8 @@ def test_global_install_records_user_scope_deployment_rows(
         )
     )
     model.install()
-    rows = (load_yaml(model.project.root / "apm.lock.yaml") or {}).get("deployments") or []
+    lock_path = model.project.root / "apm.lock.yaml"
+    assert lock_path.exists()
+    rows = (load_yaml(lock_path) or {}).get("deployments") or []
     scopes = sorted({row["scope"] for row in rows})
     assert scopes == ["user"], scopes
