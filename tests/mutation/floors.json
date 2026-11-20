@@ -4,15 +4,15 @@
     "apm-home-resolution": {
       "architecture_owner": "apm-home-resolution",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 0.96,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 0.96,
+        "killed": 24,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 1,
         "timeout": 0,
-        "total": 0
+        "total": 25
       },
       "targets": [
         {
@@ -33,15 +33,15 @@
     "cached-policy-shape": {
       "architecture_owner": "cached-policy-shape",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 1.0,
+        "killed": 139,
         "no_tests": 0,
         "survived": 0,
         "timeout": 0,
-        "total": 0
+        "total": 139
       },
       "targets": [
         {
@@ -81,15 +81,15 @@
           "reason": "urlsplit sets username to a string (possibly empty) whenever the netloc contains '@', so the username test alone already refuses every userinfo URL; regrouping or dropping the password and '@' clauses cannot change the result."
         }
       ],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 4,
+        "kill_rate": 1.0,
+        "killed": 106,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 4,
         "timeout": 0,
-        "total": 0
+        "total": 110
       },
       "targets": [
         {
@@ -157,15 +157,15 @@
           "reason": "old is a LockedDependency, which always defines resolved_tag, so dropping the getattr default cannot raise or change the truth test."
         }
       ],
-      "floor": 0.0,
+      "floor": 0.97,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 9,
+        "kill_rate": 0.9718,
+        "killed": 241,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 16,
         "timeout": 0,
-        "total": 0
+        "total": 257
       },
       "targets": [
         {
@@ -197,15 +197,15 @@
           "reason": "The extra trailing cell in the first DP row is never read: the inner loop only indexes previous[j] for j <= len(right), and previous is replaced by a correctly sized row after each pass."
         }
       ],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 1,
+        "kill_rate": 1.0,
+        "killed": 147,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 1,
         "timeout": 0,
-        "total": 0
+        "total": 148
       },
       "targets": [
         {
@@ -228,15 +228,15 @@
     "deployment-provenance-state": {
       "architecture_owner": "deployment-provenance-state",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 1.0,
+        "killed": 41,
         "no_tests": 0,
         "survived": 0,
         "timeout": 0,
-        "total": 0
+        "total": 41
       },
       "targets": [
         {
@@ -274,15 +274,15 @@
           "reason": "Python codec names are case-insensitive, so 'UTF-8' and 'utf-8' select the same codec and write identical bytes."
         }
       ],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 3,
+        "kill_rate": 1.0,
+        "killed": 101,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 3,
         "timeout": 0,
-        "total": 0
+        "total": 104
       },
       "targets": [
         {
@@ -302,15 +302,15 @@
     "effective-install-target-selection": {
       "architecture_owner": "effective-install-target-selection",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 1.0,
+        "killed": 34,
         "no_tests": 0,
         "survived": 0,
         "timeout": 0,
-        "total": 0
+        "total": 34
       },
       "targets": [
         {
@@ -334,15 +334,15 @@
           "reason": "A pattern is empty after rstrip('/') exactly when it consists only of slashes, which is exactly when lstrip('/') empties it, so the filter keeps the same patterns."
         }
       ],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 1,
+        "kill_rate": 1.0,
+        "killed": 221,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 1,
         "timeout": 0,
-        "total": 0
+        "total": 222
       },
       "targets": [
         {
@@ -366,15 +366,15 @@
     "file-level-deploy-sync-cleanup": {
       "architecture_owner": "file-level-deploy-sync-cleanup",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 0.8,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 0.8,
+        "killed": 28,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 7,
         "timeout": 0,
-        "total": 0
+        "total": 35
       },
       "targets": [
         {
@@ -424,15 +424,15 @@
           "reason": "'\\uFEFF' and '\\ufeff' are the same one-character string literal (escape case only), so the mutant source is identical at runtime."
         }
       ],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 6,
+        "kill_rate": 1.0,
+        "killed": 57,
         "no_tests": 0,
-        "survived": 0,
-        "timeout": 0,
-        "total": 0
+        "survived": 6,
+        "timeout": 2,
+        "total": 65
       },
       "targets": [
         {
@@ -463,15 +463,15 @@
           "reason": "A location without a hostname becomes 'xxxx', which is neither an ADO sign-in host nor ends with the sign-in suffix, exactly like the empty string; the path check still decides."
         }
       ],
-      "floor": 0.0,
+      "floor": 0.97,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 2,
+        "kill_rate": 0.97,
+        "killed": 291,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 11,
         "timeout": 0,
-        "total": 0
+        "total": 302
       },
       "targets": [
         {
@@ -498,15 +498,15 @@
           "reason": "Without the 0 default, getattr returns None and int(None) raises TypeError, which the except branch already maps to the same 0."
         }
       ],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
-        "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "equivalent": 1,
+        "kill_rate": 1.0,
+        "killed": 75,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 1,
         "timeout": 0,
-        "total": 0
+        "total": 76
       },
       "targets": [
         {
@@ -526,15 +526,15 @@
     "link-projection": {
       "architecture_owner": null,
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 1.0,
+        "killed": 46,
         "no_tests": 0,
         "survived": 0,
         "timeout": 0,
-        "total": 0
+        "total": 46
       },
       "targets": [
         {
@@ -553,15 +553,15 @@
     "network-host-loopback-classification": {
       "architecture_owner": "network-host-loopback-classification",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 1.0,
+        "killed": 42,
         "no_tests": 0,
         "survived": 0,
         "timeout": 0,
-        "total": 0
+        "total": 42
       },
       "targets": [
         {
@@ -579,15 +579,15 @@
     "neutral-hook-contract": {
       "architecture_owner": "neutral-hook-contract",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 0.66,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 0.6643,
+        "killed": 93,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 47,
         "timeout": 0,
-        "total": 0
+        "total": 140
       },
       "targets": [
         {
@@ -608,15 +608,15 @@
     "read-only-lockfile-path": {
       "architecture_owner": "read-only-lockfile-path",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 0.97,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 0.9792,
+        "killed": 47,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 1,
         "timeout": 0,
-        "total": 0
+        "total": 48
       },
       "targets": [
         {
@@ -637,15 +637,15 @@
     "target-scoped-deployed-file-contraction": {
       "architecture_owner": "target-scoped-deployed-file-contraction",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 1.0,
+        "killed": 56,
         "no_tests": 0,
         "survived": 0,
         "timeout": 0,
-        "total": 0
+        "total": 56
       },
       "targets": [
         {
@@ -665,15 +665,15 @@
     "trust-policy-outcome": {
       "architecture_owner": "trust-policy-outcome",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 0.98,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 0.989,
+        "killed": 180,
         "no_tests": 0,
-        "survived": 0,
+        "survived": 2,
         "timeout": 0,
-        "total": 0
+        "total": 182
       },
       "targets": [
         {
@@ -693,15 +693,15 @@
     "url-path-containment-decoding": {
       "architecture_owner": "url-path-containment-decoding",
       "equivalents": [],
-      "floor": 0.0,
+      "floor": 1.0,
       "measured": {
         "equivalent": 0,
-        "kill_rate": 0.0,
-        "killed": 0,
+        "kill_rate": 1.0,
+        "killed": 26,
         "no_tests": 0,
         "survived": 0,
         "timeout": 0,
-        "total": 0
+        "total": 26
       },
       "targets": [
         {
