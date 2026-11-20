@@ -37,7 +37,7 @@ from apm_cli.core.target_detection import (
 )
 from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
-pytestmark = pytest.mark.e2e
+pytestmark = pytest.mark.component
 
 
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"

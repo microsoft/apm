@@ -58,7 +58,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_http_server import LocalGitHttpServerFactory
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
-pytestmark = pytest.mark.e2e
+pytestmark = pytest.mark.component
 
 
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
