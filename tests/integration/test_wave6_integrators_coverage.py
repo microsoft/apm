@@ -1480,8 +1480,10 @@ class TestPromoteSubSkills:
         existing.mkdir()
         (existing / "SKILL.md").write_text("# Skill")
 
-        count, _deployed = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "pkg")
-        assert count == 1
+        count, deployed = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "pkg")
+        # Adopting a byte-identical render deploys it but installs nothing new.
+        assert count == 0
+        assert deployed == [existing]
 
     def test_returns_zero_for_nonexistent_dir(self, tmp_path):
         count, deployed = SkillIntegrator._promote_sub_skills(

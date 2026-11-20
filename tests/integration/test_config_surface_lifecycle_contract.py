@@ -1033,7 +1033,7 @@ def test_claude_lsp_collision_requires_force_and_force_reconciles(
         cwd=project.root,
         env=environment,
     )
-    assert "--force" in refused.stdout
+    assert "--force" in refused.stdout + refused.stderr
     assert plugin_path.read_bytes() == original
 
     runner.run_sequence(
@@ -1056,7 +1056,7 @@ def test_claude_lsp_collision_requires_force_and_force_reconciles(
         cwd=project.root,
         env=environment,
     )
-    assert "--force" in update_refused.stdout
+    assert "--force" in update_refused.stdout + update_refused.stderr
     assert plugin_path.read_bytes() == foreign
 
     runner.run_sequence(
@@ -1292,7 +1292,7 @@ def test_lsp_uninstall_cleanup_failure_is_nonzero_and_actionable(
     )
 
     assert plugin_path.read_bytes() == foreign
-    normalized_output = " ".join(result.stdout.split())
+    normalized_output = " ".join((result.stdout + result.stderr).split())
     assert "Uninstall incomplete" in normalized_output
     assert "'apm install'" in normalized_output
 

@@ -16,8 +16,9 @@ from apm_cli.core.remediation import (
 )
 from apm_cli.deps.file_provenance import LOCAL_BUNDLE_OWNER
 from apm_cli.install.local_edits import (
-    count_exportable_findings,
     edited_file_remediations,
+    exportable_edit_paths,
+    install_keeps_edit,
     local_edit_hint,
     rendering_change_hint,
     unedited_modified_paths,
@@ -127,9 +128,11 @@ def render_drift_text(
         lines.append("")
 
     unedited = unedited_modified_paths(findings, lockfile, project_root)
-    exportable = count_exportable_findings(findings, lockfile, unedited=unedited)
+    exportable = exportable_edit_paths(findings, lockfile, unedited=unedited)
     if exportable:
-        lines.append(f"  {STATUS_SYMBOLS['info']} {local_edit_hint(exportable)}")
+        overwritten = sum(1 for path in exportable if not install_keeps_edit(path))
+        hint = local_edit_hint(len(exportable), overwritten=overwritten)
+        lines.append(f"  {STATUS_SYMBOLS['info']} {hint}")
     if unedited:
         lines.append(f"  {STATUS_SYMBOLS['info']} {rendering_change_hint(len(unedited))}")
 

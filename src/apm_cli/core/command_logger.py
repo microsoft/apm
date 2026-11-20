@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import (
@@ -32,6 +33,21 @@ if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
     from apm_cli.install.failure_residue import FailedInstallResidue
     from apm_cli.policy.models import PolicyRemedy
+
+
+def _dependency_label(dep_key: str) -> str:
+    """Render a lockfile dependency key without a machine-specific path.
+
+    A local dependency declared by absolute or home path is keyed by that
+    path; output names it ``_local/<name>``, as the manifest and lockfile do.
+    """
+    if dep_key.startswith("~") or PurePosixPath(dep_key).is_absolute():
+        name = PurePosixPath(dep_key.replace("\\", "/")).name
+    elif PureWindowsPath(dep_key).is_absolute():
+        name = PureWindowsPath(dep_key).name
+    else:
+        return dep_key
+    return f"_local/{name}" if name else dep_key
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -176,12 +192,16 @@ class CommandLogger:
         if count <= 0:
             return
         noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
+        _rich_info(
+            f"Cleaned {count} stale deployed {noun} for {_dependency_label(dep_key)}",
+            symbol="info",
+        )
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
         _rich_warning(
-            f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.",
+            f"Retained user-edited file {rel_path} from {_dependency_label(dep_key)}; "
+            "resolve it and retry.",
             symbol="warning",
         )
 
@@ -709,7 +729,10 @@ class InstallLogger(CommandLogger):
             return
         self._stale_cleaned_total += count
         noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
+        _rich_info(
+            f"Cleaned {count} stale deployed {noun} for {_dependency_label(dep_key)}",
+            symbol="info",
+        )
 
     def frozen_orphans_kept(self, dep_keys: list[str]) -> None:
         """Name undeclared packages a frozen install left in place (#3662)."""
@@ -747,7 +770,7 @@ class InstallLogger(CommandLogger):
         kept the file and a manual decision is pending.
         """
         _rich_warning(
-            f"  Kept user-edited file {rel_path} (from {dep_key}); "
+            f"  Kept user-edited file {rel_path} (from {_dependency_label(dep_key)}); "
             "delete manually if no longer needed",
             symbol="warning",
         )

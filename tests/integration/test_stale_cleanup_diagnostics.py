@@ -95,7 +95,9 @@ def test_cleanup_output_names_dependency(
 
     output = cleaned.stdout + cleaned.stderr
     assert cleaned.returncode == 0, output
-    expected = f"Cleaned {2 * count} stale deployed files for {dependency.root}"
+    # The lockfile keys an absolute local dependency by its path; output names
+    # it by the portable key so no machine-specific path is printed.
+    expected = f"Cleaned {2 * count} stale deployed files for _local/{dependency.root.name}"
     assert expected in output, output
     assert f"Cleaned {2 * count} stale files from " not in output
     assert all(not path.exists() for path in stale_paths)

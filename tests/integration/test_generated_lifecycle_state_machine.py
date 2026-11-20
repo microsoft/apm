@@ -373,7 +373,9 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
             tree_prefixes=self.fixture.tree_prefixes,
         )
         if self.retained_user_file:
-            assert "conflicts with unmanaged file" in " ".join(result.stdout.split())
+            assert "conflicts with unmanaged file" in " ".join(
+                (result.stdout + result.stderr).split()
+            )
             assert self.skill_path.read_bytes() == _TAMPER_BYTES
             _assert_same_state(state, self._state())
             return

@@ -34,14 +34,27 @@ def install_keeps_edit(path: str) -> bool:
     return "skills" in PurePosixPath(path).parts
 
 
-def local_edit_hint(count: int) -> str:
-    """Return the audit hint for *count* edits the next ``apm install`` overwrites."""
+def local_edit_hint(count: int, *, overwritten: int | None = None) -> str:
+    """Return the audit hint for *count* exportable edits.
+
+    Only *overwritten* of them (default: all) are lost to the next plain
+    ``apm install``; edited skills are kept (RA-009) but can still be
+    exported upstream.
+    """
     from apm_cli.core.remediation import LOCAL_EDITS_EXPORT
 
-    return (
-        f"{count} local edit(s) to managed files that the next 'apm install' overwrites; "
-        f"first {LOCAL_EDITS_EXPORT.clause()}"
-    )
+    overwritten = count if overwritten is None else overwritten
+    if overwritten == count:
+        return (
+            f"{count} local edit(s) to managed files that the next 'apm install' overwrites; "
+            f"first {LOCAL_EDITS_EXPORT.clause()}"
+        )
+    if overwritten:
+        return (
+            f"{count} local edit(s) to managed files ({overwritten} of them the next "
+            f"'apm install' overwrites); first {LOCAL_EDITS_EXPORT.clause()}"
+        )
+    return f"{count} local edit(s) to managed files; {LOCAL_EDITS_EXPORT.clause()}"
 
 
 def overwrite_notice(paths: Collection[str]) -> str:
@@ -158,15 +171,24 @@ def count_exportable_findings(
     *,
     unedited: Collection[str] = (),
 ) -> int:
-    """Count ``modified`` upstream-package local edits a plain install overwrites."""
-    return sum(
-        1
+    """Count ``modified`` upstream-package local edits ``apm export-patch`` exports."""
+    return sum(1 for _ in exportable_edit_paths(findings, lockfile, unedited=unedited))
+
+
+def exportable_edit_paths(
+    findings: Iterable[DriftFinding],
+    lockfile: LockFile | None = None,
+    *,
+    unedited: Collection[str] = (),
+) -> list[str]:
+    """Return the ``modified`` upstream-package local edits ``apm export-patch`` exports."""
+    return [
+        finding.path
         for finding in findings
         if finding.kind == "modified"
         and finding.path not in unedited
-        and not install_keeps_edit(finding.path)
         and is_upstream_package(finding.package, lockfile)
-    )
+    ]
 
 
 def local_edit_paths(
@@ -214,7 +236,7 @@ def hint_local_edits_before_install(ctx: InstallContext, lockfile: LockFile | No
 
     Losing an edit is never info-level (RA-009). Edited skills are kept by
     the install and reported by the skill integrator, so they are not
-    listed. Skipped for dry runs, lockfile-only resolution and user-scope
+    listed; when only kept edits exist, one info line offers the export. Skipped for dry runs, lockfile-only resolution and user-scope
     installs, which do not overwrite project files. Never blocks the install.
     """
     from apm_cli.core.scope import InstallScope
@@ -228,13 +250,12 @@ def hint_local_edits_before_install(ctx: InstallContext, lockfile: LockFile | No
     ):
         return
     keys = {dep.get_unique_key() for dep in ctx.deps_to_install}
-    overwritten = [
-        path
-        for path in local_edit_paths(ctx.project_root, lockfile, keys)
-        if not install_keeps_edit(path)
-    ]
+    edited = local_edit_paths(ctx.project_root, lockfile, keys)
+    overwritten = [path for path in edited if not install_keeps_edit(path)]
     if overwritten:
         ctx.logger.warning(overwrite_notice(overwritten))
+    elif edited:
+        ctx.logger.info(local_edit_hint(len(edited), overwritten=0))
 
 
 def unedited_apm_output(
