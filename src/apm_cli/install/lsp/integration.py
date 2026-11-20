@@ -135,7 +135,10 @@ def _graph_declares_trusted_lsp(ctx: "InstallContext") -> bool:
         if graph is not None
         else ctx.deps_to_install
     )
-    allow_map = None
+    from apm_cli.security.executables import closed_exec_map
+
+    # Resolved once, on the first package that declares LSP servers.
+    allow_map = closed_exec_map(None)
     allow_resolved = False
     for dep_ref in dependencies:
         manifest = dep_ref.get_install_path(ctx.apm_modules_dir) / "apm.yml"
@@ -190,6 +193,11 @@ def _target_server_sets(lockfile: "LockFile") -> dict[str, set[str]]:
     if not isinstance(target_servers, dict):
         return {}
     return {runtime: set(server_names) for runtime, server_names in target_servers.items()}
+
+
+def recorded_lsp_targets(lockfile: "LockFile") -> tuple[str, ...]:
+    """Return the LSP targets *lockfile* records APM writing servers to."""
+    return tuple(sorted(name for name, servers in _target_server_sets(lockfile).items() if servers))
 
 
 def package_lsp_owner(resolved_by: str) -> str:
@@ -375,15 +383,27 @@ def reconcile_lsp_after_uninstall(
         dict(lockfile.lsp_config_provenance),
     )
     from apm_cli.core.scope import InstallScope
-    from apm_cli.core.target_detection import resolve_package_target_decision
-    from apm_cli.models.apm_package import canonical_package_target_config
+    from apm_cli.core.target_detection import (
+        resolve_deployment_target_decision,
+        resolve_package_target_decision,
+    )
+    from apm_cli.models.apm_package import (
+        canonical_package_target_config,
+        package_target_selection,
+    )
 
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    target_decision = resolve_package_target_decision(
-        project_root,
-        package=apm_package,
-        explicit_target=None,
-        user_scope=user_scope,
+    # Survivors stay where APM recorded writing them (#4059): a saved default
+    # or harness detection decides only when the lock records no LSP target.
+    target_decision = resolve_deployment_target_decision(
+        manifest_target=package_target_selection(apm_package),
+        recorded_targets=recorded_lsp_targets(lockfile),
+        fallback=lambda: resolve_package_target_decision(
+            project_root,
+            package=apm_package,
+            explicit_target=None,
+            user_scope=user_scope,
+        ),
     )
     apm_config = {"scripts": apm_package.scripts or {}}
     apm_config.update(canonical_package_target_config(apm_package))

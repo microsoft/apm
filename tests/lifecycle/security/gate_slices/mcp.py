@@ -35,7 +35,7 @@ _XFAIL = {
         for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
     },
 }
-_BUNDLE_KEEPS = "S-pending (neutral issue to follow): reinstalling a local bundle keeps hook files the gate no longer allows"
+_BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _XFAIL.update(
     {
         f"G|bundle-install|{change}|mcp": _BUNDLE_KEEPS
@@ -48,6 +48,17 @@ _ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this 
 _SMOKE = {"G|update|local-deny|mcp"}
 
 # G path -> (changes with a row, (surface files, other-scope prefixes))
+_MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
+_DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
+_XFAIL["G|marketplace-install|local-deny|mcp"] = _DENY_BY_SPEC
+_USER_ORG = "S-pending (neutral issue to follow): org policy for user-scope installs"
+_XFAIL.update(
+    {
+        f"G|marketplace-install|{change}|mcp": _USER_ORG
+        for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
+    }
+)
+
 _PATHS = {
     "install": (_ALL, _PROJECT),
     "frozen": (_ALL, _PROJECT),
@@ -59,6 +70,9 @@ _PATHS = {
     "frozen-g": (_LOCAL, _USER),
     # gate_paths/bundle_install.py: the MCP server of the local bundle p-exec:bundle.
     "bundle-install": (_BUNDLE, _PROJECT),
+    # gate_paths/marketplace_install.py: p-exec@lifecycle-market at user scope. A
+    # git-served package cannot be redefined in place: definition-changed is residual.
+    "marketplace-install": (_MARKETPLACE, _USER),
 }
 
 SLICE = GateSlice(

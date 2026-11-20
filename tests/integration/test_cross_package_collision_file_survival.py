@@ -28,6 +28,7 @@ def test_collision_loser_does_not_delete_winner_file(tmp_path: Path) -> None:
     current.add_dependency(LockedDependency(repo_url=loser))
     current.add_dependency(LockedDependency(repo_url=winner))
     context = SimpleNamespace(
+        frozen=False,
         package_deployed_files={loser: [shared], winner: [shared]},
         existing_lockfile=prior,
         targets=[SimpleNamespace(name="claude", root_dir=".claude", primitives={})],

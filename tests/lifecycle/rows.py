@@ -67,7 +67,13 @@ _SURFACE_GLOBS: Mapping[tuple[str, str], str | tuple[str, str]] = {
     ("canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
-_PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
+_PROJECT_HOME_ALLOWED = (
+    ".apm/deployment-receipts",
+    ".apm/logs",
+    ".apm-local",
+    ".local/state/gh",
+    ".cache/apm",
+)
 _RECONCILING = frozenset({"install", "update"})
 
 
