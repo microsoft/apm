@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.context import InstallContext
+from apm_cli.install.phases import lockfile as lockfile_phase
 from apm_cli.install.phases.lockfile import LockfileBuilder
 
 
@@ -107,20 +108,14 @@ class TestHasOrphanLockfileEntries:
         )
         observed: list[LockFile | None] = []
         monkeypatch.setattr(
-            LockfileBuilder,
-            "_sync_cache_pin_markers_from_existing",
-            lambda self: None,
+            lockfile_phase, "sync_cache_pin_markers_from_existing", lambda ctx: None
         )
         monkeypatch.setattr(
             LockfileBuilder,
             "_reconcile_dropped_merge_hook_targets",
             lambda self: None,
         )
-        monkeypatch.setattr(
-            LockfileBuilder,
-            "_sync_cache_pin_markers_from_disk",
-            lambda self: None,
-        )
+        monkeypatch.setattr(lockfile_phase, "sync_cache_pin_markers_from_disk", lambda ctx: None)
         monkeypatch.setattr(
             LockfileBuilder,
             "_reconcile_target_deployed_files",
