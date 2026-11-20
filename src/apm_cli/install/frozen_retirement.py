@@ -80,11 +80,13 @@ def enforce_frozen_presence(
     lockfile_dir: Path,
     active_keys: frozenset[str] | None,
 ) -> None:
-    """Fail ``--frozen`` when a file the resolved graph records is missing (#4043).
+    """Fail ``--frozen`` when the lock no longer matches deployed executables.
 
     Runs the presence verifier ``apm audit`` deployed-files-present uses. A
     hook the gate retired under an unchanged lock fails here, named with its
     decision (deny wins, #3944); a kept undeclared package does not (#3662).
+    Then each recorded ``exec_status`` must still be the gate's decision,
+    through the staleness owner ``apm update`` and ``apm audit --ci`` use (#4053).
     """
     from apm_cli.policy.ci_checks import find_missing_deployed_files, resolve_audit_scope
 
@@ -100,6 +102,52 @@ def enforce_frozen_presence(
             deploy_root=deploy_root,
             targets=targets,
         )
+    if stale := _stale_exec_decisions(request, committed, lockfile_dir, deploy_root, targets):
+        from apm_cli.install.errors import FrozenInstallError
+
+        # On a merged-config target (claude settings.json) a gated hook leaves
+        # no recorded file missing; the recorded decision is the only evidence
+        # that the lock is stale (#4053).
+        raise FrozenInstallError(
+            "--frozen: apm.lock.yaml records an executables decision the gate no longer makes.",
+            reasons=[f"  - {decision.describe()}" for decision in stale],
+            tip=(
+                "Tip: run 'apm install' without --frozen, retaining --root DIR "
+                "or --global if specified, then commit apm.lock.yaml."
+            ),
+        )
+
+
+def _stale_exec_decisions(
+    request: InstallRequest,
+    committed: LockFile,
+    lockfile_dir: Path,
+    deploy_root: Path,
+    targets: Sequence[Any],
+) -> list[Any]:
+    """Locked packages whose recorded ``exec_status`` the gate no longer makes (#4053).
+
+    Indeterminate answers (unknown org policy, unreadable package) are not
+    frozen failures: the install gate already applied its own posture.
+    """
+    from apm_cli.constants import APM_MODULES_DIR
+    from apm_cli.core.scope import get_source_root, is_user_scope, scope_manifest_path
+    from apm_cli.install.exec_gate import discovered_exec_policy, stale_exec_decisions
+
+    scope = request.scope
+    source_root = lockfile_dir if scope is None else get_source_root(scope)
+
+    def _policy() -> Any:
+        return None if request.no_policy else discovered_exec_policy(deploy_root)
+
+    stale, _indeterminate = stale_exec_decisions(
+        committed,
+        lockfile_dir / APM_MODULES_DIR,
+        scope_manifest_path(source_root, user_scope=is_user_scope(scope)),
+        policy_provider=_policy,
+        targets=list(targets),
+    )
+    return stale
 
 
 def frozen_missing_files_error(

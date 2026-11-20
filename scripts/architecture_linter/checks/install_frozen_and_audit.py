@@ -115,6 +115,25 @@ _RETIREMENT_FRAGMENTS = (
 )
 
 
+# #4053: frozen and audit ask the exec_status staleness owner (the one
+# apm update uses) and never re-derive the gate's decision themselves.
+_EXEC_STATUS_OWNER = "src/apm_cli/install/exec_gate.py"
+_AUDIT_COMMAND = "src/apm_cli/commands/audit.py"
+_EXEC_STATUS_FRAGMENTS = (
+    (_EXEC_STATUS_OWNER, "def stale_exec_decisions("),
+    (_EXEC_STATUS_OWNER, "stale, indeterminate = stale_exec_decisions("),
+    (_FROZEN_RETIREMENT, "stale, _indeterminate = stale_exec_decisions("),
+    (_DEPLOYED_HASH_VERIFIER, "stale, indeterminate = stale_exec_decisions("),
+    # Audit's provider reports an unresolvable org policy as indeterminate.
+    (_AUDIT_COMMAND, "else lambda: exec_policy_from_discovery(fetch_policy)"),
+)
+_EXEC_STATUS_REDERIVATION = (
+    "recorded_exec_status_is_stale(",
+    "current_exec_decision(",
+    "exec_trust_context_for_project(",
+)
+
+
 def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     """Frozen install decisions must route through InstallService before mutation."""
     rule_id = _GUARD_FROZEN
@@ -132,6 +151,8 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     retirement, retirement_fail = _facts_for(provider, _FROZEN_RETIREMENT, rule_id)
     oracle, oracle_fail = _facts_for(provider, _GATE_ORACLE, rule_id)
     drift, drift_fail = _facts_for(provider, _DRIFT_DIFF, rule_id)
+    exec_status, exec_status_fail = _facts_for(provider, _EXEC_STATUS_OWNER, rule_id)
+    audit_command, audit_command_fail = _facts_for(provider, _AUDIT_COMMAND, rule_id)
     failures = (
         drift_fail
         + owner_fail
@@ -143,6 +164,8 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         + audit_fail
         + retirement_fail
         + oracle_fail
+        + exec_status_fail
+        + audit_command_fail
     )
     if failures:
         return tuple(failures)
@@ -269,6 +292,22 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
                 {_FROZEN_OWNER: owner, _FROZEN_RETIREMENT: retirement}.get(path, oracle), needle
             )
             for path, needle in _RETIREMENT_FRAGMENTS
+        )
+        or not all(
+            _present(
+                {
+                    _FROZEN_RETIREMENT: retirement,
+                    _EXEC_STATUS_OWNER: exec_status,
+                    _AUDIT_COMMAND: audit_command,
+                }.get(path, audit),
+                needle,
+            )
+            for path, needle in _EXEC_STATUS_FRAGMENTS
+        )
+        or any(
+            _present(facts, token)
+            for facts in (owner, retirement, audit)
+            for token in _EXEC_STATUS_REDERIVATION
         )
         or bool(duplicates)
     )

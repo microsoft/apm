@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -469,7 +470,53 @@ def recorded_exec_status_is_stale(
     return recorded != current or tuple(recorded_allowed) != tuple(current_allowed)
 
 
-def lock_exec_decisions_stale(
+@dataclass(frozen=True)
+class StaleExecDecision:
+    """A locked package whose recorded ``exec_status`` the gate no longer makes."""
+
+    package: str
+    recorded: str | None
+    current: str | None
+    recorded_allowed: tuple[str, ...] = ()
+    current_allowed: tuple[str, ...] = ()
+
+    def describe(self) -> str:
+        recorded = self.recorded or "ungated"
+        current = self.current or "ungated"
+        if self.recorded_allowed != self.current_allowed:
+            # A partial package: the worst-case status hides a per-type change.
+            recorded += f" ({', '.join(self.recorded_allowed) or 'none'} allowed)"
+            current += f" ({', '.join(self.current_allowed) or 'none'} allowed)"
+        return f"{self.package}: recorded {recorded}, now {current}"
+
+
+def exec_policy_from_discovery(discover: Callable[[], Any]) -> Any:
+    """Return the org policy a discovery call resolved for the gate.
+
+    Raises :class:`ExecPolicyUnavailable` when discovery fails or reports a
+    resolution failure (for example no cache and an unreachable source), so
+    callers fail toward the install gate's fetch-failure posture instead of
+    deciding as if there were no org policy.
+    """
+    from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+
+    try:
+        fetch = discover()
+    except Exception as exc:
+        raise ExecPolicyUnavailable(str(exc)) from exc
+    if getattr(fetch, "outcome", "") in POLICY_RESOLUTION_FAILURE_OUTCOMES:
+        raise ExecPolicyUnavailable(fetch.outcome)
+    return getattr(fetch, "policy", None)
+
+
+def discovered_exec_policy(deploy_root: Path) -> Any:
+    """Return the org policy the gate applies at *deploy_root* (see above)."""
+    from apm_cli.policy.discovery import discover_policy_with_chain
+
+    return exec_policy_from_discovery(lambda: discover_policy_with_chain(deploy_root))
+
+
+def stale_exec_decisions(
     lockfile: Any,
     modules_dir: Path,
     manifest_path: Path,
@@ -477,20 +524,20 @@ def lock_exec_decisions_stale(
     policy_provider: Callable[[], Any],
     targets: list[Any] | None = None,
     fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
-) -> bool:
-    """Return whether any lock row's executables decision may no longer hold.
+    first_only: bool = False,
+) -> tuple[list[StaleExecDecision], bool]:
+    """Return the lock rows whose executables decision no longer holds.
 
-    ``apm update`` short-circuits when no ref moved; this tells it that an
-    ``apm approve`` / ``apm deny`` or an org policy change still needs the
-    install gate to deploy or retire executables and rewrite the lock. A row
-    recorded while the gate was off is compared against the effective gate,
-    org policy included, so a policy that newly gates executables re-gates
-    it as ``apm install`` does (#3990). Org policy is fetched only when a
-    locked package declares executables. Packages are read the way audit replay reads them, under the *targets*'
-    native registration capability. Trust (and *policy_provider*) resolve
-    only when a package declares executables. An unreadable package or a
-    provider raising :class:`ExecPolicyUnavailable` fails toward running
-    the gate, which applies the policy fetch-failure posture.
+    The second value is true when the answer is indeterminate: an unreadable
+    package, or *policy_provider* raising :class:`ExecPolicyUnavailable`.
+    ``apm update`` treats that as stale and runs the gate; ``apm install
+    --frozen`` and ``apm audit --ci`` report only determinate rows (#4053).
+    A row recorded while the gate was off is compared against the effective
+    gate, org policy included, so a policy that newly gates executables is
+    stale as ``apm install`` would re-gate it (#3990). Packages are read the
+    way audit replay reads them, under the *targets*' native registration
+    capability. Trust (and *policy_provider*) resolve only when a package
+    declares executables.
     """
     from apm_cli.copilot_plugins.capability import native_registration_scope
     from apm_cli.install.drift import _build_package_info
@@ -515,29 +562,68 @@ def lock_exec_decisions_stale(
         for key, dep in (getattr(lockfile, "dependencies", None) or {}).items()
         if key != "." and dep.exec_status != TRUST_ABSENT
     ]
+    stale: list[StaleExecDecision] = []
     with native_registration_scope(targets):
         for dep in rows:
             install_path = dep.to_dependency_ref().get_install_path(modules_dir)
             if not install_path.is_dir():
                 continue
+            key = dep.get_unique_key()
             try:
                 package_info = _build_package_info(dep, install_path)
-                status, allowed_types = current_exec_decision(
-                    _trust_ctx, package_info, dep.get_unique_key()
-                )
+                status, allowed_types = current_exec_decision(_trust_ctx, package_info, key)
             except ExecPolicyUnavailable:
-                return True
+                return stale, True
             except (OSError, ValueError):
                 # An unreadable package: let install, which reports it, decide.
-                return True
+                return stale, True
             if recorded_exec_status_is_stale(
                 dep.exec_status,
                 status,
                 recorded_allowed=dep.exec_allowed_types,
                 current_allowed=allowed_types,
             ):
-                return True
-    return False
+                stale.append(
+                    StaleExecDecision(
+                        key,
+                        dep.exec_status,
+                        status,
+                        tuple(dep.exec_allowed_types or ()),
+                        tuple(allowed_types),
+                    )
+                )
+                if first_only:
+                    break
+    return stale, False
+
+
+def lock_exec_decisions_stale(
+    lockfile: Any,
+    modules_dir: Path,
+    manifest_path: Path,
+    *,
+    policy_provider: Callable[[], Any],
+    targets: list[Any] | None = None,
+    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+) -> bool:
+    """Return whether any lock row's executables decision may no longer hold.
+
+    ``apm update`` short-circuits when no ref moved; this tells it that an
+    ``apm approve`` / ``apm deny`` or an org policy change still needs the
+    install gate to deploy or retire executables and rewrite the lock (#3990).
+    An indeterminate answer fails toward running the gate, which applies the
+    policy fetch-failure posture.
+    """
+    stale, indeterminate = stale_exec_decisions(
+        lockfile,
+        modules_dir,
+        manifest_path,
+        policy_provider=policy_provider,
+        targets=targets,
+        fallback_allow_executables=fallback_allow_executables,
+        first_only=True,
+    )
+    return indeterminate or bool(stale)
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:

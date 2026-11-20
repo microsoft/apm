@@ -780,7 +780,7 @@ class InstallService:
           claims a narrower install would *drop* (``--target`` filter,
           ``--only``, a removed dependency) do not fail.  Equivalence ignores
           ``generated_at`` and ``apm_version`` (Section 5.5).
-        * **Deployed presence** of the resolved graph (*active_keys*) (#4043).
+        * **Deployed presence and exec decisions** of the graph (#4043, #4053).
         * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
           entry is re-verified through audit's verifier, so ``install --frozen``
           and ``audit --ci`` agree on kept user edits and re-renders (#3654).

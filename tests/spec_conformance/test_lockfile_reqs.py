@@ -684,6 +684,57 @@ def test_lockfile_deployed_file_hash_mismatch_fails_closed():
     )
 
 
+@pytest.mark.req("req-lk-006")
+def test_frozen_fails_rather_than_keep_a_stale_executables_decision(tmp_path: Path) -> None:
+    """A deny after the last install fails frozen; the lock is never rewritten (#4053).
+
+    On Claude the gated hook lives in the shared ``settings.json``, so no
+    recorded file goes missing: the recorded ``exec_status`` is the only
+    evidence the lock no longer matches the deployment.
+    """
+    import json
+    import os
+    import sys
+
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+    from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "stale", base_env=dict(os.environ))
+    hooks = isolated.work_root / "hooky" / ".apm" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks.parents[1] / "apm.yml").write_text("name: hooky\nversion: 1.0.0\n", encoding="utf-8")
+    hook = {"type": "command", "command": "echo hi-hooky"}
+    (hooks / "hooky.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [hook]}]}}),
+        encoding="utf-8",
+    )
+    project = isolated.work_root / "consumer"
+    (project / ".claude").mkdir(parents=True)
+    (project / "apm.yml").write_text(
+        "name: consumer\nversion: 1.0.0\ntargets: [claude]\n"
+        "dependencies:\n  apm: [../hooky]\n"
+        "executables:\n  allow:\n    ../hooky: {hooks: true}\n",
+        encoding="utf-8",
+    )
+    runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+    env = isolated.subprocess_env()
+
+    def apm(*args: str) -> tuple[int, str]:
+        result = runner.run((*args, "--no-policy"), cwd=project, env=env)
+        return result.returncode, " ".join((result.stdout + result.stderr).split())
+
+    assert apm("install")[0] == 0
+    assert runner.run(("deny", "../hooky"), cwd=project, env=env).returncode == 0
+    lock_bytes = (project / "apm.lock.yaml").read_bytes()
+
+    code, output = apm("install", "--frozen")
+    assert code == 1, output
+    assert "recorded deployed, now denied" in output, output
+    assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
+    # Without --no-policy (no git remote, so no org policy to consult).
+    assert runner.run(("audit", "--ci"), cwd=project, env=env).returncode == 1
+
+
 @pytest.mark.req("req-lk-017")
 def test_frozen_fails_closed_when_a_recorded_deployed_file_is_missing(tmp_path: Path) -> None:
     """A recorded file no longer on disk fails frozen, as ``audit --ci`` does (#4043).

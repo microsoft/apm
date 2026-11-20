@@ -411,12 +411,37 @@ def test_context_protection_cannot_regress_to_root_only(
             "return True",
             id="i7-x1-widened-beyond-retired-ancestors",
         ),
+        pytest.param(
+            "src/apm_cli/install/frozen_retirement.py",
+            "stale, _indeterminate = stale_exec_decisions(",
+            "stale, _indeterminate = _local_exec_status_check(",
+            id="frozen-bypasses-exec-status-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "stale, indeterminate = stale_exec_decisions(",
+            "stale, indeterminate = _local_exec_status_check(",
+            id="audit-bypasses-exec-status-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/audit.py",
+            "else lambda: exec_policy_from_discovery(fetch_policy)",
+            "else replay_policy",
+            id="audit-exec-status-ignores-unavailable-policy",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            '    if not stale:\n        return CheckResult(\n            name="exec-status-current",',
+            "    if not stale or recorded_exec_status_is_stale(None, None):\n"
+            '        return CheckResult(\n            name="exec-status-current",',
+            id="audit-rederives-exec-status",
+        ),
     ],
 )
 def test_frozen_and_audit_share_deployed_hash_verifier(
     path: str, original: str, replacement: str
 ) -> None:
-    """``install --frozen`` and ``audit --ci`` share presence and hash verifiers (#3654, #4043)."""
+    """Frozen and ``audit --ci`` share presence, exec_status and hash owners (#3654, #4043, #4053)."""
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(original) == 1
     rule = "install-deployment-frozen-mutation-eligibility"

@@ -306,6 +306,65 @@ def _check_deployed_files_present(
     )
 
 
+def _check_exec_status_current(
+    project_root: Path,
+    lock: LockFile,
+    manifest: APMPackage,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+    modules_root: Path,
+    policy_provider: Callable[[], Any] | None,
+) -> CheckResult:
+    """Fail when a locked ``exec_status`` is no longer the gate's decision (#4053).
+
+    Routes through the staleness owner ``apm update`` and ``apm install
+    --frozen`` use; audit never re-derives trust here. The gate's decision
+    depends on org policy, so without a *policy_provider* (``--no-policy``)
+    the check is not evaluated. Indeterminate answers (the provider raising
+    ``ExecPolicyUnavailable``, an unreadable package) are not failures.
+    """
+    from ..core.scope import manifest_root
+    from ..install.exec_gate import stale_exec_decisions
+    from ..security.executables import project_manifest_path
+
+    if policy_provider is None:
+        return CheckResult(
+            name="exec-status-current",
+            passed=True,
+            message="Executables decisions not verified: org policy not consulted (--no-policy)",
+        )
+    stale, indeterminate = stale_exec_decisions(
+        lock,
+        modules_root,
+        project_manifest_path(manifest_root(project_root, user_scope=user_scope)),
+        policy_provider=policy_provider,
+        targets=list(targets),
+        fallback_allow_executables=getattr(manifest, "allow_executables", None),
+    )
+    if not stale:
+        return CheckResult(
+            name="exec-status-current",
+            passed=True,
+            message=(
+                "Executables decisions not verified: org policy unavailable or a package unreadable"
+                if indeterminate
+                else "Recorded executables decisions match the executables gate"
+            ),
+        )
+    n = len(stale)
+    noun = "package records" if n == 1 else "packages record"
+    return CheckResult(
+        name="exec-status-current",
+        passed=False,
+        message=(
+            f"{n} {noun} an executables decision the gate no longer makes -- "
+            "run 'apm install' without --frozen and commit apm.lock.yaml"
+        ),
+        details=[decision.describe() for decision in stale],
+    )
+
+
 def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
     """Require every canonical deployment owner to resolve in the lockfile."""
     from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -1263,6 +1322,7 @@ def run_baseline_checks(
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
     no_policy: bool = False,
+    policy_provider: Callable[[], Any] | None = None,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
@@ -1273,6 +1333,7 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     Returns :class:`CIAuditResult` with individual check results.
     """
+    from ..constants import APM_MODULES_DIR
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ._shared import _parse_apm_yml_safe
 
@@ -1365,8 +1426,23 @@ def run_baseline_checks(
     if _run(_check_deployment_ledger_owners(lock)):
         return result
 
-    # Check 4: Deployed files present
-    if _run(_check_deployed_files_present(deployment_root, lock, resolved_targets)):
+    # Check 4: Deployed files present, then recorded executables decisions
+    # are still the gate's (#4053)
+    if _run(_check_deployed_files_present(deployment_root, lock, resolved_targets)) or _run(
+        _check_exec_status_current(
+            project_root,
+            lock,
+            manifest,
+            resolved_targets,
+            user_scope=user_scope,
+            modules_root=(
+                prepared_replay.modules_root
+                if prepared_replay is not None
+                else project_root / APM_MODULES_DIR
+            ),
+            policy_provider=policy_provider,
+        )
+    ):
         return result
 
     # Check 5: No orphaned packages

@@ -697,6 +697,7 @@ def _audit_ci_gate(
     logger = cfg.logger
 
     from ..install.audit_replay import resolve_ci_audit_materialization
+    from ..install.exec_gate import exec_policy_from_discovery
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
@@ -735,6 +736,11 @@ def _audit_ci_gate(
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
         no_policy=no_policy,
+        policy_provider=(
+            None
+            if no_policy and not policy_source
+            else lambda: exec_policy_from_discovery(fetch_policy)
+        ),
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
