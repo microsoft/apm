@@ -31,14 +31,13 @@ _ALL = (
     "revoke-approval",
 )
 _DRY_RUN = "#4454 dry-run preview of gate removal"
-_BUNDLE = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
-_BIN_UNLOCKED = (
-    "#4225 the user lockfile does not record the bin/ files a marketplace plugin deployed"
-)
+_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL = {
     "G|dry-run|local-deny|bin": _DRY_RUN,
-    "G|bundle-install|local-deny|bin": _BUNDLE,
-    **{f"G|marketplace-install|{change}|bin": _BIN_UNLOCKED for change in _ALL},
+    **{
+        f"G|marketplace-install|{change}|bin": _USER_ORG
+        for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
+    },
 }
 
 # U-BIN witness rows: one absence row per path shape where bin/ never deploys

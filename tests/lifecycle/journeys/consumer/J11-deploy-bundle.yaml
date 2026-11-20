@@ -41,7 +41,7 @@ steps:
   - n: 4
     run: [apm audit --ci, apm install --frozen]
     exit: 0
-    key_lines: ["[*] All 11 check(s) passed", "[+] No drift detected", "[i] No changes -- install state already up to date"]
+    key_lines: ["[*] All 12 check(s) passed", "[+] No drift detected", "[i] No changes -- install state already up to date"]
   - n: 5
     run: [apm unpack ./build/my-pkg-1.0.0.zip]
     exit: 0

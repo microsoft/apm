@@ -1,4 +1,4 @@
-"""Offline installed-CLI preview agreement and non-mutation contracts for #3035."""
+"""Installed-CLI preview agreement and non-mutation contracts (#3035, #4085)."""
 
 from __future__ import annotations
 

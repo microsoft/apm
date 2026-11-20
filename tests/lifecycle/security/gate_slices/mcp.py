@@ -33,13 +33,6 @@ _XFAIL = {
         for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
     },
 }
-_BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
-_XFAIL.update(
-    {
-        f"G|bundle-install|{change}|mcp": _BUNDLE_KEEPS
-        for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
-    }
-)
 # A bundle approval pins the whole bundle digest: a changed definition reads as
 # a bundle that is not approved yet.
 _ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this exact bundle"}
@@ -47,9 +40,7 @@ _SMOKE = {"G|update|local-deny|mcp"}
 
 # G path -> (changes with a row, (surface files, other-scope prefixes))
 _MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
-_DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
-_XFAIL["G|marketplace-install|local-deny|mcp"] = _DENY_BY_SPEC
-_USER_ORG = "#4457 org policy for user-scope installs"
+_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL.update(
     {
         f"G|marketplace-install|{change}|mcp": _USER_ORG

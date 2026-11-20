@@ -27,15 +27,14 @@ _XFAIL = {
     **{f"G|dry-run|{change}|hook": _DRY_RUN for change in ("local-deny", "org-deny")},
     "G|dry-run|revoke-approval|hook": _DRY_RUN,
 }
-_BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
-_XFAIL.update({f"G|bundle-install|{change}|hook": _BUNDLE_KEEPS for change in _BUNDLE})
+# A bundle approval pins the whole bundle digest: a changed definition reads as
+# a bundle that is not approved yet.
+_ANNOUNCE = {"G|bundle-install|definition-changed|hook": r"not approved for this exact bundle"}
 _SMOKE = {"G|install|revoke-approval|hook", "G|frozen|local-deny|hook"}
 
 # G path -> (changes with a row, surface files)
 _MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
-_DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
-_XFAIL["G|marketplace-install|local-deny|hook"] = _DENY_BY_SPEC
-_USER_ORG = "#4457 org policy for user-scope installs"
+_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL.update(
     {
         f"G|marketplace-install|{change}|hook": _USER_ORG
@@ -67,6 +66,7 @@ SLICE = GateSlice(
         GateRow(
             f"G|{path}|{change}|hook",
             surface=surface,
+            announce=_ANNOUNCE.get(f"G|{path}|{change}|hook"),
             smoke=f"G|{path}|{change}|hook" in _SMOKE,
             xfail=_XFAIL.get(f"G|{path}|{change}|hook", ""),
         )

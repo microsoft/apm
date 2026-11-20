@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -403,3 +405,18 @@ def test_i9_leaves_a_duplicate_owned_by_a_known_output_cell_to_the_global_hook(
     result = CommandResult(("apm", "approve", "p"), 0, stdout, "", tmp_path)
     found = [v.message for v in oracles._i9_no_noise(None, None, result, None, None)]
     assert found == ["identical consecutive line: '[i] a'"]
+
+
+def test_generated_witnesses_match_the_collected_tables_and_journeys() -> None:
+    """generated_obligations.json is current: a dropped or added known cell needs --write."""
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.lifecycle.witnesses"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[+] up to date:" in result.stdout, result.stdout

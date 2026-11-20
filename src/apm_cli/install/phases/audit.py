@@ -10,10 +10,14 @@ config/policy precedence resolved in
 :mod:`apm_cli.core.install_audit`.  When the effective mode is ``off`` (the
 default), this phase is a hard no-op -- zero added cost.
 
-Runs AFTER the lockfile is written (so deployed files are enumerable via
+Runs AFTER the lockfile is staged (so deployed files are enumerable via
 ``scan_lockfile_packages``) and BEFORE ``finalize``.  A ``block`` decision
 raises :class:`~apm_cli.install.errors.PolicyViolationError`, reusing the
 pipeline's existing clean-halt path; ``--force`` downgrades a block to a warn.
+Because this phase scans bytes integrators already wrote, the install
+transaction snapshots every deploy path before integration whenever the mode
+is not ``off`` and restores it when the install fails before this phase
+passes (``install/deploy_snapshot.py``).
 """
 
 from __future__ import annotations

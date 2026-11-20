@@ -39,6 +39,7 @@ from apm_cli.core.target_catalog import (
     expand_all,
     first_deprecated_target_alias,
     get_target_capability,
+    is_vendor_target_id,
     normalize_target_name,
     target_error_values,
 )
@@ -622,7 +623,7 @@ def parse_target_field(
 
     # ---- validate every token ----
     for p in raw_parts:
-        if p not in accepted_target_values():
+        if p not in accepted_target_values() and not is_vendor_target_id(p):
             raise ValueError(
                 _target_error(
                     f"'{p}' is not a valid target. "
@@ -763,7 +764,6 @@ class TargetParamType(click.ParamType):
         try:
             parsed = parse_target_field(value)
             warn_deprecated_target_alias_flag(value)
-            return parsed
         except ValueError as e:
             # Use the v2 three-section error renderer for unknown targets
             # so that CLI, apm.yml, and auto-detect all share the same
@@ -784,6 +784,16 @@ class TargetParamType(click.ParamType):
             # user sees a clean "Invalid value for '--target': ..." message
             # rather than a Python traceback.
             self.fail(err_msg, param, ctx)
+        tokens = parsed if isinstance(parsed, list) else [parsed] if parsed else []
+        vendor = [token for token in tokens if is_vendor_target_id(token)]
+        if vendor:
+            # A vendor target parses, but no vendor handler is registered (#4251).
+            self.fail(
+                f"vendor target '{vendor[0]}' has no registered handler in this APM version",
+                param,
+                ctx,
+            )
+        return parsed
 
 
 # ---------------------------------------------------------------------------
