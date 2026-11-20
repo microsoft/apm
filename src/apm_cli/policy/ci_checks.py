@@ -56,7 +56,7 @@ def _read_audited_lock(lockfile_path: Path) -> tuple[Any, CheckResult | None]:
             name="lockfile-exists",
             passed=False,
             message=str(exc),
-            remediations=exc.remediations,
+            remediations=getattr(exc, "remediations", ()),
         )
 
 
