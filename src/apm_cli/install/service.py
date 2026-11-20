@@ -90,29 +90,6 @@ def frozen_services_error(reasons: list[str]) -> Exception:
     )
 
 
-class _ParkedNoticeSilenced:
-    """A logger view for the frozen MCP checks that drops parked-server notices.
-
-    The MCP phase reports each parked server once (#4422); the frozen checks
-    keep every other line (verbose cold-cache restoration, warnings).
-    """
-
-    def __init__(self, logger: Any) -> None:
-        self._logger = logger
-
-    @classmethod
-    def wrap(cls, logger: Any) -> Any:
-        return None if logger is None else cls(logger)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        if str(message).startswith("Parked MCP server"):
-            return
-        self._logger.warning(message, *args, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._logger, name)
-
-
 class InstallService:
     """Application service for the APM install pipeline.
 
@@ -518,6 +495,7 @@ class InstallService:
         # Same admission inputs as install, so a gate-parked or approved server
         # reaches the same verdict frozen or not (#3893, #3902).
         from apm_cli.core.scope import is_user_scope
+        from apm_cli.integration.mcp_config_view import without_parked_notices
         from apm_cli.security.trust import McpAdmission
 
         admission = McpAdmission.for_project(
@@ -532,8 +510,7 @@ class InstallService:
                 lockfile,
                 modules_dir,
                 admission=admission,
-                # The MCP phase is the one printer of parked servers (#4422).
-                logger=_ParkedNoticeSilenced.wrap(request.logger),
+                logger=without_parked_notices(request.logger),
                 allow_pending=allow_pending_mcp,
             )
         )
@@ -767,14 +744,14 @@ class InstallService:
     ) -> None:
         """Reject restored MCP drift before a package can activate native configuration."""
         from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.integration.mcp_config_view import without_parked_notices
 
         reasons = InstallService._frozen_mcp_reasons(
             package,
             lockfile,
             modules_dir,
             admission=admission,
-            # The MCP phase is the one printer of parked servers (#4422).
-            logger=_ParkedNoticeSilenced.wrap(logger),
+            logger=without_parked_notices(logger),
             allow_pending=False,
             active_package_keys=active_package_keys,
         )
