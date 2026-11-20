@@ -503,7 +503,8 @@ jobs:
     - name: Install dependencies
       run: uv sync --frozen --extra dev
 
-    # -n 2 --dist worksteal parallelises within the shard.
+    # -n auto --dist worksteal uses every runner CPU within the shard,
+    # matching the main-push unit run in build-release.yml.
     #
     # Per-shard floor of 60% catches regressions at PR time on roughly
     # half the codebase (observed per-shard coverage today is ~65%).
@@ -516,7 +517,7 @@ jobs:
         uv run python -m pytest tests/unit tests/test_console.py tests/red_team tests/fixtures/policy \
           -p scripts.ci_sharding --shard-count 2 --shard-index ${{ matrix.shard }} \
           --shard-durations .github/ci-durations/linux-unit.json \
-          -n 2 --dist worksteal \
+          -n auto --dist worksteal \
           --cov --cov-report= --cov-fail-under=60
 
     - name: Rename coverage data for shard
@@ -752,7 +753,7 @@ jobs:
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
   # matching the merge-group integration scheduler. The cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
-  # The growing corpus exhausted this cap on run 39737354179. Three shards
+  # The growing corpus exhausted this cap on run 39737354179. Four shards
   # retain the full selection and xdist affinity without increasing the cap.
   # scripts/ci_sharding.py balances them by the measured Linux x86_64
   # integration seed (weights, not an allowlist), keeps every module and
@@ -804,7 +805,7 @@ jobs:
         printf 'Runner logical CPUs: '
         nproc
         uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-          -p scripts.ci_sharding --shard-count 3 --shard-index "$LIFECYCLE_SHARD" \
+          -p scripts.ci_sharding --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
           --shard-durations .github/ci-durations/linux-x86_64.json \
           -n 4 --dist loadgroup --durations=20 \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
@@ -829,9 +830,19 @@ jobs:
       LIFECYCLE_SHARD: "3"
     steps: *lifecycle-smoke-steps
 
+  lifecycle-smoke-shard-4:
+    name: Lifecycle Smoke Shard 4 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      LIFECYCLE_SHARD: "4"
+    steps: *lifecycle-smoke-steps
+
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
-    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3]
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -842,8 +853,9 @@ jobs:
         SHARD_1_RESULT: ${{ needs.lifecycle-smoke-shard-1.result }}
         SHARD_2_RESULT: ${{ needs.lifecycle-smoke-shard-2.result }}
         SHARD_3_RESULT: ${{ needs.lifecycle-smoke-shard-3.result }}
+        SHARD_4_RESULT: ${{ needs.lifecycle-smoke-shard-4.result }}
       run: |
-        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ]; then
-          echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT' and '$SHARD_3_RESULT'."
+        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ] || [ "$SHARD_4_RESULT" != success ]; then
+          echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT', '$SHARD_3_RESULT' and '$SHARD_4_RESULT'."
           exit 1
         fi
