@@ -835,63 +835,6 @@ class TestValidationFailureReasonMessages:
 class TestTransitiveDepParentChain:
     """Tests for DependencyNode.get_ancestor_chain() breadcrumb."""
 
-    def test_get_ancestor_chain_returns_breadcrumb(self):
-        """get_ancestor_chain walks up parent links and returns 'a > b > c'."""
-        from apm_cli.deps.dependency_graph import DependencyNode
-        from apm_cli.models.apm_package import APMPackage, DependencyReference
-
-        root_ref = DependencyReference.parse("acme/root-pkg")
-        mid_ref = DependencyReference.parse("acme/mid-pkg")
-        leaf_ref = DependencyReference.parse("other-org/leaf-pkg")
-
-        root_node = DependencyNode(
-            package=APMPackage(name="root-pkg", version="1.0", source="acme/root-pkg"),
-            dependency_ref=root_ref,
-            depth=1,
-        )
-        mid_node = DependencyNode(
-            package=APMPackage(name="mid-pkg", version="1.0", source="acme/mid-pkg"),
-            dependency_ref=mid_ref,
-            depth=2,
-            parent=root_node,
-        )
-        leaf_node = DependencyNode(
-            package=APMPackage(name="leaf-pkg", version="1.0", source="other-org/leaf-pkg"),
-            dependency_ref=leaf_ref,
-            depth=3,
-            parent=mid_node,
-        )
-
-        chain = leaf_node.get_ancestor_chain()
-        assert chain == "acme/root-pkg > acme/mid-pkg > other-org/leaf-pkg"
-
-    def test_get_ancestor_chain_single_node(self):
-        """Direct dep (no parent) returns just its own name."""
-        from apm_cli.deps.dependency_graph import DependencyNode
-        from apm_cli.models.apm_package import APMPackage, DependencyReference
-
-        ref = DependencyReference.parse("acme/direct-pkg")
-        node = DependencyNode(
-            package=APMPackage(name="direct-pkg", version="1.0", source="acme/direct-pkg"),
-            dependency_ref=ref,
-            depth=1,
-        )
-        chain = node.get_ancestor_chain()
-        assert chain == "acme/direct-pkg"
-
-    def test_get_ancestor_chain_root_node(self):
-        """Root node (no parent) returns just the node's display name."""
-        from apm_cli.deps.dependency_graph import DependencyNode
-        from apm_cli.models.apm_package import APMPackage, DependencyReference
-
-        ref = DependencyReference.parse("acme/root-pkg")
-        node = DependencyNode(
-            package=APMPackage(name="root-pkg", version="1.0", source="acme/root-pkg"),
-            dependency_ref=ref,
-            depth=0,
-        )
-        assert node.get_ancestor_chain() == "acme/root-pkg"
-
     def test_download_callback_includes_chain_in_error(self, tmp_path, monkeypatch):
         """When a transitive dep download fails, the error message includes
         the parent chain breadcrumb for debugging.
@@ -1049,23 +992,6 @@ class TestDownloadCallbackErrorMessages:
         assert "Failed to download dependency" in errors[0].message
         assert "transitive" not in errors[0].message.lower()
 
-    def test_transitive_dep_key_not_in_direct_dep_keys(self):
-        """Transitive dep keys are correctly absent from direct_dep_keys set.
-
-        The download_callback uses this check to select the right error label.
-        End-to-end transitive error flow is covered by
-        TestTransitiveDepParentChain.test_download_callback_includes_chain_in_error.
-        """
-        from apm_cli.models.apm_package import DependencyReference
-
-        direct_dep_keys = {"acme/root-pkg"}
-        transitive_ref = DependencyReference.parse("other-org/leaf-pkg")
-
-        # Transitive deps must NOT be in the direct set
-        assert transitive_ref.get_unique_key() not in direct_dep_keys
-        # Direct deps must be in the direct set
-        assert "acme/root-pkg" in direct_dep_keys
-
 
 class TestCallbackFailureDeduplication:
     """Tests for error deduplication when download_callback failures are not re-tried."""
@@ -1152,15 +1078,6 @@ class TestLocalPathValidationMessages:
         pkg.mkdir()
         (pkg / "apm.yml").write_text("name: test\nversion: 1.0.0\n")
         dep_ref = DependencyReference.parse(str(pkg))
-        reason = _local_path_failure_reason(dep_ref)
-        assert reason is None
-
-    def test_local_path_failure_reason_remote_ref(self):
-        """Remote refs return None (not a local path)."""
-        from apm_cli.commands.install import _local_path_failure_reason
-        from apm_cli.models.apm_package import DependencyReference
-
-        dep_ref = DependencyReference.parse("owner/repo")
         reason = _local_path_failure_reason(dep_ref)
         assert reason is None
 

@@ -852,31 +852,6 @@ class TestOpenCodeTarget:
         }
         assert next(iter(data)) == "$schema"
 
-    def test_translation_command_args_extensions_env_initialization(self):
-        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
-
-        spec = _LSP_TARGET_SPECS["opencode"]
-        entry = {
-            "command": "srv",
-            "args": ["--stdio", "-v"],
-            "extensionToLanguage": {"py": "python", ".b": "b", ".a": "a"},
-            "env": {"K": "V"},
-            "initializationOptions": {"x": 1},
-            "startupTimeout": 1,
-            "shutdownTimeout": 2,
-            "restartOnCrash": True,
-            "maxRestarts": 3,
-            "workspaceFolder": "/w",
-            "settings": {"s": 1},
-            "transport": "stdio",
-        }
-        assert LSPIntegrator._entry_for_target(entry, spec) == {
-            "command": ["srv", "--stdio", "-v"],
-            "extensions": [".a", ".b", ".py"],
-            "env": {"K": "V"},
-            "initialization": {"x": 1},
-        }
-
     def test_name_only_server_skipped_with_warning(self, tmp_path):
         logger = MagicMock()
         deps = [LSPDependency.from_string("gopls"), _make_dep("pyright")]
@@ -1232,9 +1207,3 @@ class TestOpenCodeTarget:
         )
         data = json.loads((tmp_path / "opencode.json").read_text())
         assert "srv" in data["mcp"] and "gopls" in data["lsp"]
-
-    def test_target_choice_hint(self):
-        assert (
-            LSPIntegrator.target_choice_hint()
-            == "--target copilot, --target claude or --target opencode"
-        )

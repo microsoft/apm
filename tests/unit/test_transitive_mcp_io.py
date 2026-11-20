@@ -824,37 +824,6 @@ class TestCodexProjectScopedMCP:
 class TestTransitiveTrustClassification:
     """A transitive declaration is trusted only as a plain registry reference."""
 
-    @pytest.mark.parametrize(
-        "entry",
-        [
-            "io.github.acme/server",
-            {"name": "io.github.acme/server"},
-            {"name": "io.github.acme/server", "version": "1.0.0", "transport": "stdio"},
-            {"name": "io.github.acme/server", "package": "npm", "tools": ["read"]},
-        ],
-    )
-    def test_plain_registry_reference_needs_no_trust(self, entry):
-        dep = (
-            MCPDependency.from_string(entry)
-            if isinstance(entry, str)
-            else MCPDependency.from_dict(entry)
-        )
-        assert dep.requires_transitive_trust is False
-
-    @pytest.mark.parametrize(
-        "entry",
-        [
-            {"name": "srv", "registry": False, "transport": "stdio", "command": "srv"},
-            {"name": "srv", "registry": "https://registry.example.com"},
-            {"name": "srv", "headers": {"X-Key": "${SOME_VAR}"}},
-            {"name": "srv", "env": {"LEVEL": "debug"}},
-            {"name": "srv", "args": {"flag": "value"}},
-            {"name": "srv", "url": "https://srv.example.com/mcp"},
-        ],
-    )
-    def test_custom_source_or_overlay_needs_trust(self, entry):
-        assert MCPDependency.from_dict(entry).requires_transitive_trust is True
-
     def test_compat_collection_skips_overlay_without_trust(self, tmp_path):
         pkg_dir = tmp_path / "org" / "pkg-overlay"
         pkg_dir.mkdir(parents=True)

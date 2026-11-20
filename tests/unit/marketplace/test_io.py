@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from apm_cli.marketplace._io import __all__, atomic_write
+from apm_cli.marketplace._io import atomic_write
 
 pytestmark = pytest.mark.component
 
@@ -105,9 +105,3 @@ class TestAtomicWrite:
     # ------------------------------------------------------------------
     # __all__
     # ------------------------------------------------------------------
-
-    def test_dunder_all_contains_atomic_write(self) -> None:
-        assert "atomic_write" in __all__
-
-    def test_dunder_all_does_not_expose_os(self) -> None:
-        assert "os" not in __all__

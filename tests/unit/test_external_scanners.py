@@ -261,9 +261,35 @@ class TestGate:
 # ---------------------------------------------------------------------------
 
 
+class TestGenericSarifAdapter:
+    def test_unavailable_without_file(self) -> None:
+        from apm_cli.security.external.generic_sarif import GenericSarifAdapter
+
+        ok, reason = GenericSarifAdapter().is_available()
+        assert ok is False and "external-sarif" in reason
+
+
 # ---------------------------------------------------------------------------
 # SkillSpectorAdapter
 # ---------------------------------------------------------------------------
+
+
+class TestSkillSpectorAdapter:
+    def test_unavailable_when_binary_absent(self, monkeypatch) -> None:
+        import apm_cli.security.external.skillspector as mod
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: None)
+        ok, reason = mod.SkillSpectorAdapter().is_available()
+        assert ok is False
+        assert "PATH" in reason
+        assert "Python >= 3.12" in reason
+        assert "uv tool install" in reason
+
+    def test_available_when_binary_present(self, monkeypatch) -> None:
+        import apm_cli.security.external.skillspector as mod
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+        assert mod.SkillSpectorAdapter().is_available() == (True, None)
 
 
 # ---------------------------------------------------------------------------

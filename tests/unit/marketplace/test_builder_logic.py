@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import pytest
 
+from apm_cli.marketplace.builder import (
+    BuildReport,
+)
 from apm_cli.marketplace.errors import (
     BuildError,  # noqa: F401
 )
@@ -174,6 +178,26 @@ class TestSatisfiesRange:
 # ---------------------------------------------------------------------------
 # Duplicate package name warnings
 # ---------------------------------------------------------------------------
+
+
+class TestDuplicateNameWarnings:
+    """Tests for defence-in-depth duplicate name detection in the builder."""
+
+    def test_empty_build_report_primary_output_is_safe(self) -> None:
+        report = BuildReport(outputs=())
+
+        primary = report.primary_output
+
+        assert primary.profile == ""
+        assert primary.resolved == ()
+        assert primary.errors == ()
+        assert primary.warnings == ()
+        assert primary.diagnostics == ()
+        assert primary.output_path == Path(".")
+        assert primary.unchanged_count == 0
+        assert primary.added_count == 0
+        assert primary.updated_count == 0
+        assert primary.removed_count == 0
 
 
 # ---------------------------------------------------------------------------

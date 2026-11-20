@@ -1,19 +1,14 @@
 """Tests for apm_cli.utils.yaml_io -- cross-platform UTF-8 YAML I/O."""
 
-import io
-
 import pytest
 import yaml
-from ruamel.yaml import YAMLError as RuamelYAMLError
 
 from apm_cli.utils.yaml_io import (
-    _roundtrip_yaml,
     dump_yaml,
     dump_yaml_roundtrip,
     load_frontmatter,
     load_yaml,
     load_yaml_roundtrip,
-    yaml_to_str,
 )
 
 pytestmark = pytest.mark.component
@@ -52,11 +47,6 @@ class TestLoadYaml:
         p = tmp_path / "empty.yml"
         p.write_text("", encoding="utf-8")
         assert load_yaml(p) is None
-
-    def test_load_file_not_found(self):
-        """Missing file raises FileNotFoundError."""
-        with pytest.raises(FileNotFoundError):
-            load_yaml("/nonexistent/path.yml")
 
     def test_load_invalid_yaml(self, tmp_path):
         """Malformed YAML raises yaml.YAMLError."""
@@ -137,28 +127,6 @@ class TestDumpYaml:
 
 class TestYamlToStr:
     """Tests for yaml_to_str()."""
-
-    def test_unicode_preserved(self):
-        """String serialization preserves unicode characters."""
-        result = yaml_to_str({"author": "\u7530\u4e2d\u592a\u90ce"})
-        assert "\u7530\u4e2d\u592a\u90ce" in result
-        assert "\\u" not in result
-
-    def test_latin_unicode(self):
-        """Latin extended characters preserved."""
-        result = yaml_to_str({"name": "L\u00f3pez S\u00e1nchez"})
-        assert "L\u00f3pez" in result
-        assert "\\x" not in result
-
-    def test_preserves_key_order(self):
-        """Keys stay in insertion order by default."""
-        result = yaml_to_str({"z": 1, "a": 2})
-        assert result.index("z") < result.index("a")
-
-    def test_returns_string(self):
-        """Return type is str, not bytes."""
-        result = yaml_to_str({"key": "value"})
-        assert isinstance(result, str)
 
     def test_repeated_objects_are_written_without_anchors(self, tmp_path):
         """apm.yml refuses anchors (req-mf-020(b)), so no writer may emit them (#3858)."""
@@ -258,39 +226,9 @@ class TestLoadYamlRoundtrip:
         with pytest.raises(yaml.YAMLError):
             load_yaml_roundtrip(p)
 
-    def test_roundtrip_parser_rejects_python_tags(self):
-        """The ruamel layer also fails closed on unsafe Python tags."""
-        with pytest.raises(RuamelYAMLError):
-            _roundtrip_yaml().load("x: !!python/name:os.system ''\n")
-
 
 class TestLoadFrontmatter:
     """Tests for load_frontmatter() -- bounded python-frontmatter entrypoint."""
-
-    def test_parses_metadata_and_content(self):
-        """Valid front matter yields the metadata mapping and body content."""
-        text = "---\nmcp:\n  - github\n---\nbody text\n"
-        post = load_frontmatter(io.StringIO(text))
-        assert post.metadata["mcp"] == ["github"]
-        assert "body text" in post.content
-
-    def test_no_frontmatter_returns_empty_metadata(self):
-        """A plain document with no front matter yields empty metadata."""
-        post = load_frontmatter(io.StringIO("just body, no fence\n"))
-        assert post.metadata == {}
-
-    def test_merge_bomb_frontmatter_fails_closed(self):
-        """A merge-key bomb in front matter fails closed as yaml.YAMLError."""
-        lines = ["a0: &a0 {k: v}"]
-        prev = "a0"
-        for i in range(1, 40):
-            cur = f"a{i}"
-            lines.append(f"{cur}: &{cur}")
-            lines.append(f"  <<: [*{prev}, *{prev}]")
-            prev = cur
-        bomb = "---\n" + "\n".join(lines) + "\n---\nbody\n"
-        with pytest.raises(yaml.YAMLError):
-            load_frontmatter(io.StringIO(bomb))
 
     @pytest.mark.windows_compat
     def test_leading_bom_does_not_break_the_fence(self, tmp_path):

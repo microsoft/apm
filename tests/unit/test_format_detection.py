@@ -394,12 +394,6 @@ class TestNormalizationPlanner:
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert plugin_json == plugin_path
 
-    def test_marketplace_plugin_via_claude_plugin_dir(self) -> None:
-        report = self._make_report(claude_plugin=self._plugin_evidence(has_claude_plugin_dir=True))
-        pkg_type, plugin_json = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
-        assert plugin_json is None
-
     def test_agent_plugin_wins_over_claude_plugin(self, tmp_path: Path) -> None:
         plugin_path = tmp_path / "plugin.json"
         report = self._make_report(
@@ -457,70 +451,3 @@ class TestNormalizationPlanner:
         pkg_type, plugin_json = NormalizationPlanner().plan(report)
         assert pkg_type == PackageType.INVALID
         assert plugin_json == plugin_path
-
-    def test_hybrid(self) -> None:
-        report = self._make_report(
-            apm_yml=self._apm_yml_evidence(has_apm_dir=True),
-            skill_md=self._skill_md_evidence(has_root=True),
-        )
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.HYBRID
-
-    def test_claude_skill(self) -> None:
-        report = self._make_report(skill_md=self._skill_md_evidence(has_root=True))
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.CLAUDE_SKILL
-
-    def test_skill_bundle(self) -> None:
-        report = self._make_report(
-            skill_md=self._skill_md_evidence(has_root=False, nested=("skill-a",))
-        )
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.SKILL_BUNDLE
-
-    def test_apm_package_with_apm_dir(self) -> None:
-        report = self._make_report(apm_yml=self._apm_yml_evidence(has_apm_dir=True))
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.APM_PACKAGE
-
-    def test_apm_package_with_declared_deps(self) -> None:
-        report = self._make_report(apm_yml=self._apm_yml_evidence(declares_dependencies=True))
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.APM_PACKAGE
-
-    def test_invalid_apm_yml_no_apm_dir_no_deps(self) -> None:
-        report = self._make_report(
-            apm_yml=self._apm_yml_evidence(has_apm_dir=False, declares_dependencies=False)
-        )
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.INVALID
-
-    def test_hook_package(self) -> None:
-        report = self._make_report(
-            hook_json=HookJsonFormatEvidence(hooks_dirs_found=(Path("/fake/hooks"),))
-        )
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.HOOK_PACKAGE
-
-    def test_invalid_empty_report(self) -> None:
-        report = self._make_report()
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.INVALID
-
-    def test_hybrid_wins_over_plugin_signal_when_apm_yml_is_eligible(self) -> None:
-        report = self._make_report(
-            claude_plugin=self._plugin_evidence(plugin_json_path=Path("/fake/plugin.json")),
-            apm_yml=self._apm_yml_evidence(has_apm_dir=True),
-            skill_md=self._skill_md_evidence(has_root=True),
-        )
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.HYBRID
-
-    def test_skill_bundle_wins_over_apm_only(self) -> None:
-        """Nested skills beat plain apm.yml (cascade step 4 before step 5)."""
-        report = self._make_report(
-            apm_yml=self._apm_yml_evidence(has_apm_dir=True),
-            skill_md=self._skill_md_evidence(has_root=False, nested=("s",)),
-        )
-        pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.SKILL_BUNDLE

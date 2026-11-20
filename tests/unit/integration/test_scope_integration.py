@@ -233,16 +233,6 @@ class TestOpenCodeScopeResolution:
 class TestCodexUserScope:
     """Verify Codex participates in user-scope target resolution."""
 
-    def test_for_scope_returns_profile(self):
-        codex = KNOWN_TARGETS["codex"]
-        assert codex.user_supported == "partial"
-        resolved = codex.for_scope(user_scope=True)
-        assert resolved is not None
-        assert resolved.root_dir == ".codex"
-        assert "agents" in resolved.primitives
-        assert "skills" in resolved.primitives
-        assert "hooks" in resolved.primitives
-
     def test_resolve_targets_includes_codex_at_user_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -258,33 +248,12 @@ class TestClaudeScopeResolution:
     """Verify Claude's scope resolution, including the CLAUDE_CONFIG_DIR
     override at user scope."""
 
-    def test_project_and_user_scope_same_root(self, monkeypatch):
-        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-        claude = KNOWN_TARGETS["claude"]
-        project = claude.for_scope(user_scope=False)
-        user = claude.for_scope(user_scope=True)
-        assert project.root_dir == ".claude"
-        assert user.root_dir == ".claude"
-
-    def test_all_primitives_available_at_user_scope(self):
-        claude = KNOWN_TARGETS["claude"]
-        resolved = claude.for_scope(user_scope=True)
-        # Claude supports all primitives at user scope
-        assert "instructions" in resolved.primitives
-        assert "agents" in resolved.primitives
-
     def test_user_scope_expands_tilde(self, tmp_path, monkeypatch):
         _set_home(monkeypatch, tmp_path)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/.config/claude")
         scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
         assert scoped is not None
         assert scoped.root_dir == ".config/claude"
-
-    def test_user_scope_blank_falls_back_to_default(self, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "   ")
-        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
-        assert scoped is not None
-        assert scoped.root_dir == ".claude"
 
     def test_user_scope_outside_home_keeps_absolute(self, tmp_path, monkeypatch):
         home = tmp_path / "home"

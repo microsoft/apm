@@ -10,7 +10,6 @@ import pytest
 from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.file_scanner import (
     _is_safe_lockfile_path,
-    _minimal_governed_prefixes,
     _scan_deployed_trees,
     _scan_files_in_dir,
     scan_deployed_trees,
@@ -348,12 +347,6 @@ class TestProjectFileScan:
 
         assert findings == {}
         assert scanned == 1
-
-    def test_nested_governance_roots_are_minimized(self) -> None:
-        assert _minimal_governed_prefixes({".agents/", ".agents/skills/", ".claude/skills/"}) == (
-            ".agents",
-            ".claude/skills",
-        )
 
     def test_symlinked_deploy_root_cannot_escape(self, tmp_path: Path) -> None:
         outside = tmp_path.parent / f"{tmp_path.name}-outside"

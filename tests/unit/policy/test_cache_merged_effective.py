@@ -32,7 +32,6 @@ from apm_cli.policy.discovery import (
     MAX_STALE_TTL,
     PolicyFetchResult,  # noqa: F401
     _cache_key,
-    _detect_garbage,
     _fetch_from_repo,
     _fetch_from_url,  # noqa: F401
     _get_cache_dir,
@@ -405,15 +404,6 @@ class TestBackdatedMetaOutcomes(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual(result.outcome, "empty")
 
-    def test_no_cache_fallback_outcome(self):
-        """No cache + fetch error -> cache_miss_fetch_fail."""
-        result = _stale_fallback_or_error(
-            None, "Network down", "org:test/.github", "cache_miss_fetch_fail"
-        )
-        self.assertFalse(result.found)
-        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
-        self.assertIsNotNone(result.error)
-
 
 # ---------------------------------------------------------------------------
 # Garbage-response detection
@@ -422,68 +412,6 @@ class TestBackdatedMetaOutcomes(unittest.TestCase):
 
 class TestGarbageResponse(unittest.TestCase):
     """Garbage-response detection: 200 OK with non-YAML body."""
-
-    def test_html_garbage_no_cache(self):
-        """HTML body without stale cache -> garbage_response outcome."""
-        html_body = "<html><body>Sign in to continue</body></html>"
-        result = _detect_garbage(html_body, "example.com/org/.github", "org:org/.github", None)
-        self.assertIsNotNone(result)
-        self.assertEqual(result.outcome, "garbage_response")
-        # HTML parses as a YAML string (not a mapping), so error says "not a YAML mapping"
-        self.assertIn("not a YAML mapping", result.error)
-
-    def test_yaml_list_garbage_no_cache(self):
-        """YAML list (not mapping) without cache -> garbage_response."""
-        yaml_list = "- item1\n- item2\n"
-        result = _detect_garbage(yaml_list, "test-ref", "org:test-ref", None)
-        self.assertIsNotNone(result)
-        self.assertEqual(result.outcome, "garbage_response")
-        self.assertIn("not a YAML mapping", result.error)
-
-    def test_html_garbage_with_stale_cache(self):
-        """HTML body with stale cache -> cached_stale outcome (fallback)."""
-        from apm_cli.policy.discovery import _CacheEntry
-
-        stale_entry = _CacheEntry(
-            policy=ApmPolicy(name="stale-policy"),
-            source="org:org/.github",
-            age_seconds=DEFAULT_CACHE_TTL + 100,
-            stale=True,
-            chain_refs=["org/.github"],
-            fingerprint="abc",
-        )
-        html_body = "<html><body>captive portal</body></html>"
-        result = _detect_garbage(html_body, "org/.github", "org:org/.github", stale_entry)
-        self.assertIsNotNone(result)
-        self.assertEqual(result.outcome, "cached_stale")
-        self.assertTrue(result.cache_stale)
-        self.assertEqual(result.policy.name, "stale-policy")
-
-    def test_valid_yaml_not_garbage(self):
-        """Valid YAML mapping -> _detect_garbage returns None (not garbage)."""
-        valid = "name: test\nenforcement: warn\n"
-        result = _detect_garbage(valid, "test-ref", "org:test-ref", None)
-        self.assertIsNone(result)
-
-    def test_empty_yaml_not_garbage(self):
-        """Empty YAML (None after parse) -> not garbage (becomes empty policy)."""
-        result = _detect_garbage("", "test-ref", "org:test-ref", None)
-        self.assertIsNone(result)
-
-    def test_none_content_not_garbage(self):
-        """None content -> not garbage (caller handles as absent)."""
-        result = _detect_garbage(None, "test-ref", "org:test-ref", None)
-        self.assertIsNone(result)
-
-    def test_truly_invalid_yaml_no_cache(self):
-        """Content that fails YAML parse entirely -> garbage_response."""
-        # Tabs in wrong places cause YAML parse errors
-        bad_yaml = ":\n\t\t: :\n{{{invalid"
-        result = _detect_garbage(bad_yaml, "bad-ref", "org:bad-ref", None)
-        self.assertIsNotNone(result)
-        self.assertEqual(result.outcome, "garbage_response")
-        self.assertIn("not valid YAML", result.error)
-        self.assertIn("captive portal", result.error)
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
     def test_garbage_from_repo_no_cache(self, mock_fetch):

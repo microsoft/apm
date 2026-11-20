@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 
 from apm_cli.marketplace.drift_check import (
+    DriftDifference,
+    DriftOutputReport,
     json_key_diff,
+    render_diff_lines,
 )
 
 pytestmark = pytest.mark.unit
@@ -46,6 +49,18 @@ class TestJsonKeyDiff:
 # ---------------------------------------------------------------------------
 # Dirty (drift) case
 # ---------------------------------------------------------------------------
+
+
+class TestDriftDirtyCase:
+    def test_render_diff_lines_caps_output(self):
+        # Build a report with > 20 diffs to test cap.
+        diffs = tuple(DriftDifference(path=f"k{i}", old=i, new=i + 1) for i in range(25))
+        out = DriftOutputReport(
+            format="claude", path="marketplace.json", status="drift", differences=diffs
+        )
+        lines = render_diff_lines(out)
+        # 20 visible + 1 footer line ("...N more...")
+        assert len(lines) <= 21
 
 
 # ---------------------------------------------------------------------------

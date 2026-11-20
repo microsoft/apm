@@ -31,6 +31,7 @@ import requests
 
 from apm_cli.policy.discovery import (
     _compute_hash_normalized,
+    _detect_garbage,
     _extract_extends_host,
     _fetch_github_contents,
     _is_github_host,
@@ -451,6 +452,21 @@ class TestIsGithubHost:
 # ---------------------------------------------------------------------------
 # _detect_garbage -- YAML error with cache_entry (line 1165)
 # ---------------------------------------------------------------------------
+
+
+class TestDetectGarbage:
+    def test_yaml_error_no_cache_returns_garbage_response(self) -> None:
+        result = _detect_garbage("{{invalid yaml", "owner/.github", "org:owner/.github", None)
+        assert result is not None
+        assert result.outcome == "garbage_response"
+
+    def test_valid_yaml_mapping_returns_none(self) -> None:
+        result = _detect_garbage(VALID_POLICY_YAML, "owner/.github", "org:owner/.github", None)
+        assert result is None
+
+    def test_none_content_returns_none(self) -> None:
+        result = _detect_garbage(None, "owner/.github", "org:owner/.github", None)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------

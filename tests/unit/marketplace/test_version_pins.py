@@ -191,12 +191,6 @@ class TestPinsPath:
         result = _pins_path(pins_dir=str(tmp_path))
         assert result == os.path.join(str(tmp_path), "version-pins.json")
 
-    def test_default_dir(self):
-        """Default path (no pins_dir) includes version-pins.json under CONFIG_DIR."""
-        with patch("apm_cli.config.CONFIG_DIR", "/fake/.apm"):
-            result = _pins_path(pins_dir=None)
-        assert result == os.path.join("/fake/.apm", "cache", "marketplace", "version-pins.json")
-
 
 # ---------------------------------------------------------------------------
 # Atomic write

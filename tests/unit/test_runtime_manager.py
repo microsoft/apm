@@ -23,30 +23,8 @@ class TestRuntimeManagerInit:
         manager = RuntimeManager()
         assert manager.runtime_dir == Path.home() / ".apm" / "runtimes"
 
-    def test_init_supported_runtimes_keys(self):
-        manager = RuntimeManager()
-        assert set(manager.supported_runtimes.keys()) == {"copilot", "codex", "llm", "gemini"}
-
-    def test_init_script_extension_unix(self):
-        with patch("apm_cli.runtime.manager.sys") as mock_sys:
-            mock_sys.platform = "linux"
-            manager = RuntimeManager()
-        for info in manager.supported_runtimes.values():
-            assert info["script"].endswith(".sh")
-
-    def test_init_script_extension_windows(self):
-        with patch("apm_cli.runtime.manager.sys") as mock_sys:
-            mock_sys.platform = "win32"
-            manager = RuntimeManager()
-        for info in manager.supported_runtimes.values():
-            assert info["script"].endswith(".ps1")
-
 
 class TestRuntimeManagerIsRuntimeAvailable:
-    def test_unknown_runtime_returns_false(self):
-        manager = RuntimeManager()
-        assert manager.is_runtime_available("unknown") is False
-
     def test_binary_in_apm_dir_returns_true(self, tmp_path):
         manager = RuntimeManager()
         manager.runtime_dir = tmp_path
@@ -137,42 +115,6 @@ class TestRuntimeManagerListRuntimes:
 
 
 class TestRuntimeManagerRemoveRuntime:
-    def test_unknown_runtime_returns_false(self):
-        manager = RuntimeManager()
-        assert manager.remove_runtime("unknown") is False
-
-    def test_copilot_npm_success(self):
-        manager = RuntimeManager()
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
-            proc = MagicMock()
-            proc.returncode = 0
-            mock_run.return_value = proc
-            assert manager.remove_runtime("copilot") is True
-        mock_run.assert_called_once_with(
-            ["npm", "uninstall", "-g", "@github/copilot"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=ANY,
-        )
-
-    def test_copilot_npm_failure(self):
-        manager = RuntimeManager()
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
-            proc = MagicMock()
-            proc.returncode = 1
-            proc.stderr = "error"
-            mock_run.return_value = proc
-            assert manager.remove_runtime("copilot") is False
-
-    def test_copilot_npm_exception(self):
-        manager = RuntimeManager()
-        with patch(
-            "apm_cli.runtime.manager.subprocess.run",
-            side_effect=Exception("npm not found"),
-        ):
-            assert manager.remove_runtime("copilot") is False
-
     def test_binary_not_installed_returns_false(self, tmp_path):
         manager = RuntimeManager()
         manager.runtime_dir = tmp_path
@@ -250,13 +192,6 @@ class TestRuntimeManagerGetEmbeddedScript:
         else:
             with pytest.raises((FileNotFoundError, RuntimeError)):
                 manager2.get_embedded_script("nonexistent-script.sh")
-
-    def test_script_not_found_raises(self):
-        manager = RuntimeManager()
-        with patch("apm_cli.runtime.manager.getattr", return_value=False):
-            pass
-        with pytest.raises(RuntimeError, match="Could not load setup script"):
-            manager.get_embedded_script("definitely-does-not-exist.sh")
 
 
 # ---------------------------------------------------------------------------

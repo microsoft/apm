@@ -356,19 +356,6 @@ class TestDetectGarbage:
         assert result is not None
         assert result.outcome == "cached_stale"
 
-    def test_yaml_error_no_cache_returns_garbage_response(self) -> None:
-        result = _detect_garbage("{{invalid yaml", "owner/.github", "org:owner/.github", None)
-        assert result is not None
-        assert result.outcome == "garbage_response"
-
-    def test_valid_yaml_mapping_returns_none(self) -> None:
-        result = _detect_garbage(VALID_POLICY_YAML, "owner/.github", "org:owner/.github", None)
-        assert result is None
-
-    def test_none_content_returns_none(self) -> None:
-        result = _detect_garbage(None, "owner/.github", "org:owner/.github", None)
-        assert result is None
-
 
 # ---------------------------------------------------------------------------
 # _read_cache_entry -- expected_hash checks (lines 1251-1257)

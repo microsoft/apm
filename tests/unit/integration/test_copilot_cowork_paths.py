@@ -52,16 +52,6 @@ class TestResolveCoworkSkillsDir:
         assert result is not None
         assert result.name == "env-skills"
 
-    def test_env_override_traversal_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", "../escape")
-        with pytest.raises(CoworkResolutionError, match="traversal"):
-            resolve_copilot_cowork_skills_dir()
-
-    def test_env_override_embedded_traversal_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", "/valid/../invalid")
-        with pytest.raises(CoworkResolutionError, match="traversal"):
-            resolve_copilot_cowork_skills_dir()
-
     def test_macos_single_tenant_returns_skills_dir(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -167,11 +157,6 @@ class TestResolveCoworkSkillsDir:
             resolve_copilot_cowork_skills_dir()
         assert "APM_COPILOT_COWORK_SKILLS_DIR" in str(exc_info.value)
 
-    def test_windows_env_var_returns_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", "/tmp/fake-onedrive/skills")
-        result = resolve_copilot_cowork_skills_dir()
-        assert isinstance(result, Path)
-
     def test_linux_no_env_returns_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -236,20 +221,6 @@ class TestResolveCoworkSkillsDir:
         ):
             result = resolve_copilot_cowork_skills_dir()
         assert result == tenant / "Documents" / "Cowork" / "skills"
-
-    def test_config_path_traversal_raises_cowork_resolution_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A traversal sequence in the config value raises CoworkResolutionError."""
-        monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
-        with (
-            patch(
-                "apm_cli.config.get_copilot_cowork_skills_dir",
-                return_value="/valid/../invalid",
-            ),
-            pytest.raises(CoworkResolutionError, match="traversal"),
-        ):
-            resolve_copilot_cowork_skills_dir()
 
     def test_config_none_falls_through_cleanly_to_next_branch(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

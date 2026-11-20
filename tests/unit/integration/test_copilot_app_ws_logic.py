@@ -11,6 +11,8 @@ from collections.abc import Callable
 import pytest
 from websockets.sync.server import serve as _serve
 
+from apm_cli.integration import copilot_app_ws as ws
+
 pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
@@ -208,3 +210,17 @@ def test_run_serve_forever_propagates_normal_completion(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # Security hardenings (token scrub + file mode)
 # ---------------------------------------------------------------------------
+
+
+class TestTokenScrub:
+    def test_scrub_removes_token_query_arg(self) -> None:
+        url = "ws://127.0.0.1:51234/?token=ABC123xyz= HTTP rejected"
+        scrubbed = ws._scrub_token(url)
+        assert "ABC123xyz" not in scrubbed
+        assert "token=<redacted>" in scrubbed
+
+    def test_scrub_handles_token_in_chained_query(self) -> None:
+        s = "GET /api?foo=1&token=SECRET_VALUE&bar=2 failed"
+        scrubbed = ws._scrub_token(s)
+        assert "SECRET_VALUE" not in scrubbed
+        assert "token=<redacted>" in scrubbed

@@ -125,6 +125,28 @@ class TestRenderSummary:
 # ---------------------------------------------------------------------------
 
 
+class TestPreviewStrip:
+    def test_nothing_to_clean_when_only_info(self, logger, capsys):
+        from apm_cli.commands.audit import _preview_strip
+
+        findings = {"a.md": [_make_finding("info")]}
+        count = _preview_strip(findings, logger)
+        assert count == 0
+
+    def test_warning_findings_show_in_preview(self, logger):
+        from apm_cli.commands.audit import _preview_strip
+
+        findings = {"b.md": [_make_finding("warning")]}
+        count = _preview_strip(findings, logger)
+        assert count == 1
+
+    def test_empty_findings_returns_zero(self, logger):
+        from apm_cli.commands.audit import _preview_strip
+
+        count = _preview_strip({}, logger)
+        assert count == 0
+
+
 # ---------------------------------------------------------------------------
 # _audit_content_scan
 # ---------------------------------------------------------------------------

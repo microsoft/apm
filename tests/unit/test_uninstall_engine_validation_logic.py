@@ -117,6 +117,88 @@ class TestBuildChildrenIndex:
 # ---------------------------------------------------------------------------
 
 
+class TestValidateUninstallPackages:
+    def test_invalid_format_no_slash(self):
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        logger = _make_logger()
+        _removed, not_found = _validate_uninstall_packages(
+            ["badname"],
+            [],
+            logger,
+        )
+        assert "badname" in not_found
+        logger.error.assert_called()
+
+    def test_valid_package_found(self):
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        logger = _make_logger()
+        removed, not_found = _validate_uninstall_packages(
+            ["org/repo"],
+            ["org/repo"],
+            logger,
+        )
+        assert "org/repo" in removed or len(removed) == 1
+        assert not_found == []
+
+    def test_package_not_in_current_deps(self):
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        logger = _make_logger()
+        _removed, not_found = _validate_uninstall_packages(
+            ["org/repo"],
+            [],
+            logger,
+        )
+        assert "org/repo" in not_found
+
+    @pytest.mark.parametrize(
+        ("provenance", "expected"),
+        [
+            ({}, "Remove 'fetch' under dependencies.mcp in apm.yml, then run 'apm install'"),
+            ({"fetch": "acme/tools"}, "brought in by package 'acme/tools'"),
+            ({"fetch": "bundle:proj"}, "from a local bundle"),
+        ],
+        ids=["root", "package", "bundle"],
+    )
+    def test_mcp_server_name_routes_to_its_removal(self, provenance, expected):
+        """'apm uninstall <server>' names how that server is removed (#3994)."""
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        lockfile = _make_lockfile()
+        lockfile.mcp_servers = ["fetch"]
+        lockfile.mcp_config_provenance = provenance
+        logger = _make_logger()
+        _removed, not_found = _validate_uninstall_packages(["fetch"], [], logger, lockfile)
+        assert not_found == ["fetch"]
+        message = logger.error.call_args.args[0]
+        assert expected in message
+        assert "Invalid package format" not in message
+
+    def test_marketplace_resolved_none_adds_to_not_found(self):
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        logger = _make_logger()
+        # plugin-name without slash should be treated as marketplace ref
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine._is_marketplace_ref",
+                return_value=True,
+            ),
+            patch(
+                "apm_cli.commands.uninstall.engine._resolve_marketplace_packages",
+                return_value={"my-plugin@market": None},
+            ),
+        ):
+            _removed, not_found = _validate_uninstall_packages(
+                ["my-plugin@market"],
+                [],
+                logger,
+            )
+        assert "my-plugin@market" in not_found
+
+
 # ---------------------------------------------------------------------------
 # _dry_run_uninstall
 # ---------------------------------------------------------------------------

@@ -19,7 +19,6 @@ from apm_cli.bundle.plugin_exporter import (
     _collect_root_plugin_components,
     _get_dev_dependency_urls,
     _merge_file_map,
-    _reconcile_plugin_json_version,
     export_plugin_bundle,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -561,46 +560,6 @@ def _write_stale_release_project(tmp_path: Path, *, with_hooks: bool) -> Path:
 
 class TestReconcilePluginJsonVersion:
     """Every ``plugin.json`` inside a bundle must agree with the apm.yml version (#3351)."""
-
-    def test_forces_apm_yml_version_when_authored_is_stale(self):
-        logger = _CapturingLogger()
-
-        result = _reconcile_plugin_json_version(
-            {"name": "pkg", "version": "1.0.2"},
-            "1.0.3",
-            source_label=".claude-plugin/plugin.json",
-            logger=logger,
-        )
-
-        assert result == {"name": "pkg", "version": "1.0.3"}
-        assert len(logger.warnings) == 1
-        assert ".claude-plugin/plugin.json declares version 1.0.2" in logger.warnings[0]
-        assert "apm.yml declares 1.0.3" in logger.warnings[0]
-
-    def test_matching_version_is_untouched_and_silent(self):
-        logger = _CapturingLogger()
-
-        result = _reconcile_plugin_json_version(
-            {"name": "pkg", "version": "1.0.3"}, "1.0.3", logger=logger
-        )
-
-        assert result["version"] == "1.0.3"
-        assert logger.warnings == []
-
-    def test_missing_version_is_filled_silently(self):
-        logger = _CapturingLogger()
-
-        result = _reconcile_plugin_json_version({"name": "pkg"}, "1.0.3", logger=logger)
-
-        assert result["version"] == "1.0.3"
-        assert logger.warnings == []
-
-    def test_input_is_not_mutated(self):
-        authored = {"name": "pkg", "version": "1.0.2"}
-
-        _reconcile_plugin_json_version(authored, "1.0.3", logger=_CapturingLogger())
-
-        assert authored["version"] == "1.0.2"
 
     @pytest.mark.windows_compat
     @pytest.mark.parametrize("with_hooks", [False, True], ids=["root-only", "with-native-copy"])

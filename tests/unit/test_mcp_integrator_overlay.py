@@ -22,6 +22,14 @@ def _suppress_console(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+class TestIsVscodeAvailable:
+    def test_uses_cwd_when_none(self):
+        from apm_cli.integration.mcp_integrator import _is_vscode_available
+
+        with patch("shutil.which", return_value="/usr/bin/code"):
+            assert _is_vscode_available(None) is True
+
+
 # ---------------------------------------------------------------------------
 # MCPIntegrator._build_self_defined_info
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.integration.skill_integrator import (
+    SkillIntegrator,
     should_compile_instructions,
     validate_skill_name,
 )
@@ -137,6 +138,20 @@ class TestShouldCompileInstructions:
 # ---------------------------------------------------------------------------
 
 
+class TestDircmpEqual:
+    """Cover _dircmp_equal branches."""
+
+    def test_funny_files_returns_false(self) -> None:
+        """funny_files -> returns False."""
+        dcmp = MagicMock()
+        dcmp.left_only = []
+        dcmp.right_only = []
+        dcmp.funny_files = ["weird.bin"]
+        dcmp.common_files = []
+        dcmp.subdirs = {}
+        assert SkillIntegrator._dircmp_equal(dcmp) is False
+
+
 # ---------------------------------------------------------------------------
 # _promote_sub_skills -- non-dir entry is skipped (line 578)
 # ---------------------------------------------------------------------------
@@ -205,3 +220,34 @@ class TestShouldCompileInstructions:
 # ---------------------------------------------------------------------------
 # _promote_sub_skills_standalone -- --skill filter matches nothing (#2116)
 # ---------------------------------------------------------------------------
+
+
+class TestPairedNameFilterPerSkillsRoot:
+    """#3763: each skills root receives only the skills paired with its targets."""
+
+    @staticmethod
+    def _pairing():
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        return merge_edge_pairings(
+            [(["alpha"], ["claude"]), (["gamma"], ["copilot"]), (["delta"], ["cursor"])]
+        )
+
+    def test_unselected_root_gets_nothing_and_no_pairing_keeps_the_filter(self):
+        assert SkillIntegrator._paired_name_filter(None, self._pairing(), ("gemini",)) == (
+            frozenset()
+        )
+        base = {"alpha", "gamma"}
+        assert SkillIntegrator._paired_name_filter(base, None, ("claude",)) is base
+
+    def test_paired_filter_narrows_but_never_widens_the_source_plan(self):
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        pairing = merge_edge_pairings([(None, ["claude"]), (["alpha"], ["copilot"])])
+        assert SkillIntegrator._paired_name_filter({"alpha", "gamma"}, pairing, ("claude",)) == {
+            "alpha",
+            "gamma",
+        }
+        assert SkillIntegrator._paired_name_filter({"gamma"}, pairing, ("copilot",)) == (
+            frozenset()
+        )

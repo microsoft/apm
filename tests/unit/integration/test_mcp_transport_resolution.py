@@ -256,3 +256,14 @@ class TestUnresolvedTransport:
         value = effective["io.example/any"]
         assert isinstance(value, UnresolvedTransport)
         assert "unreachable" in value.reason
+
+
+class TestPolicyInstallParity:
+    def test_first_declaration_wins_like_install(self, fake_registry):
+        fake_registry["servers"][DUAL_SERVER["name"]] = DUAL_SERVER
+        production = MCPDependency.from_dict({"name": DUAL_SERVER["name"], "transport": "stdio"})
+        development = MCPDependency.from_string(DUAL_SERVER["name"])
+        result = run_dependency_policy_checks(
+            [], policy=_policy("stdio"), mcp_deps=[production, development]
+        )
+        assert _transport_check(result).passed
