@@ -1,0 +1,17 @@
+{
+  "changelog": "`apm pack --format apm` now includes skills deployed under `.agents/skills/` for Copilot, Cursor, Gemini and OpenCode projects instead of packing an empty bundle. (#4217)",
+  "ledger_row": {
+    "issue": 4202,
+    "fixed_in": "Unreleased",
+    "summary": "apm pack --format apm filtered deployed files by the target root only, so skills a copilot project deployed under .agents/skills/ were dropped and the bundle was empty.",
+    "failure_modes": ["routing", "outcome"],
+    "properties": ["routing.authorized_targets_only", "outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_apm_format_pack_carries_skills_deployed_under_agents"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_apm_format_pack_carries_skills_deployed_under_agents -n 0 -p no:cacheprovider -q -> `assert \"No deployed files found\" not in output(packed)` failed ([!] No deployed files found -- empty bundle created)",
+  "green": "same command -> 1 passed (bundle carries .agents/skills/ks/SKILL.md; apm unpack restores identical bytes); neighbours tests/unit/test_lockfile_enrichment.py tests/unit/integration tests/unit/test_packer.py tests/unit/bundle tests/integration/test_pack_*.py (APM_E2E_TESTS=1) test_copilot_app_targets_coverage.py test_wave2_adapters_coverage.py -> 3668 passed, 2 skipped",
+  "owner": "src/apm_cli/integration/targets.py (TargetProfile.effective_pack_prefixes), consumed by src/apm_cli/bundle/lockfile_enrichment.py (_get_target_prefixes/_filter_files_by_target)",
+  "notes": "effective_pack_prefixes now adds each primitive deploy_root directory (e.g. .agents/skills/) when pack_prefixes is not set explicitly; codex/windsurf keep their explicit prefixes. Journey known cell J11 s5 FORBID J11-legacy-pack-drops-agents-skills should flip. No docs claimed the old behaviour."
+}
