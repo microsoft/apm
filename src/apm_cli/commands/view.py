@@ -446,12 +446,10 @@ def _display_registry_versions(
         return
 
     try:
-        from rich.table import Table
-
-        from apm_cli.utils.console import new_console
+        from apm_cli.utils.console import new_console, new_table
 
         console = new_console()
-        table = Table(
+        table = new_table(
             title=f"Available versions: {package}",
             show_header=True,
             header_style="bold cyan",
@@ -634,12 +632,10 @@ def display_versions(
 
     # -- render with Rich table (fallback to plain text) ---------------
     try:
-        from rich.table import Table
-
-        from apm_cli.utils.console import new_console
+        from apm_cli.utils.console import new_console, new_table
 
         console = new_console()
-        table = Table(
+        table = new_table(
             title=f"Available versions: {package}",
             show_header=True,
             header_style="bold cyan",

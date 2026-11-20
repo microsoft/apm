@@ -570,9 +570,9 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
     # Display packages in table format
     if has_rich:
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title=(
                 f" Insecure APM Dependencies ({scope_label})"
                 if insecure_only

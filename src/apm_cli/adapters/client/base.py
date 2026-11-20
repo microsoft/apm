@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from ...core.command_logger import library_logger
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
 from ...utils.atomic_io import atomic_write_text, umask_file_mode
-from ...utils.console import _rich_error, _rich_warning
 from ...utils.path_security import has_symlink_component
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -272,7 +272,7 @@ _SYMLINKED_MCP_CONFIG = (
 
 
 def _warn_symlinked_mcp_config(config_path: Path) -> None:
-    _rich_warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
+    library_logger().warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
 
 
 class MCPClientAdapter(ABC):
@@ -612,7 +612,7 @@ class MCPClientAdapter(ABC):
         except FileNotFoundError:
             return {}
         except (OSError, UnicodeError) as exc:
-            _rich_warning(
+            library_logger().warning(
                 f"Could not read {config_path}: {exc} -- skipping config write; "
                 "fix the file's permissions or encoding, or add this server manually",
                 symbol="warning",
@@ -625,7 +625,7 @@ class MCPClientAdapter(ABC):
         except json.JSONDecodeError:
             config = None
         if not isinstance(config, dict):
-            _rich_warning(
+            library_logger().warning(
                 f"Could not parse {config_path} as a JSON object -- skipping config "
                 "write to avoid data loss (comments and trailing commas are not "
                 "preserved); fix the file or add this server manually",
@@ -633,7 +633,7 @@ class MCPClientAdapter(ABC):
             )
             return None
         if self.mcp_servers_key in config and not isinstance(config[self.mcp_servers_key], dict):
-            _rich_warning(
+            library_logger().warning(
                 f"Could not parse {config_path}: {self.mcp_servers_key} must be "
                 "a JSON object -- skipping config write to avoid data loss; "
                 "fix the file or add this server manually",
@@ -1420,7 +1420,7 @@ class MCPClientAdapter(ABC):
                 if var_id in seen:
                     continue
                 seen.add(var_id)
-                _rich_warning(
+                library_logger().warning(
                     f"${{input:{var_id}}} in server "
                     f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
@@ -1745,7 +1745,7 @@ class MCPClientAdapter(ABC):
             return server_info_cache[server_url]
         server_info = self.registry_client.find_server_by_reference(server_url)
         if not server_info:
-            _rich_error(f"Error: MCP server '{server_url}' not found in registry")
+            library_logger().error(f"MCP server '{server_url}' not found in registry")
             return None
         return server_info
 
@@ -1983,7 +1983,7 @@ class MCPClientAdapter(ABC):
         ]
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
-            _rich_warning(
+            library_logger().warning(
                 f"Required environment variables have no default value and cannot be "
                 f"prompted in non-interactive mode: {var_names}. Set them in your "
                 "environment and rerun `apm install`."
@@ -2042,7 +2042,7 @@ class MCPClientAdapter(ABC):
             elif default_value:
                 resolved[name] = default_value
             elif required:
-                _rich_warning(
+                library_logger().warning(
                     f"Required environment variable '{name}' could not be resolved. "
                     f"The MCP server may not function correctly. Set {name} in your "
                     "environment and rerun `apm install`."

@@ -67,11 +67,11 @@ def list():  # noqa: F811
         runtimes = manager.list_runtimes()
 
         try:
-            from rich.table import Table  # type: ignore
+            from apm_cli.utils.console import new_table
 
             console = _get_console()
             # Create a nice table for runtimes
-            table = Table(
+            table = new_table(
                 title=" Available Runtimes",
                 show_header=True,
                 header_style="bold cyan",

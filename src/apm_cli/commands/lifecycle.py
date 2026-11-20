@@ -64,15 +64,14 @@ def lifecycle(ctx: click.Context) -> None:
 
     try:
         from rich.markup import escape
-        from rich.table import Table
 
-        from apm_cli.utils.console import _get_console
+        from apm_cli.utils.console import _get_console, new_table
 
         console = _get_console()
         if console is None:
             raise ImportError("Rich console unavailable")
 
-        table = Table(
+        table = new_table(
             title="Lifecycle Scripts",
             show_header=True,
             header_style="bold cyan",

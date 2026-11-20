@@ -112,6 +112,7 @@ def run_service_integrations(
     )
     prepared_lsp.require_capable_target()
     prepared_mcp = None
+    resolved_mcp_targets = None
     frozen_unrecorded: frozenset[tuple[str, str]] = frozenset()
     if getattr(ctx, "frozen", False) is True:
         from apm_cli.install.mcp.integration import prepare_mcp_integration
@@ -119,8 +120,8 @@ def run_service_integrations(
         from apm_cli.integration.lsp_integrator import LSPIntegrator
         from apm_cli.integration.mcp_integrator import MCPIntegrator
         from apm_cli.integration.mcp_integrator_install import (
-            _resolve_target_runtimes,
             mcp_servers_for_runtime,
+            resolve_mcp_targets,
         )
 
         prepared_mcp = prepare_mcp_integration(
@@ -140,8 +141,9 @@ def run_service_integrations(
             no_policy=ctx.no_policy,
             claude_native_keys=claude_native_keys,
         )
-        mcp_targets = (
-            _resolve_target_runtimes(
+        # Resolved (and announced) once: the MCP install below reuses it.
+        resolved_mcp_targets = (
+            resolve_mcp_targets(
                 runtime=ctx.runtime,
                 exclude=ctx.exclude,
                 apm_config=apm_config,
@@ -155,8 +157,9 @@ def run_service_integrations(
                 console=None,
             )
             if should_install_mcp and prepared_mcp.dependencies
-            else []
+            else None
         )
+        mcp_targets = list(resolved_mcp_targets.runtimes or ()) if resolved_mcp_targets else []
         # The command's structural frozen check already required this baseline.
         if existing_lock is None:
             raise RuntimeError("Frozen service integration requires the checked lockfile")
@@ -218,6 +221,7 @@ def run_service_integrations(
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             pre_install_lock=existing_lock,
             frozen=getattr(ctx, "frozen", False) is True,
+            resolved_targets=resolved_mcp_targets,
         )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

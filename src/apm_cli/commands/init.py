@@ -551,22 +551,16 @@ def _perform_init(
                 "Author your own plugin:         apm pack --format agent-plugin",
             ]
 
-        # Agentrc integration (#518): suggest agentrc when no instructions exist.
-        # Only applies to consumer init (not plugin mode).
-        agentrc_tip: str | None = None
+        # Agentrc integration (#518): when agentrc is already installed and no
+        # instructions exist, name its step. Consumer init only (not plugin
+        # mode); the default path names APM steps only (#4089).
         if not plugin and source == "init":
             agentrc_installed, has_instructions = _detect_agentrc(project_root)
-            if not has_instructions:
-                if agentrc_installed:
-                    next_steps.insert(
-                        1,
-                        "Generate agent instructions:     agentrc init",
-                    )
-                else:
-                    agentrc_tip = (
-                        "Tip: Use agentrc to generate tailored agent instructions "
-                        "from your codebase. https://github.com/microsoft/agentrc"
-                    )
+            if agentrc_installed and not has_instructions:
+                next_steps.insert(
+                    1,
+                    "Generate agent instructions:     agentrc init",
+                )
 
         try:
             _rich_panel(
@@ -578,9 +572,6 @@ def _perform_init(
             logger.progress("Next steps:")
             for step in next_steps:
                 click.echo(f"  * {step}")
-
-        if agentrc_tip:
-            logger.progress(agentrc_tip, symbol="info")
 
         # Codex tip: suggest agent-skills target when .codex/ exists
         if Path(".codex").is_dir():

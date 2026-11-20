@@ -65,9 +65,9 @@ def _display_single_file_summary(
 
         import os
 
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title="Compilation Summary",
             show_header=True,
             header_style="bold cyan",
@@ -146,9 +146,9 @@ def _display_validation_errors(errors):
     try:
         console = _get_console()
         if console:
-            from rich.table import Table
+            from apm_cli.utils.console import new_table
 
-            error_table = Table(
+            error_table = new_table(
                 title="[x] Primitive Validation Errors",
                 show_header=True,
                 header_style="bold red",

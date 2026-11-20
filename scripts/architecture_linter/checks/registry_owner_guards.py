@@ -19,7 +19,8 @@ registry-delegation-policy-target-      Compilation-target policy judges
 projection                              EffectiveTargetDecision.canonical_targets
 registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
                                         owner check; #3754 policy discovery
-                                        returns diagnostics as data
+                                        returns diagnostics as data; #4089
+                                        adapters emit through CommandLogger
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
 registry-delegation-build-id-verification Build IDs are verified in their
@@ -52,6 +53,9 @@ from scripts.architecture_linter.checks.python_semantics import (
     binding_nodes,
     direct_definitions,
     import_bound_name,
+)
+from scripts.architecture_linter.checks.registry_output_guards import (
+    library_output_findings,
 )
 from scripts.architecture_linter.checks.registry_shared import (
     _SRC,
@@ -1031,45 +1035,18 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
 def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
     """User-facing output must route through the CommandLogger / console owner.
 
-    Combines the AC12 doctor-status guard with the #3754 policy-discovery
-    guard; both report under ``registry_delegation.output_diagnostics``.
+    Combines the AC12 doctor-status guard, the #3754 policy-discovery guard
+    and the #4089 library-output guard (MCP client adapters and the safe
+    installer emit through CommandLogger); all report under
+    ``registry_delegation.output_diagnostics``.
     """
     rule_id = "registry_delegation.output_diagnostics"
     return (
         *_doctor_status_findings(provider, rule_id),
         *_target_error_status_findings(provider, rule_id),
         *_policy_discovery_output_findings(provider, rule_id),
-        *_rich_console_construction_findings(provider, rule_id),
+        *library_output_findings(provider, rule_id),
     )
-
-
-_CONSOLE_OWNER = "src/apm_cli/utils/console.py"
-_RICH_CONSOLE_IMPORT = re.compile(r"^\s*from\s+rich\.console\s+import\b.*\bConsole\b")
-_RICH_CONSOLE_CALL = re.compile(r"(?<![\w.])(?:rich\.console\.)?Console\(")
-
-
-def _rich_console_construction_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
-    """Rich consoles come from utils/console.py so tables and panels stay ASCII (#3994)."""
-    findings: list[Violation] = []
-    for path in _python_paths(provider, under=_SRC):
-        if path == _CONSOLE_OWNER:
-            continue
-        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
-        if failures:
-            findings.extend(failures)
-            continue
-        findings.extend(
-            violation(
-                rule_id,
-                path,
-                "build Rich consoles with apm_cli.utils.console.new_console() or "
-                "_get_console(); a direct rich Console renders Unicode boxes",
-                line=number,
-            )
-            for number, line in enumerate(facts.lines, start=1)
-            if _RICH_CONSOLE_IMPORT.search(line) or _RICH_CONSOLE_CALL.search(line)
-        )
-    return findings
 
 
 def _target_error_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
@@ -1980,7 +1957,8 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-output-diagnostics",),
         description=(
             "User-facing status symbols must come from utils/console.py STATUS_SYMBOLS; "
-            "policy discovery returns diagnostics as data, not logger output."
+            "policy discovery returns diagnostics as data, not logger output; MCP client "
+            "adapters and the safe installer emit through CommandLogger."
         ),
         check=_check_output_diagnostics,
     ),

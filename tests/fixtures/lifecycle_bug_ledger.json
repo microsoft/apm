@@ -529,6 +529,21 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4089,
+      "fixed_in": "0.37.0",
+      "summary": "Install and init output repeated or misreported events: install --frozen resolved and announced MCP targets twice, a skills/ bundle printed two skill lines, the Codex, Gemini and Kiro adapters echoed a second success line outside CommandLogger, default init printed a third-party tip, and install --mcp printed the absolute manifest path.",
+      "failure_modes": ["observation", "outcome", "portability"],
+      "properties": ["outcome.status_matches_state", "portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_command_output_owner_e2e.py::test_frozen_install_announces_mcp_targets_once",
+        "tests/integration/test_command_output_owner_e2e.py::test_skill_bundle_reports_one_line_per_package",
+        "tests/integration/test_command_output_owner_e2e.py::test_mcp_adapter_success_is_reported_once",
+        "tests/integration/test_command_output_owner_e2e.py::test_default_init_prints_no_third_party_tip",
+        "tests/integration/test_command_output_owner_e2e.py::test_install_mcp_names_the_manifest_relatively",
+        "tests/integration/test_architecture_owner_rule_mutations.py::test_output_owner_guards_catch_bypasses"
+      ]
     }
   ],
   "lifecycle_contracts": [

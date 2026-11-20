@@ -238,11 +238,11 @@ def config(ctx):
         logger = CommandLogger("config")
         try:
             # Lazy import rich table
-            from rich.table import Table  # type: ignore
+            from apm_cli.utils.console import new_table
 
             console = _get_console()
             # Create configuration display
-            config_table = Table(
+            config_table = new_table(
                 title="Current APM Configuration",
                 show_header=True,
                 header_style="bold cyan",

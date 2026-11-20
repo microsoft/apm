@@ -170,7 +170,7 @@ class TestConfigureMcpServer:
         result = adapter.configure_mcp_server("")
         assert result is False
         captured = capsys.readouterr()
-        assert "Error" in captured.out
+        assert "server_url cannot be empty" in captured.out
 
     def test_server_not_in_registry_raises_value_error(self, tmp_path):
         adapter = _make_adapter(tmp_path)
@@ -614,7 +614,7 @@ class TestWarnOnLegacyAngleVars:
         # No warning expected
 
     def test_angle_var_emits_warning(self, capsys, tmp_path):
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             VSCodeClientAdapter._warn_on_legacy_angle_vars({"K": "<MY_TOKEN>"}, "my-server", "env")
         mock_warn.assert_called_once()
         call_text = mock_warn.call_args[0][0]
