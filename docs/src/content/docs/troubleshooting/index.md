@@ -91,7 +91,9 @@ See [SSL / TLS issues](./ssl-issues/).
 
 `--frozen` installs exactly what `apm.lock.yaml` records and never rewrites it. It fails when
 the lockfile is missing, when `apm.yml` changed without a lockfile update, or when a deployed
-file differs from its locked hash. Reproduce it locally, then fix and commit:
+file differs from its locked hash; in that case nothing is written. For edited files, keep
+the change with `apm export-patch`, then delete the files and rerun `apm install`, or run
+`apm install --force`. Otherwise, reproduce it locally, then fix and commit:
 
 ```bash frame="terminal"
 apm install --frozen

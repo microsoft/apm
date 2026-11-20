@@ -68,10 +68,13 @@ records what the proxy serves at that moment, so review the lockfile diff like a
 From then on, archives the proxy serves are checked against the locked content hashes,
 so a proxy that alters a package later is caught.
 
-**What the proxy does not carry.** Azure DevOps dependencies, MCP registry lookups and
-the `apm-policy.yml` fetch go direct. With `PROXY_REGISTRY_ONLY=1`, Azure DevOps
-dependencies fail rather than download direct; MCP registry lookups and the policy fetch
-still go direct. Marketplace files go through the proxy.
+**What the proxy does not carry.** The `apm-policy.yml` fetch always goes direct: it is
+the governance channel. With `PROXY_REGISTRY_ONLY=1`, APM refuses the other routes that
+would bypass the proxy: Azure DevOps dependencies, lookups in the default MCP registry
+(point `MCP_REGISTRY_URL` or `apm config set mcp-registry-url` at a proxied registry to
+allow them), and marketplace files from Azure DevOps, generic git or URL sources. Without
+`PROXY_REGISTRY_URL`, it refuses every marketplace. GitHub marketplace files go through the
+proxy.
 
 **Version ranges need a listing.** APM downloads an exact ref through the proxy but does
 not list tags through it. With `PROXY_REGISTRY_ONLY=1`, a range such as `^1.2.0` fails with

@@ -14,7 +14,7 @@ Copilot, Claude Code, Cursor and others). APM adds a manifest (`apm.yml`) and a 
 | `npx skills add owner/repo` | `apm install owner/repo` |
 | Claude Code `/plugin marketplace add` and `/plugin install` | `apm marketplace add owner/repo`, then `apm install name@marketplace` |
 | `gh skill install owner/repo skill --pin v1.2.0` | `apm install owner/repo/skills/skill#v1.2.0` |
-| Skills copied into `.github/` or `.claude/` | `apm init --discover`, then `apm init --discover --apply` |
+| Skills copied into `.github/` or `.claude/` | `apm init --discover`, then `apm init --apply` |
 | A hand-edited `.mcp.json` | `apm install --mcp NAME` |
 
 Every command below assumes an `apm.yml` that names your harnesses. If you have none, start with
@@ -90,7 +90,7 @@ apm init --discover
 Then add the references to `apm.yml` and install. In a script, add `--yes` to confirm:
 
 ```bash frame="terminal"
-apm init --discover --apply
+apm init --apply
 apm install
 ```
 

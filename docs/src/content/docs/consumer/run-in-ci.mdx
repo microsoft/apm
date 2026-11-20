@@ -15,15 +15,12 @@ apm audit --ci
 
 - `apm install --frozen` installs exactly what `apm.lock.yaml` records. It
   fails if the lockfile is missing or out of sync with `apm.yml` (source,
-  ref, host, transport or MCP config), and never rewrites it.
+  ref, host, transport or MCP config), and never rewrites it. It also fails, before
+  writing anything, when a deployed file differs from its locked hash.
 - `apm audit --ci` checks the lockfile, replays the install in a scratch
   folder and compares it with the checkout, and scans for hidden Unicode. It
   exits 1 on any failure; the checks are listed in
   [Baseline CI checks](../../reference/baseline-checks/).
-
-If you commit the deployed files, run `apm audit --ci` before the install: `apm install`
-restores some edited managed files, such as instructions, which would hide the
-edit from the audit.
 
 A green run means the files match the lockfile. It says nothing about whether their
 content is harmless; see [The agent supply chain](../../concepts/agent-supply-chain/).

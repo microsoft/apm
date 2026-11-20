@@ -29,11 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `hooks: true` and `mcp: true` approvals still deploy but now warn; run `apm approve <pkg>` to pin them to content. (#3918)
 - `apm lifecycle test --execute` now fires only what an install would: run `apm lifecycle trust` for project scripts; `APM_NO_SCRIPTS` and org `deny_all` apply. (#3988)
 - `apm install -g --target claude` installs Claude plugins intact through Claude settings, including MCP and LSP servers and `bin/` under one approval and org policy; plugins with `monitors/` or `workflows/` are parked with a warning, and loose Claude hooks from older installs need `apm uninstall -g <package>` then reinstall. (closes #3181, #3191, #3290)
-- `apm install --frozen` now fails before deploying when any deployed file was edited, including instructions, agents and commands it used to restore silently; restore with `apm install --force`. (#PRD)
-- `PROXY_REGISTRY_ONLY=1` also refuses default MCP registry lookups and marketplace catalogs the proxy cannot serve; point `MCP_REGISTRY_URL` at a proxied registry. Policy fetches stay direct. (#PRD)
-- `apm install --frozen` now fails before deploying when any deployed file was edited, including instructions, agents and commands it used to restore silently; restore with `apm install --force`. (closes #3994, #4004)
 - `apm install --frozen` now fails before deploying on any edited deployed file, of every primitive type; delete the files, rerun `apm install`, and commit. (closes #3994, #4004)
-- `PROXY_REGISTRY_ONLY=1` also refuses default MCP registry lookups and marketplace catalogs the proxy cannot serve; point `MCP_REGISTRY_URL` at a proxied registry. Policy fetches stay direct. (closes #3994, #4004)
+- `PROXY_REGISTRY_ONLY=1` also refuses unsanctioned MCP registries and marketplace catalogs the proxy cannot serve; set `MCP_REGISTRY_URL` to a proxied registry. (closes #3994, #4004)
 
 ### Added
 
@@ -47,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs are rebuilt around the agent supply chain: skills, plugins and MCP quickstart, govern-your-organization journey, diagrams; old URLs redirect. (#3996)
 - Azure DevOps installs tell your Git credential helper about success or HTTP 401, so Git Credential Manager can replace an expired credential; `ADO_APM_PAT` and `az` tokens are never reported. (#3765, #3818)
 - OpenAPM v0.1 adopts amendments 0.1.61-0.1.63 (`vscode` alias, `hermes` and `grok-bot` targets, stricter-wins `fetch_failure`, per-file `.mcp.json` ownership); deprecation windows start 2026-11-19. (#3851, #3865, #3875, #3888, #3905)
-- `apm lock export` identifies GitHub packages as `pkg:github/<owner>/<repo>@<commit>`, adds `#<subpath>` for subdirectory packages, and includes the lock's SHA-256 hashes. (closes #3994, #4004)
+- `apm lock export` identifies GitHub packages as `pkg:github/<owner>/<repo>@<commit>`, adds `#<subpath>` for subdirectory packages, and includes labelled lock hashes. (closes #3994, #4004)
 - `apm init --apply` implies `--discover`, and `apm plugin init` scaffolds a commented `license:` line without choosing a license. (closes #3994, #4004)
 - Tables and panels render in ASCII, and `apm marketplace browse` lists full install names instead of a truncated table. (closes #3994, #4004)
 - `--frozen` help describes its hash check, `audit --policy` is no longer marked experimental, `apm --help` drops `apm run`, and the unpinned warning credits the lockfile. (closes #3994, #4004)
@@ -133,9 +130,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` applies org MCP policy to every server the lock keeps, including transitive and local-bundle servers, and accepts a `bundle:` server only when the lock records its deployment. (#3989)
 - `apm install -g <bundle>` reads executables approvals from the user manifest (`~/.apm/apm.yml`), never the current directory's `apm.yml`, and its skip hint names that file. (#3989)
 - A cold `apm install` of a locked marketplace package with catalog-defined MCP or LSP servers reads only server metadata from the catalog and keeps the locked commit; if the catalog now selects another commit it fails with an `apm update <name>@<marketplace>` hint instead of re-pinning. (#3989)
-- `apm install` output prints each package header above its own files with the ref once, and drops the spurious `bin/` skip and inactive-resolver lines. (#PRD)
-- `apm install` adopts an unmanaged skill directory identical to what it would deploy instead of skipping it, so `apm audit` reports no drift. (#PRD)
-- Codex `marketplace.json` records full `https://` source URLs, and a plugin declaring a missing component names the likely upstream cause. (#PRD)
 - `apm install` output prints each package header above its own files with the ref once, and drops the spurious `bin/` skip and inactive-resolver lines. (closes #3994, #4004)
 - `apm install` adopts an unmanaged skill directory identical to what it would deploy instead of skipping it, so `apm audit` reports no drift. (closes #3994, #4004)
 - Codex `marketplace.json` records full `https://` source URLs, and a plugin declaring a missing component names the likely upstream cause. (closes #3994, #4004)

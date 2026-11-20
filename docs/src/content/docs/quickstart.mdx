@@ -34,15 +34,14 @@ Copilot or Claude Code.
    [i] Targets: claude, copilot  (source: apm.yml)
      [+] vercel-labs/agent-skills #main @1a2c79d4
      |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
-     [!] 1 dependency unpinned: vercel-labs/agent-skills -- add #tag or #sha to
-   prevent drift
+     [!] 1 dependency unpinned: vercel-labs/agent-skills -- apm.lock.yaml pins the
+   resolved commit; add #tag in apm.yml to track releases on update
    [*] Installed 1 APM dependency in 6.5s.
    ```
 
-   The warning is APM being careful. This skill follows the repository's `main` branch, but the
-   lockfile records the exact commit you got, `1a2c79d4`, so teammates get that commit until
-   you choose to update. Add `#<tag>` or `#<commit>` to the install to make the manifest exact
-   too.
+   This skill follows the repository's `main` branch, so APM points out that the lockfile
+   records the exact commit you got, `1a2c79d4`. Teammates get that commit until you run
+   `apm update`. Add `#<tag>` to the install to follow tagged releases instead.
 
 3. **Install a plugin from a marketplace.** A marketplace is a published list of plugins;
    this is Anthropic's.
