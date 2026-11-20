@@ -1,0 +1,79 @@
+# E04 Private hosts (GHE, ADO, GitLab); nightly (#4110). Schema: test_journeys.py.
+# Host shapes come from the world's host aliases: GitHub Enterprise Server
+# ghes.lifecycle.test, Azure DevOps dev.azure.com/<org>/<project>/_git/<repo>,
+# GitLab gitlab.com/<group>/<sub>/<repo>, GHE Cloud lifecycle.ghe.com. Tokens are
+# placeholders; the world's git server accepts any credential, so step 4 uses
+# the documented symptom of a token that cannot see a repository (a 404).
+# Nested GitLab groups use the Git URL form (consumer/install-packages.md).
+schema: 1
+id: E04
+persona: enterprise
+title: Private hosts (GHE, ADO, GitLab)
+docs: [getting-started/authentication.md]
+steps:
+  - n: 1
+    env:
+      GITHUB_HOST: ghes.lifecycle.test
+      GITHUB_APM_PAT_LIFECYCLE: e04-ghes-token-111
+    run: [apm install lifecycle/p-skill#v1.0.0]
+    exit: 0
+    files: [apm.yml, apm.lock.yaml, .gitignore, apm_modules/, .agents/skills/p-skill/SKILL.md]
+    key_lines: ["[+] lifecycle/p-skill #v1.0.0 @<SHA8>", "Skill integrated -> .agents/skills/"]
+    forbidden_lines: [e04-ghes-token-111, Traceback]
+  - n: 2
+    env:
+      GITHUB_HOST: ghes.lifecycle.test
+      ADO_APM_PAT: e04-ado-token-222
+    run: [apm install dev.azure.com/lifecycle/lifecycle/e-ado-skill#v1.0.0]
+    exit: 0
+    key_lines: ["[+] dev.azure.com/lifecycle/lifecycle/e-ado-skill#v1.0.0", "e-ado-skill #v1.0.0"]
+    forbidden_lines: [e04-ado-token-222, Traceback]
+  - n: 3
+    env:
+      GITHUB_HOST: ghes.lifecycle.test
+      GITLAB_HOST: gitlab.com
+      GITLAB_APM_PAT: e04-gitlab-token-333
+    run: ["apm install https://gitlab.com/lifecycle/group/e-gitlab-skill.git#v1.0.0"]
+    exit: 0
+    key_lines: ["[+] gitlab.com/lifecycle/group/e-gitlab-skill#v1.0.0", "lifecycle/group/e-gitlab-skill #v1.0.0"]
+    forbidden_lines: [e04-gitlab-token-333, Traceback]
+  - n: 4
+    env:
+      GITHUB_HOST: ghes.lifecycle.test
+      GITHUB_APM_PAT_LIFECYCLE: e04-bad-token-444
+    run: [apm install lifecycle.ghe.com/lifecycle/p-missing]
+    exit: 1
+    files: []
+    key_lines:
+      - "[x] lifecycle.ghe.com/lifecycle/p-missing -- not accessible or doesn't exist"
+      - GITHUB_APM_PAT_LIFECYCLE
+    forbidden_lines: [e04-bad-token-444, Traceback]
+    remediate:
+      - {advice: apm install --verbose lifecycle.ghe.com/lifecycle/p-missing}
+    rerun: [apm install --verbose lifecycle.ghe.com/lifecycle/p-missing]
+  - n: 5
+    env:
+      GH_TOKEN: e04-gh-token-555
+    run: [apm auth github.com]
+    exit: 0
+    docs:
+      page: getting-started/authentication.md
+      commands: [apm auth github.com]
+      output: ["[+] github.com: using credential from GH_TOKEN.", "[i] Add --check to validate it against the API."]
+    key_lines: ["[+] github.com: using credential from GH_TOKEN."]
+    forbidden_lines: [e04-gh-token-555]
+known_cells:
+  # The failure names the host and a next step but not the credential variable
+  # it sent; '--verbose' (the printed next step) does not name it either.
+  - id: e04-auth-failure-omits-variable
+    law: KEY
+    tracking: "#4174"
+    step: 4
+    match: "GITHUB_APM_PAT_LIFECYCLE"
+  # The hint is 'run with --verbose for auth details' (no runnable 'apm ...'
+  # advice), and the --verbose run prints no auth details.
+  - id: e04-auth-failure-advice-not-actionable
+    law: O8
+    tracking: "#4174"
+    step: 4
+    match: "apm install --verbose lifecycle\\.ghe\\.com/lifecycle/p-missing"

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
 - Internal: lifecycle tests share one hermetic world: nine fixture packages, local git, marketplace, MCP registry and policy services, cloned per test in milliseconds. (#4142)
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
+- Internal: lifecycle tests add security tables and all 25 documented user journeys, each credited only through oracle receipts. (#4156)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 
 ### Fixed

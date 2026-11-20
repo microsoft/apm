@@ -1,0 +1,87 @@
+# J08 Uninstall and cleanup, nightly (#4110). Schema: test_journeys.py.
+# Twins (twins_consumer_a.py): acme/release-kit, acme/live-kit.
+# Setup drops acme/live-kit from apm.yml by hand, so prune has one orphan.
+schema: 1
+id: J08
+persona: consumer
+title: Uninstall and cleanup
+docs: [consumer/install-packages.md, reference/cli/uninstall.md, reference/cli/prune.md]
+world:
+  project: empty
+  setup:
+    - "apm init -y --target copilot,claude"
+    - apm install acme/release-kit#v1.1.0
+    - apm install acme/live-kit#main
+    - "python -c \"from pathlib import Path as P; m = P('apm.yml'); m.write_text(''.join(l for l in m.read_text().splitlines(True) if 'acme/live-kit' not in l))\""
+steps:
+  - n: 1
+    run: [apm uninstall acme/release-kit]
+    exit: 0
+    note: >-
+      no deployed file is user-edited here; with an edited file uninstall exits
+      non-zero before changing apm.yml (reference/cli/uninstall.md)
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - apm_modules/
+      - .agents/skills/review/SKILL.md
+      - .agents/skills/triage/SKILL.md
+      - .claude/skills/review/SKILL.md
+      - .claude/skills/triage/SKILL.md
+    key_lines:
+      - "[i] Removed acme/release-kit from apm_modules/"
+      - "[i] Removed acme/release-kit from dependencies.apm in apm.yml"
+    forbidden_lines: ["Updated <PROJECT>/apm.yml"]
+  - n: 2
+    run: [apm prune --dry-run]
+    exit: 0
+    files: []
+    key_lines: ["acme/live-kit (would be removed)", "[*] Dry run complete - no changes made"]
+  - n: 3
+    run: [apm prune]
+    exit: 0
+    files:
+      - apm_modules/
+      - apm.lock.yaml
+      - .agents/skills/live/SKILL.md
+      - .claude/rules/live.md
+      - .claude/skills/live/SKILL.md
+      - .github/instructions/live.instructions.md
+    key_lines:
+      - "[i] Removed acme/live-kit"
+      - "[i] Cleaned 6 deployed integration file(s)"
+      - "[*] Pruned 1 orphaned package(s)"
+    forbidden_lines: [Reconciled merged hook ownership]
+  - n: 4
+    run: [apm deps clean --yes]
+    exit: 0
+    files: [apm_modules/]
+    key_lines:
+      - "[!] This will remove the entire apm_modules/ directory (0 package(s))"
+      - "[*] Successfully removed apm_modules/ directory"
+  - n: 5
+    run: [apm audit --ci]
+    exit: 0
+    files: []
+    key_lines: ["No dependencies declared -- lockfile not required"]
+known_cells:
+  - id: uninstall-prints-absolute-manifest-path
+    law: FORBID
+    tracking: "#4190"
+    step: 1
+    match: "Updated <PROJECT>/apm.yml"
+  - id: prune-cleanup-unannounced
+    law: O6
+    tracking: "#4193"
+    step: 3
+    match: "live.* changed but no output line announces it"
+  - id: prune-hook-reconcile-without-hooks
+    law: FORBID
+    tracking: "#4204"
+    step: 3
+    match: "Reconciled merged hook ownership"
+  - id: frozen-fails-without-lock-when-audit-passes
+    law: I3
+    tracking: "#4197"
+    step: 5
+    match: "audit --ci exited 0 but install --frozen exited 1"

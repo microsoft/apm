@@ -58,6 +58,14 @@ def _option_names(command: click.Command) -> frozenset[str]:
     return frozenset(names)
 
 
+def _option(command: click.Command, token: str) -> click.Option | None:
+    name = token.split("=", 1)[0]
+    for param in command.params:
+        if isinstance(param, click.Option) and name in (*param.opts, *param.secondary_opts):
+            return param
+    return None
+
+
 @dataclass(frozen=True)
 class Resolution:
     """Where an argv lands in the Click tree, and what it got wrong."""
@@ -75,7 +83,8 @@ class Resolution:
 def resolve(argv: Sequence[str], group: click.Group | None = None) -> Resolution:
     """Resolve *argv* (without the leading ``apm``) against the Click tree.
 
-    Leading words select subcommands while the current command is a group.
+    Leading words select subcommands while the current command is a group;
+    a group's own options (and their values) may precede its subcommand.
     Every later token that starts with ``-`` must be an option of the
     command reached (``--name=value`` is checked by its name). Positional
     values, including placeholders such as ``<name>`` or ``{}``, are not
@@ -84,7 +93,15 @@ def resolve(argv: Sequence[str], group: click.Group | None = None) -> Resolution
     command: click.Command = group or root_group()
     path: list[str] = []
     tokens = list(argv)
-    while tokens and isinstance(command, click.Group) and not tokens[0].startswith("-"):
+    while tokens and isinstance(command, click.Group):
+        if tokens[0].startswith("-"):
+            option = _option(command, tokens[0])
+            if option is None:
+                break
+            token = tokens.pop(0)
+            if "=" not in token and not option.is_flag and not option.count and tokens:
+                tokens.pop(0)
+            continue
         child = _subcommand(command, tokens[0])
         if child is None:
             return Resolution(tuple(path), None, tokens[0], ())
