@@ -541,3 +541,19 @@ def test_retired_codex_route_rejects_bytes_beyond_the_conversion(
         (package / ".apm" / "hooks" / "evil.json").write_text("{}", encoding="ascii")
 
     assert not _accepts_retired_codex_delta(package, lockfile)
+
+
+@pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="symlinks unavailable")
+def test_retired_codex_route_names_the_codex_plugin_on_unsafe_metadata(tmp_path: Path) -> None:
+    package, lockfile = _retired_codex_route_copy(tmp_path)
+    manifest = package / ".codex-plugin" / "plugin.json"
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(manifest.read_bytes())
+    manifest.unlink()
+    try:
+        manifest.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+
+    with pytest.raises(DirectDependencyError, match=r"^Cached Codex plugin '.*contains a symlink"):
+        _accepts_retired_codex_delta(package, lockfile)
