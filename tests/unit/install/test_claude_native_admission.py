@@ -50,15 +50,33 @@ def test_explicit_empty_commands_keep_native_manifest(tmp_path: Path) -> None:
     assert plan.dependency_key == "owner/plugin"
 
 
+def test_user_scope_copilot_only_keeps_existing_route(tmp_path: Path) -> None:
+    assert _plan(_plugin(tmp_path), targets=[SimpleNamespace(name="copilot")]) is None
+
+
 @pytest.mark.parametrize(
-    "kwargs",
+    ("names", "harnesses"),
     [
-        {"scope": InstallScope.PROJECT},
-        {"targets": [SimpleNamespace(name="copilot")]},
+        (("claude",), {"claude"}),
+        (("copilot",), {"copilot"}),
+        (("claude", "copilot", "codex"), {"claude", "copilot"}),
     ],
 )
-def test_non_native_scope_keeps_existing_route(tmp_path: Path, kwargs: dict) -> None:
-    assert _plan(_plugin(tmp_path), **kwargs) is None
+def test_project_scope_admits_claude_and_copilot(
+    tmp_path: Path, names: tuple[str, ...], harnesses: set[str]
+) -> None:
+    from apm_cli.native_plugins.binding import compute_native_plugin_portable_hash
+
+    info = _plugin(tmp_path)
+    plan = _plan(info, scope=InstallScope.PROJECT, targets=[SimpleNamespace(name=n) for n in names])
+    assert plan.harnesses == harnesses
+    # A committed root is checked out on every machine: its pin leaves the exec bit out.
+    assert plan.bundle_hash == compute_native_plugin_portable_hash(info.install_path)
+
+
+def test_project_scope_without_native_harness_keeps_existing_route(tmp_path: Path) -> None:
+    targets = [SimpleNamespace(name="codex")]
+    assert _plan(_plugin(tmp_path), scope=InstallScope.PROJECT, targets=targets) is None
 
 
 def test_incidental_manifest_does_not_override_apm_intent(tmp_path: Path) -> None:

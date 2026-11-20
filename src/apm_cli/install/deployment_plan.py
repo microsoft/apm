@@ -39,7 +39,7 @@ class PackageDeploymentPlan:
         if self.codex_native is not None:
             return []
         targets = list(self.target_selection.targets)
-        native_target_names = {self.claude_native.target_name} if self.claude_native else set()
+        native_target_names = set(self.claude_native.harnesses) if self.claude_native else set()
         return [target for target in targets if target.name not in native_target_names]
 
 
@@ -148,6 +148,9 @@ def prepare_package_deployment(  # noqa: PLR0913
             policy=policy
             if policy is not None
             else getattr(getattr(ctx, "policy_fetch", None), "policy", None),
+            warn=(lambda message: diagnostics.warn(message, package=package_name))
+            if diagnostics is not None
+            else (logger.warning if logger is not None else None),
         )
     )
     projection_targets = PackageDeploymentPlan(

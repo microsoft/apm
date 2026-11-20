@@ -1,11 +1,11 @@
 """APM's only writer of documented native-plugin settings keys.
 
-Harnesses that load a local directory marketplace in place (Claude Code today,
-GitHub Copilot after #3921) read two documented keys from a settings JSON
-document:
+Harnesses that load a local directory marketplace in place (Claude Code and
+GitHub Copilot CLI) read two documented keys from a settings JSON document:
 
 * ``extraKnownMarketplaces.<name>`` -- ``{"source": {"source": "directory",
-  "path": <absolute directory>}}``;
+  "path": <directory>}}``, absolute at user scope and ``./.agents/plugins``
+  (relative to the repository) at project scope;
 * ``enabledPlugins["<plugin>@<name>"]`` -- ``true`` or ``false``.
 
 The caller supplies ownership: the plugin names the previous lockfile
@@ -40,7 +40,7 @@ class SettingsDeclaration:
     """What APM wants one settings document to declare (OpenAPM req-na-004)."""
 
     marketplace: str
-    directory: Path
+    directory: Path | str
     plugins: frozenset[str]
     owned_plugins: frozenset[str] | None
     """Plugins the previous lockfile activated; ``None`` when there was no previous lock."""

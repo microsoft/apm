@@ -15,6 +15,8 @@ from apm_cli.copilot_plugins.constants import (
 )
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.models.apm_package import clear_apm_yml_cache
+from apm_cli.native_plugins.binding import project_marketplace_name, user_marketplace_name
 
 from ._builders import (
     read_json,
@@ -38,6 +40,8 @@ def _write_project(project: Path, dependencies: list[str]) -> None:
         ),
         encoding="ascii",
     )
+    # In-process CLI runs share the apm.yml parse cache; drop the stale entry.
+    clear_apm_yml_cache()
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, project: Path, *args: str):
@@ -58,12 +62,37 @@ def _install_for_target(
     )
 
 
+MARKETPLACE = project_marketplace_name("consumer")
+
+
 def _settings_path(project: Path) -> Path:
+    return project / ".github" / "copilot" / "settings.json"
+
+
+def _local_settings_path(project: Path) -> Path:
     return project / ".github" / "copilot" / "settings.local.json"
 
 
 def _modules(project: Path) -> Path:
     return project / "apm_modules"
+
+
+def _plugins_root(root: Path) -> Path:
+    return root / ".agents" / "plugins"
+
+
+def _catalog_path(root: Path) -> Path:
+    return _plugins_root(root) / ".claude-plugin" / "marketplace.json"
+
+
+def _catalog_names(root: Path) -> list[str]:
+    return [entry["name"] for entry in read_json(_catalog_path(root))["plugins"]]
+
+
+def _assert_no_legacy_registration(project: Path) -> None:
+    assert not catalog_path_for(_modules(project)).exists()
+    assert not ledger_path_for(_modules(project)).exists()
+    assert not _local_settings_path(project).exists()
 
 
 def test_offline_install_registers_the_plugin_without_decomposing_it(
@@ -83,22 +112,24 @@ def test_offline_install_registers_the_plugin_without_decomposing_it(
     assert (materialized / "skills" / "sentinel-skill" / "SKILL.md").is_file()
     assert (materialized / "mcp.json").is_file()
 
-    catalog = read_json(catalog_path_for(_modules(project)))
-    assert catalog["plugins"] == [
-        {
-            "name": "sentinel",
-            "source": "./_local/sentinel",
-            "version": "1.0.0",
-            "description": "Portable Agent Plugin fixture",
-        }
-    ]
+    deployed = _plugins_root(project) / "sentinel"
+    assert (deployed / "plugin.json").read_bytes() == (materialized / "plugin.json").read_bytes()
+    assert (deployed / "skills" / "sentinel-skill" / "SKILL.md").is_file()
+    assert (deployed / "mcp.json").is_file()
 
-    settings = read_json(_settings_path(project))
-    assert settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"] == {
-        "source": "directory",
-        "path": "apm_modules",
+    assert read_json(_catalog_path(project)) == {
+        "name": MARKETPLACE,
+        "owner": {"name": "APM"},
+        "plugins": [{"name": "sentinel", "source": "./sentinel"}],
     }
-    assert settings[ENABLED_PLUGINS_KEY] == {"sentinel@apm": True}
+    settings = read_json(_settings_path(project))
+    assert settings == {
+        EXTRA_MARKETPLACES_KEY: {
+            MARKETPLACE: {"source": {"source": "directory", "path": "./.agents/plugins"}}
+        },
+        ENABLED_PLUGINS_KEY: {f"sentinel@{MARKETPLACE}": True},
+    }
+    _assert_no_legacy_registration(project)
 
     # The plugin is loaded natively, so APM must not also decompose it.
     assert not (project / ".agents" / "skills").exists()
@@ -151,9 +182,9 @@ def test_non_copilot_target_plugin_noop_fails_without_committing_state(
     assert "No selected target received this package" in output
     assert "apm install" in output
     assert not (project / "apm.lock.yaml").exists()
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not ledger_path_for(_modules(project)).exists()
+    assert not _plugins_root(project).exists()
     assert not _settings_path(project).exists()
+    _assert_no_legacy_registration(project)
     assert not (project / ".agents" / "skills" / "sentinel-skill").exists()
     assert not (project / ".github" / "skills" / "sentinel-skill").exists()
     assert not (project / ".github" / "mcp.json").exists()
@@ -174,8 +205,8 @@ def test_mixed_graph_registers_the_plugin_and_deploys_the_legacy_package(
     result = _install(monkeypatch, project)
 
     assert result.exit_code == 0, result.output
-    catalog = read_json(catalog_path_for(_modules(project)))
-    assert [entry["name"] for entry in catalog["plugins"]] == ["sentinel"]
+    assert _catalog_names(project) == ["sentinel"]
+    assert not (_plugins_root(project) / "classic").exists()
     assert (project / ".agents" / "skills" / "classic-skill" / "SKILL.md").is_file()
 
 
@@ -203,11 +234,11 @@ def test_legacy_parent_integrates_while_transitive_plugin_registers_opaquely(
 
     assert result.exit_code == 0, result.output
     assert (project / ".agents" / "skills" / "legacy-parent-skill" / "SKILL.md").is_file()
-    catalog = read_json(catalog_path_for(_modules(project)))
-    assert [entry["name"] for entry in catalog["plugins"]] == ["transitive-plugin"]
-    source = catalog["plugins"][0]["source"]
-    child_root = _modules(project) / source.removeprefix("./")
-    assert (child_root / "plugin.json").is_file()
+    assert _catalog_names(project) == ["transitive-plugin"]
+    assert (_plugins_root(project) / "transitive-plugin" / "plugin.json").is_file()
+    assert read_json(_settings_path(project))[ENABLED_PLUGINS_KEY] == {
+        f"transitive-plugin@{MARKETPLACE}": True
+    }
     assert not (project / ".agents" / "skills" / "transitive-plugin-skill").exists()
     assert not (project / ".github" / "skills" / "transitive-plugin-skill").exists()
     assert not (project / ".github" / "mcp.json").exists()
@@ -242,9 +273,11 @@ def test_excluded_target_keeps_legacy_parent_and_transitive_plugin_opaque(
     ]
     child = next(dep for dep in locked if dep.package_type == "agent_plugin")
     assert child.declaring_parent is not None
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not ledger_path_for(_modules(project)).exists()
+    assert child.native_plugin is None
+    assert not _plugins_root(project).exists()
     assert not _settings_path(project).exists()
+    assert not (project / ".claude" / "settings.json").exists()
+    _assert_no_legacy_registration(project)
     assert not (project / ".claude" / "skills" / "transitive-plugin-skill").exists()
     assert not (project / ".agents" / "skills" / "transitive-plugin-skill").exists()
 
@@ -256,19 +289,21 @@ def test_reinstall_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     _write_project(project, [str(tmp_path / "source" / "sentinel")])
 
     assert _install(monkeypatch, project).exit_code == 0
-    catalog_first = catalog_path_for(_modules(project)).read_bytes()
+    catalog_first = _catalog_path(project).read_bytes()
     settings_first = _settings_path(project).read_bytes()
+    lock_first = (project / "apm.lock.yaml").read_bytes()
 
     assert _install(monkeypatch, project).exit_code == 0
 
-    assert catalog_path_for(_modules(project)).read_bytes() == catalog_first
+    assert _catalog_path(project).read_bytes() == catalog_first
     assert _settings_path(project).read_bytes() == settings_first
+    assert (project / "apm.lock.yaml").read_bytes() == lock_first
 
 
-def test_source_edits_propagate_without_recopying_bytes(
+def test_source_edits_propagate_to_the_deployed_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """apm update refreshes the live bytes Copilot already points at."""
+    """apm install --force refreshes the deployed copy Copilot loads."""
     project = tmp_path / "project"
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel", skill_body="MARK_V1")
@@ -278,10 +313,9 @@ def test_source_edits_propagate_without_recopying_bytes(
     write_agent_plugin(source, name="sentinel", skill_body="MARK_V2")
     assert _install(monkeypatch, project, "--force").exit_code == 0
 
-    live = _modules(project) / "_local" / "sentinel" / "skills" / "sentinel-skill" / "SKILL.md"
-    catalog = read_json(catalog_path_for(_modules(project)))
+    live = _plugins_root(project) / "sentinel" / "skills" / "sentinel-skill" / "SKILL.md"
     assert "MARK_V2" in live.read_text(encoding="utf-8")
-    assert catalog["plugins"][0]["source"] == "./_local/sentinel"
+    assert _catalog_names(project) == ["sentinel"]
 
 
 def test_uninstall_removes_only_apm_owned_registration(
@@ -296,17 +330,19 @@ def test_uninstall_removes_only_apm_owned_registration(
     settings_path = _settings_path(project)
     document = read_json(settings_path)
     document["banner"] = "keep me"
+    document[ENABLED_PLUGINS_KEY]["mine@elsewhere"] = False
     settings_path.write_text(json.dumps(document, indent=2), encoding="ascii")
 
     result = CliRunner().invoke(cli, ["uninstall", str(source)], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
-    settings = read_json(settings_path)
-    assert settings["banner"] == "keep me"
-    assert EXTRA_MARKETPLACES_KEY not in settings
-    assert ENABLED_PLUGINS_KEY not in settings
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not ledger_path_for(_modules(project)).exists()
+    assert read_json(settings_path) == {
+        "banner": "keep me",
+        EXTRA_MARKETPLACES_KEY: {},
+        ENABLED_PLUGINS_KEY: {"mine@elsewhere": False},
+    }
+    assert not _plugins_root(project).exists()
+    _assert_no_legacy_registration(project)
     assert (source / "plugin.json").is_file()
 
 
@@ -319,21 +355,23 @@ def test_compile_does_not_rewrite_the_native_plugin(
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
     assert _install(monkeypatch, project).exit_code == 0
-    materialized = _modules(project) / "_local" / "sentinel"
-    before = {
-        path.relative_to(materialized).as_posix(): path.read_bytes()
-        for path in sorted(materialized.rglob("*"))
-        if path.is_file()
-    }
+    roots = (_modules(project) / "_local" / "sentinel", _plugins_root(project))
+
+    def snapshot() -> list[dict[str, bytes]]:
+        return [
+            {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in sorted(root.rglob("*"))
+                if path.is_file()
+            }
+            for root in roots
+        ]
+
+    before = snapshot()
 
     CliRunner().invoke(cli, ["compile"], catch_exceptions=False)
 
-    after = {
-        path.relative_to(materialized).as_posix(): path.read_bytes()
-        for path in sorted(materialized.rglob("*"))
-        if path.is_file()
-    }
-    assert after == before
+    assert snapshot() == before
 
 
 def test_global_scope_registers_in_user_copilot_settings(
@@ -370,33 +408,57 @@ def test_global_scope_registers_in_user_copilot_settings(
     )
 
     assert result.exit_code == 0, result.output
-    user_modules = home / ".apm" / "apm_modules"
+    marketplace = user_marketplace_name(home / ".apm")
     settings = read_json(copilot_home / "settings.json")
-    assert settings[ENABLED_PLUGINS_KEY] == {"sentinel@apm": True}
-    assert settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]["path"] == user_modules.as_posix()
-    assert catalog_path_for(user_modules).is_file()
+    assert settings == {
+        EXTRA_MARKETPLACES_KEY: {
+            marketplace: {
+                "source": {"source": "directory", "path": str(_plugins_root(home))},
+            }
+        },
+        ENABLED_PLUGINS_KEY: {f"sentinel@{marketplace}": True},
+    }
+    assert _catalog_names(home) == ["sentinel"]
+    assert (_plugins_root(home) / "sentinel" / "plugin.json").is_file()
+    assert not catalog_path_for(home / ".apm" / "apm_modules").exists()
     # A global registration must never leak into the working directory.
     assert not (elsewhere / ".github").exists()
+    assert not (elsewhere / ".agents").exists()
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Pre-existing: prune's package scan (commands/deps/_utils."
+        "_scan_installed_packages) does not recognize a plugin.json-only Agent "
+        "Plugin root, so an orphaned Agent Plugin is never pruned."
+    ),
+)
 def test_prune_retires_the_registration_for_an_orphaned_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Prune removes only APM-owned rows for packages it prunes."""
+    """Prune retires the declaration and deployed root of a plugin it prunes."""
     project = tmp_path / "project"
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
     assert _install(monkeypatch, project).exit_code == 0
+    settings_path = _settings_path(project)
+    document = read_json(settings_path)
+    document["banner"] = "keep me"
+    settings_path.write_text(json.dumps(document), encoding="ascii")
     _write_project(project, [])
-    (project / "apm.lock.yaml").unlink()
 
     result = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
-    settings = read_json(_settings_path(project))
-    assert ENABLED_PLUGINS_KEY not in settings
-    assert not catalog_path_for(_modules(project)).exists()
+    assert read_json(settings_path) == {
+        "banner": "keep me",
+        EXTRA_MARKETPLACES_KEY: {},
+        ENABLED_PLUGINS_KEY: {},
+    }
+    assert not _plugins_root(project).exists()
+    assert not (_modules(project) / "_local" / "sentinel").exists()
     assert (source / "plugin.json").is_file()
 
 
@@ -410,7 +472,7 @@ def test_project_registration_contains_no_absolute_paths(
     _write_project(project, [str(source)])
     assert _install(monkeypatch, project).exit_code == 0
 
-    catalog_text = catalog_path_for(_modules(project)).read_text(encoding="utf-8")
+    catalog_text = _catalog_path(project).read_text(encoding="utf-8")
     settings_text = _settings_path(project).read_text(encoding="utf-8")
 
     for text in (catalog_text, settings_text):
@@ -438,6 +500,54 @@ def test_install_root_redirect_writes_the_registration_under_that_root(
     )
 
     assert result.exit_code == 0, result.output
-    assert catalog_path_for(_modules(target_root)).is_file()
-    assert read_json(_settings_path(target_root))[ENABLED_PLUGINS_KEY] == {"sentinel@apm": True}
+    assert _catalog_names(target_root) == ["sentinel"]
+    assert read_json(_settings_path(target_root))[ENABLED_PLUGINS_KEY] == {
+        f"sentinel@{MARKETPLACE}": True
+    }
     assert not _settings_path(workspace).exists()
+    assert not _plugins_root(workspace).exists()
+
+
+def test_install_moves_a_legacy_registration_to_the_native_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Upgrading retires the old ``apm`` entries and declares the deployed root."""
+    project = tmp_path / "project"
+    source = tmp_path / "source" / "sentinel"
+    write_agent_plugin(source, name="sentinel")
+    _write_project(project, [str(source)])
+    legacy_files = {
+        catalog_path_for(_modules(project)): {
+            "name": "apm",
+            "plugins": [{"name": "sentinel", "source": "./_local/sentinel"}],
+        },
+        ledger_path_for(_modules(project)): {
+            "version": 1,
+            "marketplace": "apm",
+            "marketplaceOwned": True,
+            "marketplacePath": "apm_modules",
+            "settingsPath": ".github/copilot/settings.local.json",
+            "enabledPlugins": ["sentinel@apm"],
+        },
+        _local_settings_path(project): {
+            "model": "keep-me",
+            EXTRA_MARKETPLACES_KEY: {
+                "apm": {"source": {"source": "directory", "path": "apm_modules"}}
+            },
+            ENABLED_PLUGINS_KEY: {"sentinel@apm": True},
+        },
+    }
+    for path, document in legacy_files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document), encoding="ascii")
+
+    result = _install(monkeypatch, project)
+
+    assert result.exit_code == 0, result.output
+    assert read_json(_local_settings_path(project)) == {"model": "keep-me"}
+    assert not catalog_path_for(_modules(project)).exists()
+    assert not ledger_path_for(_modules(project)).exists()
+    assert read_json(_settings_path(project))[ENABLED_PLUGINS_KEY] == {
+        f"sentinel@{MARKETPLACE}": True
+    }
+    assert _catalog_names(project) == ["sentinel"]

@@ -899,16 +899,16 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
 
 
 def _is_native_plugin(
-    package_type: str | None, package_dir: Path, *, user_scope: bool = False
+    package_type: str | None, package_dir: Path, *, claude_native: bool = False
 ) -> bool:
     """A plugin a harness loads intact: an Agent Plugin, a Codex bundle, or a
-    Claude plugin under the user-scope native route (#3290)."""
+    Claude plugin under the native route (user scope #3290, project scope #3921)."""
     if package_type == "agent_plugin":
         return True
     if (package_dir / ".codex-plugin" / "plugin.json").is_file():
         return True
     return (
-        user_scope
+        claude_native
         and package_type in (None, "marketplace_plugin")
         and (package_dir / ".claude-plugin" / "plugin.json").is_file()
     )
@@ -929,6 +929,13 @@ def scan_installed_executable_packages(manifest: Path) -> list:
     from ..core.scope import InstallScope, get_apm_dir
 
     user_scope = manifest.parent.resolve() == get_apm_dir(InstallScope.USER).resolve()
+    if user_scope:
+        claude_native = True
+    else:
+        from ..native_plugins.harnesses import configured_harnesses
+
+        # A project that targets Claude or Copilot loads Claude plugins intact.
+        claude_native = bool(configured_harnesses(manifest.parent))
 
     if not apm_modules.is_dir():
         return results
@@ -992,7 +999,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         depth=locked.depth,
                         content_verified=installed_content_matches_lock(locked, package_dir),
                         native_plugin=_is_native_plugin(
-                            locked.package_type, package_dir, user_scope=user_scope
+                            locked.package_type, package_dir, claude_native=claude_native
                         ),
                     )
                 )
@@ -1034,7 +1041,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                     replace(
                         decl,
                         install_path=str(pkg_dir),
-                        native_plugin=_is_native_plugin(None, pkg_dir, user_scope=user_scope),
+                        native_plugin=_is_native_plugin(None, pkg_dir, claude_native=claude_native),
                     )
                 )
 

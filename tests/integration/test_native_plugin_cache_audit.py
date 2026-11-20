@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.copilot_plugins.registrar import catalog_path_for
+from apm_cli.native_plugins.binding import project_marketplace_name
 from tests.unit.copilot_plugins._builders import write_agent_plugin
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -36,13 +36,18 @@ def _snapshot(root: Path) -> dict[str, object]:
     return result
 
 
+@pytest.mark.parametrize("copy", ["source", "deployed"])
 @pytest.mark.parametrize("with_manifest", [False, True])
 @pytest.mark.parametrize("tamper", ["modified", "missing"])
 @pytest.mark.parametrize("source_kind", ["local", "git"])
 def test_native_cache_tamper_fails_installed_audit(
-    tmp_path: Path, with_manifest: bool, tamper: str, source_kind: str
+    tmp_path: Path, with_manifest: bool, tamper: str, source_kind: str, copy: str
 ) -> None:
-    """Clean/reinstall pass; native cache drift fails without changing any input."""
+    """Clean/reinstall pass; drift in either plugin copy fails without changing any input.
+
+    ``source`` is the fetched package in ``apm_modules``; ``deployed`` is the
+    copy under ``.agents/plugins`` that Copilot loads.
+    """
     project, source, home, scratch = (
         tmp_path / name for name in ("project", "source", "home", "scratch")
     )
@@ -113,26 +118,36 @@ def test_native_cache_tamper_fails_installed_audit(
         assert clean.returncode == 0, clean.stdout + clean.stderr
         assert "no drift detected against lockfile" in clean.stdout
 
-    modules = project / "apm_modules"
-    (entry,) = json.loads(catalog_path_for(modules).read_text(encoding="utf-8"))["plugins"]
-    materialized = modules / entry["source"]
-    materialized.resolve().relative_to(modules.resolve())
+    plugins = project / ".agents" / "plugins"
+    marketplace = json.loads((plugins / ".claude-plugin/marketplace.json").read_text("utf-8"))
+    assert marketplace["name"] == project_marketplace_name("consumer")
+    assert marketplace["plugins"] == [{"name": name, "source": f"./{name}"}]
+    settings_path = project / ".github/copilot/settings.json"
+    settings = settings_path.read_bytes()
     relative = Path("skills") / f"{name}-skill" / "SKILL.md"
-    skill = materialized / relative
     original = (source / relative).read_bytes()
+    modules = project / "apm_modules"
+    (materialized,) = (path.parents[2] for path in modules.rglob(relative.as_posix()))
+    assert (materialized / relative).read_bytes() == original
+    skill = (materialized if copy == "source" else plugins / name) / relative
     assert skill.read_bytes() == original
     assert not (project / ".agents/skills" / f"{name}-skill").exists()
     if tamper == "modified":
-        skill.write_bytes(original + b"\nModified only in native cache.\n")
+        skill.write_bytes(original + b"\nModified only in one native copy.\n")
     else:
         skill.unlink()
 
     changed = audit()
     assert changed.returncode != 0, changed.stdout + changed.stderr
     message = " ".join(changed.stdout.split())
-    assert "Native Agent Plugin cache differs from its replay baseline" in message
-    assert "run 'apm install' to restore the package" in message
+    if copy == "deployed":
+        assert f"Native plugin '{name}' deployed copy differs from apm.lock.yaml" in message
+        assert "Run 'apm install' to restore it." in message
+    else:
+        assert "Native Agent Plugin cache differs from its replay baseline" in message
+        assert "run 'apm install' to restore the package" in message
     assert "Traceback" not in changed.stderr
+    assert settings_path.read_bytes() == settings
     assert (source / relative).read_bytes() == original
     restored = run("install", "--no-policy", "--target", "copilot")
     assert restored.returncode == 0, restored.stdout + restored.stderr

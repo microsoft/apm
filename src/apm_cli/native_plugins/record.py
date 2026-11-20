@@ -23,6 +23,11 @@ class NativePluginRecordError(ValueError):
     """A ``native_plugin`` lock record is malformed."""
 
 
+def is_plugin_name(value: object) -> bool:
+    """Whether *value* is a plugin name a native record (and its root) can carry."""
+    return isinstance(value, str) and _NAME.fullmatch(value) is not None
+
+
 @dataclass(frozen=True)
 class NativePluginRecord:
     """One deployed native plugin owned by one locked dependency."""

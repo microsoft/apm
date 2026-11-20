@@ -104,7 +104,7 @@ def test_native_transition_preserves_retained_target_hook_state(tmp_path: Path, 
     assert {path: path.read_bytes() for path in (native, sidecar) if path.exists()} == before
     assert not ctx.claude_native_plugins
     if state in {"owned", "orphaned"}:
-        assert "apm uninstall --global" in str(error.value)
+        assert "apm uninstall <package>" in str(error.value)
     else:
         failed_path = native if state == "malformed-config" else sidecar
         assert failed_path.name in str(error.value)

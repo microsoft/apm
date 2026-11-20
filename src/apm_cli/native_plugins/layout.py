@@ -83,8 +83,8 @@ def write_catalog(root: Path, marketplace: str, plugins: Iterable[str], *, owned
 
 
 def prune_empty(root: Path) -> None:
-    """Remove the catalog directory and plugins root once nothing is left in them."""
-    for empty in (root / ".claude-plugin", root):
+    """Remove the catalog directory, plugins root and ``.agents`` once they are empty."""
+    for empty in (root / ".claude-plugin", root, root.parent):
         if empty.is_dir() and not empty.is_symlink() and not any(empty.iterdir()):
             empty.rmdir()
 

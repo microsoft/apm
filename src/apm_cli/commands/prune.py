@@ -120,6 +120,7 @@ def prune(ctx, dry_run):
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)
             lockfile = LockFile.read(lockfile_path)
+            native_before = _native_snapshot(lockfile, lockfile_path)
             expected_installed = _build_expected_install_paths(
                 declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
             )
@@ -188,7 +189,9 @@ def prune(ctx, dry_run):
                     "No orphaned packages found. apm_modules/ is clean.",
                     symbol="check",
                 )
-            _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
+            _resync_native_plugins(
+                project_root, apm_modules_dir, lockfile, logger, dry_run, native_before
+            )
             return
 
         planned_pruned_keys = set(missing_orphaned_keys)
@@ -384,7 +387,9 @@ def prune(ctx, dry_run):
                 )
                 sys.exit(1)
 
-        _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
+        _resync_native_plugins(
+            project_root, apm_modules_dir, lockfile, logger, dry_run, native_before
+        )
 
         logger.render_summary()
 
@@ -452,8 +457,45 @@ def prune(ctx, dry_run):
         _retire_native_registration(registration_token)
 
 
-def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run: bool) -> None:
-    """Rebuild APM's Copilot plugin registration from surviving locked state."""
+def _native_snapshot(lockfile, lockfile_path: Path):
+    """Native ownership and lock bytes before prune mutates the lock (req-na-004)."""
+    from ..claude_plugins.registrar import native_ownership
+
+    if lockfile is None:
+        return None
+    return native_ownership(lockfile), lockfile_path.read_bytes()
+
+
+def _reconcile_native_roots(project_root, apm_modules_dir, lockfile, logger, dry_run, before):
+    """Retire native plugins whose records prune removed; restore the lock on failure."""
+    from ..claude_plugins.registrar import reconcile_claude_plugins
+    from ..native_plugins.errors import NativePluginError
+
+    try:
+        reconcile_claude_plugins(
+            modules_dir=apm_modules_dir,
+            scope=InstallScope.PROJECT,
+            previous=before[0] if before is not None else None,
+            lockfile=lockfile,
+            deploy_root=project_root,
+            logger=logger,
+            dry_run=dry_run,
+        )
+    except NativePluginError as exc:
+        if before is not None:
+            # One rollback unit: keep the pruned plugins' ownership for the retry.
+            get_lockfile_path(project_root).write_bytes(before[1])
+        logger.warning(
+            f"Native plugin declarations could not be updated: {exc} The previous "
+            "apm.lock.yaml was restored; fix the cause, then rerun 'apm prune'."
+        )
+
+
+def _resync_native_plugins(
+    project_root, apm_modules_dir, lockfile, logger, dry_run: bool, native_before=None
+) -> None:
+    """Rebuild native plugin declarations and Copilot registration from surviving locked state."""
+    _reconcile_native_roots(project_root, apm_modules_dir, lockfile, logger, dry_run, native_before)
     try:
         from ..agent_plugins.errors import AgentPluginError
         from ..copilot_plugins.registrar import resync_native_plugins

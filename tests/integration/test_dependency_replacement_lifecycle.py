@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.copilot_plugins.registrar import catalog_path_for
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.replacement import parse_replace_block, replacement_rule_to_dict
+from apm_cli.native_plugins.binding import project_marketplace_name
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration.test_unmanaged_skill_preflight_lifecycle import _native_bytes
 from tests.unit.copilot_plugins._builders import write_agent_plugin
@@ -1262,53 +1262,52 @@ def test_replacement_native_plugin_cache_and_changed_output_cleanup(
     fixture.install()
     write_agent_plugin(fixture.local.root, name="local-base", with_mcp=False)
     fixture.local.manifest_path.unlink()
-    settings_path = fixture.consumer.root / ".github/copilot/settings.local.json"
+    root = fixture.consumer.root
+    settings_path = root / ".github/copilot/settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps({"enabledPlugins": {"user-plugin@manual": False}}), encoding="ascii"
-    )
+    user_entry = {"enabledPlugins": {"user-plugin@manual": False}}
+    settings_path.write_text(json.dumps(user_entry), encoding="ascii")
+    marketplace = project_marketplace_name(load_yaml(fixture.consumer.manifest_path)["name"])
     fixture.replace({"path": "../local-base"})
     fixture.install()
-    assert not (fixture.consumer.root / _INSTRUCTION).exists()
-    modules = fixture.consumer.root / "apm_modules"
-    catalog = catalog_path_for(modules)
-    (entry,) = json.loads(catalog.read_text(encoding="utf-8"))["plugins"]
-    assert entry["name"] == "local-base"
-    assert Path(entry["source"]).parts == ("apm-replacement-fixture", "base")
-    installed_skill = modules / entry["source"] / "skills/local-base-skill/SKILL.md"
-    expected_skill = (fixture.local.root / "skills/local-base-skill/SKILL.md").read_bytes()
+    assert not (root / _INSTRUCTION).exists()
+    plugins = root / ".agents/plugins"
+    catalog = plugins / ".claude-plugin/marketplace.json"
+    assert json.loads(catalog.read_text(encoding="utf-8"))["plugins"] == [
+        {"name": "local-base", "source": "./local-base"}
+    ]
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["enabledPlugins"] == {
+        "user-plugin@manual": False,
+        f"local-base@{marketplace}": True,
+    }
+    relative = Path("skills/local-base-skill/SKILL.md")
+    expected_skill = (fixture.local.root / relative).read_bytes()
+    installed_skill = root / "apm_modules/apm-replacement-fixture/base" / relative
     assert installed_skill.read_bytes() == expected_skill
+    assert (plugins / "local-base" / relative).read_bytes() == expected_skill
     clean = fixture.run("audit", "--ci", "--no-policy")
     assert clean.returncode == 0, clean.stdout + clean.stderr
     installed_skill.write_bytes(expected_skill + b"\nTampered selected cache.\n")
-    before = _snapshot(fixture.consumer.root)
+    before = _snapshot(root)
     refused = fixture.run("audit", "--ci", "--no-policy")
     assert refused.returncode != 0, refused.stdout + refused.stderr
     assert "cache differs" in " ".join((refused.stdout + refused.stderr).split())
-    assert _snapshot(fixture.consumer.root) == before
+    assert _snapshot(root) == before
     fixture.install()
     assert installed_skill.read_bytes() == expected_skill
     fixture.replace({"git": _FORK, "ref": fixture.fork_sha})
     fixture.install()
     fixture.assert_bytes("FORK")
     assert not installed_skill.exists()
-    if catalog.exists():
-        assert json.loads(catalog.read_text(encoding="utf-8"))["plugins"] == []
-    assert (
-        json.loads(settings_path.read_text(encoding="utf-8"))["enabledPlugins"][
-            "user-plugin@manual"
-        ]
-        is False
-    )
+    assert not plugins.exists()
+    # The marketplace section APM emptied stays as an empty object (req-na-004).
+    retired = {"extraKnownMarketplaces": {}, **user_entry}
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == retired
     fixture.replace(None)
     fixture.install()
     fixture.assert_bytes("UPSTREAM")
-    assert (
-        json.loads(settings_path.read_text(encoding="utf-8"))["enabledPlugins"][
-            "user-plugin@manual"
-        ]
-        is False
-    )
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == retired
 
 
 def test_local_replacement_update_plans_changed_content_without_dry_run_writes(

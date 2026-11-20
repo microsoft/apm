@@ -26,26 +26,34 @@ from apm_cli.cli import cli
 from apm_cli.copilot_plugins.constants import ENABLED_PLUGINS_KEY, EXTRA_MARKETPLACES_KEY
 from apm_cli.copilot_plugins.registrar import catalog_path_for
 from apm_cli.install.drift import CheckLogger, ReplayConfig, run_replay
+from apm_cli.native_plugins.binding import project_marketplace_name
 from tests.unit.copilot_plugins._builders import write_agent_plugin
 
 pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 
 def _assert_native_registration(project: Path, source: Path, name: str) -> None:
-    """Verify the real native catalog, cache, and settings without legacy projection."""
-    modules = project / "apm_modules"
-    catalog = json.loads(catalog_path_for(modules).read_text(encoding="utf-8"))
-    (entry,) = catalog["plugins"]
-    assert entry["name"] == name
-    materialized = modules / entry["source"]
-    assert (materialized / "plugin.json").read_bytes() == (source / "plugin.json").read_bytes()
+    """Verify the deployed root, its catalog and settings without legacy projection."""
+    marketplace = project_marketplace_name("consumer-app")
+    plugins = project / ".agents" / "plugins"
+    catalog = json.loads((plugins / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+    assert catalog["name"] == marketplace
+    assert catalog["plugins"] == [{"name": name, "source": f"./{name}"}]
+    deployed = plugins / name
+    assert (deployed / "plugin.json").read_bytes() == (source / "plugin.json").read_bytes()
     skill = Path("skills") / f"{name}-skill" / "SKILL.md"
-    assert (materialized / skill).read_bytes() == (source / skill).read_bytes()
-    settings = json.loads(
-        (project / ".github/copilot/settings.local.json").read_text(encoding="utf-8")
-    )
-    assert settings[ENABLED_PLUGINS_KEY] == {f"{name}@apm": True}
-    assert settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]["path"] == "apm_modules"
+    assert (deployed / skill).read_bytes() == (source / skill).read_bytes()
+    # The package's own apm.yml stays in apm_modules; it is not part of the plugin.
+    assert not (deployed / "apm.yml").exists()
+    settings = json.loads((project / ".github/copilot/settings.json").read_text(encoding="utf-8"))
+    assert settings == {
+        EXTRA_MARKETPLACES_KEY: {
+            marketplace: {"source": {"source": "directory", "path": "./.agents/plugins"}}
+        },
+        ENABLED_PLUGINS_KEY: {f"{name}@{marketplace}": True},
+    }
+    assert not (project / ".github/copilot/settings.local.json").exists()
+    assert not catalog_path_for(project / "apm_modules").exists()
     assert not (project / ".agents/skills" / f"{name}-skill").exists()
 
 

@@ -287,11 +287,11 @@ def test_retained_loose_claude_files_block_native_registration(
     claude = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
     ctx = SimpleNamespace(
         targets=[claude, KNOWN_TARGETS["codex"].for_scope(user_scope=True)],
-        claude_native_plugins={"owner/hooks": object()},
+        claude_native_plugins={"owner/hooks": SimpleNamespace(harnesses=frozenset({"claude"}))},
         package_cleanup_retained={"owner/hooks": retained, "owner/other": {".claude/x.md": None}},
     )
     if refused:
-        with pytest.raises(ClaudeNativePluginError, match="loose Claude files") as error:
+        with pytest.raises(ClaudeNativePluginError, match="loose files") as error:
             _refuse_retained_loose_claude_files(ctx)
         assert next(iter(retained)) in str(error.value)
     else:

@@ -3021,17 +3021,17 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
             "return targets",
         ),
         (
-            "src/apm_cli/claude_plugins/registrar.py",
+            "src/apm_cli/native_plugins/reconcile.py",
             "and prior.pin == own.pin",
             "and False",
         ),
         (
-            "src/apm_cli/claude_plugins/registrar.py",
+            "src/apm_cli/native_plugins/reconcile.py",
             "name not in prior_names\n            and existing.exists()",
             "False\n            and existing.exists()",
         ),
         (
-            "src/apm_cli/claude_plugins/registrar.py",
+            "src/apm_cli/native_plugins/reconcile.py",
             "None if previous is None else frozenset(prior_names),",
             "frozenset(prior_names),",
         ),
@@ -3071,9 +3071,19 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
             "return compute_package_hash(root)",
         ),
         (
-            "src/apm_cli/claude_plugins/registrar.py",
-            "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+            "src/apm_cli/native_plugins/reconcile.py",
+            "if binding.fingerprint(source) != own.record.fingerprint:",
             "if False:",
+        ),
+        (
+            "src/apm_cli/native_plugins/reconcile.py",
+            "snapshot.restore()",
+            "pass",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "reconcile_native_plugins(",
+            "_skip_native_plugins(",
         ),
         (
             "src/apm_cli/install/services.py",

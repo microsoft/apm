@@ -467,6 +467,7 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
 
 _RID_CLAUDE = "marketplace-integrations-claude-ownership"
 _CLAUDE_OWNER = "src/apm_cli/claude_plugins/registrar.py"
+_NATIVE_RECONCILE = "src/apm_cli/native_plugins/reconcile.py"
 
 
 def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -497,17 +498,30 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_CLAUDE,
-            _CLAUDE_OWNER,
+            _NATIVE_RECONCILE,
             (
                 "None if previous is None else frozenset(prior_names),",
                 "following = native_ownership(lockfile) if lockfile is not None else {}",
-                "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+                "if binding.fingerprint(source) != own.record.fingerprint:",
                 "and prior.pin == own.pin",
                 "name not in prior_names\n            and existing.exists()",
-                "_migrate_legacy_registration(modules_dir, settings_path, logger)",
                 "write_declaration(",
+                "snapshot.restore()",
             ),
-            "Claude declarations must derive ownership from the lockfile and verify approved bytes",
+            "Native declarations must derive ownership from the lockfile and verify approved bytes",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            _CLAUDE_OWNER,
+            (
+                "_migrate_legacy_registration(modules_dir, claude_settings_path(), logger)",
+                "reconcile_native_plugins(",
+            ),
+            "Claude declarations must go through the shared native reconcile",
         )
     )
     findings.extend(
@@ -567,7 +581,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             "src/apm_cli/install/drift.py",
             (
                 'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
-                'if result.get("native_claude_plugin"):',
+                'if result.get("native_claude_plugin") or lock_dep.native_plugin:',
                 "verify_claude_native_cache(",
                 'local_modules_dir=scratch_root / "apm_modules",',
             ),

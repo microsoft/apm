@@ -8,6 +8,7 @@ the ``--target copilot`` selection and no real ``copilot`` binary ever runs.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from apm_cli.copilot_plugins.constants import ENABLED_PLUGINS_KEY, EXTRA_MARKETP
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 from apm_cli.install.native_plugin_admission import finalize_native_plugin
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.native_plugins.binding import project_marketplace_name
 from apm_cli.security.executables import (
     TRUST_DENIED,
     TRUST_GATED,
@@ -68,12 +70,31 @@ def _install(monkeypatch, project: Path, *args: str):
     )
 
 
+MARKETPLACE = project_marketplace_name("consumer")
+
+
 def _settings_path(project: Path) -> Path:
-    return project / ".github" / "copilot" / "settings.local.json"
+    return project / ".github" / "copilot" / "settings.json"
 
 
 def _modules(project: Path) -> Path:
     return project / "apm_modules"
+
+
+def _plugins_root(project: Path) -> Path:
+    return project / ".agents" / "plugins"
+
+
+def _catalog_path(project: Path) -> Path:
+    return _plugins_root(project) / ".claude-plugin" / "marketplace.json"
+
+
+def _assert_nothing_declared(project: Path) -> None:
+    assert not _settings_path(project).exists()
+    assert not _plugins_root(project).exists()
+    assert not (project / ".github" / "copilot" / "settings.local.json").exists()
+    assert not catalog_path_for(_modules(project)).exists()
+    assert not ledger_path_for(_modules(project)).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -99,10 +120,8 @@ def test_dependency_target_restriction_excludes_native_registration(
 
     assert result.exit_code == 0, result.output
     # The consumer excluded copilot for this dependency, so the settings
-    # document is never created and no catalog is written.
-    assert not _settings_path(project).exists()
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not ledger_path_for(_modules(project)).exists()
+    # document is never created and no plugin root or catalog is written.
+    _assert_nothing_declared(project)
 
 
 def test_project_target_excluding_copilot_skips_plugin_and_installs_the_rest(
@@ -140,8 +159,7 @@ def test_project_target_excluding_copilot_skips_plugin_and_installs_the_rest(
     assert result.exit_code == 0, result.output
     # The ordinary package installs; the plugin is skipped, not fatal.
     assert (_modules(project) / "_local" / "plainpkg").exists()
-    assert not _settings_path(project).exists()
-    assert not catalog_path_for(_modules(project)).exists()
+    _assert_nothing_declared(project)
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +394,7 @@ def test_finalize_drops_native_when_copilot_target_excluded() -> None:
 def test_integrity_gate_failure_leaves_no_registration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A require-hashes failure leaves no marketplace, ledger, or enabledPlugins."""
+    """A require-hashes failure leaves no deployed root, catalog, or settings."""
     from apm_cli.install.errors import PolicyViolationError
 
     project = tmp_path / "project"
@@ -392,50 +410,46 @@ def test_integrity_gate_failure_leaves_no_registration(
     result = _install(monkeypatch, project)
 
     assert result.exit_code != 0
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not ledger_path_for(_modules(project)).exists()
-    assert not _settings_path(project).exists()
+    _assert_nothing_declared(project)
 
 
 # ---------------------------------------------------------------------------
-# Item 6: the ownership ledger self-heals after ``rm -rf apm_modules``.
+# Item 6: the registration self-heals after ``rm -rf apm_modules``.
 # ---------------------------------------------------------------------------
 
 
-def test_reinstall_after_ledger_deletion_self_heals(
+def test_reinstall_after_modules_deletion_self_heals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Deleting the ledger and reinstalling re-adopts instead of colliding."""
+    """Ownership lives in the lock, so a lost apm_modules re-converges cleanly."""
     project = tmp_path / "project"
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
 
     assert _install(monkeypatch, project).exit_code == 0
-    settings = read_json(_settings_path(project))
-    assert settings[ENABLED_PLUGINS_KEY] == {"sentinel@apm": True}
+    settings_before = _settings_path(project).read_bytes()
+    catalog_before = _catalog_path(project).read_bytes()
+    assert read_json(_settings_path(project))[ENABLED_PLUGINS_KEY] == {
+        f"sentinel@{MARKETPLACE}": True
+    }
 
-    # Simulate the common recovery ritual: the ledger lives under the disposable
-    # materialization root, so it is gone while the settings it governs survive.
-    ledger_path_for(_modules(project)).unlink()
-    catalog_path_for(_modules(project)).unlink()
+    # The common recovery ritual: the disposable materialization root is gone
+    # while the declarations and deployed roots it fed survive.
+    shutil.rmtree(_modules(project))
 
-    result = _install(monkeypatch, project, "--force")
+    result = _install(monkeypatch, project)
 
     assert result.exit_code == 0, result.output
-    healed = read_json(_settings_path(project))
-    assert healed[ENABLED_PLUGINS_KEY] == {"sentinel@apm": True}
-    assert healed[EXTRA_MARKETPLACES_KEY]["apm"]["source"] == {
-        "source": "directory",
-        "path": "apm_modules",
-    }
-    assert ledger_path_for(_modules(project)).is_file()
+    assert _settings_path(project).read_bytes() == settings_before
+    assert _catalog_path(project).read_bytes() == catalog_before
+    assert (_plugins_root(project) / "sentinel" / "plugin.json").is_file()
 
 
 def test_foreign_marketplace_value_still_collides(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A non-APM 'apm' marketplace whose value DIFFERS still hard-collides."""
+    """A same-name marketplace pointing elsewhere hard-collides, untouched."""
     project = tmp_path / "project"
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
@@ -443,13 +457,40 @@ def test_foreign_marketplace_value_still_collides(
     settings_path = _settings_path(project)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(
-        json.dumps({EXTRA_MARKETPLACES_KEY: {"apm": {"source": {"source": "git", "url": "x"}}}}),
+        json.dumps(
+            {EXTRA_MARKETPLACES_KEY: {MARKETPLACE: {"source": {"source": "git", "url": "x"}}}}
+        ),
         encoding="ascii",
     )
+    before = settings_path.read_bytes()
 
     result = _install(monkeypatch, project)
 
     assert result.exit_code != 0, result.output
+    assert "with another source" in _flat(result.output)
+    assert settings_path.read_bytes() == before
+    assert not _plugins_root(project).exists()
+
+
+def test_hand_written_apm_marketplace_is_no_longer_reserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The legacy ``apm`` name is the user's now: APM neither collides nor edits it."""
+    project = tmp_path / "project"
+    source = tmp_path / "source" / "sentinel"
+    write_agent_plugin(source, name="sentinel")
+    _write_project(project, [str(source)])
+    user_marketplace = {"source": {"source": "git", "url": "x"}}
+    settings_path = _settings_path(project)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps({EXTRA_MARKETPLACES_KEY: {"apm": user_marketplace}}), encoding="ascii"
+    )
+
+    result = _install(monkeypatch, project)
+
+    assert result.exit_code == 0, result.output
+    assert read_json(settings_path)[EXTRA_MARKETPLACES_KEY]["apm"] == user_marketplace
 
 
 # ---------------------------------------------------------------------------
@@ -650,8 +691,8 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     )
     assert updated.exit_code == 0, updated.output
 
-    catalog = catalog_path_for(project / "apm_modules")
-    settings = project / ".github" / "copilot" / "settings.local.json"
+    catalog = _catalog_path(project)
+    settings = _settings_path(project)
     catalog.unlink()
     settings.unlink()
 
@@ -663,44 +704,6 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     assert restored.exit_code == 0, restored.output
     assert catalog.is_file()
     assert settings.is_file()
-
-
-def test_transitive_dependency_is_not_marked_direct_on_the_install_path() -> None:
-    """The in-flight overlay must not re-derive directness and mark everything direct.
-
-    ``ctx.deps_to_install`` is the full transitive closure, and
-    ``declaring_parent`` is only stamped on local path sub-dependencies, so
-    deriving ``direct`` from it marks every transitive git dependency direct.
-    That defeats both precedence gates in ``discover_native_plugins``: the
-    direct-beats-transitive branch never fires, and the ledger owner-flip
-    refusal (guarded on ``not entry.direct``) lets a transitive package
-    silently re-point an existing registration.
-    """
-    from apm_cli.install.phases.copilot_plugins import resolved_candidates
-
-    def _dep(key: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            get_unique_key=lambda key=key: key,
-            get_install_path=lambda modules, key=key: modules / key,
-            declaring_parent=None,
-            target_subset=None,
-        )
-
-    direct = _dep("owner/declared")
-    transitive = _dep("other/pulled-in")
-    ctx = SimpleNamespace(
-        apm_modules_dir=Path("apm_modules"),
-        lockfile=None,
-        existing_lockfile=None,
-        deps_to_install=[direct, transitive],
-        all_apm_deps=[direct],
-        package_exec_status={},
-    )
-
-    by_key = {candidate.dependency_key: candidate for candidate in resolved_candidates(ctx)}
-
-    assert by_key["owner/declared"].direct is True
-    assert by_key["other/pulled-in"].direct is False
 
 
 def test_unknown_exec_status_is_not_registrable(tmp_path: Path) -> None:
@@ -728,37 +731,6 @@ def test_unknown_exec_status_is_not_registrable(tmp_path: Path) -> None:
     keys = {c.dependency_key for c in candidates_from_lockfile(lockfile, modules)}
 
     assert "github.com/testowner/futureplugin" not in keys
-
-
-def test_in_flight_gated_dependency_is_dropped_from_install_candidates(
-    tmp_path: Path,
-) -> None:
-    """The in-flight overlay re-adds every deps_to_install key AFTER the
-    lockfile gate ran, so its sibling guard is the only thing stopping a
-    package this very install gated from being registered natively.
-    """
-    from apm_cli.install.phases.copilot_plugins import resolved_candidates
-
-    key = "github.com/testowner/gatedplugin"
-
-    def _dep() -> SimpleNamespace:
-        return SimpleNamespace(
-            get_unique_key=lambda: key,
-            get_install_path=lambda modules: modules / "gatedplugin",
-            declaring_parent=None,
-            target_subset=None,
-        )
-
-    ctx = SimpleNamespace(
-        apm_modules_dir=tmp_path / "apm_modules",
-        lockfile=None,
-        existing_lockfile=None,
-        deps_to_install=[_dep()],
-        all_apm_deps=[_dep()],
-        package_exec_status={key: TRUST_GATED},
-    )
-
-    assert [c.dependency_key for c in resolved_candidates(ctx)] == []
 
 
 def test_root_layout_components_absent_from_ir_refuse_native_registration(

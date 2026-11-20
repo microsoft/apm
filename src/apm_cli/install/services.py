@@ -153,10 +153,11 @@ def _check_native_claude_transition(
             "Repair unreadable hook settings or ownership. Inspect: "
             + ", ".join(reconcile_stats.get("failed_paths", []))
             if reconcile_stats.get("errors")
-            else "Remove existing loose hooks with 'apm uninstall --global <package>' first."
+            else "Remove the existing loose hooks first: run 'apm uninstall <package>' (with "
+            "--global at user scope), then install it again."
         )
         raise ClaudeNativePluginError(
-            "Cannot switch to native Claude. Hook settings were preserved. " + recovery
+            "Cannot switch to a native plugin. Hook settings were preserved. " + recovery
         )
 
 
@@ -308,7 +309,7 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     codex_native = deployment_plan.codex_native
     native_claude_plugin = deployment_plan.claude_native
-    native_target_names = {native_claude_plugin.target_name} if native_claude_plugin else set()
+    native_target_names = set(native_claude_plugin.harnesses) if native_claude_plugin else set()
     # Compatibility-only Codex data is opaque to every loose target adapter.
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan

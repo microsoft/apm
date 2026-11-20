@@ -1,9 +1,9 @@
-"""Approving a Claude plugin's hook file takes effect on the next install.
+"""Approving a Claude plugin takes effect on the next project install (#3921).
 
-``apm approve`` pins a local plugin's hook file on its source tree
-(``hooks/hooks.json``) while install gates APM's normalized cache copy
-(``.apm/hooks/hooks.json``). Both name the hook by its publisher path, so
-the pin admits the copy; a copy whose bytes differ still parks.
+A project that targets Claude installs the plugin intact under the committed
+``.agents/plugins/<plugin>/``. ``apm approve`` pins the whole plugin by
+content, so its hooks load from the deployed root once approved; publisher
+content that changes after approval parks the plugin and retires it.
 """
 
 from __future__ import annotations
@@ -55,20 +55,31 @@ def test_approved_claude_plugin_hook_deploys_on_reinstall(
         assert result.returncode == 0, result.stdout + result.stderr
 
     def deployed() -> str:
+        hooks = project / ".agents/plugins/hooky/hooks/hooks.json"
+        return hooks.read_text(encoding="utf-8") if hooks.exists() else ""
+
+    def enabled() -> dict:
         settings = project / ".claude/settings.json"
-        return settings.read_text(encoding="utf-8") if settings.exists() else ""
+        if not settings.exists():
+            return {}
+        return json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins", {})
 
     run("install")
     assert "HOOKY_RAN" not in deployed()
+    assert not enabled()
 
     run("approve", "--all")
     grants = load_yaml(project / "apm.yml")["executables"]["allow"]
-    assert list(next(iter(grants.values()))["hooks"]) == ["hooks/hooks.json"]
+    assert next(iter(grants.values()))["plugin"].startswith("sha256:")
     run("install")
     assert "HOOKY_RAN" in deployed()
+    assert list(enabled().values()) == [True]
+    # Split install is gone: no loose hook entry reaches Claude's settings.
+    assert "HOOKY_RAN" not in (project / ".claude/settings.json").read_text(encoding="utf-8")
 
-    # A normalized copy that no longer matches the approved bytes parks again.
-    copy = next((project / "apm_modules").rglob(".apm/hooks/hooks.json"))
-    copy.write_text(copy.read_text().replace("HOOKY_RAN", "TAMPERED"))
+    # Publisher content that no longer matches the approval parks and retires.
+    hooks = plugin / "hooks/hooks.json"
+    hooks.write_text(hooks.read_text().replace("HOOKY_RAN", "TAMPERED"))
     run("install")
     assert "TAMPERED" not in deployed()
+    assert not enabled()

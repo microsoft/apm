@@ -755,9 +755,13 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 records=codex_records,
                                 **identity,
                             )
-                    if result.get("native_claude_plugin"):
+                    # Every deployed native root (Claude or Agent Plugin) matches its record.
+                    if result.get("native_claude_plugin") or lock_dep.native_plugin:
                         verify_claude_native_cache(
-                            modules_dir=live_modules_dir, locked=lock_dep, source_root=install_path
+                            modules_dir=live_modules_dir,
+                            locked=lock_dep,
+                            source_root=install_path,
+                            project_root=project_root,
                         )
                     replayed_count += 1
     finally:
