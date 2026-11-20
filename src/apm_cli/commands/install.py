@@ -1822,6 +1822,7 @@ def _install_apm_packages(ctx, outcome):
             local_cleanup_pending=_local_cleanup_pending,
             project_root=None if ctx.scope is _InstallScope.USER else ctx.project_root,
             no_policy=ctx.no_policy,
+            scope=ctx.scope,
         )
         return (*prospective_plan.dependency_counts, None)
 

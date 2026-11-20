@@ -360,6 +360,15 @@ def _declared_exec_types(
     return pkg_key, install, native, tuple(exec_types)
 
 
+def _recorded_deployed_types(dep: Any, exec_types: tuple[str, ...]) -> tuple[str, ...]:
+    """The declared types the lock records as deployed: all, or a partial approval's (#3991)."""
+    from apm_cli.security.executables import TRUST_DEPLOYED
+
+    if dep.exec_status in (None, TRUST_DEPLOYED):
+        return exec_types
+    return tuple(exec_type for exec_type in exec_types if exec_type in dep.exec_allowed_types)
+
+
 _ORG_DENY_LAYERS = frozenset({"org-deny-all", "org-deny"})
 _LOCAL_DENY_LAYERS = frozenset({"user-deny", "project-deny"})
 
@@ -377,7 +386,9 @@ def withheld_executable_sources(
 
     Keys are dependency keys; values name the deciding source: ``org policy
     denies <pkg>``, ``<pkg> is denied locally`` or ``<pkg> is no longer
-    approved locally``. Packages the gate still allows are absent, as are
+    approved locally``. Only the types the lock records as deployed are
+    judged, so a partially admitted package counts when an approved type is
+    revoked. Packages the gate still allows are absent, as are
     packages whose decision cannot be read now (an unreadable package, or
     *policy_provider* raising :class:`ExecPolicyUnavailable`). ``install
     --frozen`` names retired files with it and ``--dry-run`` previews them.
@@ -410,9 +421,10 @@ def withheld_executable_sources(
             if not install_path.is_dir():
                 continue
             try:
-                package_key, install, native, exec_types = _declared_exec_types(
+                package_key, install, native, declared = _declared_exec_types(
                     _build_package_info(dep, install_path), key
                 )
+                exec_types = _recorded_deployed_types(dep, declared)
                 layers = set(
                     package_withholding_layers(
                         _trust_ctx() if exec_types else None,

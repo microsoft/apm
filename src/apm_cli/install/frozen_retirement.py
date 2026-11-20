@@ -26,16 +26,30 @@ def _withheld_sources(
     targets: Sequence[Any],
     *,
     no_policy: bool,
+    scope: Any,
 ) -> dict[str, str]:
-    """Ask the exec gate owner why each locked package's executables are withheld."""
-    from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME
+    """Ask the exec gate owner why each locked package's executables are withheld.
+
+    Modules sit beside the lock, but grants come from the manifest the
+    install gate reads: the source project's ``apm.yml`` (``--root DIR``
+    keeps it outside *lockfile_dir*), or ``$APM_HOME/apm.yml`` at user scope.
+    An unscoped install keeps its lock beside its manifest.
+    """
+    from apm_cli.constants import APM_MODULES_DIR
+    from apm_cli.core.scope import get_source_root, is_user_scope, manifest_root
     from apm_cli.install.exec_gate import withheld_executable_sources
     from apm_cli.policy.outcome_routing import resolve_trust_policy
+    from apm_cli.security.executables import project_manifest_path
 
+    manifest_dir = (
+        lockfile_dir
+        if scope is None
+        else manifest_root(get_source_root(scope), user_scope=is_user_scope(scope))
+    )
     return withheld_executable_sources(
         lockfile,
         lockfile_dir / APM_MODULES_DIR,
-        lockfile_dir / APM_YML_FILENAME,
+        project_manifest_path(manifest_dir),
         policy_provider=lambda: resolve_trust_policy(
             deploy_root, no_policy=no_policy, announce=False, raise_blocking_errors=False
         ),
@@ -119,6 +133,7 @@ def frozen_missing_files_error(
         deploy_root,
         targets,
         no_policy=request.no_policy,
+        scope=request.scope,
     )
     candidates = [LockFile.from_yaml(payload) for payload in withheld]
     reasons = []
@@ -147,16 +162,13 @@ def frozen_missing_files_error(
 
 
 def preview_executable_retirements(
-    lockfile: LockFile, lockfile_dir: Path, *, no_policy: bool
+    lockfile: LockFile, lockfile_dir: Path, *, no_policy: bool, scope: Any
 ) -> list[str]:
     """Packages whose deployed executables an install would retire now (``--dry-run``)."""
     from apm_cli.policy.ci_checks import resolve_audit_scope
-    from apm_cli.security.executables import TRUST_DEPLOYED
 
     deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_dir, lockfile)
-    sources = _withheld_sources(lockfile, lockfile_dir, deploy_root, targets, no_policy=no_policy)
-    return [
-        sources[key]
-        for key in sorted(sources)
-        if lockfile.dependencies[key].exec_status in (None, TRUST_DEPLOYED)
-    ]
+    sources = _withheld_sources(
+        lockfile, lockfile_dir, deploy_root, targets, no_policy=no_policy, scope=scope
+    )
+    return [sources[key] for key in sorted(sources)]

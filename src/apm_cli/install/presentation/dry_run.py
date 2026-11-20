@@ -27,6 +27,7 @@ def render_and_exit(
     local_cleanup_pending: Callable[[LockFile], bool] | None = None,
     project_root: Path | None = None,
     no_policy: bool = False,
+    scope: object = None,
 ) -> None:
     """Render the dry-run preview to the user.
 
@@ -118,7 +119,9 @@ def render_and_exit(
 
         # Deny wins (#3944, #4043): install would remove these packages' deployed
         # executables; the preview removes nothing.
-        retirements = preview_executable_retirements(_dryrun_lock, apm_dir, no_policy=no_policy)
+        retirements = preview_executable_retirements(
+            _dryrun_lock, apm_dir, no_policy=no_policy, scope=scope
+        )
         if retirements:
             logger.progress(
                 f"Executables that would be retired (decision changed since apm.lock.yaml): "
