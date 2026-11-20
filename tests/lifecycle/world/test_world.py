@@ -51,7 +51,6 @@ from tests.lifecycle.world.services import (
     policy_org,
 )
 from tests.lifecycle.world.shims import AZ_CALL_LOG, TRAP_EXIT, TRAPPED
-from tests.utils.lifecycle_evidence import OutputOracleError
 
 pytestmark = [
     pytest.mark.e2e,
@@ -917,15 +916,7 @@ def test_exec_gate_on_variant_gates_a_project_without_an_executables_block(
     ("variant", "absent"),
     [
         ("exec-deny-all", ".github/hooks/p-exec-session.json"),
-        pytest.param(
-            "mcp-deny",
-            ".mcp.json",
-            marks=pytest.mark.xfail(
-                strict=True,
-                raises=OutputOracleError,
-                reason="#4267 the blocking org policy line prints twice when MCP is denied",
-            ),
-        ),
+        ("mcp-deny", ".mcp.json"),
     ],
 )
 def test_org_policy_denies_approved_executables(
