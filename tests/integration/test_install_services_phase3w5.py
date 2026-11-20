@@ -105,12 +105,15 @@ def make_skill_result(
     bin_skipped_reason: str | None = None,
     deployed_files: tuple[Path, ...] = (),
 ) -> SkillIntegrationResult:
+    # A created root skill carries its SKILL.md path, as SkillIntegrator reports
+    # it; skills_integrated() counts a root skill only then (a skills/ bundle has none).
+    skill_path = (target_paths or [Path("skills/demo/SKILL.md")])[0] if skill_created else None
     return SkillIntegrationResult(
         target_paths=target_paths or [],
         skill_created=skill_created,
         skill_updated=False,
         skill_skipped=False,
-        skill_path=None,
+        skill_path=skill_path,
         references_copied=0,
         sub_skills_promoted=sub_skills_promoted,
         bin_deployed=bin_deployed,
