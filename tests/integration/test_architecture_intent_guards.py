@@ -6,7 +6,12 @@ import ast
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from scripts.architecture_linter.runner import registered_rules
+
+pytestmark = pytest.mark.component
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RULES_BY_ID = {rule.id: rule for rule in registered_rules()}

@@ -17,7 +17,7 @@ import pytest
 
 from tests.integration._dependency_graph_world import NO_POLICY, World, write_package
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _SSH = "git@gitlab.example.invalid:org/sshpkg.git"
 

@@ -16,7 +16,7 @@ import yaml
 
 from tests.integration._mcp_chain_kit import Chain, http_server
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "upgrade_0361" / "t2" / "v0.36.0"
 _MOVE = "MCP servers that would move from .vscode/mcp.json to .mcp.json:"

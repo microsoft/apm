@@ -17,6 +17,7 @@ import pytest
 from tests.integration._path_corner_world_kit import CornerWorld, output, tree_bytes, write
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,

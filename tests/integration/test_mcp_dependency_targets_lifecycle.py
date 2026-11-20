@@ -19,6 +19,7 @@ from apm_cli.deps.lockfile import LockFile
 from tests.integration._mcp_chain_kit import Chain, stdio_server
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,

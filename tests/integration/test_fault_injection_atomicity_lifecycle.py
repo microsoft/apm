@@ -28,6 +28,7 @@ from tests.integration._fault_injection_kit import (
 from tests.utils.artifact_snapshot import assert_unchanged
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="POSIX permissions and signals"),

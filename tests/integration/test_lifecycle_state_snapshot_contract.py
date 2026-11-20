@@ -13,6 +13,8 @@ from apm_cli.core.deployment_state import (
 from apm_cli.deps.lockfile import LockFile
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 
+pytestmark = pytest.mark.component
+
 
 def _record(
     *,

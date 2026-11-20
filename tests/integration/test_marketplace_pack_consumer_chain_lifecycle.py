@@ -26,7 +26,7 @@ from tests.integration._marketplace_pack_kit import (
 )
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _OUTPUTS = {
     "claude": ".claude-plugin/marketplace.json",

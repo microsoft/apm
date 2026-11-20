@@ -29,6 +29,9 @@ from tests.utils.scenario_rows import (
     ScenarioRow,
 )
 
+pytestmark = pytest.mark.e2e
+
+
 _AUDIT_ARGS = (
     "audit",
     "--ci",

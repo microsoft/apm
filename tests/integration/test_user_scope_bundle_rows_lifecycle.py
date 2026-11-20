@@ -15,6 +15,7 @@ import pytest
 from tests.integration._marketplace_pack_kit import MarketplacePackWorld, skill_md, write
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
 ]

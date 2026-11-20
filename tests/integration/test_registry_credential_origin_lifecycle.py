@@ -26,6 +26,7 @@ from tests.utils.local_github_https_fixture import openssl_executable
 from tests.utils.local_header_capture_proxy import local_header_capture_proxy
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,

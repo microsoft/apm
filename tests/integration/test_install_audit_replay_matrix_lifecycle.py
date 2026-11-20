@@ -43,7 +43,7 @@ from tests.integration._install_audit_replay_kit import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 
 def _git_url(slug: str) -> str:

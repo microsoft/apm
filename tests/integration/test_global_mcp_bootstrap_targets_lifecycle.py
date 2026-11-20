@@ -18,7 +18,7 @@ from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 
 def _env(tmp_path: Path) -> tuple[IsolatedApmEnvironment, dict[str, str], Path]:

@@ -44,6 +44,7 @@ from scripts.architecture_linter.models import Rule, RunReport
 from scripts.architecture_linter.registry import load_registry
 
 pytestmark = [
+    pytest.mark.component,
     # Two module-scoped fixtures below each pay for one expensive, full,
     # all-six-group lint of the real repository. `--dist loadgroup` (the
     # xdist scheduler this repo's sharded integration runs use) is the only

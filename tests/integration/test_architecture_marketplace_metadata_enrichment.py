@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
+
+pytestmark = pytest.mark.component
+
 
 _RULE_ID = "marketplace-integrations-metadata-enrichment"
 _RULES_BY_ID = {rule.id: rule for rule in registered_rules()}

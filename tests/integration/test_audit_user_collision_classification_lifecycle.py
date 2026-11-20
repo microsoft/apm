@@ -21,7 +21,7 @@ from tests.integration._target_compile_kit import (
     write_project,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 INSTALL = ("install", "--no-policy")
 USER_FILES = {

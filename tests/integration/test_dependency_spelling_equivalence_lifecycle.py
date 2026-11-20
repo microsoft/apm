@@ -23,7 +23,7 @@ from tests.integration._dependency_graph_world import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _SPELLINGS: tuple[object, ...] = (
     "https://github.com/test/c.git",

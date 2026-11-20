@@ -14,7 +14,7 @@ import pytest
 
 from tests.integration._dependency_graph_world import NO_POLICY, World, remote, write, write_package
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _SKILL = "---\nname: tool\ndescription: Tool skill\n---\nUse it.\n"
 

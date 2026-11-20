@@ -36,6 +36,7 @@ from tests.utils.local_scripted_https_proxy import (
 )
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),

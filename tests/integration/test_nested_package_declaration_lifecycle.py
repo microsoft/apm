@@ -16,7 +16,7 @@ import pytest
 
 from tests.integration._dependency_graph_world import NO_POLICY, World, remote, write_package
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _REJECTED = "test/mono and its subdirectory package test/mono/packages/x cannot both be declared"
 

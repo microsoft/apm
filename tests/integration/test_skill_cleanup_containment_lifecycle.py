@@ -15,6 +15,7 @@ import pytest
 from tests.integration._containment_kit import SKILL, build_containment_kit, output, snapshot
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,

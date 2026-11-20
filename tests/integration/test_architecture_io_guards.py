@@ -7,6 +7,10 @@ import json
 import logging
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def test_sbom_stdout_stays_machine_pure_when_update_is_available(
     tmp_path: Path, monkeypatch

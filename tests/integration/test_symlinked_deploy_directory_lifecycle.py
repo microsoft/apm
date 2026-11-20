@@ -20,6 +20,7 @@ from tests.integration._containment_kit import (
 )
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,

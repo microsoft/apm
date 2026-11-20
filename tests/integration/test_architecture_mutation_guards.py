@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 def test_compiled_output_batch_scans_once_before_writing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

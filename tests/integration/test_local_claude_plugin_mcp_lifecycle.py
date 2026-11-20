@@ -27,6 +27,9 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, McpPolicy
 from tests.utils.materialized_downloader import stub_materialized_downloader
 
+pytestmark = pytest.mark.component
+
+
 _SERVERS = {"demo": {"type": "http", "url": "https://example.com/mcp"}}
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 _PATCH_DOWNLOADER = "apm_cli.deps.github_downloader.GitHubPackageDownloader"

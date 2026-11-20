@@ -25,7 +25,7 @@ from tests.integration._dependency_graph_world import (
     write_package,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 _OTHER = f"{GENERIC_HOST}/test/tool"
 _PORTED_HOST = "github.com:8443"

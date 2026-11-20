@@ -21,7 +21,7 @@ import pytest
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.integration._dependency_graph_world import NO_POLICY, World, remote, set_deps
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 
 def test_update_follows_parent_repin_drop_and_add(tmp_path: Path, apm_binary_path: Path) -> None:

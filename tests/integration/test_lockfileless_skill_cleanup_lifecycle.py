@@ -14,6 +14,7 @@ import pytest
 from tests.integration._lockfile_chain_kit import build_kit, output, skill, write
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,

@@ -27,6 +27,8 @@ from apm_cli.core.lifecycle_scripts import (
     parse_script_file,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _write_yaml(path: Path, data: dict) -> Path:
     """Write *data* as YAML to *path* and return *path*."""

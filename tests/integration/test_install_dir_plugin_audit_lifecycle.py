@@ -17,6 +17,7 @@ import pytest
 from tests.integration._dependency_graph_world import NO_POLICY, World, write, write_package
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,

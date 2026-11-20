@@ -25,6 +25,7 @@ from scripts.architecture_linter.inventory import EXCLUDED_ROOTS
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
 
 pytestmark = [
+    pytest.mark.component,
     pytest.mark.integration,
     # One module-scoped fixture pays for a single filesystem copy of the
     # repository and one linter run per mutation. `--dist loadgroup` (the

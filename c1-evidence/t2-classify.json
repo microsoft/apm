@@ -1,0 +1,12 @@
+{
+ "partition": "train2 classification and placement",
+ "steps_done": [],
+ "folds": {},
+ "decisions": [
+  "Scope: baseline unclassified_modules + misplaced_modules minus open-PR files and tests/quality, tests/fixtures, tests/lifecycle (never-edit).",
+  "Protected test_architecture_* and *_lifecycle* modules: marker-only commit; never moved, even when they spawn processes from tests/unit.",
+  "e2e = module runs the installed CLI (ApmLifecycleRunner, apm_binary_path, apm_engine_command, packaged_sample, run_cli); component = tmp_path, CliRunner, real files, repo file reads, git, http; unit = pure logic with mocks only.",
+  "Modules mixing CliRunner and real-binary tests are classified e2e (module must be uniform)."
+ ],
+ "counts_left": {}
+}

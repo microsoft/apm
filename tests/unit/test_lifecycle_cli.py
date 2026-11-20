@@ -20,6 +20,8 @@ from click.testing import CliRunner
 
 from apm_cli.commands.lifecycle import lifecycle
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

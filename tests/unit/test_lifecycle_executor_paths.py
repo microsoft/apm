@@ -23,6 +23,8 @@ import pytest
 from apm_cli.core import script_executors as se
 from apm_cli.core.lifecycle_scripts import LifecycleEvent, ScriptEntry
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def apm_log_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

@@ -16,6 +16,8 @@ from apm_cli.core.lifecycle_scripts import (
 )
 from apm_cli.core.script_trust import trust_project_scripts
 
+pytestmark = pytest.mark.component
+
 
 def _write_apm_yml(path: Path, sentinel: Path) -> None:
     """Write an apm.yml with a post-install command that creates sentinel.

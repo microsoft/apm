@@ -19,6 +19,7 @@ import pytest
 from tests.integration._fault_injection_kit import build_world, evidence
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="POSIX process groups and signals"),

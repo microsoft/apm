@@ -15,7 +15,7 @@ import pytest
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._marketplace_pack_kit import MarketplacePackWorld, output, skill_md, write
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 
 def test_marketplace_package_category_round_trip(tmp_path: Path, apm_binary_path: Path) -> None:

@@ -14,7 +14,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.lifecycle_smoke]
 
 _REMOTE = "https://github.com/apm-fixtures/versioned-marketplace"
 _SKILL = "---\nname: versioned-skill\ndescription: Versioned package fixture\n---\n# Skill\n"
