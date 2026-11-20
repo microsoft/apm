@@ -1676,6 +1676,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Repository segment validation strips a .git character set again (#3715).",
     ),
     MutationCase(
+        guard_id="contracts-tooling-update-plan-recorded-ref",
+        rule_id="contracts-tooling-update-plan-recorded-ref",
+        path="src/apm_cli/install/plan.py",
+        old="        new_ref = _recorded_ref(dep, old, new_ref)",
+        new="        new_ref = new_ref or None",
+        intent="Update plans compare the resolver's default-branch name with the recorded ref.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-claude-mcp-paths",
         rule_id="mutation_writes.claude_mcp_paths",
         path="src/apm_cli/integration/mcp_integrator.py",
