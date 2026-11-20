@@ -19,7 +19,10 @@ from apm_cli.utils.credential_rendering import (
     render_config_value,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-credential-value-rendering")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-credential-value-rendering", "P-LAW-auth.credentials_isolated"),
+]
 
 _SECRET = "Sentinel0a1b2c3d4e5f6a7b8c9d"
 _URL = f"https://alice:{_SECRET}@reg.example.invalid/apm"

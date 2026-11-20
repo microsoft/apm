@@ -28,6 +28,9 @@ from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as 
 from scripts.architecture_linter.checks.contracts_update_plan_ref import (
     RULES as UPDATE_PLAN_REF_RULES,
 )
+from scripts.architecture_linter.checks.install_approve_command import (
+    RULES as APPROVE_COMMAND_RULES,
+)
 
 RULES = (
     *EXISTING_RULES,
@@ -36,6 +39,7 @@ RULES = (
     *REPLACEMENT_RULES,
     *LOCKFILE_GENERATOR_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
+    *APPROVE_COMMAND_RULES,
     *CI_TOPOLOGY_RULES,
     *LOCAL_PATH_ANCHOR_RULES,
     *UPDATE_PLAN_REF_RULES,

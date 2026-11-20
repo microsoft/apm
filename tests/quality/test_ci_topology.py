@@ -43,6 +43,8 @@ RATCHET_CHECK = "Test Architecture Ratchets"
 RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
+# A job that hits its cap ends "cancelled", which hides the ratchet result.
+RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 5}
 RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
 RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
 ARCHITECTURE_SCALING_TARGET = (
@@ -299,7 +301,7 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
     """Keep each execution's source, environment, selection and deadline."""
     job = workflow_job(ci, job_id)
     assert job["runs-on"] == "ubuntu-24.04"
-    assert job["timeout-minutes"] == 5
+    assert job["timeout-minutes"] == RATCHET_TIMEOUT_MINUTES[job_id]
     assert job["permissions"] == {"contents": "read"}
     assert job.get("env", {}) == {}
     assert all(key not in job for key in ("if", "needs", "continue-on-error", "strategy"))
@@ -429,7 +431,7 @@ def test_provisional_ci_opt_in_is_draft_guarded() -> None:
 
 
 def test_ratchet_executions_are_separate_and_bounded() -> None:
-    """Both original workloads retain independent five-minute execution caps."""
+    """Both original workloads retain independent, pinned execution caps."""
     _assert_ratchet_split(load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml"))
 
 
@@ -595,8 +597,8 @@ def test_duplicate_ratchet_target_fails(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("timeout-minutes", 4),
-        ("timeout-minutes", 6),
+        ("timeout-minutes", -1),
+        ("timeout-minutes", 1),
         ("runs-on", "ubuntu-latest"),
         ("permissions", {"contents": "write"}),
         ("if", "false"),
@@ -606,6 +608,8 @@ def test_duplicate_ratchet_target_fails(
 def test_ratchet_execution_job_drift_fails(
     provisional_ci: WorkflowNode, job_id: str, field: str, value: object
 ) -> None:
+    if field == "timeout-minutes":
+        value = RATCHET_TIMEOUT_MINUTES[job_id] + value
     workflow_job(provisional_ci, job_id)[field] = value
     with pytest.raises(AssertionError):
         _assert_ratchet_split(provisional_ci)
