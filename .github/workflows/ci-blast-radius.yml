@@ -1,0 +1,176 @@
+# Blast-radius PR slice (#4117).
+#
+# plan   -> scripts/blast_radius.py decides slice / full / noop from the PR
+#           diff, the owner registry overlay (modules, families) and the
+#           latest nightly `blast-radius-map` artifact. It fails closed to the
+#           FULL integration suite when the map is missing, malformed, stale
+#           (> 48 h) or future-dated, when the harness changed, when a changed
+#           src/ path has no owner, or when a src/ change selects nothing.
+# shard  -> runs the selection minus lifecycle smoke (smoke is the floor and
+#           runs in its own required job), at most 8 shards.
+# Blast Radius Slice (Linux) -> the required aggregate (merge-gate
+#           EXPECTED_CHECKS, pull_request list only).
+name: Blast Radius Slice
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blast-radius-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  blast-radius-plan:
+    name: Blast Radius Plan (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      shard_count: ${{ steps.plan.outputs.shard_count }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
+    # A missing artifact is not an error here: the planner fails closed.
+    - name: Download latest nightly blast-radius map
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        run_id="$(gh run list -R "$GITHUB_REPOSITORY" --workflow blast-radius-map-nightly.yml \
+          --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)"
+        if [ -n "$run_id" ]; then
+          gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n blast-radius-map -D blast-radius-map || true
+        fi
+
+    - name: Plan the slice (fails closed to the full suite)
+      id: plan
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        mkdir -p build
+        git diff --name-status -M "$BASE_SHA...$HEAD_SHA" > build/blast-radius-changes.txt
+        uv run --frozen --extra dev python scripts/blast_radius.py plan \
+          --map blast-radius-map/blast-radius-map.json \
+          --changes build/blast-radius-changes.txt \
+          --out build/blast-radius-plan.json \
+          --github-output "$GITHUB_OUTPUT" \
+          --summary "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload plan
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: blast-radius-plan
+        path: |
+          build/blast-radius-plan.json
+          build/blast-radius-plan.args
+          build/blast-radius-changes.txt
+        retention-days: 14
+
+  blast-radius-shard:
+    name: Blast Radius Shard ${{ matrix.shard }} (Linux)
+    needs: blast-radius-plan
+    if: needs.blast-radius-plan.outputs.shard_count != '0' && needs.blast-radius-plan.outputs.shard_count != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.blast-radius-plan.outputs.shards) }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '24'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: true
+
+    - name: Install Unix shell startup test runtimes
+      run: bash scripts/ci-apt-install.sh fish zsh
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
+    - name: Download plan
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: blast-radius-plan
+        path: build
+
+    - name: Run the blast-radius selection minus lifecycle smoke
+      env:
+        APM_E2E_TESTS: "1"
+        SHARD_COUNT: ${{ needs.blast-radius-plan.outputs.shard_count }}
+        SHARD_INDEX: ${{ matrix.shard }}
+      run: |
+        mark_expr="$(python -c 'import json; print(json.load(open("build/blast-radius-plan.json"))["mark_expr"])')"
+        uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+          -p scripts.ci_sharding --shard-count "$SHARD_COUNT" --shard-index "$SHARD_INDEX" \
+          --shard-durations .github/ci-durations/linux-x86_64.json \
+          -n 4 --dist loadgroup --durations=20 \
+          -m "$mark_expr" "@build/blast-radius-plan.args"
+
+  blast-radius:
+    name: Blast Radius Slice (Linux)
+    needs: [blast-radius-plan, blast-radius-shard]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+    - name: Require the plan and every shard
+      env:
+        PLAN_RESULT: ${{ needs.blast-radius-plan.result }}
+        SHARD_RESULT: ${{ needs.blast-radius-shard.result }}
+        MODE: ${{ needs.blast-radius-plan.outputs.mode }}
+        SHARD_COUNT: ${{ needs.blast-radius-plan.outputs.shard_count }}
+      run: |
+        if [ "$PLAN_RESULT" != success ]; then
+          echo "::error::Blast-radius plan must succeed; got '$PLAN_RESULT'."
+          exit 1
+        fi
+        if [ "$SHARD_COUNT" = 0 ]; then
+          echo "Blast radius $MODE: nothing beyond the lifecycle smoke floor to run."
+          exit 0
+        fi
+        if [ "$SHARD_RESULT" != success ]; then
+          echo "::error::Every blast-radius shard must succeed; got '$SHARD_RESULT' (mode $MODE)."
+          exit 1
+        fi
