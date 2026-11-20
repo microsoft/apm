@@ -196,6 +196,80 @@ def test_a_receiptless_clone_install_receipts_every_file_quietly(
     apm("audit", "--ci", "--no-policy")
 
 
+def test_a_repeat_install_shows_no_adoption_even_verbose(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-007: receipted, unchanged files are unchanged, not adopted, in --verbose too."""
+    isolated, _project, apm = _setup(tmp_path, apm_binary_path)
+    apm("install", "--no-policy")
+    store = _receipt_store(isolated)
+
+    repeat = apm("install", "--no-policy", "--verbose")
+
+    assert "adopted" not in repeat, repeat
+    assert _receipt_store(isolated) == store
+
+
+_EDITED = {
+    "copilot": ".github/instructions/style.instructions.md",
+    "cursor": ".cursor/rules/style.mdc",
+    "skill": ".agents/skills/demo/SKILL.md",
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_EDITED))
+def test_an_edited_receipted_file_is_kept_with_exit_zero(
+    tmp_path: Path, apm_binary_path: Path, kind: str
+) -> None:
+    """RA-012: an edit a receipt proves is kept and named, exit 0; parity with skills."""
+    from apm_cli.integration.base_integrator import kept_edit_message
+
+    isolated, project, _apm = _setup(tmp_path, apm_binary_path)
+    _write(
+        isolated.work_root / "prims/.apm/skills/demo/SKILL.md",
+        "---\nname: demo\ndescription: Demo skill\n---\nDemo.\n",
+    )
+    targets = ["copilot", "cursor"]
+    for name in targets:
+        (project / (".github" if name == "copilot" else ".cursor")).mkdir(exist_ok=True)
+    dump_yaml(
+        {
+            "name": "consumer",
+            "version": "0.1.0",
+            "targets": targets,
+            "dependencies": {"apm": ["../prims"]},
+        },
+        project / "apm.yml",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    env = isolated.subprocess_env()
+
+    def install():
+        return runner.run(("install", "--no-policy"), cwd=project, env=env)
+
+    first = install()
+    assert first.returncode == 0, first.stdout + first.stderr
+    relative = _EDITED[kind]
+    edited = project / relative
+    edited.write_bytes(edited.read_bytes() + b"EDIT\n")
+    edited_bytes = edited.read_bytes()
+
+    kept = install()
+
+    assert kept.returncode == 0, kept.stdout + kept.stderr
+    message = kept_edit_message(relative, user_scope=False, proven_edit=True)
+    assert message in " ".join(kept.stdout.split()), kept.stdout
+    assert "Kept " not in kept.stderr, kept.stderr
+    assert "no local deployment receipt" not in kept.stdout + kept.stderr
+    assert edited.read_bytes() == edited_bytes
+    store, lock = _receipt_store(isolated), (project / "apm.lock.yaml").read_bytes()
+    repeat = install()
+    assert repeat.returncode == 0, repeat.stdout + repeat.stderr
+    assert edited.read_bytes() == edited_bytes
+    assert _receipt_store(isolated) == store
+    assert (project / "apm.lock.yaml").read_bytes() == lock
+
+
 def test_a_differing_file_is_never_receipted_by_adoption(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

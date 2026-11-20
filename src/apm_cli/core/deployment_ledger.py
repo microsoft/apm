@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import itertools
 import json
 import os
 import sys
@@ -24,6 +23,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.legacy_lock_evidence import git_permits_legacy_adoption, legacy_lock_hashes
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -433,6 +433,10 @@ class DeploymentMaterializationSession:
             and evidence.render_verdict(claim, path, rendered_as=None) == AUTHORIZED
         )
 
+    def receipted_hash(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
+        """The hash this checkout's receipt binds for *path*, else ``None`` (#4360)."""
+        return self._trusted_hash(path, targets, self._write_locator)
+
     def legacy_recorded_hash(self, claim: str) -> str | None:
         """The hash a pre-0.37 lock recorded for *claim*, else ``None`` (#4398)."""
         return self._legacy_hashes.get(claim.replace("\\", "/"))
@@ -681,79 +685,6 @@ class DeploymentMaterializationSession:
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
         cls(project_root, scope, None).retire(deleted)
-
-
-# Locks written before 0.37, whose APM never refused an overwrite for lack of a
-# receipt (#4360), are the only record of what that APM deployed.
-_LOCK_HASH_EVIDENCE_BEFORE = (0, 37)
-
-
-def legacy_lock_hashes(lockfile: LockFile | None) -> dict[str, str]:
-    """Map each claim to its recorded hash when *lockfile* predates 0.37 (#4398).
-
-    A lock written before 0.37 (or one recording no version) comes from an APM
-    that did not require receipt evidence, so its hash is the record of what
-    that APM deployed. A claim two owners record with different hashes is dropped.
-    """
-    if lockfile is None or not _predates_receipt_evidence(lockfile.apm_version):
-        return {}
-    hashes: dict[str, str] = {}
-    conflicts: set[str] = set()
-    recorded = [dep.deployed_file_hashes for dep in lockfile.dependencies.values()]
-    recorded.append(lockfile.local_deployed_file_hashes)
-    for mapping in recorded:
-        for claim, digest in (mapping or {}).items():
-            key = claim.replace("\\", "/")
-            if hashes.setdefault(key, digest) != digest:
-                conflicts.add(key)
-    for key in conflicts:
-        del hashes[key]
-    return hashes
-
-
-def _predates_receipt_evidence(version: str | None) -> bool:
-    if not version:
-        return True
-    parts: list[int] = []
-    for piece in version.split(".")[:2]:
-        digits = "".join(itertools.takewhile(str.isdigit, piece))
-        if not digits:
-            return False
-        parts.append(int(digits))
-    return tuple(parts) < _LOCK_HASH_EVIDENCE_BEFORE
-
-
-def git_permits_legacy_adoption(path: Path) -> bool:
-    """Whether git lets a pre-0.37 lock hash vouch for *path* (#4398).
-
-    A forger can only know committed bytes, and those stay recoverable, so a
-    file git tracks unchanged qualifies, as does one git does not track at all
-    (untracked, ignored, or no repository). A tracked file with a staged or
-    unstaged change that exactly matches the lock is suspicious and does not.
-    Any other git error fails closed.
-    """
-    import subprocess
-
-    env = {**os.environ, "LC_ALL": "C"}
-
-    def git(*args: str) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(
-            ["git", *args], cwd=path.parent, env=env, capture_output=True, check=False, timeout=30
-        )
-
-    try:
-        inside = git("rev-parse", "--is-inside-work-tree")
-        if inside.returncode != 0:
-            return b"not a git repository" in inside.stderr.lower()
-        tracked = git("ls-files", "--error-unmatch", "--", path.name)
-        if tracked.returncode != 0:
-            return b"did not match any file" in tracked.stderr.lower()
-        status = git("status", "--porcelain", "--", path.name)
-    except FileNotFoundError:
-        return True  # no git installed: nothing can track the file
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return status.returncode == 0 and not status.stdout.strip()
 
 
 @contextmanager
