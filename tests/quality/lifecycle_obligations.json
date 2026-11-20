@@ -23689,7 +23689,7 @@
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:761"
+    "src/apm_cli/install/manifest_reconcile.py:763"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "1ad485650147565f0b59e68dcaea9349ecf34251f2dc9427802d1cca1f5dbf0f"
+ "sha256": "104a1bcd97893a636a54d6d182f6992526305b245cd18ee30e1a15abbc88de60"
 }
