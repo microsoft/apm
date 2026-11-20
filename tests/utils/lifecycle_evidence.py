@@ -693,7 +693,8 @@ def _logical_lines(text: str) -> list[str]:
     previous_raw = ""
     for raw in text.splitlines():
         line = raw.rstrip()
-        wrapped = previous_raw.endswith(" ") or len(previous_raw) >= _WRAP_WIDTH
+        # A console wrap never exceeds the width; a longer line is unwrapped output.
+        wrapped = previous_raw.endswith(" ") or len(previous_raw) == _WRAP_WIDTH
         previous_raw = raw
         if not line.strip():
             continue
