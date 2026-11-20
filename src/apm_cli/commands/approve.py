@@ -200,7 +200,9 @@ def approve_cmd(
             return
 
         if not packages:
-            _rich_error("Specify at least one package, or use --pending / --all / --recommended.")
+            logger.refusal(
+                "Specify at least one package, or use --pending / --all / --recommended."
+            )
             sys.exit(1)
 
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)

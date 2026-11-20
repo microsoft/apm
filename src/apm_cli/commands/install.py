@@ -1951,7 +1951,10 @@ def _install_apm_packages(ctx, outcome):
                 if isinstance(e, PolicyViolationError)
                 else f"Failed to install APM dependencies: {e}"
             )
-            logger.error(msg)
+            if isinstance(e, PolicyViolationError):
+                logger.refusal(msg)
+            else:
+                logger.error(msg)
             if not ctx.verbose:
                 logger.progress("Run with --verbose for detailed diagnostics")
             raise InstallFailureAlreadyRendered(msg) from e
@@ -1986,7 +1989,7 @@ def _install_apm_packages(ctx, outcome):
             ),
         )
     except PolicyBlockError:
-        logger.error(
+        logger.refusal(
             "MCP server(s) blocked by org policy. "
             "APM packages remain installed; MCP configs were NOT written."
         )

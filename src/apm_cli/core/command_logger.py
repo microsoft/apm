@@ -144,6 +144,10 @@ class CommandLogger:
         """Log an error."""
         _rich_error(message, symbol=symbol)
 
+    def refusal(self, message: str) -> None:
+        """Render a refusal on stderr, where click reports errors (#3992)."""
+        _rich_error(message, symbol="error", err=True)
+
     def error_detail(self, message: str):
         """Log supporting error context that must remain visible by default."""
         _rich_echo(message)
@@ -890,7 +894,7 @@ class InstallLogger(CommandLogger):
         )
 
         if severity == "block":
-            _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
+            self.refusal(f"Policy violation: {dep_ref} -- {reason}")
             if source:
                 _rich_echo(
                     "  "
@@ -898,6 +902,7 @@ class InstallLogger(CommandLogger):
                         dep_ref, source, remedy=remedy, declared_by=declared_by, rule=rule
                     ),
                     color="dim",
+                    err=True,
                 )
 
     def policy_disabled(self, reason: str):
