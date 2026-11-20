@@ -1,7 +1,6 @@
 {
   "files": {
     "src/apm_cli/claude_plugins/registrar.py": 1,
-    "src/apm_cli/commands/approve.py": 1,
     "src/apm_cli/commands/uninstall/cli.py": 1,
     "src/apm_cli/commands/update.py": 1,
     "src/apm_cli/install/frozen_retirement.py": 1,
