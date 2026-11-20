@@ -558,9 +558,8 @@ class TestCleanupStaleMcp:
     @pytest.mark.parametrize("user_scope", [False, True])
     def test_claude_atomic_failure_retains_live_bytes_and_ownership(self, tmp_path, user_scope):
         """A failed Claude replace cannot precede lock ownership removal."""
-        from types import SimpleNamespace
-
         from apm_cli.core.scope import InstallScope
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
         if not user_scope:
             (tmp_path / ".claude").mkdir()
@@ -587,8 +586,8 @@ class TestCleanupStaleMcp:
         with (
             patch(
                 "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-                return_value=SimpleNamespace(
-                    dependencies=[], configs={}, provenance={}, bundle_owned=frozenset()
+                return_value=CurrentMcpConfigView(
+                    dependencies=(), configs={}, provenance={}, problems=()
                 ),
             ),
             patch(

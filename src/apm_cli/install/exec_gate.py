@@ -454,7 +454,7 @@ def gate_retirements(
     from apm_cli.core.scope import manifest_root
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.policy.outcome_routing import classify_project_policy
-    from apm_cli.security.executables import resolve_project_exec_allow_map
+    from apm_cli.security.executables import effective_exec_map_for_project
     from apm_cli.security.trust import McpAdmission
 
     if lockfile is None:
@@ -477,7 +477,14 @@ def gate_retirements(
 
     def _trust_ctx() -> Any:
         if not trust:
-            allow = resolve_project_exec_allow_map(project_root, apm_package, user_scope=user_scope)
+            # Reuse the policy routed above: a second resolution would report
+            # the same policy miss twice (I9).
+            allow = effective_exec_map_for_project(
+                project_root,
+                user_scope=user_scope,
+                policy=route.policy,
+                fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+            )
             trust.append(getattr(allow, "trust_context", None))
         return trust[0]
 
