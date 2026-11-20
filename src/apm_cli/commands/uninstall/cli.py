@@ -13,6 +13,13 @@ from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile_generator import require_current_cli
+from ...deps.lockfile_write_authority import (
+    LockfileWriter,
+    flush_lockfile_writes,
+    lockfile_writer,
+    remove_lockfile,
+    restore_lockfile_bytes,
+)
 from ...hook_contract import HookContractError
 from ...install.errors import PolicyViolationError
 from ...install.locking import serialized_lifecycle
@@ -126,7 +133,9 @@ def _persist_uninstall_lockfile(
             removal_pending = True
         else:
             ensure_lockfile_writable(lockfile_path)
-            lockfile_path.unlink(missing_ok=True)
+            remove_lockfile(lockfile_path)
+        # Survivors are durable before native registrations change.
+        flush_lockfile_writes()
     except LockfileSymlinkError:
         raise
     except Exception:
@@ -187,7 +196,7 @@ def _persist_lock_then_resync_native(
         lockfile_path=lockfile_path,
     )
     if saved is not None and saved.removal_pending:
-        lockfile_path.unlink(missing_ok=True)
+        remove_lockfile(lockfile_path)
 
 
 def _sync_integrations_for_manifest(
@@ -345,6 +354,7 @@ def _abort_if_retained_target_cleanup_paths(
     outcome.apply_to(lockfile)
     try:
         lockfile.write(lockfile_path)
+        flush_lockfile_writes()
         lock_state = "apm.lock.yaml now records only the files still on disk"
     except OSError as exc:
         lock_state = f"apm.lock.yaml could not be updated ({exc}) and may list removed files"
@@ -558,6 +568,7 @@ def _finish_selected_profile_uninstall(
 )
 @click.pass_context
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.UNINSTALL)
 def uninstall(ctx, packages, dry_run, verbose, global_):
     """Remove APM packages from apm.yml and apm_modules (like npm uninstall).
 
@@ -1179,7 +1190,7 @@ def _resync_native_registration_after_uninstall(
     except ClaudeNativePluginError as exc:
         if native_before is not None and native_before.lock_bytes and lockfile_path is not None:
             # One rollback unit: keep the removed plugins' ownership for the retry.
-            lockfile_path.write_bytes(native_before.lock_bytes)
+            restore_lockfile_bytes(lockfile_path, native_before.lock_bytes)
         raise ClaudeNativePluginError(
             "Package removal may already be complete, but Claude registration did not converge. "
             f"{exc} Reconcile remaining declarations with 'apm install --global' and the "

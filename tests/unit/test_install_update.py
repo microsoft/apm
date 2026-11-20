@@ -5,15 +5,35 @@ and re-fetches the latest content, especially for subdirectory packages.
 
 Also tests the drift detection helpers in ``apm_cli/drift.py``:
 - ``detect_ref_change()`` covers all ref transition cases (None→value, etc.)
-- ``detect_orphans()`` covers full vs partial install
+- ``_orphan_preview()`` covers full vs partial install
 - ``build_download_ref()`` validates locked-SHA vs manifest-ref selection
 """
 
 from unittest.mock import Mock
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.drift import build_download_ref, detect_config_drift, detect_orphans, detect_ref_change
+from apm_cli.drift import build_download_ref, detect_config_drift, detect_ref_change
 from apm_cli.models.apm_package import DependencyReference
+
+
+def _orphan_preview(lockfile, intended, *, only_packages):
+    """Return the deployed files the install orphan decision would remove."""
+    from apm_cli.install.orphans import DeploymentClaims, OrphanOperation, decide_orphan_removal
+
+    if only_packages or not lockfile:
+        return set()
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.INSTALL,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=None,
+        resolved_keys=None,
+        intended=intended,
+        materialized=None,
+        reachability=None,
+        deployment_claims=DeploymentClaims(live_files=None, retained={}),
+    )
+    return {path for files in decision.removed_files.values() for path in files}
 
 
 class TestSkipDownloadWithUpdateFlag:
@@ -516,7 +536,7 @@ class TestRefChangedDetection:
 
 
 class TestOrphanDeployedFilesDetection:
-    """Tests for detect_orphans() in drift.py.
+    """Tests for the install orphan decision (install/orphans.py).
 
     When packages are removed from apm.yml and apm install is run (full install),
     the deployed files should be identified for cleanup.
@@ -556,7 +576,7 @@ class TestOrphanDeployedFilesDetection:
             }
         )
         intended = {"owner/pkg-a", "owner/pkg-b"}
-        orphans = detect_orphans(lockfile, intended, only_packages=None)
+        orphans = _orphan_preview(lockfile, intended, only_packages=None)
         assert orphans == set()
 
     def test_orphaned_files_when_package_removed(self):
@@ -571,7 +591,7 @@ class TestOrphanDeployedFilesDetection:
             }
         )
         intended = {"owner/pkg-a"}  # pkg-removed not in new manifest
-        orphans = detect_orphans(lockfile, intended, only_packages=None)
+        orphans = _orphan_preview(lockfile, intended, only_packages=None)
         assert orphans == {
             ".github/prompts/removed.prompt.md",
             ".github/instructions/removed.instructions.md",
@@ -586,12 +606,12 @@ class TestOrphanDeployedFilesDetection:
             }
         )
         intended = {"owner/pkg-a"}
-        orphans = detect_orphans(lockfile, intended, only_packages=["owner/pkg-a"])
+        orphans = _orphan_preview(lockfile, intended, only_packages=["owner/pkg-a"])
         assert orphans == set()
 
     def test_no_orphans_when_no_lockfile(self):
         """No orphaned files when there is no existing lockfile."""
-        orphans = detect_orphans(None, {"owner/pkg-a"}, only_packages=None)
+        orphans = _orphan_preview(None, {"owner/pkg-a"}, only_packages=None)
         assert orphans == set()
 
     def test_lockfile_merge_drops_orphan_in_full_install(self):

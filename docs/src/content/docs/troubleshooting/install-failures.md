@@ -196,8 +196,8 @@ and lockfiles invalid for other reasons keep their existing behavior.
 
 `apm.lock.yaml` records the APM version that wrote it in `apm_version`. If your
 APM is older, `apm install` (including `--frozen` and `-g`), `apm update`,
-`apm uninstall`, `apm prune`, `apm lock`, `apm audit` and `apm pack` stop before
-changing anything and name both versions:
+`apm uninstall`, `apm prune`, `apm lock`, `apm compile`, `apm audit` and
+`apm pack` stop before changing anything and name both versions:
 
 ```text
 Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.38.0,

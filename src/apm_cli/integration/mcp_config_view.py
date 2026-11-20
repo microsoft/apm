@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -1179,7 +1180,9 @@ def _collect_transitive_compat(
 
     if not modules_root.exists():
         return []
-    lockfile = LockFile.read(lock_path) if lock_path is not None and lock_path.exists() else None
+    lockfile = (
+        LockFile.read(lock_path) if lock_path is not None and lockfile_exists(lock_path) else None
+    )
     if lockfile is None:
         return _collect_unlocked_compat(
             modules_root,

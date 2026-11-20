@@ -1,8 +1,10 @@
-"""Shared JSON baseline lifecycle for bounded test-quality ratchets."""
+"""Shared JSON baseline lifecycle for bounded quality ratchets."""
 
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -28,6 +30,68 @@ def load_baseline(path: Path, *, label: str) -> dict[str, object]:
         raise BaselineError(f"invalid {label} baseline {path}: {error}") from error
     if not isinstance(payload, dict):
         raise BaselineError(f"invalid {label} baseline: root must be an object")
+    return payload
+
+
+def load_baseline_at_ref(
+    root: Path,
+    path: Path,
+    ref: str,
+    *,
+    label: str,
+) -> dict[str, object] | None:
+    """Load the committed baseline at a git ref, or None when absent there.
+
+    Shrink-only ratchets compare the working baseline with the base branch
+    copy so a change cannot grandfather new debt by editing the JSON.
+    """
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError as error:
+        raise BaselineError(f"{label} baseline {path} is outside {root}") from error
+    git = shutil.which("git")
+    if git is None:
+        raise BaselineError("git executable not found")
+    verify = subprocess.run(  # noqa: S603 - fixed git operation, no shell
+        [git, "-C", str(root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if verify.returncode != 0:
+        raise BaselineError(f"unknown git ref for {label} baseline: {ref}")
+    # Only a path absent from the ref's tree means "no baseline yet"; any other
+    # git failure must fail closed instead of skipping the growth check.
+    listed = subprocess.run(  # noqa: S603 - fixed git operation, no shell
+        [git, "-C", str(root), "ls-tree", "--name-only", ref, "--", relative],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if listed.returncode != 0:
+        raise BaselineError(
+            f"cannot list {label} baseline at {ref}: {listed.stderr.strip() or 'git ls-tree failed'}"
+        )
+    if relative not in listed.stdout.splitlines():
+        return None
+    shown = subprocess.run(  # noqa: S603 - fixed git operation, no shell
+        [git, "-C", str(root), "show", f"{ref}:{relative}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if shown.returncode != 0:
+        raise BaselineError(
+            f"cannot read {label} baseline at {ref}: {shown.stderr.strip() or 'git show failed'}"
+        )
+    try:
+        payload = json.loads(shown.stdout)
+    except JSONDecodeError as error:
+        raise BaselineError(f"invalid {label} baseline at {ref}: {error}") from error
+    if not isinstance(payload, dict):
+        raise BaselineError(f"invalid {label} baseline at {ref}: root must be an object")
     return payload
 
 

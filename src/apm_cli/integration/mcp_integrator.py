@@ -33,6 +33,7 @@ from apm_cli.deps.lockfile import (
     get_lockfile_path,
     installed_apm_version,
 )
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
@@ -1239,7 +1240,7 @@ class MCPIntegrator:
         # is MCP state to record. Calls that clear the last server keep the
         # early return: they must not conjure a lockfile for a project that
         # never had one.
-        creating = not lock_path.exists()
+        creating = not lockfile_exists(lock_path)
         if creating and not (mcp_server_names or mcp_configs):
             return
         try:

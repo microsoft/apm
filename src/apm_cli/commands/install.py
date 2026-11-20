@@ -27,6 +27,7 @@ from apm_cli.deps.lockfile_generator import (
     check_current_cli,
     refusal_exit,
 )
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -689,6 +690,7 @@ def _validate_and_add_packages_to_apm_yml(
 # that still patch ``apm_cli.commands.install._warn_*``.
 
 
+@lockfile_writer(LockfileWriter.INSTALL_MCP)
 def _handle_mcp_install(  # noqa: PLR0913
     *,
     mcp_name,
@@ -1261,7 +1263,7 @@ def install(  # noqa: PLR0913
                         else discover_trust_policy(_bundle_project_root)
                     ),
                 )
-                _install_lb(
+                lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(_install_lb)(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
                     target=target,
@@ -1700,6 +1702,7 @@ def install(  # noqa: PLR0913
         ctx.exit(outcome.exit_code)
 
 
+@lockfile_writer(LockfileWriter.INSTALL)
 def _install_apm_packages(ctx, outcome):
     """Execute the APM + transitive MCP installation pipeline.
 

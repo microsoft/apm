@@ -43,6 +43,7 @@ from pathlib import Path
 
 import click
 
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle
 
 from ..core.command_logger import InstallLogger
@@ -172,6 +173,7 @@ def lock(
 
 
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.LOCK)
 def _run_lock(
     *,
     verbose: bool,

@@ -9,6 +9,7 @@ import builtins
 from pathlib import Path
 
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 
 
 def deduplicate_deps(deps: list) -> list:
@@ -51,7 +52,7 @@ def resolve_locked_apm_yml_sources(
     locked_sources: dict[Path, object] | None = None
     direct_paths: builtins.set = builtins.set()
 
-    if lock_path and lock_path.exists():
+    if lock_path and lockfile_exists(lock_path):
         lockfile = LockFile.read(lock_path)
         if lockfile is not None:
             locked_sources = {}

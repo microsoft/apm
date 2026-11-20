@@ -616,6 +616,7 @@ contracts-tooling-lockfile-symlink-write-guard
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-lockfile-write-authority
 contracts-tooling-native-lifecycle-evidence
 contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity

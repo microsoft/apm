@@ -407,6 +407,7 @@ class PromptIntegrator(BaseIntegrator):
                 write_text_lf(target_path, rendered)
             else:
                 links_resolved = self.copy_prompt(source_file, target_path)
+            self.note_rendered_write(target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)

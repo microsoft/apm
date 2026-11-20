@@ -28,6 +28,7 @@ _ROUTES = (
     ("src/apm_cli/commands/update.py", "_run_dep_update", "require_current_cli"),
     ("src/apm_cli/commands/uninstall/cli.py", "uninstall", "require_current_cli"),
     ("src/apm_cli/commands/prune.py", "prune", "require_current_cli"),
+    ("src/apm_cli/commands/compile/cli.py", "_run_compilation", "require_current_cli"),
     ("src/apm_cli/commands/lock.py", "_run_lock", "require_current_cli"),
     ("src/apm_cli/commands/pack.py", "pack_cmd", "check_current_cli"),
     ("src/apm_cli/bundle/local_bundle.py", "_read_bundle_lockfile", "warn_if_newer"),
