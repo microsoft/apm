@@ -14,6 +14,7 @@ from ...core.command_logger import CommandLogger
 from ...deps.lockfile_generator import require_current_cli
 from ...hook_contract import HookContractError
 from ...install.locking import serialized_lifecycle
+from ...install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ...models.apm_package import APMPackage
 from ...models.dependency.selection import manifest_declarations_of
 from ...utils.path_security import PathTraversalError
@@ -62,6 +63,19 @@ def _report_uninstall_outcome(
         or integration_incomplete
         or integration_cleanup_error is not None
     )
+
+
+def _snapshot_compile_inputs(deploy_root, manifest_path, modules_dir, scope):
+    """Snapshot compile-input instructions for the project-scope compile hint."""
+    from ...core.scope import InstallScope
+    from ...models.apm_package import package_target_selection
+
+    if scope is not InstallScope.PROJECT:
+        return None
+    manifest_target = None
+    with contextlib.suppress(Exception):
+        manifest_target = package_target_selection(APMPackage.from_apm_yml(manifest_path))
+    return snapshot_compile_inputs(deploy_root, manifest_target, modules_dir)
 
 
 def _collect_deployed_cleanup_state(
@@ -691,6 +705,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # A failed recursive delete can be partial; retain metadata for retry,
         # rather than claiming that already-deleted files were rolled back.
         refreshed_survivor_keys = builtins.set()
+        compile_inputs = _snapshot_compile_inputs(deploy_root, manifest_path, modules_dir, scope)
         try:
             from ...codex_plugins.registrar import remove_codex_plugins
 
@@ -983,6 +998,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         ]
         if removed_from_modules > 0:
             summary_lines.append(f"Removed {removed_from_modules} package(s) from apm_modules/")
+        if compile_inputs is not None:
+            hint_compile_after_removal(compile_inputs, modules_dir, logger)
         cleanup_incomplete = _report_uninstall_outcome(
             logger,
             summary_lines,
