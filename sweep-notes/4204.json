@@ -1,0 +1,17 @@
+{
+  "changelog": "`apm prune` no longer prints `Reconciled merged hook ownership` when the pruned packages left merged hook configuration unchanged (#4217)",
+  "ledger_row": {
+    "issue": 4204,
+    "fixed_in": "Unreleased",
+    "summary": "apm prune announced merged hook reconciliation for packages that deployed no hooks, so the output described a hook change that never happened.",
+    "failure_modes": ["observation", "outcome"],
+    "properties": ["outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_prune_deployment_ledger_e2e.py::test_prune_reports_hook_reconciliation_only_when_hooks_change"
+    ]
+  },
+  "red": "APM_E2E_TESTS=1 APM_BINARY_PATH=$(uv run which apm) uv run --extra dev pytest tests/integration/test_prune_deployment_ledger_e2e.py -k hook_reconciliation -n 0 -> [no-hooks] FAILED: assert ('[i] Reconciled merged hook ownership for pruned package(s)' in prune.stdout.splitlines()) is False",
+  "green": "same command -> 2 passed (no-hooks and hooks positive control)",
+  "owner": "src/apm_cli/integration/hook_integrator.py (HookIntegrator.reconcile_after_removal reports stats['merged_hooks_changed'] via hook_reintegration.merged_hook_state); src/apm_cli/commands/prune.py renders the line only when it is true",
+  "notes": "Journey J08 s3 known cell prune-hook-reconcile-without-hooks should flip. Pre-existing failure on main unrelated to this change: tests/integration/test_hook_wipe_target_scope_e2e.py::test_zero_write_abort_before_destructive_wipe_on_prune (fails identically with the change stashed). hook_integrator.py is at 2095 lines (limit 2100), so the snapshot helper lives in hook_reintegration.py."
+}
