@@ -54,7 +54,7 @@ not admitted.
 |---|---|---|
 | `--update` | off | Re-resolve dependencies to the latest version or Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutable Git refs must resolve against upstream; APM does not fall back to stale refs from the local bare Git cache. Mutually exclusive with `--frozen`. For interactive use with a confirmation prompt, use [`apm update`](../update/) instead. |
 | `--frozen` | off | Require `apm.lock.yaml`, replay its pins, and never rewrite it. Refuse declaration and local-source drift; verify unavailable package MCP evidence after hydration, before deployment. Fail if any deployed file differs from its locked hash, both before deployment (for every primitive type) and after it. See **Frozen mode** and **Cold frozen restoration** below for validation timing and recorded-file checks. Not a network freshness check. Mutually exclusive with `--update`, positional package additions, and `--mcp`. |
-| `--dry-run` | off | [Preview without writing](#preview-without-writing), subject to offline dependency limits. Positional packages and ref changes are validated and previewed without changing an existing `apm.yml`. Without an `apm.yml`, bootstrap plans against a temporary manifest and prints `Would create apm.yml`; global bootstrap also leaves the APM home (`$APM_HOME`, default `~/.apm`) uncreated. `-g --mcp` writes no user manifest, lockfile, or runtime configuration. |
+| `--dry-run` | off | [Preview without writing](#preview-without-writing); contacts dependency sources like an install. Positional packages and ref changes are validated and previewed without changing an existing `apm.yml`. Without an `apm.yml`, bootstrap plans against a temporary manifest and prints `Would create apm.yml`; global bootstrap also leaves the APM home (`$APM_HOME`, default `~/.apm`) uncreated. `-g --mcp` writes no user manifest, lockfile, or runtime configuration. |
 | `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** suppress general install errors (any reported error still exits `1`, matching npm / pip / cargo) or select ref freshness. Add `--update` or `--refresh` to resolve mutable refs upstream; [`apm update`](../update/) does so with or without `--force`. Use only after independent verification. |
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
 | `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. A package already in `dependencies` moves to `devDependencies`; without `--dev`, a package already in `devDependencies` stays there (npm semantics), so one package is never declared twice. |
@@ -389,16 +389,16 @@ apm install microsoft/apm-sample-package --dry-run
 apm install -g microsoft/apm-sample-package --dry-run
 ```
 
-`--dry-run` reuses the install resolver read-only: local source metadata and
-unchanged installed remote metadata supply required indirect APM dependencies,
-which are included in preview counts. Missing or unreadable metadata, changed
-remote refs, `--update` or `--refresh` requiring fetching, failed `--frozen`
-transitive pin checks, or unresolved marketplace lookups
-mark the dependency preview incomplete and suppress orphan-removal predictions.
-An incomplete summary reports the locally known count, not a complete install plan.
-This graph pass performs no fetching, materialization, or writes; positional
-validation may still access the network. Stale-file integration cleanup is not
-previewed.
+`--dry-run` runs the install pipeline itself and stops before its first write.
+It contacts dependency sources like an install (resolution downloads go to the
+shared cache and to staging that is rolled back), then applies the same org
+policy and MCP checks, so the preview reports what the install would decide,
+including `Would be blocked by policy` for a transitive MCP server. It writes
+nothing to the project, `apm.lock.yaml`, deployed targets or user
+configuration. An unreachable source, missing or unreadable metadata, or a
+failed `--frozen` pin check marks the preview incomplete and suppresses
+orphan-removal predictions; the exit code stays `0`. Stale-file integration
+cleanup is not previewed.
 
 ### Redirect writes to a scratch directory
 

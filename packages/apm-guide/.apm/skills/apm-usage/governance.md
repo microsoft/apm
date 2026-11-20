@@ -675,13 +675,15 @@ $ apm install acme/evil-pkg
 
 One violation line per offending dependency or MCP server; the hint names what to change in apm.yml (for a transitive MCP server, the dependency that brings it in) and cites the check in parentheses.
 
-Transitive MCP server blocked -- APM packages stay installed, MCP configs are not written:
+Transitive MCP server blocked -- the install stops before anything is committed; `apm.lock.yaml`, deployed files and MCP configs are unchanged:
 
 ```shell
 $ apm install
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
+[x] Policy violation: evil-srv -- denied by pattern: evil-*
+  Blocked by org policy at org:contoso/.github (mcp-denylist) -- remove `acme/carrier` (it brings in `evil-srv`) from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Install blocked by org policy: 1 check(s) failed
 ```
 
 ### 8. Escape hatches
