@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 def _entry(cwd):
     from apm_cli.core.lifecycle_scripts import ScriptEntry
