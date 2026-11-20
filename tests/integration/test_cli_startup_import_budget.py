@@ -4,8 +4,9 @@
 every binary-driven test. They must not import command modules or GitPython
 (whose import spawns ``git version``). The guard is deterministic: it
 measures the imported-module set in-process with ``-X importtime`` against
-the installed console script and asserts a recorded count budget plus a
-must-not-import list. Wall-clock ratio against ``python -c pass`` is recorded
+the installed console-script entry point (``apm_cli.entrypoint:main``) under
+the test interpreter, so a packaged binary on the lane never skips it, and
+asserts a recorded count budget plus a must-not-import list. Wall-clock ratio against ``python -c pass`` is recorded
 as a non-gating benchmark signal only.
 """
 
@@ -15,6 +16,7 @@ import os
 import re
 import statistics
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -60,9 +62,13 @@ def _tree(root: Path) -> dict[str, bytes]:
     }
 
 
-def _imported_modules(python: str, apm: Path, args: tuple[str, ...], env: dict) -> set[str]:
+# Runs exactly what the ``apm`` console script runs (pyproject [project.scripts]).
+_ENTRYPOINT = "import sys; from apm_cli.entrypoint import main; sys.argv[0] = 'apm'; main()"
+
+
+def _imported_modules(args: tuple[str, ...], env: dict) -> set[str]:
     result = subprocess.run(
-        [python, "-X", "importtime", str(apm), *args],
+        [sys.executable, "-X", "importtime", "-c", _ENTRYPOINT, *args],
         capture_output=True,
         env=env,
         cwd=env["HOME"],
@@ -110,10 +116,9 @@ def startup_env(tmp_path: Path) -> dict[str, str]:
 
 @pytest.mark.parametrize("args", _STARTUP_ARGS, ids=lambda a: " ".join(a))
 def test_installed_cli_startup_stays_within_import_budget(
-    apm_binary_path: Path, startup_env: dict[str, str], args: tuple[str, ...]
+    startup_env: dict[str, str], args: tuple[str, ...]
 ) -> None:
-    python = _console_script_python(apm_binary_path)
-    modules = _imported_modules(python, apm_binary_path, args, startup_env)
+    modules = _imported_modules(args, startup_env)
 
     assert _forbidden(modules) == [], f"apm {' '.join(args)} imported forbidden modules"
     assert len(modules) <= MODULE_BUDGET, (
