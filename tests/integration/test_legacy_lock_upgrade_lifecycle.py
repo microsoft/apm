@@ -237,32 +237,59 @@ _C3_GIT_STATES = {
 }
 
 
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("+")[0].split(".")[:3])
+
+
+def _stamped_world(tmp_path: Path, apm_binary_path: Path, stamp: str) -> _World:
+    """A committed project whose lock carries *stamp*: a released fixture, or the
+    binary under test itself ("candidate", a lock stamped 0.37 or later)."""
+    if stamp != "candidate":
+        return _World(tmp_path / "c3", apm_binary_path, FIXTURES / stamp)
+    world = _World(tmp_path / "c3", apm_binary_path, FIXTURE_036)
+    for path in world.snapshot():
+        if path not in {"apm.yml", ".gitignore"}:
+            (world.project / path).unlink()
+    world.ok("install")
+    world._git("add", "-A")
+    world._git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "v037")
+    written_by = (load_yaml(world.project / "apm.lock.yaml") or {})["apm_version"]
+    assert _version(str(written_by)) >= (0, 37, 0), written_by
+    return world
+
+
 @pytest.mark.parametrize(
-    ("fixture", "git_state", "overwritten"),
+    ("stamp", "git_state", "overwritten"),
     [
-        (FIXTURE_036, "tracked-dirty", False),
-        (FIXTURE_036, "tracked-clean", False),
-        (FIXTURE_035, "tracked-dirty", False),
-        (FIXTURE_035, "tracked-staged", False),
-        (FIXTURE_035, "untracked", False),
-        (FIXTURE_035, "tracked-clean", True),
+        ("v0.35.1", "tracked-dirty", False),
+        ("v0.35.1", "tracked-staged", False),
+        ("v0.35.1", "untracked", False),
+        ("v0.35.1", "tracked-clean", True),
+        ("v0.36.1", "tracked-dirty", False),
+        ("v0.36.1", "tracked-clean", True),
+        ("candidate", "tracked-dirty", False),
+        ("candidate", "tracked-clean", False),
     ],
     ids=[
-        "stamp036-dirty",
-        "stamp036-clean",
         "stamp035-dirty",
         "stamp035-staged",
         "stamp035-untracked",
         "stamp035-clean",
+        "stamp036-dirty",
+        "stamp036-clean",
+        "stamp037-dirty",
+        "stamp037-clean",
     ],
 )
-def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre036_file(
-    tmp_path: Path, apm_binary_path: Path, fixture: Path, git_state: str, overwritten: bool
+def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
+    tmp_path: Path, apm_binary_path: Path, stamp: str, git_state: str, overwritten: bool
 ) -> None:
-    """A lock hash forged to match a local edit is evidence only for a <=0.35 stamp,
-    and only while git holds the edit (tracked and clean); otherwise the edit is kept."""
+    """A lock hash forged to match a local edit is evidence only for a lock stamped
+    before 0.37, and only while git holds the edit (tracked and clean); otherwise
+    the edit is kept."""
+    fixture = FIXTURE_036 if stamp == "candidate" else FIXTURES / stamp
     expected = _fresh_render(tmp_path, apm_binary_path, fixture)
-    world = _World(tmp_path / "c3", apm_binary_path, fixture)
+    world = _stamped_world(tmp_path, apm_binary_path, stamp)
     edited_bytes = _forge_lock_hash(world, _C3_EDITED)
     assert edited_bytes != expected[_C3_EDITED]
     for args in _C3_GIT_STATES[git_state]:
@@ -306,6 +333,42 @@ def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_p
     after = world.snapshot()
     assert {p: after.get(p) for p in deployed} == {p: before[p] for p in deployed}
     assert set(after) == set(before)
+    world.ok("audit", "--ci")
+    world.ok("install", "--frozen")
+    assert world.snapshot() == after
+    world.ok("install")
+    assert world.snapshot() == after
+
+
+def test_c5b_036_stamped_project_whose_render_changed_converges(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A lock stamped 0.36 is migrated like any lock before 0.37: files whose bytes
+    equal the recorded hash but differ from the 0.37 render re-render silently.
+
+    No file primitive renders differently between released 0.36.1 and 0.37 (the
+    v0.36.1 fixture renders identically, see C5), so the 0.35.1 renders are
+    restamped 0.36.1 to put a changed render under a 0.36 lock.
+    """
+    expected = _fresh_render(tmp_path, apm_binary_path, FIXTURE_035)
+    world = _World(tmp_path / "c5b", apm_binary_path, FIXTURE_035)
+    lock_path = world.project / "apm.lock.yaml"
+    lock_text = lock_path.read_text(encoding="utf-8")
+    assert lock_text.count("apm_version: 0.35.1\n") == 1
+    lock_path.write_text(lock_text.replace("apm_version: 0.35.1\n", "apm_version: 0.36.1\n"))
+    world._git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qam", "v036")
+    before = world.snapshot()
+    for path in RE_RENDERED:
+        assert before[path] != expected[path], f"fixture no longer exercises {path}"
+
+    code, out, err = world.run("install")
+
+    assert code == 0, f"{out}\n{err}"
+    assert _kept_lines(out + err) == []
+    after = world.snapshot()
+    deployed = {p for p in expected if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"}}
+    assert {p: after.get(p) for p in deployed} == {p: expected[p] for p in deployed}
+    _assert_lock_matches_disk(world)
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")
     assert world.snapshot() == after
