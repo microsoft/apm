@@ -36,7 +36,12 @@ def _withheld_sources(
     An unscoped install keeps its lock beside its manifest.
     """
     from apm_cli.constants import APM_MODULES_DIR
-    from apm_cli.core.scope import get_source_root, is_user_scope, scope_manifest_path
+    from apm_cli.core.scope import (
+        get_source_root,
+        is_user_scope,
+        manifest_root,
+        scope_manifest_path,
+    )
     from apm_cli.install.exec_gate import withheld_executable_sources
     from apm_cli.policy.outcome_routing import resolve_trust_policy
 
@@ -46,7 +51,10 @@ def _withheld_sources(
         lockfile_dir / APM_MODULES_DIR,
         scope_manifest_path(source_root, user_scope=is_user_scope(scope)),
         policy_provider=lambda: resolve_trust_policy(
-            deploy_root, no_policy=no_policy, announce=False, raise_blocking_errors=False
+            manifest_root(deploy_root, user_scope=is_user_scope(scope)),
+            no_policy=no_policy,
+            announce=False,
+            raise_blocking_errors=False,
         ),
         targets=list(targets),
     )
@@ -136,14 +144,22 @@ def _stale_exec_decisions(
     frozen failures: the install gate already applied its own posture.
     """
     from apm_cli.constants import APM_MODULES_DIR
-    from apm_cli.core.scope import get_source_root, is_user_scope, scope_manifest_path
+    from apm_cli.core.scope import (
+        get_source_root,
+        is_user_scope,
+        manifest_root,
+        scope_manifest_path,
+    )
     from apm_cli.install.exec_gate import discovered_exec_policy, stale_exec_decisions
 
     scope = request.scope
     source_root = lockfile_dir if scope is None else get_source_root(scope)
+    # Discover where the install gate does: APM_HOME at user scope, never the
+    # HOME repository's remote (#4087).
+    policy_root = manifest_root(deploy_root, user_scope=is_user_scope(scope))
 
     def _policy() -> Any:
-        return None if request.no_policy else discovered_exec_policy(deploy_root)
+        return None if request.no_policy else discovered_exec_policy(policy_root)
 
     stale, _indeterminate = stale_exec_decisions(
         committed,
