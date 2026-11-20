@@ -59,7 +59,7 @@ steps:
       page: enterprise/apm-policy.mdx
       output:
         - "..."
-        - "| [!]      | dependency-allowlist     | 1 dependency(ies) not in allow list (enforcement: warn)     |"
+        - "| [!]      | dependency-allowlist     | 1 dependency(ies) not in allow list (enforcement: warn)         |"
         - "..."
         - "14 check(s) passed; 1 reports violations under 'enforcement: warn' and fail once the policy switches to block."
     key_lines: ["| [!]      | dependency-allowlist", "[+] No drift detected"]
