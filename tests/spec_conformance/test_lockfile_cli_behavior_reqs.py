@@ -48,10 +48,10 @@ def _locked_entry(project: Path) -> dict:
     return next(entry for entry in lock["dependencies"] if DEPENDENCY in entry["repo_url"])
 
 
-# --- req-lk-015: recorded hashes are recomputed and enforced -------------------
+# --- req-lk-017: deployed file hashes are re-verified --------------------------
 
 
-@pytest.mark.req("req-lk-015")
+@pytest.mark.req("req-lk-017")
 @pytest.mark.parametrize("command", sorted(_VERIFY))
 def test_tampered_deployed_file_fails_closed_naming_both_hashes(
     tmp_path: Path, apm_binary_path: Path, command: str
@@ -61,12 +61,12 @@ def test_tampered_deployed_file_fails_closed_naming_both_hashes(
     project = sample.project.root
     expected = _locked_entry(project)["deployed_file_hashes"][_DEPLOYED_AGENT]
     target = project / _DEPLOYED_AGENT
-    target.write_text(target.read_text(encoding="utf-8") + "\ntampered\n", encoding="utf-8")
+    target.write_bytes(target.read_bytes() + b"\ntampered\n")
     observed = hashlib.sha256(target.read_bytes()).hexdigest()
     tampered = target.read_bytes()
     lock_before = (project / "apm.lock.yaml").read_bytes()
 
-    result = sample.run(_VERIFY[command], scenario_id=f"lk-015-{command}")
+    result = sample.run(_VERIFY[command], scenario_id=f"lk-017-{command}")
 
     output = _text(result)
     assert result.returncode == 1, output
@@ -75,6 +75,9 @@ def test_tampered_deployed_file_fails_closed_naming_both_hashes(
     assert observed[:12] in output
     assert target.read_bytes() == tampered
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
+
+
+# --- req-lk-015: locked package content is recomputed and enforced -----------
 
 
 @pytest.mark.req("req-lk-015")
@@ -89,7 +92,7 @@ def test_tampered_package_content_fails_closed_naming_the_entry(
     sample = _installed(tmp_path, apm_binary_path)
     project = sample.project.root
     content = project / "apm_modules" / DEPENDENCY / _AGENT
-    content.write_text(content.read_text(encoding="utf-8") + "\ntampered\n", encoding="utf-8")
+    content.write_bytes(content.read_bytes() + b"\ntampered\n")
 
     result = sample.run(_VERIFY[command], scenario_id=f"lk-015-content-{command}")
 

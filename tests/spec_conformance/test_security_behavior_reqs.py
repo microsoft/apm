@@ -275,29 +275,65 @@ def test_token_scoped_to_its_host_class() -> None:
 _V01_SCHEMA = "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json"
 
 
-@pytest.mark.req("req-sc-006")
-@pytest.mark.xfail(strict=True, reason="#4286: http:// registry URLs are not gated at parse")
-@pytest.mark.parametrize("schema", [None, _V01_SCHEMA], ids=["default", "openapm-v0.1"])
-def test_plaintext_registry_url_needs_insecure_or_private_host(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
-) -> None:
+_CONTRACTS = pytest.mark.parametrize("schema", [None, _V01_SCHEMA], ids=["default", "openapm-v0.1"])
+
+
+def _load_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema, entry: dict):
     import apm_cli.deps.registry.feature_gate as gate
 
     monkeypatch.setattr(gate, "is_package_registry_enabled", lambda **_kw: True)
     base: dict = {"name": "p", "version": "1.0.0"}
     if schema:
         base["$schema"] = schema
+    return APMPackage.from_mapping(
+        {**base, "registries": {"corp": entry}}, package_path=tmp_path, create_config=False
+    )
 
-    def load(entry: dict) -> APMPackage:
-        return APMPackage.from_mapping(
-            {**base, "registries": {"corp": entry}}, package_path=tmp_path, create_config=False
-        )
 
-    for url in ("http://127.0.0.1:8080", "http://10.0.0.5", "http://192.168.1.2"):
-        assert load({"url": url}).registries == {"corp": url}
-    assert load({"url": "http://r.example.com", "insecure": True}).registries
+@pytest.mark.req("req-sc-006")
+@pytest.mark.xfail(strict=True, reason="#4286: a public http:// registry URL is accepted at parse")
+@_CONTRACTS
+def test_public_plaintext_registry_url_is_rejected_naming_the_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
+) -> None:
     with pytest.raises(ValueError, match="corp"):
-        load({"url": "http://r.example.com"})
+        _load_registry(tmp_path, monkeypatch, schema, {"url": "http://r.example.com"})
+
+
+# Passing loopback / RFC 1918 clause of req-sc-006 (unmarked; the id reports its xfails).
+@_CONTRACTS
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8080", "http://10.0.0.5", "http://192.168.1.2"])
+def test_private_plaintext_registry_url_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None, url: str
+) -> None:
+    loaded = _load_registry(tmp_path, monkeypatch, schema, {"url": url})
+    assert loaded.registries == {"corp": url}
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        pytest.param(
+            None,
+            id="default",
+            marks=[
+                pytest.mark.req("req-sc-006"),
+                pytest.mark.xfail(
+                    strict=True, reason="S-pending: the default contract rejects the insecure field"
+                ),
+            ],
+        ),
+        # Passing under the v0.1 contract; unmarked so the id reports the xfail above.
+        pytest.param(_V01_SCHEMA, id="openapm-v0.1"),
+    ],
+)
+def test_insecure_opt_in_admits_a_public_plaintext_registry_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
+) -> None:
+    entry = {"url": "http://r.example.com", "insecure": True}
+    assert _load_registry(tmp_path, monkeypatch, schema, entry).registries == {
+        "corp": "http://r.example.com"
+    }
 
 
 @pytest.mark.req("req-sc-007")
