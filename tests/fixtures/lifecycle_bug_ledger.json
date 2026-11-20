@@ -1051,6 +1051,21 @@
       ]
     },
     {
+      "issue": 4221,
+      "fixed_in": "Unreleased",
+      "summary": "apm approve --pending lists a local bundle's parked executables with the exact approval key the install printed, instead of reporting that everything is approved.",
+      "failure_modes": [
+        "outcome",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_approve_pending_lists_parked_bundle_executables"
+      ]
+    },
+    {
       "issue": 4235,
       "fixed_in": "Unreleased",
       "summary": "Registry archive extraction applies one set of archive limits to every accepted format: entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries, with every entry validated before the first write.",

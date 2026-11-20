@@ -176,18 +176,24 @@ def install_local_bundle(
             if bundle_info.source_dir is not None
             else []
         )
-        from ..security.executables import exec_map_authorizes_all
+        from ..security.executables import exec_map_authorizes_all, local_bundle_approval_key
 
         bundle_approval_key = None
         if not exec_map_authorizes_all(allow_executables):
-            from ..security.executables import local_bundle_approval_key
-
             bundle_approval_key = local_bundle_approval_key(
                 bundle_info.package_id,
                 str(bundle_info.plugin_json.get("version") or ""),
                 bundle_info.source_dir,
                 bundle_info.lockfile,
             )
+        _record_parked_bundle_executables(
+            bundle_info,
+            str(alias or bundle_info.package_id),
+            bundle_approval_key,
+            (bundle_mcp_deps, bundle_lsp_deps),
+            allow_executables,
+            scope_dir=None if dry_run else _bundle_lock_root(global_),
+        )
         bundle_mcp_deps = _filter_bundle_executables(
             bundle_mcp_deps,
             bundle_info=bundle_info,
@@ -618,6 +624,52 @@ def _filter_bundle_executables(
         + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
     )
     return []
+
+
+def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> tuple[str, ...]:
+    """Executable types the bundle ships, before trust filters them."""
+    from .local_bundle_paths import bundle_pack_files, is_plugin_hook_path
+
+    files = list(bundle_pack_files(bundle_info))
+    if not files and bundle_info.source_dir is not None:
+        root = Path(bundle_info.source_dir)
+        files = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
+    declared = []
+    if any(is_plugin_hook_path(path) for path in files):
+        declared.append("hooks")
+    if mcp_deps:
+        declared.append("mcp")
+    if lsp_deps:
+        declared.append("lsp")
+    return tuple(declared)
+
+
+def _record_parked_bundle_executables(
+    bundle_info,
+    slug: str,
+    approval_key: str | None,
+    service_deps: tuple[list, list],
+    allow_executables,
+    *,
+    scope_dir: Path | None,
+) -> None:
+    """Record which declared executable types this install parks (#4221); not on dry runs."""
+    from ..security.executables import package_type_approved
+    from .local_bundle_pending import record_parked_executables
+
+    if scope_dir is None:
+        return
+    declared = _declared_bundle_exec_types(bundle_info, *service_deps)
+    parked = (
+        []
+        if approval_key is None
+        else [
+            exec_type
+            for exec_type in declared
+            if not package_type_approved(allow_executables, (approval_key,), exec_type)
+        ]
+    )
+    record_parked_executables(scope_dir, slug, approval_key, parked)
 
 
 def _bundle_owner_key(bundle_info) -> str:
