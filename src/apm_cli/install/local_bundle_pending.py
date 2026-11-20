@@ -107,6 +107,19 @@ def pending_bundles(
     return found
 
 
+def recorded_bundle_keys(scope_dir: Path, owner: str) -> tuple[str, ...]:
+    """Return the approval keys the last installs recorded for bundle *owner* (RA-025).
+
+    *owner* is the bundle's package id (its MCP provenance token); a key
+    names it before ``#`` (``<package>#<version>@sha256:<digest>``).
+    """
+    return tuple(
+        bundle.approval_key
+        for bundle in _recorded(scope_dir)
+        if bundle.slug == owner or bundle.approval_key.split("#", 1)[0] == owner
+    )
+
+
 def recorded_bundle(scope_dir: Path, approval_key: str) -> PendingBundle | None:
     """Return the installed bundle whose last install printed exactly *approval_key* (#4437).
 
