@@ -276,8 +276,9 @@ def _orphan_decision(
         decide_orphan_removal,
     )
 
+    # Partial contexts (tests, embedders) may omit the graph and selections.
     graph = getattr(ctx, "dependency_graph", None)
-    materialized = [*ctx.deps_to_install]
+    materialized = [*getattr(ctx, "deps_to_install", ())]
     if graph is not None:
         # Resolved graph references, not raw declarations: unresolved
         # marketplace entries have no install path of their own.

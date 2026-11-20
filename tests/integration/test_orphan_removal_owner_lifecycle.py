@@ -2,7 +2,8 @@
 
 Each offline preview (``apm install --dry-run``, ``apm prune --dry-run``,
 ``apm uninstall --dry-run``) must name exactly what the real run then removes.
-The same owner keeps a targeted install from touching unrelated orphans,
+Files a retained owner still deploys are kept in the preview and the real
+run alike. The same owner keeps a targeted install from touching unrelated orphans,
 removes unlocked ``apm_modules`` directories in prune, rescues a transitive
 dependency a surviving package still declares in uninstall, and gives
 ``apm audit --ci`` the direct-entry projection of the install decision.
@@ -195,6 +196,50 @@ def test_uninstall_preview_matches_real_run_and_rescues_shared_dependency(
     assert "leaf-shared" in after
     assert "leaf-shared" in project.skills()
     assert "leaf-dropped" not in project.skills()
+
+
+def test_install_preview_keeps_files_a_retained_owner_still_claims(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Safety retention: an orphan's file the project's own content also deploys survives."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "lifecycle", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    environment["APM_NO_CACHE"] = "1"
+    environment["COLUMNS"] = "500"
+    environment.pop("CLAUDE_CONFIG_DIR", None)
+    factory = LocalPackageFactory(isolated.package_root)
+    package = factory.create("claimed")
+    factory.add_skill(package, "claimed", "---\nname: claimed\ndescription: pkg\n---\n# pkg\n")
+    root = isolated.work_root / "consumer"
+    local_skill = root / ".apm" / "skills" / "claimed"
+    local_skill.mkdir(parents=True)
+    (local_skill / "SKILL.md").write_text(
+        "---\nname: claimed\ndescription: local\n---\n# local\n", encoding="utf-8"
+    )
+    (root / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    project = _Project(
+        ApmLifecycleRunner((str(apm_binary_path),)), environment, root, {"claimed": package}
+    )
+    project.install(str(package.root))
+    shared = set(project.lock()["claimed"]["deployed_files"])
+    assert shared
+    project.undeclare("claimed")
+
+    preview = project.run("install", "--dry-run", "--verbose", *_INSTALL_FLAGS)
+    assert "Files that would be removed" not in preview.stdout
+    kept = {
+        line.removeprefix("Kept ").split(":", 1)[0]
+        for line in _lines(preview.stdout)
+        if line.startswith("Kept ") and line.endswith("still deployed by a remaining package")
+    }
+    assert kept == shared
+
+    project.install()
+    assert "claimed" not in project.lock()
+    assert all((root / path).exists() for path in shared)
+    assert "# local" in (root / ".claude" / "skills" / "claimed" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_audit_reports_the_direct_entry_projection(tmp_path: Path, apm_binary_path: Path) -> None:
