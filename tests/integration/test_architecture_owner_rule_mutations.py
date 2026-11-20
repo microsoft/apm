@@ -1825,6 +1825,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Agent adoption compares the raw source instead of the rendered text (#3722).",
     ),
     MutationCase(
+        guard_id="install-deployment-approval-store-identity",
+        rule_id="install-deployment-approval-store-identity",
+        path="src/apm_cli/commands/approve.py",
+        old="    packages = _canonical_specs(manifest, packages)\n    allow, deny = _load_store(manifest, user_scope)",
+        new="    allow, deny = _load_store(manifest, user_scope)",
+        intent="apm deny keys the store by the raw install spec instead of the package identity.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-approve-command",
+        rule_id="install-deployment-approve-command",
+        path="src/apm_cli/integration/mcp_config_view.py",
+        old="    approve = approve_command(package, user_scope=user_scope)",
+        new='    approve = f"apm approve {package}"',
+        intent="A user-scope parked MCP notice prints an approve command that cannot work there.",
+    ),
+    MutationCase(
         guard_id="install-deployment-audit-replay",
         rule_id="install-deployment-audit-replay",
         path="src/apm_cli/install/audit_replay.py",
@@ -2503,6 +2519,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective marketplace output path loses its single resolver.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-pack-credential-files",
+        rule_id="marketplace-integrations-pack-credential-files",
+        path="src/apm_cli/bundle/plugin_exporter.py",
+        old="    refuse_credential_files(file_map)\n",
+        new="",
+        intent="The plugin bundle format packs files without the credential-file refusal.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-pack-plugin-manifests",
         rule_id="marketplace-integrations-pack-plugin-manifests",
         path="src/apm_cli/core/build_orchestrator.py",
@@ -3110,6 +3134,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             "        return False"
         ),
         intent="GitAuthEnvBuilder regains a parallel URL rewrite safety policy.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-github-credential-class",
+        rule_id="transport-platform-github-credential-class",
+        path="src/apm_cli/core/host_providers.py",
+        old='return host.endswith(".ghe.com")',
+        new='return host.endswith((".ghe.com", ".github.io"))',
+        intent="The GitHub token chain widens beyond github.com, *.ghe.com and GITHUB_HOST.",
     ),
     MutationCase(
         guard_id="transport-platform-github-throttle",

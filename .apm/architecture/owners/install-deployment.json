@@ -209,10 +209,12 @@
     },
     {
       "id": "executable-trust-context",
-      "decision": "Executable trust context and per-package approval",
-      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision, authorized_exec_map, package_type_approved, compose_trust_bin); install/exec_gate.py adapters consume it and never treat a missing map as authorization; every deploy-path allow-map consumer receives an owner-produced map (#4018)",
+      "decision": "Executable trust context and per-package approval, including the approve command parked notices print and the store identity a CLI spec names",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision, authorized_exec_map, package_type_approved, compose_trust_bin); install/exec_gate.py adapters consume it and never treat a missing map as authorization; every deploy-path allow-map consumer receives an owner-produced map (#4018); security/executables.py canonical_approval_spec resolves every approve/deny/explain spec to the store identity (#4189); security/trust.py approve_command names the install scope (apm approve -g) and approval_scan_dir reads the unit the install gate parked (#4154)",
       "selectors": ["src/apm_cli/security/executables.py"],
-      "guards": ["install-deployment-executable-trust-context"]
+      "guards": ["install-deployment-approval-store-identity",
+        "install-deployment-approve-command",
+        "install-deployment-executable-trust-context"]
     },
     {
       "id": "executable-item-admission",
