@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 from tests.integration._mcp_chain_kit import Chain, stdio_server
+from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
 
@@ -391,3 +392,49 @@ def test_failed_install_removes_the_target_root_it_created(
     assert not (chain.project / ".github").exists(), text
     assert _tree_state(chain.project) == before, text
     assert not (chain.project / "apm.lock.yaml").exists(), text
+
+
+_HASH_POLICY = (
+    "name: acme\nversion: 1.0.0\nenforcement: block\n"
+    "security:\n  integrity:\n    require_hashes: true\n"
+)
+
+
+def test_frozen_require_hashes_judges_the_committed_lockfile_before_deploy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``--frozen`` keeps the lockfile, so require_hashes judges it before the first write."""
+    chain = Chain(tmp_path / "frozen-hashes", apm_binary_path, dirs=(".github",))
+    source = chain.isolated.package_root / "hashed-kit"
+    (source / ".apm" / "instructions").mkdir(parents=True)
+    (source / "apm.yml").write_text("name: hashed-kit\nversion: 1.0.0\n", encoding="utf-8")
+    (source / ".apm" / "instructions" / "hashed.instructions.md").write_text(
+        "---\napplyTo: '**'\ndescription: hashed\n---\nHashed rule.\n", encoding="utf-8"
+    )
+    repositories = LocalGitRepositoryFactory(chain.isolated.repository_root, env=chain.env)
+    repository = repositories.create("hashed-kit", source_tree=source)
+    commit = repositories.commit(repository, message="seed hashed kit")
+    remote = "https://github.com/acme-fixture/hashed-kit"
+    chain.env = {
+        **repositories.url_rewrite_subprocess_env(repository, remote),
+        "APM_NON_INTERACTIVE": "1",
+    }
+    chain.write_manifest([], apm=[{"git": remote, "ref": commit.sha}])
+    chain.ok("install", *_TARGET, "--no-policy")
+    lock_path = chain.project / "apm.lock.yaml"
+    lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    for dependency in lock["dependencies"]:
+        dependency.pop("content_hash", None)
+    lock_path.write_text(yaml.safe_dump(lock, sort_keys=False), encoding="utf-8")
+    chain.seed_org_policy(_HASH_POLICY)
+    deployed = chain.project / ".github" / "instructions" / "hashed.instructions.md"
+    deployed.unlink()
+    before = _committed_state(chain.project)
+
+    result = chain.run("install", "--frozen", *_TARGET)
+    text = result.stdout + result.stderr
+
+    assert result.returncode == 1, text
+    assert "require_hashes" in text, text
+    assert not deployed.exists(), text
+    assert _committed_state(chain.project) == before, text

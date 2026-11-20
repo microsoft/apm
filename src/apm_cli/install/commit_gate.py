@@ -201,11 +201,14 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
 def check_before_deploy(ctx: InstallContext) -> None:
     """Run every check that must pass before the first deployed byte."""
     from apm_cli.install.integrity import enforce_installed_hash_policy
+    from apm_cli.install.service import InstallService
 
     prospective = prospective_lockfile(ctx)
     if not ctx.dry_run:
-        # --dry-run acquires nothing, so no content hash exists to check yet.
-        enforce_installed_hash_policy(ctx, prospective)
+        # --dry-run acquires nothing, so no content hash exists to check yet;
+        # --frozen commits the existing lockfile, so that is what is judged.
+        frozen = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
+        enforce_installed_hash_policy(ctx, ctx.existing_lockfile if frozen else prospective)
     if ctx.install_mcp and not ctx.lockfile_only and ctx.apm_package is not None:
         _check_merged_mcp_policy(ctx, prospective)
 
