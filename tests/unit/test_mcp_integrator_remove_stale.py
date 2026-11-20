@@ -29,6 +29,28 @@ class TestRemoveStaleCharacterisation:
         result = MCPIntegrator.remove_stale(stale_names=set(), logger=logger)
         assert result is None
 
+    def test_remove_stale_empty_names(self, tmp_path):
+        """An empty stale set short-circuits: no config is rewritten, nothing is logged."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        config_path = tmp_path / ".vscode" / "mcp.json"
+        config_path.parent.mkdir()
+        original = b'{"servers": {"keep-me": {"command": "srv"}}}'
+        config_path.write_bytes(original)
+        logger = MagicMock()
+
+        with patch("apm_cli.factory.ClientFactory.supported_clients") as supported:
+            MCPIntegrator.remove_stale(
+                stale_names=set(),
+                runtime="vscode",
+                project_root=tmp_path,
+                logger=logger,
+            )
+
+        assert config_path.read_bytes() == original
+        supported.assert_not_called()
+        assert logger.method_calls == []
+
     def test_remove_stale_with_runtime(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -37,6 +59,37 @@ class TestRemoveStaleCharacterisation:
             runtime="vscode",
         )
         assert result is None
+
+    def test_remove_stale_returns_none(self, tmp_path):
+        """remove_stale() reports via side effects: it returns None after real removals."""
+        import json
+
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        config_path = tmp_path / ".vscode" / "mcp.json"
+        config_path.parent.mkdir()
+        config_path.write_text(
+            json.dumps(
+                {
+                    "servers": {
+                        "stale-server": {"command": "old"},
+                        "keep-server": {"command": "keep"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = MCPIntegrator.remove_stale(
+            stale_names={"stale-server"},
+            runtime="vscode",
+            project_root=tmp_path,
+            logger=MagicMock(),
+        )
+
+        assert result is None
+        servers = json.loads(config_path.read_text(encoding="utf-8"))["servers"]
+        assert servers == {"keep-server": {"command": "keep"}}
 
     def test_remove_stale_with_scope(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator

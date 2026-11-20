@@ -145,6 +145,21 @@ class TestValidationRoundtrip:
             _build(name="", command_argv=("x",))
 
 
+class TestExplicitTransportOverride:
+    def test_explicit_transport_overrides_remote_inference(self):
+        inferred, _ = _build(url="https://example.com/mcp")
+        overridden, self_def = _build(url="https://example.com/mcp", transport="streamable-http")
+        assert inferred["transport"] == "http"
+        assert self_def is True
+        assert overridden == {
+            "name": "foo",
+            "registry": False,
+            "transport": "streamable-http",
+            "url": "https://example.com/mcp",
+        }
+        assert MCPDependency.from_dict(overridden).transport == "streamable-http"
+
+
 class TestRegistryUrlOverlay:
     """``registry_url`` (--registry CLI flag) is persisted to the entry's
     ``registry:`` field for reproducible installs across machines."""

@@ -570,6 +570,49 @@ class TestCollectTransitiveMCPDeps:
         assert len(result) == 1
         assert result[0].name == "private-srv"
 
+    def test_no_lockfile_conservative(self, tmp_path):
+        """Missing lockfile: depth is unknown, so even a would-be direct dep is not trusted."""
+        apm_modules = tmp_path / "apm_modules"
+        pkg_dir = apm_modules / "org" / "direct-pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "direct-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            "ghcr.io/registry/server",
+                            {
+                                "name": "local-srv",
+                                "registry": False,
+                                "transport": "stdio",
+                                "command": "local-mcp",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
+        lock_path = tmp_path / "apm.lock.yaml"
+        assert not lock_path.exists()
+
+        unlocked = MCPIntegrator.collect_transitive(apm_modules, lock_path)
+        assert [d.name for d in unlocked] == ["ghcr.io/registry/server"]
+
+        lock_path.write_text(
+            yaml.dump(
+                {
+                    "lockfile_version": "1",
+                    "dependencies": [
+                        {"repo_url": "org/direct-pkg", "host": "github.com", "depth": 1},
+                    ],
+                }
+            )
+        )
+        locked = MCPIntegrator.collect_transitive(apm_modules, lock_path)
+        assert sorted(d.name for d in locked) == ["ghcr.io/registry/server", "local-srv"]
+
 
 # ---------------------------------------------------------------------------
 # _deduplicate_mcp_deps

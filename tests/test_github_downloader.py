@@ -367,6 +367,27 @@ class TestGitHubPackageDownloaderIntegration:
         # This test would require a real repository - skip in CI
         pytest.skip("Integration test requiring network access")
 
+    @pytest.mark.integration
+    @pytest.mark.skipif(
+        os.environ.get("APM_RUN_INTEGRATION_TESTS") != "1",
+        reason="Integration test requiring network access",
+    )
+    def test_download_real_package(self):
+        """Test downloading a real APM package (requires network)."""
+        target_path = self.temp_dir / "apm-sample-package"
+
+        result = self.downloader.download_package(
+            "microsoft/apm-sample-package#v1.0.0", target_path
+        )
+
+        assert result.install_path == target_path
+        assert result.package.name == "apm-sample-package"
+        assert (target_path / "apm.yml").is_file()
+        assert not (target_path / ".git").exists()
+        assert result.resolved_reference.ref_name == "v1.0.0"
+        commit = result.resolved_reference.resolved_commit
+        assert commit is not None and len(commit) == 40
+
 
 class TestEnterpriseHostHandling:
     """Test enterprise GitHub host handling (PR #33 bug fixes)."""
@@ -461,6 +482,47 @@ class TestErrorHandling:
         """Test handling of network timeouts."""
         # Would require mocking network timeouts
         pass
+
+    def test_authentication_failure_handling(self, tmp_path):
+        """A clone rejected for bad credentials surfaces the auth guidance, not raw git output."""
+        from git.exc import GitCommandError
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+        resolved = ResolvedReference(
+            original_ref="owner/private-repo#main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        git_error = GitCommandError(
+            ["git", "clone"], 128, stderr="fatal: Authentication failed for repository"
+        )
+
+        with (
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=git_error),
+            patch.object(
+                downloader.auth_resolver,
+                "build_error_context",
+                return_value="Set GITHUB_APM_PAT to a token with repo access.",
+            ) as build_context,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            downloader.download_package("owner/private-repo#main", tmp_path / "pkg")
+
+        assert str(exc_info.value) == (
+            "Failed to clone repository owner/private-repo. "
+            "Set GITHUB_APM_PAT to a token with repo access."
+        )
+        assert exc_info.value.__cause__ is git_error
+        build_context.assert_called_once_with(
+            "github.com",
+            "clone",
+            org="owner",
+            port=None,
+            dep_url="owner/private-repo",
+        )
 
     def test_download_raw_file_retries_anonymous_failure_with_token(self):
         """Public GitHub retries an anonymous 401 with the resolved token."""
@@ -581,6 +643,38 @@ class TestErrorHandling:
                     for call in mock_get.call_args_list[:3]
                 )
                 assert "Authorization" in mock_get.call_args_list[3].kwargs["headers"]
+
+    def test_repository_not_found_handling(self, tmp_path):
+        """'remote: Repository not found' is routed to the access-guidance error path."""
+        from git.exc import GitCommandError
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+        resolved = ResolvedReference(
+            original_ref="acme/missing-repo#v1.0.0",
+            ref_type=GitReferenceType.TAG,
+            resolved_commit="def456",
+            ref_name="v1.0.0",
+        )
+        not_found = GitCommandError(
+            ["git", "clone"], 128, stderr="remote: Repository not found.\nfatal: not found"
+        )
+
+        with (
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=not_found),
+            patch.object(
+                downloader.auth_resolver, "build_error_context", return_value="<access hint>"
+            ) as build_context,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            downloader.download_package("acme/missing-repo#v1.0.0", tmp_path / "missing")
+
+        message = str(exc_info.value)
+        assert message == "Failed to clone repository acme/missing-repo. <access hint>"
+        assert "Repository not found" not in message
+        assert build_context.call_args.args == ("github.com", "clone")
+        assert build_context.call_args.kwargs["org"] == "acme"
 
     def test_download_github_file_403_rate_limit_no_token(self):
         """Test that 403 with X-RateLimit-Remaining: 0 and no token gives a rate-limit error."""

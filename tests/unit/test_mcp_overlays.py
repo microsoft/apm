@@ -570,6 +570,17 @@ class TestMCPDependencyHardening:
         with pytest.raises(ValueError, match="Invalid MCP dependency name"):
             MCPDependency.from_dict({"name": "bad name"})
 
+    def test_from_dict_self_defined_runs_strict_checks(self):
+        # Identical payloads differ only in ``registry``: the registry entry
+        # gets universal checks only, the self-defined one gets strict=True
+        # checks (here: the transport allowlist).
+        payload = {"name": "srv", "transport": "websocket", "url": "https://example.com/mcp"}
+        registry_dep = MCPDependency.from_dict(dict(payload))
+        assert registry_dep.transport == "websocket"
+        assert registry_dep.is_self_defined is False
+        with pytest.raises(ValueError, match="unsupported transport 'websocket'"):
+            MCPDependency.from_dict({**payload, "registry": False})
+
 
 # ---------------------------------------------------------------------------
 # _build_self_defined_server_info

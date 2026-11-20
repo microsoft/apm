@@ -464,6 +464,10 @@ class TestIsValidCredentialToken:
     def test_empty_string_invalid(self):
         assert not GitHubTokenManager._is_valid_credential_token("")
 
+    def test_none_coerced_invalid(self):
+        """None fails the truthiness check and is reported invalid instead of raising."""
+        assert GitHubTokenManager._is_valid_credential_token(None) is False
+
     def test_whitespace_only_invalid(self):
         assert not GitHubTokenManager._is_valid_credential_token("  ")
 

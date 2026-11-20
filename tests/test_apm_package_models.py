@@ -1160,6 +1160,24 @@ class TestHookPackageValidation:
             assert result.is_valid, f"Errors: {result.errors}"
             assert result.package_type == PackageType.APM_PACKAGE
 
+    def test_validate_empty_dir_is_invalid(self):
+        """Empty hooks/ and .apm/hooks/ dirs (no hook JSON) are not hook-package evidence."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "hooks").mkdir()
+            (root / ".apm" / "hooks").mkdir(parents=True)
+            (root / "hooks" / "README.md").write_text("# not a hook descriptor")
+
+            result = validate_apm_package(root)
+
+            assert result.package_type == PackageType.INVALID
+            assert not result.is_valid
+            assert result.package is None
+            assert len(result.errors) == 1
+            assert result.errors[0].startswith(
+                "Not a valid APM package: no apm.yml, SKILL.md, hooks, or plugin structure"
+            )
+
 
 from src.apm_cli.models.validation import detect_package_type  # noqa: E402
 

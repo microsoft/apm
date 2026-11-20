@@ -66,6 +66,18 @@ class TestIsVscodeAvailable:
         ):
             assert _is_vscode_available() is False
 
+    def test_code_on_path_takes_precedence_over_missing_dir(self, tmp_path):
+        missing_root = tmp_path / "no-such-project"
+        with (
+            patch(
+                "apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"
+            ) as which,
+            patch.object(Path, "is_dir", autospec=True, return_value=False) as is_dir,
+        ):
+            assert _is_vscode_available(missing_root) is True
+        which.assert_called_once_with("code")
+        is_dir.assert_not_called()
+
 
 # ===========================================================================
 # MCPIntegrator.deduplicate

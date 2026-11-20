@@ -1714,6 +1714,17 @@ class TestProxyRegistryOnlyMode:
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package("microsoft/some-package", Path("/tmp/test-pkg"))
 
+    def test_proxy_registry_only_is_canonical(self):
+        """PROXY_REGISTRY_ONLY outranks the deprecated ARTIFACTORY_ONLY alias in both directions."""
+        canonical_off = {"PROXY_REGISTRY_ONLY": "0", "ARTIFACTORY_ONLY": "1"}
+        with patch.dict(os.environ, canonical_off, clear=True):
+            assert GitHubPackageDownloader._is_artifactory_only() is False
+        canonical_on = {"PROXY_REGISTRY_ONLY": "true", "ARTIFACTORY_ONLY": "0"}
+        with patch.dict(os.environ, canonical_on, clear=True):
+            assert GitHubPackageDownloader._is_artifactory_only() is True
+        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+            assert GitHubPackageDownloader._is_artifactory_only() is True
+
     def test_virtual_file_errors_without_base_url(self):
         """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual file packages."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):

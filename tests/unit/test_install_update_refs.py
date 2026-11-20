@@ -242,6 +242,23 @@ class TestAlreadyResolvedSkipLogic:
 
     # --- is_cacheable gate ---
 
+    def test_cacheable_skips_normal_install(self):
+        """Normal install: is_cacheable=True (tag/commit ref) causes skip.
+
+        Every other skip reason is held off, so flipping is_cacheable alone
+        must flip the decision.
+        """
+        decide = partial(
+            _compute_skip_download,
+            install_path_exists=True,
+            update_refs=False,
+            already_resolved=False,
+            lockfile_match=False,
+            ref_changed=False,
+        )
+        assert decide(is_cacheable=True) is True
+        assert decide(is_cacheable=False) is False
+
     def test_cacheable_no_skip_during_update(self):
         """--update: is_cacheable alone does NOT cause skip_download=True.
 
@@ -435,6 +452,26 @@ class TestForceRefRecheck:
             )
             is True
         )
+
+    def test_git_semver_forces_resolve_on_update(self) -> None:
+        """Git-source semver dep with a lock row still re-resolves on update.
+
+        A virtual Git subpath is used so the mutable-ref fallback (which skips
+        virtual packages) cannot be what forces the recheck: the same dep with
+        a literal ref is not rechecked.
+        """
+        dep = _recheck_dep(is_local=False, artifactory_prefix=None, ref_kind="semver")
+        dep.is_virtual = True
+        locked = LockedDependency(
+            repo_url="org/pkg",
+            resolved_ref="v1.2.0",
+            resolved_commit="b" * 40,
+        )
+        assert dep.source != "registry"
+        assert dep.ref_kind == "semver"
+        assert should_force_ref_recheck(dep, locked, update_refs=True) is True
+        dep.reference = "stable"
+        assert should_force_ref_recheck(dep, locked, update_refs=True) is False
 
     def test_registry_literal_ref_no_force(self) -> None:
         """Registry dep with a literal ref (e.g. 'stable') is never force-resolved."""

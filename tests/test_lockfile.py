@@ -772,6 +772,20 @@ class TestLockFileSemanticEquivalence:
         b = self._make_lock(lockfile_version="2")
         assert not a.is_semantically_equivalent(b)
 
+    def test_new_lockfile_vs_empty(self):
+        """A freshly stamped lockfile with no deps matches an empty one (no dirty write)."""
+        new = LockFile(
+            lockfile_version="1",
+            generated_at="2026-11-20T08:00:00+00:00",
+            apm_version="9.9.9",
+        )
+        empty = LockFile()
+        assert new.lockfile_version == empty.lockfile_version
+        assert new.is_semantically_equivalent(empty)
+        assert empty.is_semantically_equivalent(new)
+        new.add_dependency(LockedDependency(repo_url="owner/repo", depth=1))
+        assert not new.is_semantically_equivalent(empty)
+
 
 # ---------------------------------------------------------------------------
 # Issue #1888: installed package name + version per lockfile entry
