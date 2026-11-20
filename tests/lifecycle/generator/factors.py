@@ -126,7 +126,7 @@ def compile_staged_targets() -> tuple[str, ...]:
     """Targets whose profile has no native instructions primitive.
 
     A file primitive routed to one of these is staged for compile instead of
-    deployed (install/services.py:1050).
+    deployed (install/services.py:1046).
     """
     return tuple(
         sorted(
