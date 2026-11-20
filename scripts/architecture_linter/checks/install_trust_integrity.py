@@ -70,6 +70,10 @@ _TRUST_READERS: dict[str, str] = {
     _EXECUTABLES: "policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)",
     _EXEC_GATE: "policy = resolve_trust_policy(self._project_root, announce=False)",
     _LOCAL_BUNDLE: "policy = resolve_trust_policy(",
+    # The ``apm audit --ci`` drift replay reuses the run's one discovery.
+    "src/apm_cli/commands/audit.py": (
+        "return resolve_trust_policy(cfg.project_root, announce=False, fetch_result=fetch_policy())"
+    ),
 }
 
 

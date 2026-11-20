@@ -656,7 +656,12 @@ def _audit_ci_gate(
     def replay_policy():
         if no_policy and not policy_source:
             return None
-        return getattr(fetch_policy(), "policy", None)
+        from ..policy.outcome_routing import resolve_trust_policy
+
+        # Routed like install: a blocking outcome raises PolicyViolationError,
+        # which the replay reports as a failed check. This command reports the
+        # policy outcome itself below.
+        return resolve_trust_policy(cfg.project_root, announce=False, fetch_result=fetch_policy())
 
     materialization = resolve_ci_audit_materialization(
         cfg.project_root, verbose=cfg.verbose, policy_provider=replay_policy
