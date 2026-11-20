@@ -391,3 +391,69 @@ def test_c5b_036_stamped_project_whose_render_changed_converges(
     assert world.snapshot() == after
     world.ok("install")
     assert world.snapshot() == after
+
+
+# The most common real upgrade (0.36.1 -> 0.37), from a released 0.36.1 binary:
+# Copilot project MCP moves from .github/mcp.json to the root .mcp.json (#3866),
+# and the package now ships a Kiro agent that names an MCP server with
+# ``@server``, which 0.36.1 refused and 0.37 deploys.
+FIXTURE_036_COPILOT_KIRO = FIXTURES / "v0.36.1-copilot-kiro"
+_SERVER_AGENT = ".apm/agents/notes-agent.agent.md"
+_SERVER_AGENT_TEXT = (
+    "---\nname: notes-agent\ndescription: Uses the notes server\n"
+    'tools: ["read", "@notes"]\n---\nYou take notes.\n'
+)
+_LEGACY_COPILOT_MCP = ".github/mcp.json"
+
+
+def _add_server_agent(world: _World) -> None:
+    (world.project.parent / "pkg" / _SERVER_AGENT).write_text(_SERVER_AGENT_TEXT, encoding="ascii")
+
+
+def _mcp_servers(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {}
+
+
+def test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    fixture = FIXTURE_036_COPILOT_KIRO
+    assert json.loads((fixture / "FIXTURE.json").read_text())["apm_version"] == "0.36.1"
+    assert "notes" in _mcp_servers(fixture / "project" / _LEGACY_COPILOT_MCP)
+
+    fresh = _World(tmp_path / "fresh", apm_binary_path, fixture)
+    _add_server_agent(fresh)
+    for path in fresh.snapshot():
+        if path not in {"apm.yml", ".gitignore"}:
+            (fresh.project / path).unlink()
+    fresh.ok("install")
+    expected = fresh.snapshot()
+    assert _LEGACY_COPILOT_MCP not in expected
+
+    world = _World(tmp_path / "c6", apm_binary_path, fixture)
+    _add_server_agent(world)
+
+    code, out, err = world.run("install")
+
+    assert code == 0, f"{out}\n{err}"
+    assert _kept_lines(out + err) == []
+    after = world.snapshot()
+    for path, content in expected.items():
+        if path != "apm.lock.yaml":
+            assert after.get(path) == content, path
+    assert set(after) - set(expected) <= {_LEGACY_COPILOT_MCP}
+    if _LEGACY_COPILOT_MCP in after:
+        assert "notes" not in _mcp_servers(world.project / _LEGACY_COPILOT_MCP)
+    assert _mcp_servers(world.project / ".mcp.json")["notes"] == {
+        "type": "stdio",
+        "command": "node",
+        "args": ["server.js"],
+    }
+    assert "@notes" in (world.project / ".kiro/agents/notes-agent.md").read_text()
+    _assert_lock_matches_disk(world)
+
+    world.ok("audit", "--ci")
+    world.ok("install", "--frozen")
+    assert world.snapshot() == after
+    world.ok("install")
+    assert world.snapshot() == after
