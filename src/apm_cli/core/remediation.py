@@ -442,6 +442,11 @@ BUNDLE_TARGET_MISMATCH = _entry(
     "produce a {target}-targeted bundle",
     before="ask the publisher to declare targets: [{target}] in apm.yml",
 )
+AUTH_TOKEN_UNEXPORTED = _entry(
+    "auth-token-unexported",
+    "apm auth {host} --export",
+    "print an export line your shell can eval",
+)
 RUNTIME_MISSING = _entry(
     "runtime-missing", "apm runtime setup copilot", "install the primary runtime"
 )

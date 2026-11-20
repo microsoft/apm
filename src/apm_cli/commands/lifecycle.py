@@ -567,7 +567,7 @@ def lifecycle_trust() -> None:
         return
 
     _rich_warning(
-        "Project lifecycle scripts can run arbitrary commands during apm install, update, "
+        "Project lifecycle scripts can execute arbitrary commands during apm install, update, "
         "uninstall, and compile.",
         symbol="warning",
     )

@@ -61,6 +61,8 @@ READ_ONLY_COMMANDS = frozenset(
         "apm deps why",
         "apm doctor",
         "apm experimental list",
+        "apm lifecycle test",
+        "apm lifecycle validate",
         "apm list",
         "apm marketplace audit",
         "apm marketplace browse",
@@ -77,7 +79,7 @@ READ_ONLY_COMMANDS = frozenset(
         "apm view",
     }
 )
-_MUTATING_FLAGS = ("--strip", "--fix", "--force", "--write")
+_MUTATING_FLAGS = ("--strip", "--fix", "--force", "--write", "--execute")
 _COMMAND = re.compile(r"apm [a-z][^'\"`\[\n;,)]*")
 
 
