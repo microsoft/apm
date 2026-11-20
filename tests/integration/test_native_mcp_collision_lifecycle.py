@@ -151,6 +151,19 @@ class _Scenario:
             scenario_id="native-mcp-collision-lifecycle",
         )
 
+    def audit(self) -> CommandResult:
+        """Run the CI audit at this scope's root (audit has no --global flag)."""
+        environment = self.isolated.subprocess_env(
+            overrides={"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": str(self.isolated.home / ".codex")}
+        )
+        environment.update(self.environment_overrides)
+        return self.runner.run(
+            ("audit", "--ci", "--no-policy"),
+            cwd=self.root,
+            env=environment,
+            scenario_id="native-mcp-collision-lifecycle",
+        )
+
     def install(self, *flags: str, targets: str = "claude,codex") -> CommandResult:
         """Reconcile the requested scope and exact target selection."""
         return self.run("install", "--target", targets, "--no-policy", *flags)
@@ -249,7 +262,11 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     foreign_target: str,
     identical: bool,
 ) -> None:
-    """Direct adds never adopt foreign matches or overwrite differing connections."""
+    """Direct adds never adopt foreign matches or overwrite differing connections.
+
+    An identical foreign entry needs no write, so install and --frozen both pass
+    without claiming it; a differing one is refused by both.
+    """
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     requested = _http()["url"]
     scenario.write(foreign_target, requested if identical else "http://127.0.0.1:9/personal")
@@ -264,9 +281,8 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     other_bytes = scenario.path(other).read_bytes()
     for flags in ((), ("--force",), ("--frozen",)):
         repeated = scenario.install(*flags)
-        expected_success = identical and "--frozen" not in flags
-        assert (repeated.returncode == 0) is expected_success, repeated.stdout + repeated.stderr
-        if "--frozen" in flags:
+        assert (repeated.returncode == 0) is identical, repeated.stdout + repeated.stderr
+        if "--frozen" in flags and not identical:
             assert "ownership is not recorded" in " ".join(repeated.stdout.split())
         assert scenario.path(foreign_target).read_bytes() == before
         assert scenario.path(other).read_bytes() == other_bytes
@@ -715,13 +731,17 @@ def test_user_disabled_matching_codex_connection_installs_and_replays_frozen(
     )
     before = path.read_bytes()
 
+    # Zero bytes of the user's entry change, and replay and audit agree it is fine.
     _success(scenario.install(targets="codex"))
     assert path.read_bytes() == before
     assert scenario.lock().mcp_target_servers == {}
+    lock_before = (scenario.root / "apm.lock.yaml").read_bytes()
     _success(scenario.install("--frozen", targets="codex"))
+    _success(scenario.audit())
     assert path.read_bytes() == before
+    assert (scenario.root / "apm.lock.yaml").read_bytes() == lock_before
 
-    # A different command stays a conflict, on install and on replay.
+    # A different command stays a conflict on install and on replay.
     scenario.edit("codex", "notes", {"command": "OTHER", "enabled": False})
     edited = path.read_bytes()
     for flags in ((), ("--frozen",)):

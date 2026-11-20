@@ -202,7 +202,9 @@ Code, Copilot CLI, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity)
 preserve differing native entries and exit `1`; successful writes, including earlier registry writes, stay managed.
 Registry conflicts do not skip nonconflicting self-defined updates. Full APM
 lockfile rebuilds, including `--only apm`, retain prior MCP write receipts.
-`--force` cannot take over a foreign connection; `--frozen` cannot certify it.
+`--force` cannot take over a foreign connection; `--frozen` cannot certify a
+differing one. A user entry equal to a self-defined server (Codex `enabled` aside)
+needs no write: install and `--frozen` pass and leave it unowned.
 Rename or remove only the conflicting native entry, then retry with the same
 scope and targets. Do not delete the lockfile to bypass ownership checks.
 See [MCP conflict recovery](https://microsoft.github.io/apm/consumer/install-mcp-servers/#resolve-a-connection-name-conflict)

@@ -153,14 +153,8 @@ def _source(root: Path, marker: str) -> None:
     asset.chmod(0o644)
 
 
-# Audit names cache drift through the Codex native owner or, for a source the
-# lock pins by content hash, through the integrity replay; both fail closed.
-_CACHE_DRIFT = ("cache differs", "do not match apm.lock.yaml")
-
-
-def _names_cache_drift(output: str) -> bool:
-    text = " ".join(output.split())
-    return any(marker in text for marker in _CACHE_DRIFT)
+_NATIVE_DRIFT = "cache differs"
+_REPLAY_DRIFT = "do not match apm.lock.yaml"
 
 
 def _audit_cache(
@@ -168,8 +162,13 @@ def _audit_cache(
     root: Path,
     env: dict[str, str],
     materialized: Path,
+    *,
+    sibling_drift: str = _NATIVE_DRIFT,
 ) -> None:
-    """Native source cache drift must fail the canonical audit without native writes."""
+    """Native source cache drift must fail the canonical audit without native writes.
+
+    *sibling_drift* is the one message audit prints for a changed ``sibling.txt``.
+    """
     home = Path(env["HOME"])
 
     def state() -> dict[Path, tuple[bytes, int]]:
@@ -195,23 +194,26 @@ def _audit_cache(
 
     clean = audit("codex-native-cache-audit-clean")
     assert clean.returncode == 0, clean.stdout + clean.stderr
-    for relative in ("sibling.txt", "resources/__pycache__/asset.bin"):
+    for relative, drift in (
+        ("sibling.txt", sibling_drift),
+        ("resources/__pycache__/asset.bin", _NATIVE_DRIFT),
+    ):
         cached = materialized / relative
         original = cached.read_bytes()
         try:
             cached.write_bytes(original + b"\nChanged only in the APM cache.\n")
             changed = audit(f"codex-native-cache-audit-tampered-{cached.name}")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            assert _names_cache_drift(changed.stdout + changed.stderr)
+            text = " ".join((changed.stdout + changed.stderr).split())
+            other = _REPLAY_DRIFT if drift == _NATIVE_DRIFT else _NATIVE_DRIFT
+            assert drift in text and other not in text, text
             assert "Traceback" not in changed.stderr
             structured = audit(f"codex-native-cache-json-{cached.name}", json_output=True)
             assert structured.returncode != 0, structured.stdout + structured.stderr
             report = json.loads(structured.stdout)
             assert report["passed"] is False
             assert any(
-                check["name"] == "drift"
-                and check["passed"] is False
-                and _names_cache_drift(check["message"])
+                check["name"] == "drift" and check["passed"] is False and drift in check["message"]
                 for check in report["checks"]
             )
         finally:
@@ -223,7 +225,7 @@ def _audit_cache(
             cached.chmod(original_mode ^ stat.S_IXUSR)
             changed = audit("codex-native-cache-audit-mode")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            assert _names_cache_drift(changed.stdout + changed.stderr)
+            assert _NATIVE_DRIFT in " ".join((changed.stdout + changed.stderr).split())
             assert "Traceback" not in changed.stderr
         finally:
             cached.chmod(original_mode)
@@ -559,7 +561,7 @@ def test_git_pinned_install_and_missing_apm_cache_restore(
         ]["loose"]["enabled"]
         is False
     )
-    _audit_cache(runner, tmp_path, env, materialized)
+    _audit_cache(runner, tmp_path, env, materialized, sibling_drift=_REPLAY_DRIFT)
     config_path = Path(env["CODEX_HOME"]) / "config.toml"
     config_before = config_path.read_bytes()
     asset = materialized / "resources/__pycache__/asset.bin"
