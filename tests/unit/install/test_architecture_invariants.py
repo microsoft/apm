@@ -43,6 +43,10 @@ KNOWN_LARGE_MODULES = {
     # every reconciliation deleter and skill path migration. Decomposition
     # tracked as follow-up.
     "pipeline.py": 1005,
+    # A refused re-download restores the prior apm_modules copy (#4353):
+    # FreshDependencySource.acquire discards or restores it. Decomposition
+    # tracked with the #3701 follow-up.
+    "sources.py": 1005,
     "manifest_reconcile.py": 1010,
     # services.py grew past 1000 when exec-gate delegation helpers (main)
     # and canvas integration helpers (canvas PR) merged concurrently.

@@ -88,6 +88,7 @@ def _make_ctx(
     ctx.diagnostics = MagicMock()
     ctx.apm_modules_dir = Path("/fake/apm_modules")
     ctx.pre_download_results = {}
+    ctx.prior_copies = {}
 
     # dependency_graph stub
     node_stub = MagicMock()
