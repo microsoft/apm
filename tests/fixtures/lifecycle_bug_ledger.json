@@ -597,7 +597,7 @@
       "regression_tests": [
         "tests/integration/test_lockfile_write_authority_lifecycle.py::test_install_commits_the_lockfile_once",
         "tests/integration/test_lockfile_write_authority_lifecycle.py::test_compile_commits_the_lockfile_through_the_authority",
-        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_failed_install_discards_its_staged_lockfile",
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_failed_install_records_what_it_deployed_in_one_write",
         "tests/integration/test_lockfile_write_authority_lifecycle.py::test_every_lockfile_writer_refuses_a_newer_generator_before_changing_files",
         "tests/integration/test_lockfile_writer_mapping.py::test_each_lock_writing_command_maps_to_its_registered_writer",
         "tests/integration/test_lockfile_writer_mapping.py::test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens"
