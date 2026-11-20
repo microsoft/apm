@@ -69,7 +69,7 @@ def test_without_a_provider_replay_discovers_policy(project: Path, discovered: l
 def test_global_replay_reads_the_user_manifest(
     project: Path, tmp_path: Path, discovered: list[Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#3954: audit -g reads grants from APM_HOME/apm.yml; policy stays at the deploy root."""
+    """#3954, #4087: audit -g reads grants and the policy root from APM_HOME, not the deploy root."""
     apm_home = tmp_path / "apm-home"
     apm_home.mkdir()
     (apm_home / "apm.yml").write_text(
@@ -85,7 +85,7 @@ def test_global_replay_reads_the_user_manifest(
     assert allow is not None
     assert allow.get("../userhooky", {}).get("hooks") is True
     assert "../hooky" not in allow.trust_context.project_deny
-    assert discovered == [project]
+    assert discovered == [apm_home]
 
 
 def _hook_package(root: Path) -> SimpleNamespace:

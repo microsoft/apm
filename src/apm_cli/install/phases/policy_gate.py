@@ -195,7 +195,7 @@ def _policy_root(ctx: InstallContext):
     """
     from apm_cli.core.scope import is_user_scope, manifest_root
 
-    return manifest_root(ctx.project_root, user_scope=is_user_scope(ctx.scope))
+    return manifest_root(ctx.project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))
 
 
 def _discover_with_chain(ctx: InstallContext):

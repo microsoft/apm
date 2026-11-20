@@ -84,7 +84,10 @@ _SCOPE_ROOT_CONSUMERS: dict[str, tuple[str, ...]] = {
     "src/apm_cli/install/phases/policy_gate.py": (
         "return read_project_fetch_failure_default(_policy_root(ctx))",
         "return discover_policy_with_chain(_policy_root(ctx))",
-        "return manifest_root(ctx.project_root, user_scope=is_user_scope(ctx.scope))",
+        (
+            "return manifest_root(ctx.project_root, "
+            'user_scope=is_user_scope(getattr(ctx, "scope", None)))'
+        ),
     ),
     "src/apm_cli/commands/update.py": (
         "manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)",
