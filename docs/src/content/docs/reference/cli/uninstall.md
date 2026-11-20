@@ -180,10 +180,11 @@ evidence, uninstall exits 1 before changing anything: `apm.yml`,
 `apm.lock.yaml`, `apm_modules/` and every file stay as they were. It names each
 file and why, then offers two remedies:
 
-- Run `apm install` once with access to the package source, which
-  re-establishes deployment evidence, then rerun `apm uninstall`.
-- If the source is unreachable, or a listed file holds your edits, move each
-  listed file aside or delete it, then rerun `apm uninstall`.
+- Move aside any listed file that holds your edits, then run `apm install` once
+  with access to the package source, which re-establishes deployment evidence,
+  then rerun `apm uninstall`. Install rewrites a file it cannot prove it wrote.
+- If the source is unreachable, move each listed file aside or delete it, then
+  rerun `apm uninstall`.
 
 After upgrading, uninstall needs this evidence. If the source is unreachable,
 use the second remedy. If a target-scoped file cannot be deleted, uninstall
