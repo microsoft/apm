@@ -11,7 +11,7 @@ import click
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..install.locking import serialized_lifecycle
-from ..utils.credential_rendering import render_config_value
+from ..utils.credential_rendering import redact_secrets, render_config_value
 from ..version import get_version
 from . import self_update as self_update_command
 from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
@@ -461,7 +461,7 @@ def set(key, value):  # noqa: F811
             try:
                 is_default = _parse_bool_value(value)
             except ValueError as exc:
-                logger.error(str(exc))
+                logger.error(redact_secrets(str(exc)))
                 sys.exit(1)
             set_registry_default(reg_name, is_default)
             if is_default:
@@ -481,7 +481,7 @@ def set(key, value):  # noqa: F811
             try:
                 llm = _parse_bool_value(value)
             except ValueError as exc:
-                logger.error(str(exc))
+                logger.error(redact_secrets(str(exc)))
                 sys.exit(1)
             set_scanner_llm(scanner_name, llm)
             logger.success(f"external.{scanner_name}.llm set to {'true' if llm else 'false'}")
@@ -491,7 +491,7 @@ def set(key, value):  # noqa: F811
             try:
                 tokens = shlex.split(value, posix=(os.name != "nt"))
             except ValueError as exc:
-                logger.error(f"Could not parse args value: {exc}")
+                logger.error(f"Could not parse args value: {redact_secrets(str(exc))}")
                 sys.exit(1)
             if not tokens:
                 logger.error("external.<name>.args requires at least one token.")
@@ -518,7 +518,7 @@ def set(key, value):  # noqa: F811
                 f"{render_config_value(key, get_copilot_cowork_skills_dir())}"
             )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -529,7 +529,7 @@ def set(key, value):  # noqa: F811
                 f"Temporary directory set to: {render_config_value(key, get_temp_dir())}"
             )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -541,7 +541,7 @@ def set(key, value):  # noqa: F811
             rendered = _render_target_value(parsed)
             logger.success(f"Default install target set to: {render_config_value(key, rendered)}")
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -552,7 +552,7 @@ def set(key, value):  # noqa: F811
             channel = set_self_update_channel(value)
             logger.success(f"Self-update channel saved: {render_config_value(key, channel)}")
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -571,7 +571,7 @@ def set(key, value):  # noqa: F811
                     "(must match the existing Unix installation)"
                 )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -598,7 +598,7 @@ def set(key, value):  # noqa: F811
                     "Use only a trusted network or switch to https://."
                 )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -619,7 +619,7 @@ def set(key, value):  # noqa: F811
                 f"Install-time audit set to: {render_config_value(key, get_audit_on_install())}"
             )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -631,18 +631,17 @@ def set(key, value):  # noqa: F811
     try:
         enabled = _parse_bool_value(value)
     except ValueError as exc:
-        logger.error(str(exc))
+        logger.error(redact_secrets(str(exc)))
         sys.exit(1)
 
     setter, label = config_entry
     setter(enabled)
-    rendered = "true" if enabled else "false"
     if key in _DEPRECATED_CONFIG_KEYS:
         # A success line would imply the setting does something.
         logger.warning(_DEPRECATED_CONFIG_KEYS[key])
-        logger.info(f"Stored {key}={rendered} (no effect)")
+        logger.info(f"Stored {key}={'true' if enabled else 'false'} (no effect)")
     else:
-        logger.success(f"{label} set to {rendered}")
+        logger.success(f"{label} set to {'true' if enabled else 'false'}")
 
     # Warn when persisting allow-protocol-fallback=true in a CI environment where
     # $HOME is often shared across jobs -- the persisted value will affect all

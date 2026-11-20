@@ -4,7 +4,7 @@ PROMISE: credential-value-rendering -- a stored registry token, a credential
 carried in a registry or proxy URL, and token environment variables never
 reach command output or exported artifacts; presence is still reported
 (source: .apm/architecture/owners/transport-auth-platform.json).
-CELL: OP=config-get|config-list|config|doctor|lock-export|install SCOPE=user
+CELL: OP=config-set|config-get|config-list|config|doctor|lock-export|install SCOPE=user
 NET=none
 """
 
@@ -66,7 +66,9 @@ def test_credential_values_never_reach_command_output_or_artifacts(
             "GITHUB_APM_PAT": _TOKEN,
             "ADO_APM_PAT": _TOKEN,
             "APM_REGISTRY_TOKEN_CORP": _TOKEN,
-            "PROXY_REGISTRY_URL": f"http://alice:{_TOKEN}@proxy.example.invalid/art/apm",
+            "PROXY_REGISTRY_URL": (
+                f"http://alice:{_TOKEN}@proxy.example.invalid/art/apm?token={_TOKEN}"
+            ),
             "PROXY_REGISTRY_TOKEN": _TOKEN,
             "APM_LOG_LEVEL": "DEBUG",
         }
@@ -111,6 +113,32 @@ def test_credential_values_never_reach_command_output_or_artifacts(
         assert f"registry.corp.token: {_MASK}" in listing.stdout, _evidence(listing)
         assert "registry.corp.url: https://reg.example.invalid/apm" in listing.stdout
     ok("config")
+
+    # Free-text values: credential flags, URLs inside equals-form args,
+    # username-only userinfo and query credentials render redacted.
+    ok("experimental", "enable", "external-scanners")
+    args_value = (
+        f"--api-key {_TOKEN} --auth={_TOKEN} "
+        f"--endpoint=https://{_TOKEN}@reg.example.invalid/apm "
+        f"--report=https://u:a:{_TOKEN}@reg.example.invalid/r?sig={_TOKEN}"
+    )
+    ok("config", "set", "--", "external.skillspector.args", args_value)
+    args_line = (
+        "external.skillspector.args: --api-key [REDACTED] --auth=[REDACTED] "
+        "--endpoint=https://reg.example.invalid/apm "
+        "--report=https://reg.example.invalid/r?sig=********"
+    )
+    assert ok("config", "get", "external.skillspector.args").stdout.splitlines()[-1] == args_line
+    for args in (("config", "get"), ("config", "list")):
+        listing = ok(*args)
+        assert args_line in listing.stdout, _evidence(listing)
+    for url in (
+        f"https://mcp.example.invalid/v0?token={_TOKEN}",
+        f"//{_TOKEN}@h.invalid/x?token={_TOKEN}",
+    ):
+        rejected = apm("config", "set", "mcp-registry-url", url)
+        assert rejected.returncode != 0, _evidence(rejected)
+
     unset_read = ok("config", "get", "registry.other.token")
     assert unset_read.stdout.splitlines()[-1] == "registry.other.token: Not set"
 
@@ -130,12 +158,13 @@ def test_credential_values_never_reach_command_output_or_artifacts(
     bad.mkdir()
     (bad / "apm.yml").write_text(
         "name: bad\nversion: 1.0.0\nregistries:\n  corp:\n"
-        f"    url: ftp://alice:{_TOKEN}@reg.example.invalid/apm\n",
+        f"    url: ftp://alice:{_TOKEN}@reg.example.invalid/apm?token={_TOKEN}\n",
         encoding="ascii",
     )
     failed = apm("install", cwd=bad)
     assert failed.returncode != 0, _evidence(failed)
-    assert "ftp://reg.example.invalid/apm" in failed.stdout + failed.stderr, _evidence(failed)
+    expected = "ftp://reg.example.invalid/apm?token=********"
+    assert expected in failed.stdout + failed.stderr, _evidence(failed)
 
     # No artifact outside the credential store and the test inputs carries it.
     inputs = {config_json, project / "apm.lock.yaml", bad / "apm.yml"}

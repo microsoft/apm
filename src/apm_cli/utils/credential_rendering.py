@@ -11,7 +11,8 @@ routes through these helpers instead of growing its own redaction:
   key names a credential, otherwise with URL userinfo and labelled secrets
   removed.
 * :func:`redact_url_userinfo` -- strip ``user:password@`` from a URL.
-* :func:`redact_secrets` -- replace credential-shaped substrings in free text.
+* :func:`redact_secrets` -- replace credential-shaped substrings in free text,
+  including the value of credential flags such as ``--api-key VALUE``.
 * :func:`mask_known_values` -- replace known secret values in free text.
 
 The values themselves are never transformed for use; only their displayed
@@ -33,21 +34,40 @@ INVALID_URL_PLACEHOLDER = "<redacted-url>"
 # Keyword + ``:``/``=`` separator redacts any value (optionally after an auth
 # scheme word). Keyword + whitespace only redacts token-shaped values (>= 16
 # chars) so prose such as "bearer token acquisition failed" stays readable.
+# Values already rendered as a mask are left as they are. URL userinfo is
+# redacted when it carries a password (which may itself contain ``:``) or a
+# token-shaped username.
 SECRET_RE = re.compile(
     r"(?:"
     r"(?:token|password|secret|authorization|api[_-]?key)\s*[:=]\s*"
     r"(?:(?:bearer|basic|token)\s+)?"
+    r"(?!\[REDACTED\]|\*{8})"
     r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"
     r"|"
     r"(?:token|password|secret|bearer|basic|api[_-]?key)\s+"
+    r"(?!\[REDACTED\])"
     r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{16,}"
     r"|"
-    r"://[^:@/\s]+:[^:@/\s]+@"
+    r"://[^@/\s]*:[^@/\s]*@"
+    r"|"
+    r"://[^:@/\s]{16,}@"
     r"|"
     r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psour]_[A-Za-z0-9_]{20,})\b"
     r"|"
     r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}"
     r")",
+    re.IGNORECASE,
+)
+
+# A command-line flag whose name marks its value as a credential, such as
+# ``--api-key VALUE``, ``--token=VALUE`` or ``--client-secret VALUE``. The
+# flag name stays readable; only the value is replaced.
+_SECRET_FLAG_RE = re.compile(
+    r"(?<![\w-])(--?(?:[A-Za-z0-9]+[-_])*"
+    r"(?:token|password|passwd|secret|auth|authorization|api[-_]?key|apikey|credentials?|pat)"
+    r"(?:[-_][A-Za-z0-9]+)*)"
+    r"(=|\s+)(?!-|\[REDACTED\])"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s'\"]+)",
     re.IGNORECASE,
 )
 
@@ -61,7 +81,8 @@ _CREDENTIAL_KEY_SUFFIXES = ("-token", "_token", "-password", "_password", "-secr
 
 def redact_secrets(text: str) -> str:
     """Replace credential-shaped substrings in *text* with ``[REDACTED]``."""
-    return SECRET_RE.sub(REDACTED, text)
+    flagged = _SECRET_FLAG_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", text)
+    return SECRET_RE.sub(REDACTED, flagged)
 
 
 def mask_known_values(text: str, values: Iterable[str]) -> str:

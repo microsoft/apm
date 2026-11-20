@@ -561,7 +561,7 @@
     {
       "issue": 4171,
       "fixed_in": "Unreleased",
-      "summary": "apm config get rendered stored registry tokens and registry URL userinfo as plain values; credential values now render through one owner as a fixed mask with presence reported, across config reads, diagnostics, SBOM export and registry error messages.",
+      "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",
       "failure_modes": ["auth", "outcome"],
       "properties": ["auth.credentials_isolated", "outcome.status_matches_state"],
       "regression_tests": [

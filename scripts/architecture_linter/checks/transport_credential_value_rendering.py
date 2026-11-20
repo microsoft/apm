@@ -9,24 +9,29 @@ looks like when APM prints, logs or exports it.
   masking exactly once.
 * No other product module regrows the secret pattern, a URL userinfo
   stripper or a ``[REDACTED]`` replacement loop (closed world).
-* ``apm config`` renders every echoed, logged or tabled value through the
-  owner; any other interpolation is a key name or a fixed literal.
+* ``apm config`` output is closed-world: every argument of an echo, print,
+  logger, console, Rich-helper or table call is a fixed literal, a key or
+  label name, or a value rendered through the owner (AST check, so no call
+  shape such as ``click.echo(body["token"])`` slips past).
 * Known consumers (debug log filter, script log, SBOM export, proxy and
   registry diagnostics) delegate to the owner.
 """
 
 from __future__ import annotations
 
+import ast
 import re
 
 from scripts.architecture_linter.checks.transport_platform_shared import (
     GROUP,
     _count_checks,
     _forbid_scan,
+    _load,
     _require_subs,
     _src_python,
 )
 from scripts.architecture_linter.facts import FactsProvider
+from scripts.architecture_linter.groups.common import source_text, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 _RULE_ID = "transport-platform-credential-value-rendering"
@@ -54,25 +59,127 @@ _FORBIDDEN_MECHANISMS = re.compile(
     r"|\.replace\([^)\n]*,\s*[\"']\[REDACTED\][\"']\)"
 )
 
-# apm config output sinks: every interpolated value must be a key or label
-# name, a fixed literal, or rendered through the owner (closed world).
-_CONFIG_INTERPOLATION_ALLOWLIST = (
-    r"(?:reg_name|scanner_name|scanner|name|key|label|rendered|indent|exc|HIGHLIGHT|RESET"
-    r"|', '\.join\(SUPPORTED_SCANNERS\)"
-    r"|len\(tokens\)|config_module\.CONFIG_FILE|'true' if llm else 'false')\}"
-    r"|render_config_value\(|_valid_config_keys\("
+# Config output paths whose sinks are checked closed-world: every argument of
+# an echo, print, logger, console, Rich-helper or table call is a fixed
+# literal, a key or label name, or a value rendered through the owner.
+_CONFIG_OUTPUT_PATHS = (_CONFIG_COMMAND,)
+_SINK_NAMES = frozenset({"print", "echo", "secho"})
+_SINK_ATTRS = frozenset(
+    {
+        "add_row",
+        "critical",
+        "debug",
+        "echo",
+        "error",
+        "exception",
+        "info",
+        "log",
+        "print",
+        "progress",
+        "secho",
+        "success",
+        "verbose_detail",
+        "warning",
+        "write",
+    }
 )
-_RAW_CONFIG_SINKS = re.compile(
-    r"\bf\"[^\"\n]*\{(?!" + _CONFIG_INTERPOLATION_ALLOWLIST + r")"
-    r"|click\.echo\(\s*(?![\"']|f\"|$)"
-    r"|\.add_row\((?!category, setting, render_config_value\()"
+_RENDERING_CALLS = frozenset(
+    {
+        "render_config_value",
+        "render_credential_value",
+        "redact_secrets",
+        "redact_url_userinfo",
+        "_valid_config_keys",
+        "len",
+    }
 )
+_SAFE_NAMES = frozenset(
+    {
+        "HIGHLIGHT",
+        "RESET",
+        "category",
+        "config_table",
+        "indent",
+        "key",
+        "label",
+        "name",
+        "reg_name",
+        "scanner",
+        "scanner_name",
+        "setting",
+    }
+)
+_SAFE_EXPRESSIONS = frozenset(
+    {
+        "', '.join(SUPPORTED_SCANNERS)",
+        "_DEPRECATED_CONFIG_KEYS[key]",
+        "config_module.CONFIG_FILE",
+    }
+)
+
+
+def _is_sink(func: ast.expr) -> bool:
+    if isinstance(func, ast.Name):
+        return func.id in _SINK_NAMES or func.id.startswith("_rich_")
+    return isinstance(func, ast.Attribute) and func.attr in _SINK_ATTRS
+
+
+def _is_rendered(node: ast.expr) -> bool:
+    """Return whether *node* is a literal, a key name, or owner-rendered."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in _SAFE_NAMES
+    if isinstance(node, ast.JoinedStr):
+        return all(_is_rendered(part) for part in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return _is_rendered(node.value)
+    if isinstance(node, ast.IfExp):
+        return _is_rendered(node.body) and _is_rendered(node.orelse)
+    if isinstance(node, ast.BinOp):
+        return _is_rendered(node.left) and _is_rendered(node.right)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id in _RENDERING_CALLS:
+            return True
+    return ast.unparse(node) in _SAFE_EXPRESSIONS
+
+
+def _raw_output_sinks(provider: FactsProvider, inventory: frozenset[str]) -> list[Violation]:
+    findings: list[Violation] = []
+    for path in _CONFIG_OUTPUT_PATHS:
+        facts, failures = _load(provider, inventory, _RULE_ID, path, parse=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        try:
+            tree = ast.parse(source_text(facts))
+        except SyntaxError as exc:
+            findings.append(violation(_RULE_ID, path, f"unparsable source: {exc.msg}"))
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and _is_sink(node.func)):
+                continue
+            arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
+            raw = [arg for arg in arguments if not _is_rendered(arg)]
+            if raw:
+                findings.append(
+                    violation(
+                        _RULE_ID,
+                        path,
+                        "config output must render values through render_config_value "
+                        f"(raw {ast.unparse(raw[0])!r} in {ast.unparse(node.func)})",
+                        line=node.lineno,
+                        column=node.col_offset + 1,
+                    )
+                )
+    return findings
+
 
 _DELEGATING_CONSUMERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _CONFIG_COMMAND,
         (
-            "from ..utils.credential_rendering import render_config_value",
+            "from ..utils.credential_rendering import redact_secrets, render_config_value",
             'click.echo(f"{indent}{key}: {render_config_value(key, value)}")',
             "table.add_row(category, setting, render_config_value(setting, value))",
             "_echo_setting(key, (get_registry_config(reg_name) or {}).get(field))",
@@ -129,17 +236,7 @@ def _check_credential_value_rendering(provider: FactsProvider) -> tuple[Violatio
             exempt=False,
         )
     )
-    findings.extend(
-        _forbid_scan(
-            provider,
-            inventory,
-            _RULE_ID,
-            (_CONFIG_COMMAND,),
-            _RAW_CONFIG_SINKS,
-            "apm config renders every printed, logged or tabled value through render_config_value",
-            exempt=False,
-        )
-    )
+    findings.extend(_raw_output_sinks(provider, inventory))
     for path, needles in _DELEGATING_CONSUMERS:
         findings.extend(
             _require_subs(

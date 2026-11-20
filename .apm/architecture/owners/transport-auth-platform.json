@@ -221,8 +221,8 @@
     },
     {
       "id": "credential-value-rendering",
-      "decision": "How credential values render in command output: stored secrets show a fixed mask with presence reported, other config values drop URL userinfo and labelled secrets, and free-text diagnostics, debug logs, script logs and SBOM export redact through one pattern and one URL userinfo stripper",
-      "owner": "utils/credential_rendering.py (render_credential_value, render_config_value, is_credential_key, redact_secrets, SECRET_RE, redact_url_userinfo, mask_known_values); consumers: commands/config.py (_echo_setting), core/auth.py (SecretRedactionFilter), core/auth_outcome.py (sanitize_diagnostic_detail), core/script_executors.py, export/purl.py (scrub_url), install/mcp/warnings.py, deps/registry_proxy.py, deps/registry/client.py, deps/registry/auth.py, deps/registry/resolver.py, models/apm_package.py",
+      "decision": "How credential values render in command output: stored secrets show a fixed mask with presence reported, other config values drop URL userinfo, mask URL query values and redact labelled secrets and credential flag values, every apm config output call renders values through the owner, and free-text diagnostics, debug logs, script logs and SBOM export redact through one pattern and one URL userinfo stripper",
+      "owner": "utils/credential_rendering.py (render_credential_value, render_config_value, is_credential_key, redact_secrets, SECRET_RE, redact_url_userinfo, mask_known_values); consumers: commands/config.py (_echo_setting, _add_table_row, every output call), core/auth.py (SecretRedactionFilter), core/auth_outcome.py (sanitize_diagnostic_detail), core/script_executors.py, export/purl.py (scrub_url), install/mcp/warnings.py, deps/registry_proxy.py, deps/registry/client.py, deps/registry/auth.py, deps/registry/resolver.py, models/apm_package.py",
       "selectors": [
         "src/apm_cli/utils/credential_rendering.py",
         "src/apm_cli/commands/config.py"

@@ -41,7 +41,7 @@ Print the value of `KEY`. With no argument, prints the user config summary: effe
 
 Alias for `apm config get` with no argument; produces the same user config summary. With the `registries` flag enabled, the summary also lists each configured `registry.<name>` entry.
 
-Credential values are never printed. A stored token shows as `******** (set)` (or `Not set`), and URLs are shown without embedded `user:password@` credentials. There is no flag to reveal a stored token; read `$APM_HOME/config.json` directly if you need it.
+Credential values are never printed. A stored token shows as `******** (set)` (or `Not set`), URLs are shown without embedded `user:password@` credentials and with query values masked, and values of credential flags such as `--api-key` show as `[REDACTED]`. There is no flag to reveal a stored token; read `$APM_HOME/config.json` directly if you need it.
 
 :::note
 Familiar with `npm config list` or `git config --list`? `apm config list` is the equivalent.

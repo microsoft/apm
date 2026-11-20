@@ -2713,9 +2713,12 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-credential-value-rendering",
         rule_id="transport-platform-credential-value-rendering",
         path="src/apm_cli/commands/config.py",
-        old='click.echo(f"{indent}{key}: {render_config_value(key, value)}")',
-        new='click.echo(f"{indent}{key}: {value}")',
-        intent="apm config prints stored credential values without the owner's mask.",
+        old='                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n',
+        new=(
+            '                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n'
+            '                click.echo(body["token"])\n'
+        ),
+        intent="apm config echoes a stored registry token outside the owner's mask.",
     ),
     MutationCase(
         guard_id="transport-platform-git-cache-identity",
