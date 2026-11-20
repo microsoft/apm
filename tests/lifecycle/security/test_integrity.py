@@ -373,9 +373,9 @@ _SKILL_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
 _DRIFT = r"content-integrity\s*\|\s*1 file\(s\) with hash drift"
 _FROZEN_HASHES = r"--frozen: deployed files do not match the hashes recorded in apm.lock.yaml"
 _RETAINED = r"Uninstall could not remove tracked target files"
-_UNINSTALL_RETAINS_MODULES = (
-    "#4467 uninstall keeps apm_modules when it retains an edited target file"
-)
+# Uninstall refuses before any change when a file lacks deletion evidence (#3701).
+_REFUSED = r"Uninstall refused: deleting these tracked files needs deployment evidence"
+_REFUSAL_NEXT_STEP = r"move each listed file aside or delete it, then rerun 'apm uninstall'"
 
 DEPLOYED_FILE_HASHES = ArtifactSlice(
     packages=("p-skill",),
@@ -422,13 +422,13 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         # uninstall.md: a removed package's file is deleted only with evidence
         # that APM wrote its current bytes (a deployment receipt, or byte
         # equality with the locked render); a lockfile hash alone is never
-        # evidence. An edited file is retained and uninstall exits 1; an edited
-        # or missing lock hash does not change the evidence, so cleanup proceeds.
+        # evidence. An edited file makes uninstall refuse before any change
+        # (exit 1); an edited or missing lock hash does not change the
+        # evidence, so cleanup proceeds.
         ("uninstall-prune", "disk-or-cache"): Expect(
             1,
-            (_RETAINED, r"Retained user-edited file"),
-            unchanged=_SKILL_STATE,
-            xfail=_UNINSTALL_RETAINS_MODULES,
+            (_REFUSED, r"Nothing was removed", _REFUSAL_NEXT_STEP),
+            unchanged=(*_SKILL_STATE, "apm_modules"),
         ),
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
@@ -671,12 +671,13 @@ PATH_CONTAINMENT = ArtifactSlice(
             1, (r"outside the project tree",), unchanged=(LOCK, MANIFEST), check=_outside_intact
         ),
         ("update", "disk-or-cache"): Expect(0, unchanged=(LOCK, MANIFEST), check=_outside_intact),
+        # A deployed skill member replaced by a symlink: uninstall refuses
+        # before any change, so apm_modules stays byte-identical (#4451).
         ("uninstall-prune", "disk-or-cache"): Expect(
             1,
-            (_RETAINED,),
-            unchanged=(LOCK, MANIFEST),
+            (_REFUSED, r"replaced by a symbolic link", _REFUSAL_NEXT_STEP),
+            unchanged=(LOCK, MANIFEST, "apm_modules", ".agents/skills/p-skill"),
             check=_outside_intact,
-            xfail=_UNINSTALL_RETAINS_MODULES,
         ),
         # The commit pin holds: the moved tag is not fetched.
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE, check=_outside_intact),

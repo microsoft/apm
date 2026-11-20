@@ -202,6 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An org policy cached under 7 days now applies offline, as a fresh one does, to install, MCP install, lifecycle scripts and dry-run. (#4456, #4464)
 
 ## [0.37.0] - 2026-11-20
+- `apm uninstall` refuses before any change when a deployed skill file was replaced by a symbolic link, instead of removing the package copy first; the same holds for an edited deployed file. (closes #4451, #4467, #4294)
 
 ### Highlights
 
