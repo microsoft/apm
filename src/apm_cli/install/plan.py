@@ -385,7 +385,7 @@ def _recorded_ref(
     A git dependency declared without a ref follows the remote default
     branch. The resolver names that branch, but the lockfile records the
     declared (absent) ref, so the plan compares absent with absent; a moved
-    branch still differs by commit (RA-007).
+    branch still differs by commit (#4166).
     """
     if (
         new_ref is not None
