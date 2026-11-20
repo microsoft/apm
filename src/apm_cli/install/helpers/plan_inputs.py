@@ -21,19 +21,22 @@ def confirm_update_plan(
 
     Runs the caller's plan confirmation (``apm update``), then refuses an
     unwritable (symlinked) lockfile while the transaction is still a no-op
-    (#3532). An update exists to rewrite the lockfile: even an unchanged
-    dependency plan can change the deployment ledger (for example new
-    targets), so the refusal does not depend on the plan. Returns ``False``
-    when the caller declined the plan.
+    (#3532, #4168). An update exists to rewrite the lockfile: even an
+    unchanged dependency plan can change the deployment ledger (for example
+    new targets), so the refusal does not depend on the plan; neither does any
+    other install's, since it cannot record what it deploys. Returns
+    ``False`` when the caller declined the plan.
     """
     if plan_callback is not None:
         plan = build_resolved_update_plan(ctx, lockfile)
         if not plan_callback(plan):
             return False
-    if not (ctx.update_refs and ctx.apm_dir) or ctx.frozen or ctx.dry_run or ctx.lockfile_only:
+    if not ctx.apm_dir or ctx.frozen or ctx.dry_run or ctx.lockfile_only:
         return True
     from apm_cli.deps.lockfile import get_lockfile_path, refuse_lockfile_before_mutation
 
+    # An install that cannot write its lockfile (symlinked, or from a newer
+    # APM) refuses before it deploys anything (#3532, #4168).
     refuse_lockfile_before_mutation(lockfile, get_lockfile_path(ctx.apm_dir), would_mutate=True)
     return True
 

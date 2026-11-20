@@ -646,6 +646,16 @@
       ]
     },
     {
+      "issue": 4168,
+      "fixed_in": "0.37.0",
+      "summary": "An install through a symlinked apm.lock.yaml deployed the new package's files and only then refused to write the lockfile, leaving untracked files on disk.",
+      "failure_modes": ["transaction", "ownership"],
+      "properties": ["transaction.failed_command_preserves_state", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_install_symlinked_lockfile_lifecycle.py::test_install_refuses_a_symlinked_lockfile_before_deploying"
+      ]
+    },
+    {
       "issue": 4176,
       "fixed_in": "0.37.0",
       "summary": "Per-project deployment receipts under $APM_HOME/deployment-receipts outlived the project roots they described, so they accumulated forever.",

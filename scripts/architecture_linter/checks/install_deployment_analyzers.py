@@ -78,6 +78,10 @@ from scripts.architecture_linter.checks.install_locked_copy_validity import (
 from scripts.architecture_linter.checks.install_locked_copy_validity import (
     check_locked_copy_validity,
 )
+from scripts.architecture_linter.checks.install_lockfile_preflight import (
+    GUARD_INSTALL_LOCKFILE_PREFLIGHT,
+    check_install_lockfile_preflight,
+)
 from scripts.architecture_linter.checks.install_lockfile_required import (
     GUARD_LOCKFILE_REQUIRED,
     check_lockfile_required,
@@ -183,6 +187,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_INSTALL_LOCKFILE_PREFLIGHT,
+        "Every mutating install refuses an unwritable lockfile before it deploys.",
+        check_install_lockfile_preflight,
+    ),
     _rule(
         GUARD_LOCKFILE_REQUIRED,
         "Frozen install and audit share one answer to whether a lockfile is required.",
