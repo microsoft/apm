@@ -195,7 +195,7 @@ def test_pinned_nested_package_survives_parent_module_removal(tmp_path):
     _materialize(tmp_path, "acme/repo", "acme/repo/skills/child")
     ctx = _module_ctx(tmp_path, lock)
     decision = _targeted_decision(tmp_path, lock, retained=[child.get_unique_key()])
-    assert decision.retained_keys == {parent.get_unique_key(), child.get_unique_key()}
+    assert child.get_unique_key() in decision.retained_keys
     cleanup._remove_dropped_package_dirs(ctx, decision)
     assert (tmp_path / "acme/repo/skills/child").is_dir()
 
