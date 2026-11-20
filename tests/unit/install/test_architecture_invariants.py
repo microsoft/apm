@@ -61,6 +61,8 @@ KNOWN_LARGE_MODULES = {
     # Cleanup evidence renders recorded targets too (#3701).
     # Replay copies ask install's locked content verdict (#4187).
     "drift.py": 1058,
+    # The resolver takes its frozen pin mode from InstallService (#4012).
+    "phases/resolve.py": 1001,
 }
 
 
