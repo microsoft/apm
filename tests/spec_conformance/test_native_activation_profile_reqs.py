@@ -391,6 +391,66 @@ def test_project_scope_declares_a_relative_path_under_a_per_project_name(
     )
 
 
+@pytest.mark.req("req-na-002")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX exec bit")
+def test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine(
+    tmp_path: Path,
+) -> None:
+    """Amendment 0.1.71: the committed digest is the approval digest construction."""
+    from apm_cli.claude_plugins.registrar import _machine_hash
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    assert_spec_contains(
+        "At project scope, where the deployed plugin\nroots and the lockfile are project files "
+        "shared between machines, the\nrecorded root digest MUST omit the executable-bit byte",
+        "MUST NOT record that comparison in\nthe lockfile (amendment 0.1.71)",
+    )
+    root = tmp_path / "plugin"
+    (root / "hooks").mkdir(parents=True)
+    script = root / "hooks/run.sh"
+    script.write_text("echo hi\n", encoding="utf-8")
+    script.chmod(0o755)
+    committed = fingerprint_native_claude_source(root, portable=True)
+    assert committed == native_plugin_fingerprint(root)
+    on_this_machine = _machine_hash(root)
+    script.chmod(0o644)
+    # A teammate checkout without the bit still matches the committed lock ...
+    assert fingerprint_native_claude_source(root, portable=True) == committed
+    # ... while the deploying machine still sees the bit.
+    assert _machine_hash(root) != on_this_machine
+
+
+@pytest.mark.req("req-na-004")
+def test_cross_target_suppression_is_the_consumers_own_false() -> None:
+    """Amendment 0.1.71: APM owns Copilot's key for a plugin it declares to Claude."""
+    assert_spec_contains(
+        "(cross-target suppression, amendment 0.1.71)",
+        "writes a `false` enable value for it in `.github/copilot/settings.json`",
+    )
+    owned = frozenset({"alpha", "beta"})
+    claude_only = SettingsDeclaration(
+        "apm-p-1",
+        "./.agents/plugins",
+        frozenset(),
+        owned,
+        suppressed=frozenset({"alpha"}),
+        managed=frozenset({"alpha"}),
+    )
+    document = {"enabledPlugins": {"alpha@apm-p-1": True, "beta@apm-p-1": False}}
+    apply_declaration(document, claude_only, Path("settings.json"))
+    # APM's own true flips to false; a user's false for an unmanaged plugin stays.
+    assert document["enabledPlugins"] == {"alpha@apm-p-1": False, "beta@apm-p-1": False}
+    both = SettingsDeclaration(
+        "apm-p-1",
+        "./.agents/plugins",
+        frozenset({"alpha"}),
+        owned,
+        managed=frozenset({"alpha"}),
+    )
+    apply_declaration(document, both, Path("settings.json"))
+    assert document["enabledPlugins"]["alpha@apm-p-1"] is True
+
+
 def _reconcile(case: dict[str, Any]) -> tuple[Any, list[str]]:
     """Reference model of the req-na-004 rule, used only to check the oracle."""
     if "settings_before_raw" in case:
