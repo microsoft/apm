@@ -115,6 +115,35 @@ def _get_target_prefixes(target: str) -> list[str]:
     return list(profile.effective_pack_prefixes)
 
 
+def pack_target_prefixes(targets: list[str]) -> tuple[str, ...]:
+    """Every path prefix a bundle packed for *targets* may ship.
+
+    The targets' own pack prefixes plus their cross-target mapping
+    destinations: exactly the paths :func:`_filter_files_by_target` keeps.
+    """
+    prefixes: dict[str, None] = {}
+    for target in targets:
+        prefixes.update(dict.fromkeys(_get_target_prefixes(target)))
+        prefixes.update(dict.fromkeys(_CROSS_TARGET_MAPS.get(target, {}).values()))
+    return tuple(prefixes)
+
+
+def _project_hashes(hashes: dict[str, str], mappings: dict[str, str]) -> dict[str, str]:
+    """Add each remapped bundle path's hash under its bundle path.
+
+    *mappings* maps ``bundle_path -> disk_path``; a directory entry maps
+    every hashed file beneath it.
+    """
+    projected = dict(hashes)
+    for bundle_path, disk_path in mappings.items():
+        src = disk_path.rstrip("/")
+        dst = bundle_path.rstrip("/")
+        for key, digest in hashes.items():
+            if key == src or key.startswith(src + "/"):
+                projected.setdefault(dst + key[len(src) :], digest)
+    return projected
+
+
 def _filter_files_by_target(
     deployed_files: list[str], target: str | list[str]
 ) -> tuple[list[str], dict[str, str]]:
@@ -231,6 +260,10 @@ def enrich_lockfile_for_pack(
                 filtered, mappings = _filter_files_by_target(dep["deployed_files"], target)
                 dep["deployed_files"] = filtered
                 all_mappings.update(mappings)
+                if mappings and isinstance(dep.get("deployed_file_hashes"), dict):
+                    dep["deployed_file_hashes"] = _project_hashes(
+                        dep["deployed_file_hashes"], mappings
+                    )
 
     # Issue #887: strip packaging-time local-content fields from the bundle
     # lockfile. ``local_deployed_files`` / ``local_deployed_file_hashes``
