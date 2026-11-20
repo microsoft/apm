@@ -134,16 +134,6 @@ def _recorded(observation: Observation) -> frozenset[str]:
 
 KNOWN_CELLS: tuple[KnownCell, ...] = (
     KnownCell(
-        "gate-cell-a",
-        "I6",
-        "#4041",
-        lambda machine, op, before, after, result: (
-            result is not None and op.name == "audit-ci" and not op.json_output
-        ),
-        match=r"^stdout has non-ASCII characters",
-        scopes=("project",),
-    ),
-    KnownCell(
         "gate-cell-b",
         "R",
         "#4042",
@@ -195,14 +185,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
             op.name == "install-frozen" and machine.converged and before.lock is None
         ),
         match=r"^converged install-frozen exited 1$",
-    ),
-    KnownCell(
-        "gate-cell-f",
-        "I9",
-        "#4048",
-        lambda machine, op, before, after, result: result is not None,
-        match=r"^identical consecutive line: '\|-- \(files unchanged\)'$",
-        per_step=False,
     ),
     KnownCell(
         "gate-cell-e",
