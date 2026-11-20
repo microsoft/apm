@@ -38,6 +38,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.results import InstallResult
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Placeholder policy exception (C2 coordination with W2-gate-phase)
 # ---------------------------------------------------------------------------

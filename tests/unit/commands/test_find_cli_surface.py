@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

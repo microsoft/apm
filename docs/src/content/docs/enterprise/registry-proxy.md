@@ -49,7 +49,7 @@ export PROXY_REGISTRY_ONLY=1
 |---|---|
 | `PROXY_REGISTRY_URL` | Base URL of the proxy. APM downloads package archives from it. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token, never sent to hosts other than the proxy. |
-| `PROXY_REGISTRY_ONLY` | `1` refuses any direct download from the upstream host, including on lockfile replay. |
+| `PROXY_REGISTRY_ONLY` | `1` refuses any direct download from the upstream host, including on lockfile replay, and skips source-host probes such as the `apm update` auth check. |
 | `PROXY_REGISTRY_ALLOW_HTTP` | `1` authorizes sending `PROXY_REGISTRY_TOKEN` over `http://` to a host that is not loopback or a private network address (10/8, 172.16/12, 192.168/16). Without it, the token is not sent there and a `[!]` line says why. |
 
 The lockfile records which entries came through the proxy. With `PROXY_REGISTRY_ONLY=1`,
@@ -69,7 +69,8 @@ From then on, archives the proxy serves are checked against the locked content h
 so a proxy that alters a package later is caught.
 
 **What the proxy does not carry.** The `apm-policy.yml` fetch always goes direct: it is
-the governance channel. With `PROXY_REGISTRY_ONLY=1`, APM refuses the other routes that
+the governance channel, and APM prints one `[i]` line naming its origin. An explicit
+`apm self-update` also goes direct; the automatic update check is skipped (`apm -v` notes it). With `PROXY_REGISTRY_ONLY=1`, APM refuses the other routes that
 would bypass the proxy: Azure DevOps dependencies, lookups in the default MCP registry
 (point `MCP_REGISTRY_URL` or `apm config set mcp-registry-url` at a proxied registry to
 allow them), and marketplace files from Azure DevOps, generic git or URL sources. Without

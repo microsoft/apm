@@ -4,22 +4,20 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.lifecycle_scenario import LifecycleScenario, new_lifecycle_scenario
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_git_repository import (
     GitCommit,
     LocalGitRepository,
-    LocalGitRepositoryFactory,
 )
-from tests.utils.local_package import LocalPackage, LocalPackageFactory
+from tests.utils.local_package import LocalPackage
 
 pytestmark = [
     pytest.mark.integration,
@@ -41,16 +39,6 @@ _MANUAL_CURSOR_COMMAND = "echo manual-cursor"
 
 
 @dataclass(frozen=True)
-class _Scenario:
-    isolated: IsolatedApmEnvironment
-    environment: dict[str, str]
-    sources: LocalPackageFactory
-    consumers: LocalPackageFactory
-    repositories: LocalGitRepositoryFactory
-    runner: ApmLifecycleRunner
-
-
-@dataclass(frozen=True)
 class _PublishedPackage:
     name: str
     repository: LocalGitRepository
@@ -65,27 +53,6 @@ class _PublishedPackage:
             "git": self.remote_url,
             "ref": self.commit.sha,
         }
-
-
-def _new_scenario(root: Path, apm_binary_path: Path) -> _Scenario:
-    """Create one isolated installed-CLI scenario."""
-    isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
-    environment = isolated.subprocess_env()
-    return _Scenario(
-        isolated=isolated,
-        environment=environment,
-        sources=LocalPackageFactory(isolated.package_root),
-        consumers=LocalPackageFactory(isolated.work_root),
-        repositories=LocalGitRepositoryFactory(
-            isolated.repository_root,
-            env=environment,
-        ),
-        runner=ApmLifecycleRunner(
-            (str(apm_binary_path),),
-            timeout_seconds=90,
-            scenario_timeout_seconds=300,
-        ),
-    )
 
 
 def _hook_document() -> dict[str, object]:
@@ -110,7 +77,7 @@ def _hook_document() -> dict[str, object]:
 
 
 def _publish(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     name: str,
     *,
     targets: tuple[str, ...],
@@ -132,7 +99,7 @@ def _publish(
 
 
 def _restrict_published_package_to_claude(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     published: _PublishedPackage,
     *,
     malformed_instruction: bool = False,
@@ -165,7 +132,7 @@ def _restrict_published_package_to_claude(
 
 
 def _consumer(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     name: str,
     dependency: dict[str, object],
 ) -> LocalPackage:
@@ -181,7 +148,7 @@ def _consumer(
 
 
 def _cursor_windsurf_consumer(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     name: str,
     dependency: dict[str, object],
 ) -> LocalPackage:
@@ -203,7 +170,7 @@ def _cursor_windsurf_consumer(
 
 
 def _repoint_published_package_targets(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     published: _PublishedPackage,
     *,
     targets: tuple[str, ...],
@@ -291,7 +258,7 @@ def _windsurf_commands(snapshot: LifecycleStateSnapshot) -> list[str]:
 
 
 def _run_success(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     project: LocalPackage,
     args: tuple[str, ...],
     *,
@@ -392,7 +359,7 @@ def _assert_claude_owned_cursor_empty(
 
 
 def _assert_audit_passes_without_writes(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     project: LocalPackage,
     *,
     environment: dict[str, str],
@@ -455,7 +422,7 @@ def test_claude_package_restricts_hooks_across_install_update_and_audit(
     apm_binary_path: Path,
 ) -> None:
     """A Claude package never writes generic hooks or provenance to Cursor."""
-    scenario = _new_scenario(tmp_path / "claude-only", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "claude-only", apm_binary_path)
     published = _publish(
         scenario,
         "claude-only-hooks",
@@ -497,7 +464,7 @@ def test_package_target_transition_repairs_cursor_and_uninstall_preserves_user_h
     apm_binary_path: Path,
 ) -> None:
     """Cursor-to-Claude update removes only APM-owned Cursor state."""
-    scenario = _new_scenario(tmp_path / "target-transition", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "target-transition", apm_binary_path)
     universal = _publish(
         scenario,
         "transition-hooks",
@@ -597,7 +564,7 @@ def test_failed_restricted_update_preserves_existing_hook_state(
     apm_binary_path: Path,
 ) -> None:
     """Malformed instruction preflight precedes excluded-target hook cleanup."""
-    scenario = _new_scenario(tmp_path / "failed-target-transition", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "failed-target-transition", apm_binary_path)
     universal = _publish(scenario, "failed-transition-hooks", targets=())
     consumer = _consumer(scenario, "failed-transition-consumer", universal.dependency)
     _run_success(
@@ -636,7 +603,7 @@ def test_consumer_widen_then_drop_cursor_preserves_user_hooks(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """An installed CLI retires Cursor, not merely the other target, on contraction."""
-    scenario = _new_scenario(tmp_path / "drop-cursor", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "drop-cursor", apm_binary_path)
     published = _publish(scenario, "drop-cursor-hooks", targets=("codex", "cursor"))
     consumer = scenario.consumers.create(
         "codex-consumer", dependencies=(published.dependency,), targets=("codex",)
@@ -714,7 +681,7 @@ def test_cursor_windsurf_package_target_widen_then_narrow_retires_owned_windsurf
     retire only the owned Windsurf hook, preserving both the surviving
     Cursor hook and a pre-existing unowned Windsurf user hook throughout.
     """
-    scenario = _new_scenario(tmp_path / "cursor-windsurf-transition", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "cursor-windsurf-transition", apm_binary_path)
     cursor_only = _publish(scenario, "cursor-windsurf-hooks", targets=("cursor",))
     consumer = _cursor_windsurf_consumer(
         scenario,

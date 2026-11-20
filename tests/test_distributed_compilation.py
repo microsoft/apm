@@ -11,6 +11,8 @@ from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfi
 from apm_cli.compilation.distributed_compiler import DirectoryMap, DistributedAgentsCompiler
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 
 class TestDistributedCompiler:
     """Test distributed AGENTS.md compilation."""

@@ -14,6 +14,8 @@ import yaml
 
 from apm_cli.utils.yaml_io import _BoundedSafeLoader
 
+pytestmark = pytest.mark.unit
+
 _has_aliases = _BoundedSafeLoader._has_aliases
 
 # ---------------------------------------------------------------------------

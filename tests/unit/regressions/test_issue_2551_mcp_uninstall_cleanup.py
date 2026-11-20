@@ -11,6 +11,8 @@ from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.mcp import ownership
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 
+pytestmark = pytest.mark.unit
+
 
 class _Lockfile(LockFile):
     def __init__(self) -> None:

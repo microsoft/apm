@@ -1,0 +1,78 @@
+# J14 Diagnose and inspect: doctor, the dependency views, package versions, the
+# cache commands, and a verbose install that fails on a dependency the host
+# does not serve (#4110). Schema: test_journeys.py. `apm doctor` probes
+# github.com/git/git; twins_consumer_b.py serves a twin of it.
+schema: 1
+id: J14
+persona: consumer
+title: Diagnose and inspect
+docs: [troubleshooting/index.md, troubleshooting/install-failures.md, consumer/install-packages.md]
+world:
+  setup:
+    - apm install lifecycle/p-skill#v1.0.0
+# O4 (i) reads JSON structure lines of 'apm deps why --json' as repeats.
+allow_repeat: ["{", "}", "]", '"is_direct": true,']
+steps:
+  - n: 1
+    run: [apm doctor]
+    exit: 0
+    docs:
+      page: troubleshooting/index.md
+      commands: [apm doctor]
+    key_lines: [Environment Diagnostics, github.com reachable]
+    forbidden_lines: ["[x]"]
+  - n: 2
+    run: [apm deps list, apm deps tree, apm deps why lifecycle/p-skill --json]
+    exit: 0
+    docs:
+      page: troubleshooting/index.md
+      commands: [apm deps list, apm deps tree]
+    key_lines:
+      - APM Dependencies (Project)
+      - "`-- lifecycle/p-skill@1.0.0"
+      - '"repo_url": "lifecycle/p-skill"'
+  - n: 3
+    run: [apm view lifecycle/p-skill versions]
+    exit: 0
+    key_lines: ["| v1.0.0 | tag    |"]
+  - n: 4
+    run: [apm cache info, apm cache clean --yes, apm cache prune --days 30]
+    exit: 0
+    files: []
+    docs:
+      page: troubleshooting/index.md
+      commands: [apm cache info]
+    key_lines:
+      - "[i] Cache root: "
+      - "[+] Cache cleaned."
+      - "[+] Pruned 0 SHA group(s)."
+  - n: 5
+    edit:
+      - replace: apm.yml
+        old: "- lifecycle/p-skill#v1.0.0\n"
+        new: "- lifecycle/p-skill#v1.0.0\n    - lifecycle/p-missing#v1.0.0\n"
+    run: [apm install --verbose]
+    exit: 1
+    files: []
+    key_lines:
+      - "[x] 1 package failed:"
+      - "lifecycle/p-missing"
+    forbidden_lines: [Traceback, "Could not connect to github.com (network error"]
+    remediate:
+      - {advice: apm uninstall lifecycle/p-missing}
+known_cells:
+  - id: J14-missing-repo-reported-as-network-error
+    law: FORBID
+    tracking: "#4199"
+    step: 5
+    match: "Could not connect to github.com \\(network error"
+  - id: J14-missing-repo-prints-no-runnable-next-action
+    law: O8
+    tracking: "#4199"
+    step: 5
+    match: "advice 'apm uninstall lifecycle/p-missing' is not printed"
+  - id: J14-verbose-install-failure-printed-twice
+    law: O4
+    tracking: "#4199"
+    step: 5
+    match: "repeats \"fatal: repository 'https://github.com/lifecycle/p-missing.git/' not found\""

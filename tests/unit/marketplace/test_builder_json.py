@@ -10,10 +10,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.marketplace.builder import (
     BuildReport,
     MarketplaceOutputReport,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_output_report(

@@ -11,9 +11,13 @@ Also tests the drift detection helpers in ``apm_cli/drift.py``:
 
 from unittest.mock import Mock
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.drift import build_download_ref, detect_config_drift, detect_ref_change
 from apm_cli.models.apm_package import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _orphan_preview(lockfile, intended, *, only_packages):

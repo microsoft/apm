@@ -126,8 +126,19 @@ pytestmark = [pytest.mark.<behavioral>, pytest.mark.promise("<catalog id>")]
   (`P-OWN-*`, `P-INV-*`, `P-LAW-*`, `P-DOC-*`); spec-conformance modules use
   their OpenAPM `req-*` ids. Add a missing promise to the catalog in the
   same pull request.
-- Local check before push (the gate's failure message names the fix):
+- Local check before push: `uv run --extra dev python -m tests.quality.taxonomy --changed`
+  checks only the test modules you changed (committed, staged, unstaged or
+  untracked, against the merge base with `origin/main`) in well under 5
+  seconds. The full gate is
   `uv run --extra dev pytest -p no:cacheprovider -q tests/quality/test_test_taxonomy.py`.
+  A failure for a missing marker or promise prints the exact line to add, for
+  example `Suggested: pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-...")]`:
+  the behavioral marker is inferred from the path (`tests/lifecycle` -> e2e;
+  `tests/integration` -> e2e when the module drives the installed CLI, else
+  component; `tests/unit` -> unit; elsewhere component) and the promise is the
+  best catalog match (req-* ids the module mentions, then ids sharing words
+  with the module name), with up to two other candidates. Check the
+  suggestion against the boundary the tests cross before you accept it.
 - When resolving a merge conflict, never resolve a modify/delete by dropping
   main's tests; keep main's test and re-apply your change.
 
@@ -286,6 +297,20 @@ with one entry per line; entries may only be removed.
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
 ```
 
+`scripts/check_test_assertions.py` (baseline
+`tests/quality/assertion_quality_baseline.json`) ratchets per-file counts the
+same way: AQ001 constant assertions, AQ002 `pytest.raises(Exception)`, AQ003
+component or e2e tests that assert no user-visible output, exit code or durable
+state, AQ004 tests that patch a symbol defined in an owner module they import,
+and AQ006 e2e modules that do not drive the real CLI (they use `CliRunner`,
+patch an owner module, or never run `apm` through `ApmLifecycleRunner`, the
+`apm_binary_path` or `apm_engine_command` fixtures, or the lifecycle `driver`).
+
+For consolidation, `uv run --frozen python scripts/check_exact_test_duplicates.py
+--report-equal-copies` lists equal copies that are safe to delete. A copy
+qualifies only if body, decorators, fixtures, class context, module bindings and
+CI lane all match its kept twin. The report never fails and never edits files.
+
 Moving a listed test or module to another directory under the same name keeps
 its allowance and is reported as moved. Prune stale or moved duplicate entries
 with `--update-baseline`; edit stale or moved taxonomy entries by hand.
@@ -346,7 +371,7 @@ assert the cross-platform contract, unless (per module) virtually
 every test in the file already exercises that same code path (in
 which case a module-level `pytestmark = pytest.mark.windows_compat`
 is the right level of granularity -- see
-`tests/unit/test_shepherd_owner_touch_gate.py` for an example where
+`tests/integration/test_shepherd_owner_touch_gate.py` for an example where
 nearly every test goes through the same git-executable-resolution
 helper).
 
@@ -374,7 +399,7 @@ helper).
    ```bash
    uv run --extra dev pytest -m windows_compat tests/unit --collect-only -q
    ```
-5. `tests/unit/test_windows_compat_gate_workflow.py` asserts the
+5. `tests/integration/test_windows_compat_gate_workflow.py` asserts the
    *shape* of the gate (marker-scoped, bounded, non-empty, required,
    non-duplicative of the Linux full suite) -- it does not enumerate
    file names, so it does not need editing when you add or remove a

@@ -7,7 +7,11 @@ Covers:
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
+
+pytestmark = pytest.mark.component
 
 
 class TestWindsurfClientAdapterConfigPath:

@@ -10,9 +10,12 @@ Tests cover:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.list_cmd import list as list_command
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

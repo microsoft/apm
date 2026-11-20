@@ -13,6 +13,8 @@ import pytest
 
 from apm_cli.adapters.package_manager.base import MCPPackageManagerAdapter
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helper concrete implementations
 # ---------------------------------------------------------------------------

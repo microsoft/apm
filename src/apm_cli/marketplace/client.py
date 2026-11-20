@@ -1102,10 +1102,11 @@ def fetch_raw(
     if proxy_bytes is not None:
         return proxy_bytes
 
-    from ..deps.registry_proxy import RegistryConfig, is_enforce_only
+    from ..deps.egress_route import EgressRoute, EgressSurface, route_for
+    from ..deps.registry_proxy import RegistryConfig
 
-    cfg = RegistryConfig.from_env()
-    if (cfg is not None and cfg.enforce_only) or is_enforce_only():
+    if route_for(EgressSurface.MARKETPLACE_FILE) is not EgressRoute.DIRECT:
+        cfg = RegistryConfig.from_env()
         raise MarketplaceError(
             f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
             "PROXY_REGISTRY_ONLY blocks the direct GitHub fetch"
@@ -1159,9 +1160,9 @@ def _refuse_direct_egress(source_name: str, what: str) -> None:
     catalogs route through ``PROXY_REGISTRY_URL``; every other remote kind,
     and any kind without a configured proxy, would go direct.
     """
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressRoute, EgressSurface, route_for
 
-    if is_enforce_only():
+    if route_for(EgressSurface.MARKETPLACE_FILE) is not EgressRoute.DIRECT:
         # Drop any query string: a signed catalog URL must not reach CI logs.
         what = re.sub(r"\?\S*", "", what)
         raise MarketplaceEgressRefusedError(
@@ -1200,10 +1201,10 @@ def _fetch_file(
         proxy_result = _try_proxy_fetch(source, file_path)
         if proxy_result is not None:
             return proxy_result
+        from ..deps.egress_route import EgressSurface, is_proxy_only
         from ..deps.registry_proxy import RegistryConfig
 
-        cfg = RegistryConfig.from_env()
-        if cfg is not None and cfg.enforce_only:
+        if RegistryConfig.from_env() is not None and is_proxy_only(EgressSurface.MARKETPLACE_FILE):
             # The proxy answered for this path: a miss is "not found".
             logger.debug(
                 "PROXY_REGISTRY_ONLY blocks direct fetch for %s/%s %s",

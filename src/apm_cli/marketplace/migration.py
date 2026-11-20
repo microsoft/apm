@@ -26,6 +26,8 @@ from pathlib import Path
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
 from .errors import MarketplaceYmlError
 from .yml_schema import (
     MarketplaceConfig,
@@ -91,7 +93,7 @@ def detect_config_source(project_root: Path) -> ConfigSource:
     ``marketplace:`` block) and a standalone ``marketplace.yml`` are
     present -- the user must explicitly choose which one wins.
     """
-    apm_yml = project_root / "apm.yml"
+    apm_yml = manifest_file(project_root)
     legacy_yml = project_root / "marketplace.yml"
 
     has_apm_block = _has_marketplace_block(apm_yml)
@@ -133,7 +135,7 @@ def load_marketplace_config(
     """
     source = detect_config_source(project_root)
     if source == ConfigSource.APM_YML:
-        return load_marketplace_from_apm_yml(project_root / "apm.yml")
+        return load_marketplace_from_apm_yml(manifest_file(project_root))
     if source == ConfigSource.LEGACY_YML:
         msg = DEPRECATION_MESSAGE
         if warn_callback is not None:
@@ -216,7 +218,7 @@ def migrate_marketplace_yml(
         already has a ``marketplace:`` block and ``force`` is ``False``.
     """
     legacy_path = project_root / "marketplace.yml"
-    apm_path = project_root / "apm.yml"
+    apm_path = manifest_file(project_root)
 
     if not legacy_path.exists():
         raise MarketplaceYmlError("marketplace.yml not found -- nothing to migrate.")

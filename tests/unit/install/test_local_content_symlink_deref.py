@@ -18,6 +18,8 @@ import pytest
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 
 def _try_symlink(link: Path, target: Path) -> None:
     """Create a symlink or skip the test on platforms without support."""
