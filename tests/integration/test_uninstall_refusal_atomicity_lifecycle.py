@@ -18,6 +18,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.promise("P-LAW-transaction.failed_command_preserves_state"),
 ]
 
 

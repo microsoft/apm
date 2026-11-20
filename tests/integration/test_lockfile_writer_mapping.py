@@ -24,7 +24,7 @@ from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.component, pytest.mark.promise("P-INV-I1")]
 
 _LOCKFILE = "apm.lock.yaml"
 _SERVER = {
@@ -135,8 +135,15 @@ def _bundle(world: _World) -> Path:
     return bundle
 
 
+def _apm_bundle(world: _World) -> Path:
+    """An APM-format bundle, the input ``apm unpack`` reads."""
+    _ok(world.leaf.root, world.environment, "pack", "--format", "apm", "-o", "dist-apm")
+    (bundle,) = (world.leaf.root / "dist-apm").iterdir()
+    return bundle
+
+
 def _writer_steps(
-    world: _World, bundle: Path
+    world: _World, bundle: Path, apm_bundle: Path
 ) -> list[tuple[tuple[str, ...], Path, LockfileWriter]]:
     root = world.project.root
     return [
@@ -154,6 +161,7 @@ def _writer_steps(
             world.consumer.root,
             LockfileWriter.INSTALL_BUNDLE,
         ),
+        (("unpack", str(apm_bundle), "--force"), world.consumer.root, LockfileWriter.UNPACK),
     ]
 
 
@@ -161,7 +169,7 @@ def test_each_lock_writing_command_maps_to_its_registered_writer(
     tmp_path: Path, recorder: _Recorder
 ) -> None:
     world = _world(tmp_path / "mapping")
-    steps = _writer_steps(world, _bundle(world))
+    steps = _writer_steps(world, _bundle(world), _apm_bundle(world))
 
     for args, cwd, writer in steps:
         recorder.clear()
@@ -191,6 +199,7 @@ def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
 ) -> None:
     world = _world(tmp_path / "refusal")
     bundle = _bundle(world)
+    apm_bundle = _apm_bundle(world)
     _ok(world.project.root, world.environment, "install", *_NO_POLICY)
     world.packages.set_targets(world.project, ("copilot",))
     for root in (world.project.root, world.consumer.root):
@@ -199,7 +208,7 @@ def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
         lock["apm_version"] = "99.0.0"
         dump_yaml(lock, path)
 
-    for args, cwd, writer in _writer_steps(world, bundle):
+    for args, cwd, writer in _writer_steps(world, bundle, apm_bundle):
         before = _tree(cwd)
         recorder.clear()
         assert _invoke(cwd, world.environment, *args) != 0, args

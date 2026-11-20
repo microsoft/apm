@@ -13,6 +13,11 @@ from apm_cli.deps.lockfile_write_authority import (
 )
 from apm_cli.install.errors import PolicyViolationError
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-LAW-transaction.failed_command_preserves_state"),
+]
+
 
 class _Rendered(RuntimeError):
     """A command-level wrapper raised from the original failure."""

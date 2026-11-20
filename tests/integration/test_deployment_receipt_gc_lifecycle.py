@@ -24,6 +24,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.promise("P-OWN-deployment-provenance-state"),
 ]
 
 _RULE = "---\napplyTo: '**'\ndescription: Receipt rule\n---\nKeep receipts tidy.\n"

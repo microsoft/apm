@@ -20,6 +20,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.promise("P-LAW-lockfile.frozen_preserves_bytes", "P-INV-I3"),
 ]
 
 _MANIFEST = "name: empty-consumer\nversion: 1.0.0\ntargets:\n- copilot\ndependencies:\n  apm: []\n"

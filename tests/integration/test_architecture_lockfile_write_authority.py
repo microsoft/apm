@@ -12,7 +12,7 @@ from scripts.architecture_linter.checks.contracts_lockfile_write_authority impor
 )
 from scripts.architecture_linter.runner import run_selected_rules
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I1")]
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RULE_ID = "contracts-tooling-lockfile-write-authority"

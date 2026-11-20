@@ -22,6 +22,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.promise("P-OWN-file-level-deploy-sync-cleanup", "P-LAW-idempotency.byte_stable"),
 ]
 
 _RULE = "---\napplyTo: '**'\ndescription: Retired rule\n---\nRetire me.\n"

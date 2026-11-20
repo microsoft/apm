@@ -25,6 +25,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.promise("P-INV-I1", "P-LAW-idempotency.byte_stable"),
 ]
 
 _needs_inotify = pytest.mark.skipif(

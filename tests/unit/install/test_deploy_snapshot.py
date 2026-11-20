@@ -7,8 +7,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.install.deploy_snapshot import DeployTargetSnapshot, capture_audit_gated_snapshot
 from apm_cli.install.transaction import InstallTransaction
+
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-LAW-transaction.failed_command_preserves_state"),
+]
 
 
 def _tree(root: Path) -> dict[str, bytes | str]:

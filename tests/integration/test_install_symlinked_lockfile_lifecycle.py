@@ -23,6 +23,7 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
     pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows"),
+    pytest.mark.promise("P-LAW-transaction.failed_command_preserves_state"),
 ]
 
 _SKILL = "---\nname: {name}\ndescription: {name} skill\n---\n# {name}\n"

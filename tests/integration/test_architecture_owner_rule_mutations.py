@@ -613,23 +613,6 @@ def test_codex_native_content_and_ownership_gates_cannot_be_bypassed(
             "return _selected_dependency_reference(package, dependencies).get_identity()",
             "return DependencyReference.parse(package).get_identity()",
         ),
-    ],
-)
-def test_package_selector_identity_cannot_bypass_interpreted_references(
-    path: str, old: str, new: str
-) -> None:
-    """Install and preview cannot revert to lossy shorthand reparsing."""
-    rule_id = "install-deployment-prospective-dry-run-plan"
-    source = (ROOT / path).read_text(encoding="utf-8")
-    assert old in source
-    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
-    assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
-
-
-@pytest.mark.parametrize(
-    ("path", "old", "new"),
-    [
         (
             "src/apm_cli/install/dry_run_plan.py",
             "resolved_apm_dependencies=preview.resolved_dependencies,",
@@ -652,8 +635,12 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
     ],
 )
-def test_preview_cannot_bypass_pipeline_graph_authority(path: str, old: str, new: str) -> None:
-    """An alternate root-only preview or incomplete-removal claim fails the guard."""
+def test_package_selector_identity_cannot_bypass_interpreted_references(
+    path: str, old: str, new: str
+) -> None:
+    """Install and preview cannot revert to lossy shorthand reparsing, and a
+    preview cannot bypass the pipeline graph (root-only preview or an
+    incomplete-removal claim)."""
     rule_id = "install-deployment-prospective-dry-run-plan"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert old in source
