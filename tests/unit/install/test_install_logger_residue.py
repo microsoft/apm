@@ -48,7 +48,8 @@ class TestInstallLoggerResidue:
         assert "2 native target files" in rendered
         assert ".claude/agents/a.md" in rendered
         assert ".claude/skills/s/SKILL.md" in rendered
-        assert "Remove these files, or re-run 'apm install' (add --force" in rendered
+        assert "Remove these files, then re-run 'apm install'." in rendered
+        assert "--force" not in rendered
         _assert_no_rollback_claim(rendered)
 
     def test_user_scope_next_step_reruns_global_install(self) -> None:
@@ -57,7 +58,7 @@ class TestInstallLoggerResidue:
         )
 
         assert "~/.claude/agents/a.md" in rendered
-        assert "re-run 'apm install -g' (add --force" in rendered
+        assert "re-run 'apm install -g'." in rendered
 
     def test_entries_are_not_called_files(self) -> None:
         rendered = _render(
@@ -71,7 +72,7 @@ class TestInstallLoggerResidue:
         )
         assert "copilot-app-db://workflows/42" in rendered
         assert "Remove these files" not in rendered
-        assert "Re-run 'apm install' (add --force" in rendered
+        assert "Re-run 'apm install'." in rendered
         _assert_no_rollback_claim(rendered)
 
     @patch("apm_cli.core.command_logger._rich_error")

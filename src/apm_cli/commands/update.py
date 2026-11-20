@@ -166,7 +166,9 @@ def _locked_copy_contradicts_lock(lockfile: LockFile | None, modules_dir: Path) 
     from apm_cli.install.source_helpers import locked_content_mismatch
 
     for key, dependency in lockfile.dependencies.items():
-        if key == "." or not dependency.content_hash:
+        # Local packages re-copy from their source on every install, so their
+        # copy carries no locked-source verdict (as audit's replay skips them).
+        if key == "." or not dependency.content_hash or dependency.source == "local":
             continue
         install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
         if install_path.is_dir() and locked_content_mismatch(

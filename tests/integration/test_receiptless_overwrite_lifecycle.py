@@ -133,7 +133,6 @@ def _locked_hashes(world: _World) -> dict[str, str]:
 
 
 def _kept_line(entry: str, *, user_scope: bool, proven_edit: bool = False) -> str:
-    install = "apm install -g" if user_scope else "apm install"
     reason = (
         "it was modified since APM deployed it"
         if proven_edit
@@ -141,10 +140,14 @@ def _kept_line(entry: str, *, user_scope: bool, proven_edit: bool = False) -> st
         "deployment receipt or locked render proving APM wrote it, so it may hold "
         "local edits"
     )
-    return (
-        f"Kept {entry}: {reason}. Move it aside, then run '{install}' to restore it, or "
-        f"'{install} --force' to overwrite it."
+    # Never a --force overwrite: it also deploys despite critical findings (RA-008).
+    remedy = (
+        "Move it aside, then run 'apm install -g' to restore it."
+        if user_scope
+        else "Move it aside, then run 'apm install' to restore it, or 'apm export-patch' "
+        "to export the local edits as upstream patches."
     )
+    return f"Kept {entry}: {reason}. {remedy}"
 
 
 def _output(result: CommandResult) -> str:
@@ -190,11 +193,12 @@ def test_receiptless_install_keeps_each_edited_kind(
         assert {path: path.read_bytes() for path in paths.values()} == edited
         assert _locked_hashes(world) == hashes_before
 
-    # The printed remedy restores the files.
+    # Restore remedy, as printed: move each file aside, then install.
     for path in paths.values():
-        path.unlink()
+        path.rename(path.with_name(f"{path.name}.aside"))
     restored = world.install()
     assert restored.returncode == 0, _output(restored)
+    assert "Kept " not in _output(restored)
     assert all(_EDIT not in path.read_text(encoding="utf-8") for path in paths.values())
 
 

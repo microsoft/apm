@@ -247,14 +247,16 @@ class TestDiagnosticCollectorRendering:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_collision_group_shows_force_hint(
+    def test_collision_group_shows_move_aside_hint_not_force(
         self, mock_info, mock_warning, mock_echo, mock_console
     ):
         dc = DiagnosticCollector()
         dc.skip("f.md")
         dc.render_summary()
         info_texts = [str(c) for c in mock_info.call_args_list]
-        assert any("--force" in t for t in info_texts)
+        # RA-008: --force also deploys despite critical findings; never the hint.
+        assert any("Move the local files aside, then run 'apm install'" in t for t in info_texts)
+        assert not any("--force" in t for t in info_texts)
 
     @patch(f"{_MOCK_BASE}._get_console", return_value=None)
     @patch(f"{_MOCK_BASE}._rich_echo")

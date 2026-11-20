@@ -69,8 +69,9 @@ def test_audit_ci_structured_output_reports_a_failed_replay(
     assert "Error:" not in result.stderr, _evidence(result)
     document = json.loads(result.stdout)
     if fmt == "json":
-        failed = {c["name"]: c["message"] for c in document["checks"] if not c["passed"]}
-        assert failed["drift"].startswith(f"drift replay failed: {_SYMLINK_ERROR}"), failed
+        failed = {c["name"]: c for c in document["checks"] if not c["passed"]}
+        assert failed["drift"]["message"].startswith("drift replay failed"), failed
+        assert failed["drift"]["details"][0].startswith(_SYMLINK_ERROR), failed
     else:
         messages = [r["message"]["text"] for r in document["runs"][0]["results"]]
         assert any(_SYMLINK_ERROR in text for text in messages), messages

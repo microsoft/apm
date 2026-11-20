@@ -302,8 +302,13 @@ def _check_required_packages_deployed(
     policy: DependencyPolicy,
     *,
     dep_names: set[str] | DependencyPolicyIndex | None = None,
+    installing: bool = False,
 ) -> CheckResult:
     """Check 4: required packages are PRESENT in the lockfile (issue #1873, Gap B).
+
+    *installing* means the caller is the install that locks *deps*: a declared
+    required package it is about to record is not absent, or the check would
+    block the very install that satisfies it.
 
     Asserts package PRESENCE, not materialised ``deployed_files``. A package
     can be legitimately present-but-parked -- resolved and locked, with its
@@ -329,7 +334,7 @@ def _check_required_packages_deployed(
         if match is None:
             # Never skip: the entry cannot locate its lock row by identity.
             unresolved.append(_unresolved_required_subject(index, pkg_name))
-        elif match.locked_in(lock) is None:
+        elif match.locked_in(lock) is None and not installing:
             # PRESENCE, not deployment: the package must appear in the lockfile.
             absent.append(
                 PolicySubject(
@@ -1444,6 +1449,7 @@ def run_dependency_policy_checks(
     direct_dep_keys: set[str] | None = None,
     source_deps: Iterable[DependencyReference] | None = None,
     declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
+    installing: bool = False,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1511,6 +1517,10 @@ def run_dependency_policy_checks(
         the install-pipeline callers pass the declarations they captured
         beforehand and ``require_pinned_constraint`` judges the authored
         constraint rather than the selected tag (#3224).
+    installing:
+        ``True`` for the install gate, which is about to lock
+        *deps_to_install*: a declared required package missing only from
+        the previous lockfile does not block the install that records it.
 
     Returns
     -------
@@ -1554,7 +1564,7 @@ def run_dependency_policy_checks(
         return result
     if _run(
         _check_required_packages_deployed(
-            deps_list, lockfile, policy.dependencies, dep_names=dep_names
+            deps_list, lockfile, policy.dependencies, dep_names=dep_names, installing=installing
         )
     ):
         return result

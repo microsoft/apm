@@ -247,6 +247,14 @@ def _unlink(relative: str) -> Callable[[_World], None]:
     return lambda world: (world.consumer.root / relative).unlink()
 
 
+def _move_aside(relative: str) -> Callable[[_World], None]:
+    def move(world: _World) -> None:
+        path = world.consumer.root / relative
+        path.rename(path.with_name(f"{path.name}.aside"))
+
+    return move
+
+
 def _corrupt_lockfile(world: _World) -> None:
     (world.consumer.root / "apm.lock.yaml").write_text("dependencies: [\n", encoding="ascii")
 
@@ -351,7 +359,7 @@ TEXT_PROOFS: tuple[_TextProof, ...] = (
         lambda world: ("export-patch", "--dry-run"),
         1,
         _expect_ok,
-        before=_unlink("apm.lock.yaml"),
+        before=_move_aside("apm.lock.yaml"),
     ),
     _TextProof(
         "executables-denied",
@@ -948,6 +956,8 @@ W3_CORE_MODELS_PROOFS: tuple[_TextProof, ...] = (
         lambda _world: _INSTALL_ARGS,
         0,
         _user_file_overwritten,
+        # The printed manual step, as printed: move the local file aside (RA-008).
+        before=_move_aside(_INSTRUCTION),
     ),
     _TextProof(
         "deployment-owners-invalid",

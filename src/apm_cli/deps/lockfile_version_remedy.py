@@ -23,7 +23,7 @@ def with_version_remedy(exc: Exception, path: Path) -> Exception:
         return exc
     match = _VERSION.search(str(exc))
     version = match.group(1) if match else "'unknown'"
-    regen = remediation.LOCKFILE_VERSION_UNSUPPORTED.bind(path=path.name)
+    regen = remediation.LOCKFILE_VERSION_UNSUPPORTED.bind(lockfile=path.name)
     if is_user_scope_root(path.parent):
         regen = regen.with_command("apm lock -g")
     upgrade = remediation.LOCKFILE_VERSION_UPGRADE_APM.bind(version=version)

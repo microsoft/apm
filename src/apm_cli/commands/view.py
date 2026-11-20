@@ -613,11 +613,11 @@ def display_versions(
     from ..deps.egress_route import EgressSurface, is_refused
 
     if is_refused(EgressSurface.SOURCE_ENUMERATION):
+        # State the enterprise policy only; never advise lifting it (RA-014).
         logger.error(
             f"Cannot list versions for '{package}' in registry-only mode: "
-            "APM does not list versions through the registry proxy and "
-            "PROXY_REGISTRY_ONLY blocks version enumeration against the source "
-            "host. To list versions, unset PROXY_REGISTRY_ONLY; to install, pin "
+            "version listing from the source host is disabled because "
+            "PROXY_REGISTRY_ONLY is set (enterprise proxy policy). To install, pin "
             "an exact version tag in apm.yml."
         )
         sys.exit(1)

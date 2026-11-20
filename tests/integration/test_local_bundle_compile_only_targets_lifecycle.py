@@ -241,8 +241,10 @@ def test_staged_instruction_edits_are_reported_as_hash_drift(
     audited = world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=1)
     assert f"hash-drift: {_STAGED} (staged," in _output(audited)
 
-    # A forced reinstall restages the bundle bytes and clears the drift.
-    world.apm(project, *install, "--force")
+    # The printed remedy, without --force (RA-008): delete the edited staged
+    # copy, then reinstall the bundle, which restages its bytes.
+    staged.unlink()
+    world.apm(project, *install)
     assert "Injected after install." not in staged.read_text(encoding="ascii")
     compiled = world.apm(project, "compile")
     assert "hash-drift" not in _output(compiled)

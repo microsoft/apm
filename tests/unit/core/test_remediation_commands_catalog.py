@@ -103,7 +103,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "prune-partial": _FAULT,
     "registry-canonical-unrecorded": _NETWORK,
     "runtime-missing": _NETWORK,
-    "staged-bundle-drift": _OUTSIDE,
+    "staged-bundle-drift": "executed end to end by "
+    "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py (RA-008)",
     "target-not-deployed": _OUTSIDE,
     "user-instructions-missing": _OUTSIDE,
     "user-manifest-invalid": _OUTSIDE,

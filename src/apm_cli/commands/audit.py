@@ -734,7 +734,7 @@ def _audit_ci_gate(
 
     from ..install.audit_replay import resolve_ci_audit_materialization
     from ..install.exec_gate import exec_policy_from_discovery
-    from ..policy.ci_checks import _check_drift, run_baseline_checks
+    from ..policy.ci_checks import _check_drift, replay_failure_check, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
     fail_fast = not no_fail_fast
@@ -771,6 +771,8 @@ def _audit_ci_gate(
         ci_mode=True,
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
+        # A failed replay is one finding, reported in full under drift when drift runs.
+        replay_error_owner=None if no_drift else "drift",
         no_policy=no_policy,
         policy_provider=(
             None
@@ -874,13 +876,8 @@ def _audit_ci_gate(
                 lockfile = None  # the lockfile-exists check already failed with both remedies
             if lockfile is not None:
                 if prepared_replay_error is not None:
-                    from ..policy.models import CheckResult
-
-                    drift_check = CheckResult(
-                        name="drift",
-                        passed=False,
-                        message=f"drift replay failed: {prepared_replay_error}",
-                        details=[prepared_replay_error],
+                    drift_check = replay_failure_check(
+                        "drift", prepared_replay_error, label="drift replay failed"
                     )
                     drift_findings = []
                 else:

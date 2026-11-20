@@ -219,11 +219,15 @@ def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str
         else "it differs from what APM renders and there is no local deployment "
         "receipt or locked render proving APM wrote it, so it may hold local edits"
     )
-    restore, overwrite = remediation.KEPT_FILE_RESTORE, remediation.KEPT_FILE_OVERWRITE
+    # Restore, or keep the edit by exporting it; never a --force overwrite,
+    # which would also deploy despite critical security findings (RA-008).
     if user_scope:
-        restore = restore.with_command("apm install -g")
-        overwrite = overwrite.with_command("apm install -g --force")
-    return remediation.kept_file_message(entry, reason, restore, overwrite)
+        # export-patch reads the project lock only; user scope can only restore.
+        restore = remediation.KEPT_FILE_RESTORE.with_command("apm install -g")
+        return remediation.kept_file_message(entry, reason, restore)
+    return remediation.kept_file_message(
+        entry, reason, remediation.KEPT_FILE_RESTORE, remediation.LOCAL_EDITS_EXPORT
+    )
 
 
 class BaseIntegrator:

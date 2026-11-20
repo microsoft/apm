@@ -42,9 +42,7 @@ def run(ctx: InstallContext) -> None:
     cli_override = getattr(ctx, "audit_override", None)
     if cli_override == "off" and decision.mode != "off" and logger is not None:
         logger.warning(
-            f"Policy overrides --no-audit to '{decision.mode}' "
-            f"(set by {decision.source}). "
-            f"Use '--no-policy' to skip the policy floor."
+            f"Policy overrides --no-audit to '{decision.mode}' (set by {decision.source})."
         )
     project_root = ctx.project_root
 
@@ -107,18 +105,18 @@ def run(ctx: InstallContext) -> None:
     blocking = decision.mode == "block" and has_critical and not ctx.force
 
     if blocking:
-        from apm_cli.core.remediation import HIDDEN_CHARACTERS_FLAGGED, INSTALL_AUDIT_FORCE, either
+        from apm_cli.core.remediation import (
+            HIDDEN_CHARACTERS_FLAGGED,
+            SECURITY_FINDINGS_REVIEW,
+            either,
+        )
         from apm_cli.install.errors import PolicyViolationError
 
-        advice = either(HIDDEN_CHARACTERS_FLAGGED, INSTALL_AUDIT_FORCE)
+        # Review, never bypass: no --force or --no-policy hint (RA-008, RA-015).
+        advice = either(HIDDEN_CHARACTERS_FLAGGED, SECURITY_FINDINGS_REVIEW)
         raise PolicyViolationError(
             f"Install-time audit blocked: {summary}. {advice[:1].upper()}{advice[1:]}"
-            + (
-                ", or '--no-policy' to skip the policy floor"
-                if "policy" in decision.source.lower()
-                else ""
-            )
-            + f" (mode set by {decision.source})."
+            f" (mode set by {decision.source})."
         )
 
     # warn mode, or block downgraded by --force: record without halting.
