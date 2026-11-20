@@ -375,7 +375,8 @@
       "owner": "integration/targets.py (TargetProfile.skills_rel_root, TargetProfile.skills_deploy_path)",
       "selectors": [
         "src/apm_cli/install/deployed_paths.py",
-        "src/apm_cli/commands/uninstall/engine.py"
+        "src/apm_cli/commands/uninstall/engine.py",
+        "src/apm_cli/commands/uninstall/local_survivors.py"
       ],
       "guards": ["install-deployment-skills-root-derivation"]
     },
