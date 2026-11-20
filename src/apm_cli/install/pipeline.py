@@ -944,16 +944,15 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                 raise
 
         # ------------------------------------------------------------------
-        # Phase: Native GitHub Copilot Agent Plugin registration (#2703).
-        # Runs LAST -- after the lockfile is canonical, after the require-hashes
-        # integrity gate, and after the content-audit gate -- so the APM-owned
-        # marketplace catalog, ownership ledger, and enabled-plugin settings
-        # entries are written only for an install those gates actually allowed
-        # to complete. Writing earlier would leave Copilot loading a plugin a
-        # later gate refused.
+        # Phase: native plugin activation (Claude Code and GitHub Copilot,
+        # #2703, #3921). Runs LAST -- after the lockfile is canonical, after
+        # the require-hashes integrity gate, and after the content-audit gate
+        # -- so deployed roots, the generated catalog and settings entries are
+        # written only for an install those gates allowed to complete.
+        # Writing earlier would leave a harness loading a plugin a later gate
+        # refused.
         # ------------------------------------------------------------------
         if not lockfile_only:
-            _run_phase("copilot_plugins", copilot_plugins, ctx)
             _run_phase("codex_plugins", codex_plugins, ctx)
             _run_phase("claude_plugins", claude_plugins, ctx)
 

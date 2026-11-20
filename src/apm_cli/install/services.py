@@ -137,6 +137,7 @@ def _check_native_claude_transition(
     project_root: Path,
     targets: list[Any],
     package: str,
+    flag: str = "",
 ) -> None:
     """Refuse native activation over retained or unreadable loose hook state."""
     from apm_cli.claude_plugins.admission import ClaudeNativePluginError
@@ -153,9 +154,9 @@ def _check_native_claude_transition(
         failed = ", ".join(reconcile_stats.get("failed_paths", []))
         recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
         if not reconcile_stats.get("errors"):
-            recovery = f"Run: apm uninstall --global {package} && apm install --global {package}"
+            recovery = f"Run: apm uninstall{flag} {package} && apm install{flag} {package}"
         raise ClaudeNativePluginError(
-            f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
+            f"Cannot switch {package} to a native plugin. Hook settings were preserved. {recovery}"
         )
 
 
@@ -307,7 +308,7 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     codex_native = deployment_plan.codex_native
     native_claude_plugin = deployment_plan.claude_native
-    native_target_names = {native_claude_plugin.target_name} if native_claude_plugin else set()
+    native_target_names = native_claude_plugin.harnesses if native_claude_plugin else set()
     # Compatibility-only Codex data is opaque to every loose target adapter.
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan
@@ -323,8 +324,8 @@ def integrate_package_primitives(  # noqa: PLR0913
         return result
 
     # A natively registered Agent Plugin stays opaque: Copilot loads the whole
-    # unit live from apm_modules, so decomposing its skills or MCP servers here
-    # would double-load them. The registrar owns this package instead. The
+    # unit from its deployed copy in .agents/plugins, so decomposing its skills
+    # or MCP servers here would double-load them. The registrar owns this package instead. The
     # short-circuit fires only AFTER target narrowing (so a dependency that
     # excludes copilot is not registered) and AFTER the executable trust gate
     # (so an Agent Plugin's MCP servers / bin cannot bypass a default-deny).
@@ -424,6 +425,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             project_root,
             [target for target in targets if target.name in native_target_names],
             package_name,
+            " --global" if scope is InstallScope.USER else "",
         )
         if not projection_targets:
             from apm_cli.claude_plugins.admission import queue_native_claude

@@ -299,10 +299,20 @@ class LockfileBuilder:
             if lockfile_only or getattr(self.ctx, "frozen", False)
             else getattr(self.ctx, "package_completed_reintegrations", {})
         )
-        canonical_records = {}
+        # A kept native plugin deployed nothing this run: its previous ledger
+        # records stand, never re-attributed to this run (#3921). Seeded first,
+        # so a dependency this run evaluated wins any record it co-owns.
+        carried_keys = getattr(self.ctx, "native_carried_keys", None) or set()
+        canonical_records = {
+            key: record
+            for key, record in (prior_ledger.records.items() if prior_ledger else ())
+            if carried_keys & set(record.owners)
+        }
         authoritative_empty = False
         ghost_count = 0
         for dep_key in lockfile.dependencies:
+            if dep_key in carried_keys:
+                continue
             claim = package_claims[dep_key]
             current = list(claim.current_files)
             retained_hashes = cleanup_retained.get(dep_key, {})
@@ -387,35 +397,76 @@ class LockfileBuilder:
                 lockfile.dependencies[dep_key].exec_allowed_types = allowed.get(dep_key, ())
 
     def _attach_native_plugins(self, lockfile: LockFile) -> None:
-        """Record each admitted native Claude plugin as its dependency's ownership.
+        """Record each admitted native plugin as its dependency's ownership.
 
-        A run whose targets exclude Claude did not evaluate Claude admission, so
-        an existing record is carried forward instead of retiring the plugin.
+        A run whose targets exclude every harness a recorded plugin loads in
+        did not evaluate its admission, so that record is carried forward
+        instead of retiring the plugin.
         """
-        from apm_cli.claude_plugins.registrar import marketplace_binding
+        from apm_cli.claude_plugins.registrar import native_ownership, scope_binding
+        from apm_cli.core.scope import is_user_scope
         from apm_cli.native_plugins.record import NativePluginRecord
 
         plugins = getattr(self.ctx, "claude_native_plugins", None) or {}
+        existing = getattr(self.ctx, "existing_lockfile", None)
         if plugins:
-            name, path = marketplace_binding(self.ctx.apm_modules_dir.parent, self.ctx.project_root)
+            name, path = scope_binding(
+                user_scope=is_user_scope(self.ctx.scope),
+                modules_dir=self.ctx.apm_modules_dir,
+                deploy_root=self.ctx.project_root,
+                previous=None if existing is None else native_ownership(existing),
+            )
         for dep_key, plugin in plugins.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].native_plugin = NativePluginRecord(
                     plugin.name, plugin.bundle_hash, name, path
                 )
-        existing = getattr(self.ctx, "existing_lockfile", None)
-        if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):
+        if existing is None:
             return
+        self._carry_unevaluated_native_plugins(lockfile, existing)
+
+    def _carry_unevaluated_native_plugins(self, lockfile: LockFile, existing: LockFile) -> None:
+        """Keep the previous row of a native plugin this run's targets never reached.
+
+        Per dependency (``carried_native_row``): ``--target copilot`` never
+        evaluates a ``targets: [claude]`` plugin, so its previous row carries
+        forward whole and integration deployed nothing for it this run; its
+        deployed root, declarations and loose files stay as the row records
+        (req-na-005's "keep the previous entry"). When its source changed, a
+        default-visible note says the update waits.
+        """
+        import copy
+
+        from apm_cli.native_plugins.scopes import carried_native_row, record_harnesses
+
+        run_targets = {target.name for target in self.ctx.targets or ()}
+        carried = {}
         for dep_key, locked in lockfile.dependencies.items():
-            prior = existing.dependencies.get(dep_key)
-            if (
-                locked.native_plugin is None
-                and prior is not None
-                and prior.native_plugin is not None
-                and (prior.resolved_commit, prior.content_hash)
-                == (locked.resolved_commit, locked.content_hash)
+            if locked.native_plugin is not None:
+                continue
+            prior = carried_native_row(existing, dep_key, locked.target_subset, run_targets)
+            if prior is None:
+                continue
+            carried[dep_key] = copy.deepcopy(prior)
+            if (prior.resolved_commit, prior.content_hash) == (
+                locked.resolved_commit,
+                locked.content_hash,
             ):
-                locked.native_plugin = prior.native_plugin
+                continue
+            harnesses = record_harnesses(prior.package_type, prior.native_plugin.marketplace_path)
+            if locked.target_subset:
+                harnesses &= frozenset(locked.target_subset)
+            message = (
+                f"Kept the previous version of native plugin '{prior.native_plugin.name}': "
+                f"this run's targets do not include {', '.join(sorted(harnesses))}, so its "
+                "update was not applied. Run 'apm install' without --target to update it."
+            )
+            diagnostics = getattr(self.ctx, "diagnostics", None)
+            if diagnostics is not None:
+                diagnostics.warn(message, package=dep_key)
+            elif getattr(self.ctx, "logger", None) is not None:
+                self.ctx.logger.warning(message)
+        lockfile.dependencies.update(carried)
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.
