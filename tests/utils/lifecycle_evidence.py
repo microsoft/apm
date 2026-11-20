@@ -325,6 +325,8 @@ class LifecycleEvidencePlugin:
 _TRACEBACK = "Traceback (most recent call last)"
 _STATUS_PREFIXES = ("[+]", "[!]", "[x]", "[i]", "[*]", "[>]")
 _TREE_PREFIXES = ("|--", "+--", "`--", "\\--")
+# The narrowest console width Rich wraps at when stdout is not a terminal.
+_WRAP_WIDTH = 79
 # Starts of a printed line (status, tree or box row) as opposed to a wrap continuation.
 _LINE_OPENERS = (*_STATUS_PREFIXES, "|", "+", "`", "\\")
 _ALLOWED_CONTROL = frozenset("\n\r\t")
@@ -365,6 +367,11 @@ def _runs(command: str, *flags: str) -> Callable[[tuple[str, ...], str], bool]:
     return lambda args, _scenario: _command_name(args) == command and all(f in args for f in flags)
 
 
+def _runs_any(*commands: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: the command is one of *commands*."""
+    return lambda args, _scenario: _command_name(args) in commands
+
+
 def _scenario(*ids: str) -> Callable[[tuple[str, ...], str], bool]:
     """Cell predicate: the lifecycle scenario id is one of *ids*."""
     return lambda _args, scenario_id: scenario_id in ids
@@ -397,7 +404,7 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
     KnownOutputCell(
         "install-org-policy-banner-per-phase",
         "I9",
-        "#4241",
+        "#4249",
         _runs("install"),
         r"\[!\] Policy: org:",
         output=(
@@ -418,7 +425,7 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "I9",
         "#4219",
         _runs("uninstall"),
-        r"repeats a diagnostic: '\|-- ",
+        r"repeats a (line|diagnostic): '\|-- ",
         # Survivor tree lines with no package line naming them, one of them repeated.
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
     ),
@@ -426,14 +433,20 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "install-hook-line-per-target",
         "I9",
         "#4243",
-        _scenario("target-contraction-install-a-b"),
-        r"PreToolUse: runs echo scope",
+        _runs("install"),
+        r"repeats a (line|diagnostic): '\|   ",
+        # One hook integrated into two targets that render it the same way (Claude
+        # and Windsurf, or a hook file) is listed once per target, back to back.
+        output=(
+            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
+            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
+        ),
     ),
     KnownOutputCell(
         "install-registry-lookup-per-registry",
         "I9",
         "#4244",
-        _runs("install"),
+        _runs_any("install", "update"),
         r"Looking up 1 MCP server in registry",
         output=r"^\[i\] Using MCP registry: .*^\[i\] Using MCP registry: ",
     ),
@@ -447,6 +460,31 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
             r"^\+- MCP Servers.*'hermes-stdio': unknown key"
             r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
         ),
+    ),
+    KnownOutputCell(
+        "install-mcp-failure-line-per-runtime",
+        "I9",
+        "#4288",
+        _runs("install"),
+        r"Failed to install ",
+        output=r"^\|\s+\S+\s+-- failed for [^,\n]+, ",
+    ),
+    KnownOutputCell(
+        "install-left-existing-server-per-shared-file",
+        "I9",
+        "#4289",
+        _runs("install"),
+        r"Left existing MCP server",
+        # Claude Code and Copilot CLI share .mcp.json; each warns about it.
+        output=r"Configuring for [^\n]*Claude Code[^\n]*Copilot CLI.*^\[!\] Left existing MCP server",
+    ),
+    KnownOutputCell(
+        "install-verbose-ado-auth-attempt-repeats",
+        "I9",
+        "#4290",
+        _runs("install", "--verbose"),
+        r"Auth-only attempt for ado host|credential fill|Without a credential",
+        output=r"^  \[i\] Auth-only attempt for ado host",
     ),
     KnownOutputCell(
         "install-frozen-trust-notice-repeats",
@@ -516,8 +554,10 @@ def _json_mode(args: Sequence[str]) -> bool:
     )
 
 
-def _ascii_violations(stream: str, text: str) -> list[OutputViolation]:
-    bad = sorted({hex(ord(c)) for c in text if not (" " <= c <= "~" or c in _ALLOWED_CONTROL)})
+def _ascii_violations(stream: str, text: str, echoed: str = "") -> list[OutputViolation]:
+    """Characters outside printable ASCII, except those of *echoed* (the test's own paths)."""
+    allowed = _ALLOWED_CONTROL | frozenset(echoed)
+    bad = sorted({hex(ord(c)) for c in text if not (" " <= c <= "~" or c in allowed)})
     if not bad:
         return []
     return [OutputViolation("I6", f"{stream} has characters outside printable ASCII {bad[:5]}")]
@@ -526,18 +566,24 @@ def _ascii_violations(stream: str, text: str) -> list[OutputViolation]:
 def _logical_lines(text: str) -> list[str]:
     """Non-blank lines with terminal wraps undone.
 
-    The console wraps a long status or tree line at its width; the
-    continuation starts at column 0 with no status, tree or box prefix.
-    Joining it back keeps two different wrapped paths from comparing equal
-    on their shared first half ("[>] Resolving").
+    The console wraps a long status or tree line at its width: the broken
+    line ends with the space it broke at, or fills the width when a word is
+    split, and the continuation starts at column 0 with no status, tree or
+    box prefix. Joining it back keeps two different wrapped paths from
+    comparing equal on their shared first half ("[>] Resolving"); a short
+    line is never joined, so plain lines such as "Phase: ..." stay apart.
     """
     lines: list[str] = []
+    previous_raw = ""
     for raw in text.splitlines():
         line = raw.rstrip()
+        wrapped = previous_raw.endswith(" ") or len(previous_raw) >= _WRAP_WIDTH
+        previous_raw = raw
         if not line.strip():
             continue
         if (
             lines
+            and wrapped
             and not line[:1].isspace()
             and not line.startswith(_LINE_OPENERS)
             and lines[-1].strip().startswith(_LINE_OPENERS)
@@ -594,8 +640,11 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
 def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]:
     """Every I6, I8 and I9 violation in one APM command result."""
     found: list[OutputViolation] = []
+    # A path-corner world puts non-ASCII characters in the test's own paths;
+    # echoing a user path back is not APM output, so its characters pass.
+    echoed = str(getattr(result, "cwd", ""))
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
-        found.extend(_ascii_violations(stream, text))
+        found.extend(_ascii_violations(stream, text, echoed))
     if _json_mode(args) and result.returncode in (0, 1):
         try:
             json.loads(result.stdout)

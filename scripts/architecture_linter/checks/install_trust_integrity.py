@@ -48,28 +48,28 @@ _CI_CHECKS = "src/apm_cli/policy/ci_checks.py"
 _DISCOVERY = "discover_policy_with_chain"
 # Every remaining direct discovery call consumes the outcome itself: the
 # install gate and preflight route it, audit/policy commands report it,
-# update and lifecycle scripts fail toward the gate. Trust readers are not
-# here; they ask resolve_trust_policy.
+# lifecycle scripts fail toward the gate. Trust readers, approve, update
+# and MCP admission are not here; they ask the routing owner.
 _DISCOVERY_CALLERS = frozenset(
     {
         (_OWNER, "discover_trust_policy"),
         ("src/apm_cli/policy/install_preflight.py", "run_policy_preflight"),
         ("src/apm_cli/install/phases/policy_gate.py", "_discover_with_chain"),
-        ("src/apm_cli/commands/approve.py", "_load_org_policy"),
         ("src/apm_cli/commands/policy.py", "status"),
         ("src/apm_cli/commands/audit.py", "_audit_ci_gate"),
         ("src/apm_cli/commands/audit.py", "_resolve_fail_on_drift"),
-        ("src/apm_cli/commands/update.py", "_policy"),
         ("src/apm_cli/core/lifecycle_scripts.py", "build_runner_from_context"),
-        # MCP admission records an unusable policy as ``policy_unavailable``,
-        # which audit reports; install paths then pass the routed policy gate.
-        ("src/apm_cli/security/trust.py", "resolve"),
     }
 )
 _TRUST_READERS: dict[str, str] = {
     _EXECUTABLES: "policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)",
     _EXEC_GATE: "policy = resolve_trust_policy(self._project_root, announce=False)",
     _LOCAL_BUNDLE: "policy = resolve_trust_policy(",
+    "src/apm_cli/commands/approve.py": "policy = resolve_trust_policy(project_root, logger=logger)",
+    # The ``apm audit --ci`` drift replay reuses the run's one discovery.
+    "src/apm_cli/commands/audit.py": (
+        "return resolve_trust_policy(cfg.project_root, announce=False, fetch_result=fetch_policy())"
+    ),
 }
 
 
