@@ -4,7 +4,7 @@ import builtins
 import contextlib
 import shlex
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -165,8 +165,18 @@ def _removed_lock_key(dep_entry: object, lockfile: LockFile | None) -> str:
         return target if isinstance(target, str) else str(target)
 
 
-def _dependency_public_label(dep_entry: object) -> str:
-    """Return a path-safe dependency label for user-facing uninstall output."""
+def _count_noun(count: int, singular: str, plural: str | None = None) -> str:
+    """Return ``count`` with a correctly pluralized noun (``1 file``, ``2 files``)."""
+    return f"{count} {singular if count == 1 else (plural or singular + 's')}"
+
+
+def _is_host_local_spelling(local_path: str) -> bool:
+    """Return whether a declared local path names a machine-specific location."""
+    return local_path.startswith(("/", "\\", "~")) or bool(PureWindowsPath(local_path).drive)
+
+
+def _dependency_lifecycle_label(dep_entry: object) -> str:
+    """Return the portable package name passed to uninstall lifecycle scripts."""
     try:
         dependency = _parse_dependency_entry(dep_entry)
     except (ValueError, TypeError, AttributeError, KeyError):
@@ -174,6 +184,23 @@ def _dependency_public_label(dep_entry: object) -> str:
     if dependency.is_local:
         return dependency.repo_url
     return dependency.get_identity()
+
+
+def _dependency_public_label(dep_entry: object) -> str:
+    """Return a path-safe dependency label for user-facing uninstall output.
+
+    Relative local declarations keep the manifest spelling (``./pkg``); a
+    declaration naming an absolute or home path falls back to the portable
+    ``_local/<name>`` key so diagnostics never print machine-specific paths.
+    """
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+        local_path = dependency.local_path if dependency.is_local else None
+    except (ValueError, TypeError, AttributeError, KeyError):
+        local_path = None
+    if local_path and not _is_host_local_spelling(local_path):
+        return local_path
+    return _dependency_lifecycle_label(dep_entry)
 
 
 def _is_private_local_identity(value: str) -> bool:
@@ -982,7 +1009,7 @@ def _dry_run_uninstall(
         from ...deps.lockfile import get_lockfile_path
 
         lockfile = LockFile.read(get_lockfile_path(Path(".")))
-    logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
+    logger.progress(f"Dry run: Would remove {_count_noun(len(packages_to_remove), 'package')}:")
     for pkg in packages_to_remove:
         package_label = _dependency_public_label(pkg)
         logger.progress(f"  - {package_label} from apm.yml")
@@ -1001,7 +1028,7 @@ def _dry_run_uninstall(
             if shared_survivors:
                 logger.progress(
                     f"  - refresh {package_label} in apm_modules/ for "
-                    f"{len(shared_survivors)} surviving declaration(s)"
+                    f"{_count_noun(len(shared_survivors), 'surviving declaration')}"
                 )
             else:
                 logger.progress(f"  - {package_label} from apm_modules/")
@@ -1069,7 +1096,7 @@ def _remove_packages_from_disk(
                     refreshed_survivor_keys.update(refresh.survivor_keys)
                 logger.progress(
                     f"Refreshed {package_label} in apm_modules/ for "
-                    f"{len(refresh.survivor_keys)} surviving declaration(s)"
+                    f"{_count_noun(len(refresh.survivor_keys), 'surviving declaration')}"
                 )
                 continue
 

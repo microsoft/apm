@@ -37,8 +37,11 @@ from .engine import (
     _cleanup_staged_local_refreshes,
     _cleanup_stale_mcp,
     _cleanup_transitive_orphans,
+    _count_noun,
+    _dependency_lifecycle_label,
     _dependency_public_label,
     _dry_run_uninstall,
+    _is_host_local_spelling,
     _preflight_uninstall_survivors,
     _project_transitive_orphans,
     _remove_packages_from_disk,
@@ -51,9 +54,51 @@ from .engine import (
 )
 
 
+class _CleanupLabelLogger:
+    """Name target-cleanup lines with uninstall labels instead of lockfile keys."""
+
+    def __init__(self, logger: CommandLogger, lockfile, labels: dict[str, str]) -> None:
+        self._logger = logger
+        self._lockfile = lockfile
+        self._labels = labels
+
+    def _label(self, dep_key: str) -> str:
+        if dep_key in self._labels:
+            return self._labels[dep_key]
+        if dep_key.startswith("local:") or _is_host_local_spelling(dep_key):
+            locked = self._lockfile.dependencies.get(dep_key) if self._lockfile else None
+            return locked.repo_url if locked is not None else "local dependency"
+        return dep_key
+
+    def stale_cleanup(self, dep_key: str, count: int) -> None:
+        self._logger.stale_cleanup(self._label(dep_key), count)
+
+    def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str) -> None:
+        self._logger.cleanup_skipped_user_edit(rel_path, self._label(dep_key))
+
+    def __getattr__(self, name: str):
+        return getattr(self._logger, name)
+
+
+def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: int) -> str:
+    """Return the final summary, counting each package once."""
+    summary = f"removed {_count_noun(removed_count, 'package')}"
+    if orphan_count:
+        orphans = _count_noun(
+            orphan_count,
+            "orphaned transitive dependency",
+            "orphaned transitive dependencies",
+        )
+        summary += f" and {orphans}"
+    if retained_count:
+        retained = _count_noun(retained_count, "package")
+        summary += f"; removed {retained} from the selected profile only"
+    return summary
+
+
 def _report_uninstall_outcome(
     logger: CommandLogger,
-    summary_lines: list[str],
+    summary: str,
     integration_cleanup: IntegrationCleanupOutcome,
     integration_cleanup_error: Exception | None,
     mcp_cleanup_error: Exception | None,
@@ -64,7 +109,7 @@ def _report_uninstall_outcome(
     integration_incomplete = not integration_cleanup.complete
     if not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
         if integration_cleanup_error is None:
-            logger.success("Uninstall complete: " + ", ".join(summary_lines))
+            logger.success(f"Uninstall complete: {summary}")
         else:
             logger.warning("Package removal finished, but integration cleanup is incomplete.")
     elif integration_incomplete:
@@ -549,7 +594,8 @@ def _finish_selected_profile_uninstall(
             defer_empty_removal=False,
         )
     logger.success(
-        f"Uninstall complete: removed {retained_count} package(s) from the selected profile only"
+        f"Uninstall complete: removed {_count_noun(retained_count, 'package')} "
+        "from the selected profile only"
     )
     _fire_uninstall_scripts(
         "post-uninstall",
@@ -636,7 +682,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         if scope is InstallScope.USER:
             logger.progress(f"Uninstalling from user scope ({manifest_path.parent}/)")
 
-        logger.start(f"Uninstalling {len(packages)} package(s)...")
+        logger.start(f"Uninstalling {_count_noun(len(packages), 'package')}...")
 
         # Read current apm.yml
         from ...models.manifest_io import load_manifest_roundtrip
@@ -646,7 +692,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         try:
             data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
-            logger.error(f"Failed to read {apm_yml_path}: {e}")
+            logger.error(f"Failed to read {manifest_display}: {e}")
             sys.exit(1)
         _enter_manifest_host_scope(host_scope, data, logger)
 
@@ -674,7 +720,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         if packages_not_found:
             logger.error(
-                f"Uninstall aborted: {len(packages_not_found)} requested package(s) "
+                f"Uninstall aborted: {_count_noun(len(packages_not_found), 'requested package')} "
                 "could not be selected. Resolve the errors above and retry; "
                 "no changes were made."
             )
@@ -683,7 +729,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger.error("No packages were selected; no changes were made.")
             sys.exit(1)
         selected_package_labels = tuple(
-            _dependency_public_label(package) for package in packages_to_remove
+            _dependency_lifecycle_label(package) for package in packages_to_remove
         )
         surviving_deps = list(current_deps)
         for declaration in manifest_declarations_of(current_deps, packages_to_remove):
@@ -727,7 +773,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         try:
             data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
-            logger.error(f"Failed to re-read {apm_yml_path} after pre-uninstall: {e}")
+            logger.error(f"Failed to re-read {manifest_display} after pre-uninstall: {e}")
             sys.exit(1)
         had_dev_section, prod_deps, dev_deps, current_deps = _prepare_dependency_sections(data)
         lockfile = LockFile.read(lockfile_path)
@@ -748,7 +794,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             sys.exit(1)
         selected_package_labels = tuple(
-            _dependency_public_label(package) for package in packages_to_remove
+            _dependency_lifecycle_label(package) for package in packages_to_remove
         )
         packages_to_remove, retained_packages = _split_selected_profile_packages(
             packages_to_remove, lockfile, user_scope=scope is InstallScope.USER
@@ -818,7 +864,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 cwd=manifest_path.parent,
                 scope=scope,
             )
-            removed_from_modules = _remove_packages_from_disk(
+            _remove_packages_from_disk(
                 packages_to_remove,
                 modules_dir,
                 logger,
@@ -836,7 +882,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:
             _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
             sys.exit(1)
-        removed_from_modules += orphan_removed
 
         # Step 3: Remove target-scoped files while their lockfile ownership is
         # still recoverable. The post-removal manifest can omit a removed
@@ -871,7 +916,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 remove_selected_ownership=True,
                 selected_outcome=cleanup_outcome,
                 user_scope=scope is InstallScope.USER,
-                logger=logger,
+                logger=_CleanupLabelLogger(
+                    logger,
+                    lockfile,
+                    {
+                        _removed_lock_key(package, lockfile): _dependency_public_label(package)
+                        for package in (*packages_to_remove, *retained_packages)
+                    },
+                ),
                 preserved_selected_values=profile_survivors,
             )
             _abort_if_retained_target_cleanup_paths(
@@ -915,9 +967,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 del data["devDependencies"]
         try:
             dump_yaml_roundtrip(data, apm_yml_path)
-            logger.success(f"Updated {apm_yml_path} (removed {len(packages_to_remove)} package(s))")
+            logger.success(f"Updated {manifest_display}")
         except Exception as e:
-            logger.error(f"Failed to write {apm_yml_path}: {e}")
+            logger.error(f"Failed to write {manifest_display}: {e}")
             sys.exit(1)
 
         # Step 5: Capture pre-uninstall MCP state (lockfile already read above)
@@ -1005,8 +1057,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         for label, count in cleaned.items():
             if count > 0:
-                logger.progress(f"Cleaned up {count} integrated {label}", symbol="check")
-                logger.verbose_detail(f"    Removed {count} deployed {label} file(s)")
+                kind = label.removesuffix("s")
+                logger.progress(
+                    f"Cleaned up {_count_noun(count, f'integrated {kind}')}", symbol="check"
+                )
+                logger.verbose_detail(f"    Removed {_count_noun(count, f'deployed {kind} file')}")
 
         # Step 11: MCP cleanup
         from ...adapters.client.intellij import IntelliJConfigError
@@ -1088,22 +1143,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             native_before=native_before,
         )
 
-        # Final summary
-        summary_lines = [
-            f"Removed {len(packages_to_remove)} package(s) from apm.yml",
-            *(
-                [f"removed {len(retained_packages)} package(s) from the selected profile only"]
-                if retained_packages
-                else []
-            ),
-        ]
-        if removed_from_modules > 0:
-            summary_lines.append(f"Removed {removed_from_modules} package(s) from apm_modules/")
+        # Final summary: count each package once, whichever stores it left.
+        summary = _uninstall_summary(
+            len(packages_to_remove), len(retained_packages), orphan_removed
+        )
         if compile_inputs is not None:
             hint_compile_after_removal(compile_inputs, modules_dir, logger)
         cleanup_incomplete = _report_uninstall_outcome(
             logger,
-            summary_lines,
+            summary,
             integration_cleanup,
             integration_cleanup_error,
             mcp_cleanup_error,
