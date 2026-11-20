@@ -607,9 +607,9 @@ def display_versions(
             _display_registry_versions(package, dep_ref, logger, registry_name=_default_reg)
             return
 
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressSurface, is_refused
 
-    if is_enforce_only():
+    if is_refused(EgressSurface.SOURCE_ENUMERATION):
         logger.error(
             f"Cannot list versions for '{package}' in registry-only mode: "
             "APM does not list versions through the registry proxy and "

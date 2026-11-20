@@ -316,12 +316,10 @@ class TestAdoBearerHeaderInjection:
         dep_ref = _make_subdir_dep(repo_url="owner/repo", host="github.com")
         secret = "GH_PAT_SECRET"
 
-        captured_token_args: list[str] = []
+        captured_kwargs: list[set[str]] = []
 
         def _capture_build_repo_url(*args, **kwargs):
-            # Capture the token positional or kwarg so we can assert it
-            # is empty for the authenticated attempt.
-            captured_token_args.append(kwargs.get("token", ""))
+            captured_kwargs.append(set(kwargs))
             return "https://github.com/owner/repo.git"
 
         with (
@@ -336,9 +334,9 @@ class TestAdoBearerHeaderInjection:
         ):
             attempts = gdv._build_validation_attempts(downloader, dep_ref, log=lambda _m: None)
 
-        # The token MUST NOT be passed into the URL builder for the
-        # authenticated attempt -- it travels in the env header instead.
-        assert all(t == "" for t in captured_token_args), (
+        # No credential ever reaches the URL builder -- it travels in the
+        # env header instead.
+        assert all("token" not in kw and "auth_scheme" not in kw for kw in captured_kwargs), (
             "Round-3 security: non-ADO token must not be embedded in the URL"
         )
 

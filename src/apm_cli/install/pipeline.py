@@ -51,6 +51,7 @@ from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
+from ..deps.egress_route import EgressSurface, is_proxy_only, is_refused
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -195,6 +196,8 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         with contextlib.suppress(Exception):
             logger.verbose_detail(line)
 
+    if is_refused(EgressSurface.SOURCE_PROBE):
+        return  # Registry-only mode sends no source-host probe; the proxy serves downloads.
     seen: builtins.set = builtins.set()
     for dep in ctx.deps_to_install:
         dep = dep.source_reference
@@ -208,7 +211,6 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         seen.add(key)
 
         dep_ctx = auth_resolver.resolve_for_dep(dep)
-        _auth_scheme = getattr(dep_ctx, "auth_scheme", "basic") or "basic"
 
         from ..deps.github_downloader import GitHubPackageDownloader
 
@@ -231,8 +233,6 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             dep.repo_url,
             use_ssh=_use_ssh,
             dep_ref=dep,
-            token="",
-            auth_scheme=_auth_scheme,
         )
         probe_env = auth_resolver.git_env_for_remote(
             dep_ctx,
@@ -724,8 +724,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
         installed_packages: builtins.list[InstalledPackage] = []
 
-        # Resolve registry proxy configuration once for this install session.
         registry_config = RegistryConfig.from_env()
+        proxy_only = registry_config is not None and is_proxy_only(EgressSurface.SOURCE_ARCHIVE)
 
         # Build managed_files from existing lockfile for collision detection
         managed_files = builtins.set()
@@ -739,7 +739,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             # (github.com, GHE Cloud, GHES) are incompatible. A ref update
             # re-resolves its selection through the registry; only the
             # entries it keeps as-is are checked.
-            if registry_config and registry_config.enforce_only:
+            if proxy_only:
                 conflicts = registry_config.validate_lockfile_deps(
                     proxy_only_lock_entries(existing_lockfile, update_refs=update_refs, ctx=ctx)
                 )
@@ -764,7 +764,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             # Supply chain warning: registry-proxy entries without a
             # content_hash cannot be verified on re-install.
-            if registry_config and registry_config.enforce_only and not update_refs:
+            if proxy_only and not update_refs:
                 missing = registry_config.find_missing_hashes(
                     builtins.list(existing_lockfile.dependencies.values())
                 )

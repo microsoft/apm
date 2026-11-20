@@ -397,12 +397,14 @@ class TestBuildRepoUrl:
     def _delegate(self, **kwargs) -> DownloadDelegate:
         return DownloadDelegate(_make_host(**kwargs))
 
-    def test_github_https_with_token(self) -> None:
+    def test_github_https_never_embeds_host_token(self) -> None:
+        """Credentials travel via git env, never in the clone URL."""
         d = self._delegate(github_token="tok123")
         dep = _make_dep("owner/repo", "github.com")
         url = d.build_repo_url("owner/repo", dep_ref=dep)
-        assert "owner/repo" in url
-        assert "tok123" in url
+        parsed = urlparse(url)
+        assert url == "https://github.com/owner/repo.git"
+        assert parsed.username is None and parsed.password is None
 
     def test_github_https_no_token(self) -> None:
         d = self._delegate()
@@ -423,32 +425,6 @@ class TestBuildRepoUrl:
         url = d.build_repo_url("owner/repo", dep_ref=dep)
         assert url.startswith("http://")
         assert "owner/repo" in url
-
-    def test_empty_token_suppresses_auth(self) -> None:
-        """token='' is the sentinel that explicitly suppresses embedding."""
-        d = self._delegate(github_token="tok")
-        dep = _make_dep("owner/repo", "github.com")
-        url = d.build_repo_url("owner/repo", token="", dep_ref=dep)
-        # The empty-token sentinel means "no credential in URL"
-        assert "tok" not in url
-
-    def test_explicit_token_overrides_host_token(self) -> None:
-        d = self._delegate(github_token="host-tok")
-        dep = _make_dep("owner/repo", "github.com")
-        url = d.build_repo_url("owner/repo", token="override-tok", dep_ref=dep)
-        assert "override-tok" in url
-        assert "host-tok" not in url
-
-    def test_ado_without_dep_ref_falls_through(self) -> None:
-        """build_repo_url with dep_ref=None preserves legacy behaviour."""
-        d = self._delegate()
-        url = d.build_repo_url("owner/repo", dep_ref=None)
-        assert "owner/repo" in url
-
-    def test_no_dep_ref_ssh(self) -> None:
-        d = self._delegate()
-        url = d.build_repo_url("owner/repo", use_ssh=True, dep_ref=None)
-        assert "@" in url or "ssh" in url.lower()
 
     def test_no_dep_ref_insecure(self) -> None:
         d = self._delegate()
@@ -495,7 +471,7 @@ class TestBuildRepoUrl:
         # Second backend_for was called with None dep_ref (fallback path)
         assert mock_backend_for.call_count == 2
 
-    def test_gitlab_token_resolved_from_auth_resolver(self) -> None:
+    def test_gitlab_url_built_without_token_resolution(self) -> None:
         host = _make_host()
         gitlab_ctx = MagicMock()
         gitlab_ctx.token = "gitlab-tok"
@@ -509,10 +485,9 @@ class TestBuildRepoUrl:
             backend.build_clone_https_url.return_value = "https://gitlab.example.com/owner/repo.git"
             mock_backend_for.return_value = backend
             d.build_repo_url("owner/repo", dep_ref=dep)
-        # Token should come from auth_resolver.resolve_for_dep
-        backend.build_clone_https_url.assert_called_once()
-        _, kwargs = backend.build_clone_https_url.call_args
-        assert kwargs.get("token") == "gitlab-tok"
+        # URL building never resolves or forwards credentials.
+        backend.build_clone_https_url.assert_called_once_with(dep)
+        host.auth_resolver.resolve_for_dep.assert_not_called()
 
     def test_generic_host_no_token_embedded(self) -> None:
         d = self._delegate()
@@ -524,9 +499,7 @@ class TestBuildRepoUrl:
             backend.build_clone_https_url.return_value = "https://custom.git.host/owner/repo.git"
             mock_backend_for.return_value = backend
             d.build_repo_url("owner/repo", dep_ref=dep)
-        backend.build_clone_https_url.assert_called_once()
-        _, kwargs = backend.build_clone_https_url.call_args
-        assert kwargs.get("token") is None
+        backend.build_clone_https_url.assert_called_once_with(dep)
 
 
 # ---------------------------------------------------------------------------

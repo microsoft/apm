@@ -421,14 +421,6 @@ class TestListRemoteRefs:
             "owner/repo",
             use_ssh=False,
             dep_ref=dep,
-            token="",
-            auth_scheme="basic",
-        )
-        host._build_repo_url.assert_any_call(
-            "owner/repo",
-            use_ssh=False,
-            dep_ref=dep,
-            token="",
         )
 
     def test_ssh_preference_selects_ssh_without_token_auth(self):
@@ -452,8 +444,6 @@ class TestListRemoteRefs:
             "owner/repo",
             use_ssh=True,
             dep_ref=dep,
-            token=None,
-            auth_scheme="basic",
         )
         host._build_noninteractive_git_env.assert_called_once()
         host.auth_resolver.try_with_fallback.assert_not_called()

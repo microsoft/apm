@@ -204,31 +204,46 @@ def test_sanitize_token_url_in_message():
     assert f"***@{host}" in sanitized
 
 
-def test_build_gitlab_https_clone_url_encodes_token_specials():
-    from urllib.parse import unquote, urlsplit
-
-    url = github_host.build_gitlab_https_clone_url("gitlab.com", "group/sub/repo", "x:y/z")
-    assert "x-access-token" not in url.lower()
-    sp = urlsplit(url)
-    assert sp.hostname == "gitlab.com"
-    assert sp.username == "oauth2"
-    assert unquote(sp.password) == "x:y/z"
-    assert sp.path == "/group/sub/repo.git"
+_CREDENTIAL_PARAM_MARKERS = ("token", "credential", "password", "secret")
 
 
-def test_build_gitlab_https_clone_url_preserves_port():
-    from urllib.parse import urlsplit
+def _url_builders():
+    from apm_cli.deps import host_backends
+    from apm_cli.deps.download_strategies import DownloadDelegate
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
-    url = github_host.build_gitlab_https_clone_url(
-        "gitlab.corp.example",
-        "group/repo",
-        "glpat-secret",
-        port=8443,
-    )
-    sp = urlsplit(url)
-    assert sp.hostname == "gitlab.corp.example"
-    assert sp.port == 8443
-    assert sp.username == "oauth2"
+    builders = {
+        "build_https_clone_url": github_host.build_https_clone_url,
+        "build_ado_https_clone_url": github_host.build_ado_https_clone_url,
+        "build_ssh_url": github_host.build_ssh_url,
+        "DownloadDelegate.build_repo_url": DownloadDelegate.build_repo_url,
+        "GitHubPackageDownloader._build_repo_url": GitHubPackageDownloader._build_repo_url,
+        "HostBackend.build_clone_https_url": host_backends.HostBackend.build_clone_https_url,
+    }
+    for cls in (
+        host_backends.GitHubBackend,
+        host_backends.GHECloudBackend,
+        host_backends.GHESBackend,
+        host_backends.ADOBackend,
+        host_backends.GitLabBackend,
+        host_backends.GenericGitBackend,
+    ):
+        builders[f"{cls.__name__}.build_clone_https_url"] = cls.build_clone_https_url
+    return builders
+
+
+@pytest.mark.parametrize("name", sorted(_url_builders()))
+def test_url_builders_accept_no_credential_parameter(name):
+    """Regression (#4088 S10): credentials travel via git env, never in URLs."""
+    import inspect
+
+    params = inspect.signature(_url_builders()[name]).parameters
+    leaked = [p for p in params if any(m in p.lower() for m in _CREDENTIAL_PARAM_MARKERS)]
+    assert leaked == [], f"{name} still accepts credential parameter(s): {leaked}"
+
+
+def test_gitlab_token_url_builder_is_removed():
+    assert not hasattr(github_host, "build_gitlab_https_clone_url")
 
 
 def test_unsupported_host_error_message():
@@ -270,15 +285,8 @@ def test_unsupported_host_error_shows_current_host(monkeypatch):
 
 def test_build_ado_https_clone_url():
     """Test Azure DevOps HTTPS URL construction."""
-    # Without token
     url = github_host.build_ado_https_clone_url("dmeppiel-org", "market-js-app", "compliance-rules")
     assert url == "https://dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
-
-    # With token
-    url = github_host.build_ado_https_clone_url(
-        "dmeppiel-org", "market-js-app", "compliance-rules", token="mytoken"
-    )
-    assert url == "https://mytoken@dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
 
     # With custom host (ADO Server)
     url = github_host.build_ado_https_clone_url(

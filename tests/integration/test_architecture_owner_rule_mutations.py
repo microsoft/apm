@@ -2560,6 +2560,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
     ),
     MutationCase(
+        guard_id="transport-platform-egress-route-policy",
+        rule_id="transport-platform-egress-route-policy",
+        path="src/apm_cli/install/pipeline.py",
+        old="if is_refused(EgressSurface.SOURCE_PROBE):",
+        new="if False:",
+        intent="The update auth preflight probes source hosts without asking the egress-route owner.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
@@ -2685,8 +2693,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-git-url-credentials-out-of-argv",
         rule_id="transport-platform-git-child-environment",
         path="src/apm_cli/deps/clone_engine.py",
-        old='                    token="",\n                    auth_scheme="basic",',
-        new='                    token=token,\n                    auth_scheme="basic",',
+        old="                    use_ssh=False,\n                    dep_ref=dep_ref,\n                )",
+        new="                    use_ssh=False,\n                    dep_ref=dep_ref,\n                    token=token,\n                )",
         intent="Authenticated GitHub clone URLs regain process-visible credentials.",
     ),
     MutationCase(
@@ -2821,6 +2829,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Host-qualified reference parsing loses its canonical coordinate owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-http-session-construction",
+        rule_id="transport-platform-http-session-construction",
+        path="src/apm_cli/registry/client.py",
+        old="self.session = CredentialScopedSession()",
+        new="self.session = requests.Session()",
+        intent="The MCP registry client builds an ad hoc session outside the credential-origin owner.",
+    ),
+    MutationCase(
         guard_id="transport-platform-ls-remote-tag-commits",
         rule_id="transport-platform-ls-remote-tag-commits",
         path="src/apm_cli/marketplace/ref_resolver.py",
@@ -2915,6 +2931,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="\napm_require_owned_bundle\n",
         new="\n:\n",
         intent="Unix installation skips bundle ownership preflight before destructive replacement.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-builder-credential-free",
+        rule_id="transport-platform-url-builder-credential-free",
+        path="src/apm_cli/utils/github_host.py",
+        old="def build_ssh_url(\n    host: str,",
+        new="def build_ssh_url(\n    host: str,\n    token: str,",
+        intent="A clone URL builder regrows a credential parameter.",
     ),
     MutationCase(
         guard_id="transport-platform-url-path-security",

@@ -92,9 +92,7 @@ class _DownloaderContext(Protocol):
         repo_url_base: str,
         *,
         use_ssh: bool = ...,
-        dep_ref: DependencyReference | None = ...,
-        token: str | None = ...,
-        auth_scheme: str = ...,
+        dep_ref: DependencyReference,
     ) -> str: ...
     def _clone_with_fallback(self, *args, **kwargs): ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
@@ -150,9 +148,9 @@ class GitReferenceResolver:
         if dep_ref.is_artifactory():
             return []
 
-        from .registry_proxy import is_enforce_only
+        from .egress_route import EgressSurface, is_refused
 
-        if is_enforce_only():
+        if is_refused(EgressSurface.SOURCE_ENUMERATION):
             # PROXY_REGISTRY_ONLY=1: the proxy is the only sanctioned source,
             # so skip the direct ls-remote against the upstream host. Mirrors
             # the is_artifactory() short-circuit above: a registry-only
@@ -166,7 +164,6 @@ class GitReferenceResolver:
             repo_url_base,
             use_ssh=candidate_uses_ssh,
             dep_ref=dep_ref,
-            token="",
         )
         anonymous_plan = host._transport_selector.select(
             dep_ref=dep_ref,
@@ -190,12 +187,10 @@ class GitReferenceResolver:
         if public_github_https_first:
             dep_token = None
             dep_auth_ctx = None
-            dep_auth_scheme = "basic"
             transport_plan = anonymous_plan
         else:
             dep_token = host._resolve_dep_token(dep_ref)
             dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
-            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
             transport_plan = host._transport_selector.select(
                 dep_ref=dep_ref,
                 cli_pref=host._protocol_pref,
@@ -253,8 +248,6 @@ class GitReferenceResolver:
                 repo_url_base,
                 use_ssh=use_ssh,
                 dep_ref=dep_ref,
-                token=(None if use_ssh else ""),
-                auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
             )
 
         # Keep the GitPython object as a test seam. The network call itself
@@ -300,8 +293,6 @@ class GitReferenceResolver:
                     repo_url_base,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
-                    auth_scheme="basic",
                 )
                 return ("ok", _run_remote(public_url, git_env))
 
@@ -423,9 +414,9 @@ class GitReferenceResolver:
         if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
             return ref.lower()
 
-        from .registry_proxy import is_enforce_only
+        from .egress_route import EgressSurface, is_refused
 
-        if is_enforce_only():
+        if is_refused(EgressSurface.SOURCE_ENUMERATION):
             # PROXY_REGISTRY_ONLY=1: the commits API is on the upstream host,
             # which the mode forbids contacting. Callers already treat None
             # as "keep the ref name" and fall through to proxy resolution.
