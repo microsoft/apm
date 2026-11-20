@@ -2615,7 +2615,7 @@
       "id": "req-sc-007",
       "keyword": "MUST",
       "section": "10.3",
-      "status": "xfail",
+      "status": "active",
       "test_count": 4,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_redacts_credential_material",
@@ -3192,11 +3192,11 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 97,
+      "active": 98,
       "skipped": 3,
       "text-only": 5,
       "unbound": 0,
-      "xfail": 10
+      "xfail": 9
     },
     "governance": {
       "active": 19,
