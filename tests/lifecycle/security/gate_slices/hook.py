@@ -34,6 +34,17 @@ _XFAIL.update({f"G|bundle-install|{change}|hook": _BUNDLE_KEEPS for change in _B
 _SMOKE = {"G|install|revoke-approval|hook", "G|frozen|local-deny|hook"}
 
 # G path -> (changes with a row, surface files)
+_MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
+_DENY_BY_SPEC = "S-pending (neutral issue to follow): deny by install spec and installed identity"
+_XFAIL["G|marketplace-install|local-deny|hook"] = _DENY_BY_SPEC
+_USER_ORG = "S-pending (neutral issue to follow): org policy for user-scope installs"
+_XFAIL.update(
+    {
+        f"G|marketplace-install|{change}|hook": _USER_ORG
+        for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
+    }
+)
+
 _PATHS = {
     "install": (_ALL, _PROJECT),
     "frozen": (_ALL, _PROJECT),
@@ -45,6 +56,9 @@ _PATHS = {
     "frozen-g": (_LOCAL, _USER),
     # gate_paths/bundle_install.py: the hook of the local bundle p-exec:bundle.
     "bundle-install": (_BUNDLE, _PROJECT),
+    # gate_paths/marketplace_install.py: p-exec@lifecycle-market at user scope. A
+    # git-served package cannot be redefined in place: definition-changed is residual.
+    "marketplace-install": (_MARKETPLACE, _USER),
 }
 
 SLICE = GateSlice(
