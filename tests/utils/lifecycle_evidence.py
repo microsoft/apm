@@ -460,6 +460,22 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
     ),
     KnownOutputCell(
+        "pack-dry-run-plugin-notes-twice",
+        "I9",
+        "#4291",
+        _runs("pack", "--dry-run"),
+        r"Left out of the plugin|Would write plugin manifest",
+        output=r"^\[!\] Left out of the plugin: ",
+    ),
+    KnownOutputCell(
+        "install-frozen-parked-mcp-notice-per-phase",
+        "I9",
+        "#4299",
+        _runs("install", "--frozen"),
+        r"Parked MCP server .*: denied",
+        output=r"^\[!\] Parked MCP server .*: denied.*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
         "install-hook-line-per-target",
         "I9",
         "#4243",
