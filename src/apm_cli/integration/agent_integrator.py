@@ -436,6 +436,7 @@ class AgentIntegrator(BaseIntegrator):
             return _ADOPTED if adopted else _SKIPPED
         target_path.parent.mkdir(parents=True, exist_ok=True)
         write_text_lf(target_path, rendered)
+        self.note_rendered_write(target_path)
         target_paths.append(target_path)
         return _WRITTEN
 

@@ -183,6 +183,18 @@ class BaseIntegrator:
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
 
+    def note_rendered_write(self, path: Path) -> None:
+        """Report one final-rendered file write, never an adopted or skipped file (#3701).
+
+        The install service drains these through ``take_rendered_writes`` after
+        each integrator call and records them as local deployment receipts.
+        """
+        self.__dict__.setdefault("_rendered_writes", []).append(path)
+
+    def take_rendered_writes(self) -> list[Path]:
+        """Return and forget the writes reported since the previous drain."""
+        return self.__dict__.pop("_rendered_writes", [])
+
     @staticmethod
     def filter_authorized_files(files: list[Path], source_plan=None) -> list[Path]:
         """Keep only files admitted by the canonical deployment source plan."""

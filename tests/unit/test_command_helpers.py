@@ -18,13 +18,13 @@ from apm_cli.commands._helpers import (
     _check_and_notify_updates,
     _check_orphaned_packages,
     _expand_with_ancestors,
-    _find_orphaned_packages,
     _get_default_script,
     _list_available_scripts,
     _load_apm_config,
     _scan_installed_packages,
     _update_gitignore_for_apm_modules,
 )
+from apm_cli.install.orphans import _find_orphaned_packages
 
 # ---------------------------------------------------------------------------
 # _atomic_write

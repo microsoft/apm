@@ -21,6 +21,11 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
 from apm_cli.install.package_resolution import effective_dependency_selection
+from apm_cli.install.phases.lockfile_cache_pins import (
+    sync_cache_pin_markers,
+    sync_cache_pin_markers_from_disk,
+    sync_cache_pin_markers_from_existing,
+)
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -36,11 +41,38 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     site (in ``_install_apm_dependencies``) share one implementation.
     Returns ``{rel_path: "sha256:<hex>"}`` for files that exist as regular
     files; symlinks and unreadable paths are silently omitted (they cannot
-    contribute meaningful provenance).
+    contribute meaningful provenance). ``cowork://`` rows hash the file
+    they decode to under the resolved Cowork root, so they carry the same
+    provenance as project rows (#3701); without a resolvable root they get
+    no hash.
     """
+    from apm_cli.integration.copilot_cowork_paths import (
+        COWORK_URI_SCHEME,
+        CoworkResolutionError,
+        from_lockfile_path,
+        resolve_copilot_cowork_skills_dir,
+    )
+    from apm_cli.utils.path_security import PathTraversalError
+
     out: dict = {}
+    cowork_root: Path | None = None
+    cowork_resolved = False
     for _rel in rel_paths or ():
-        _full = project_root / _rel
+        if _rel.startswith(COWORK_URI_SCHEME):
+            if not cowork_resolved:
+                cowork_resolved = True
+                try:
+                    cowork_root = resolve_copilot_cowork_skills_dir()
+                except CoworkResolutionError:
+                    cowork_root = None
+            if cowork_root is None:
+                continue
+            try:
+                _full = from_lockfile_path(_rel, cowork_root)
+            except (PathTraversalError, ValueError):
+                continue
+        else:
+            _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
             try:  # noqa: SIM105
                 out[_rel] = compute_file_hash(_full)
@@ -90,7 +122,7 @@ class LockfileBuilder:
         # fail-closed on a stale cache. Idempotent + best-effort; warnings
         # for unpinned deps are surfaced by the primary post-build sync, so
         # this secondary pass stays silent.
-        self._sync_cache_pin_markers_from_existing()
+        sync_cache_pin_markers_from_existing(self.ctx)
         # Reconcile dropped-target merge-hook JSON/sidecar state (issue
         # #2253) unconditionally, before the early-return below. Whether
         # this cleanup is needed depends purely on "did the declared
@@ -128,7 +160,7 @@ class LockfileBuilder:
             # must still be pruned to match apm.yml (see
             # ``_has_orphan_lockfile_entries``).
             self._reconcile_target_deployed_files(self.ctx.existing_lockfile)
-            self._sync_cache_pin_markers_from_disk()
+            sync_cache_pin_markers_from_disk(self.ctx)
             return
         try:
             from apm_cli.deps.lockfile import LockFile as _LF
@@ -213,7 +245,7 @@ class LockfileBuilder:
             # #1137 follow-up): if their lockfile is already current,
             # _write_if_changed is a no-op, but markers must still be
             # written so the next `apm audit` drift replay succeeds.
-            self._sync_cache_pin_markers(lockfile)
+            sync_cache_pin_markers(self.ctx, lockfile)
         except Exception as e:
             self._handle_failure(e)
 
@@ -246,13 +278,32 @@ class LockfileBuilder:
         manifest. Skipped for partial (``only_packages``) installs, which
         intentionally preserve unlisted entries.
         """
-        existing = self.ctx.existing_lockfile
-        if existing is None or self.ctx.only_packages:
+        if self.ctx.existing_lockfile is None or self.ctx.only_packages:
             return False
-        from apm_cli.deps.lockfile import _SELF_KEY
+        return bool(self._orphan_decision().candidate_keys)
 
-        intended = self.ctx.intended_dep_keys or set()
-        return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
+    def _orphan_decision(self):
+        """Ask the orphan owner which previous rows a full install retires."""
+        from apm_cli.install.orphans import (
+            DeploymentClaims,
+            OrphanOperation,
+            decide_orphan_removal,
+        )
+
+        return decide_orphan_removal(
+            operation=OrphanOperation.INSTALL,
+            roots=(),
+            candidate_universe=self.ctx.existing_lockfile,
+            installed_paths=None,
+            resolved_keys=None,
+            intended=self.ctx.intended_dep_keys or set(),
+            materialized=None,
+            reachability=None,
+            deployment_claims=DeploymentClaims(
+                live_files=frozenset(),
+                retained=getattr(self.ctx, "orphan_cleanup_retained", {}),
+            ),
+        )
 
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
@@ -597,13 +648,15 @@ class LockfileBuilder:
             return
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
             retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
+            decision = self._orphan_decision()
             for dep_key, dep in self.ctx.existing_lockfile.dependencies.items():
                 if dep_key not in lockfile.dependencies:
-                    if self.ctx.only_packages or dep_key in self.ctx.intended_dep_keys:
-                        # Preserve: partial install (sequential install support)
-                        # OR package still in manifest but failed to download.
+                    if dep_key in decision.rescued_keys:
+                        # Preserve: package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
-                    elif retained := retained_orphans.get(dep_key):
+                    elif dep_key in decision.retained_keys and (
+                        retained := retained_orphans.get(dep_key)
+                    ):
                         self._keep_retained_orphan(
                             lockfile, dep_key, dep, retained, self.ctx.existing_lockfile
                         )
@@ -831,34 +884,10 @@ class LockfileBuilder:
         if self.ctx.logger:
             self.ctx.logger.error(_lock_msg)
 
-    def _sync_cache_pin_markers(self, lockfile: LockFile) -> None:
-        """Write ``.apm-pin`` markers for every cached remote dep.
-
-        Idempotent and best-effort: a missing or unwritable cache
-        directory is silently skipped at the marker-helper level and
-        will surface during the next ``apm audit`` drift replay.
-        Wrapped in a broad except because lockfile assembly success
-        must not be undone by a marker write failure.
-        """
-        try:
-            from apm_cli.install.cache_pin import sync_markers_for_lockfile
-
-            apm_modules_dir = self.ctx.apm_modules_dir
-            if apm_modules_dir is None:
-                return
-            written = sync_markers_for_lockfile(lockfile, self.ctx.project_root, apm_modules_dir)
-            if self.ctx.logger and written:
-                self.ctx.logger.verbose_detail(
-                    f"Wrote {written} cache pin marker(s) for drift replay"
-                )
-        except Exception as exc:
-            if self.ctx.logger:
-                self.ctx.logger.verbose_detail(f"Cache pin marker sync skipped: {exc}")
-
     def _reconcile_dropped_merge_hook_targets(self) -> None:
         """Clean merge-hook JSON/sidecar state for targets dropped from ``targets:``.
 
-        Best-effort, matching ``_sync_cache_pin_markers_from_existing``'s own
+        Best-effort, matching ``sync_cache_pin_markers_from_existing``'s own
         convention: a failure here must never abort the install. Internal
         malformed-state handling already fails closed and warns (see
         ``HookIntegrator.reconcile_dropped_targets``); this wrapper only
@@ -905,64 +934,6 @@ class LockfileBuilder:
         )
         if changed:
             lockfile.save(get_lockfile_path(self.ctx.apm_dir))
-
-    def _sync_cache_pin_markers_from_existing(self) -> None:
-        """Self-heal markers from the pre-existing in-memory lockfile.
-
-        Runs at the very start of ``build_and_save`` so that remote deps
-        recorded in the on-disk lockfile get their ``.apm-pin`` markers
-        even when the imminent build prunes them (orphan removal, #1926):
-        the pruned dep's cache remains under ``apm_modules/`` and the
-        supply-chain contract (#1137) requires every cached remote dep to
-        be marked. Warnings are suppressed here -- the primary post-build
-        sync over the freshly-built lockfile surfaces unpinned deps, so a
-        second warning pass would be noise. Best-effort: a marker write
-        failure must never abort the install.
-        """
-        existing = self.ctx.existing_lockfile
-        if existing is None:
-            return
-        try:
-            from apm_cli.install.cache_pin import sync_markers_for_lockfile
-
-            apm_modules_dir = self.ctx.apm_modules_dir
-            if apm_modules_dir is None:
-                return
-            written = sync_markers_for_lockfile(
-                existing,
-                self.ctx.project_root,
-                apm_modules_dir,
-                warn_unpinned=False,
-            )
-            if self.ctx.logger and written:
-                self.ctx.logger.verbose_detail(
-                    f"Self-healed {written} cache pin marker(s) from existing lockfile"
-                )
-        except Exception as exc:
-            if self.ctx.logger:
-                self.ctx.logger.verbose_detail(
-                    f"Cache pin marker self-heal (existing) skipped: {exc}"
-                )
-
-    def _sync_cache_pin_markers_from_disk(self) -> None:
-        """Self-heal markers from the on-disk lockfile when no install ran.
-
-        This handles the upgrade path: user installed an older APM,
-        runs the new APM with no manifest changes, expects the next
-        ``apm audit`` to find every remote dep correctly marked.
-        """
-        try:
-            from apm_cli.deps.lockfile import LockFile as _LF
-            from apm_cli.deps.lockfile import get_lockfile_path
-
-            lockfile_path = get_lockfile_path(self.ctx.apm_dir)
-            if not lockfile_path.exists():
-                return
-            lockfile = _LF.load_or_create(lockfile_path)
-            self._sync_cache_pin_markers(lockfile)
-        except Exception as exc:
-            if self.ctx.logger:
-                self.ctx.logger.verbose_detail(f"Cache pin marker self-heal skipped: {exc}")
 
     def compute_deployed_hashes(self, rel_paths) -> dict[str, str]:
         """Delegate to the module-level canonical implementation."""

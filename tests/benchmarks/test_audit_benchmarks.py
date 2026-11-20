@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 
-from apm_cli.commands.uninstall.engine import _build_children_index
+from apm_cli.install.orphans import _build_children_index
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.primitives.discovery import find_primitive_files
 from apm_cli.utils.console import _get_console, _reset_console
