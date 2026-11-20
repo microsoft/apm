@@ -1124,6 +1124,9 @@ class HookIntegrator(BaseIntegrator):
                 self.note_rendered_write(target_path)
                 hooks_integrated += 1
             else:
+                # A managed file already holding the render is APM's bytes (#3701).
+                if managed_files and rel_path in managed_files:
+                    self.note_rendered_write(target_path)
                 scripts_adopted += 1
             target_paths.append(target_path)
             from apm_cli.integration.targets import KNOWN_TARGETS

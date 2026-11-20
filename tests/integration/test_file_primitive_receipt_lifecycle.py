@@ -157,6 +157,45 @@ def test_adopted_identical_files_get_a_receipt(tmp_path: Path, apm_binary_path: 
         assert not (project / relative).exists(), relative
 
 
+def _receipt_store(isolated: IsolatedApmEnvironment) -> dict[str, bytes]:
+    store = isolated.home / ".apm" / "deployment-receipts"
+    return {path.name: path.read_bytes() for path in sorted(store.glob("*.json"))}
+
+
+def test_a_repeat_install_is_a_quiet_no_op(tmp_path: Path, apm_binary_path: Path) -> None:
+    """Cell (a): after a 0.37 install, a repeat prints no adoption and changes nothing (I2)."""
+    isolated, project, apm = _setup(tmp_path, apm_binary_path)
+    apm("install", "--no-policy")
+    store, lock = _receipt_store(isolated), (project / "apm.lock.yaml").read_bytes()
+
+    repeat = apm("install", "--no-policy")
+
+    assert "adopted" not in repeat, repeat
+    assert _receipt_store(isolated) == store
+    assert (project / "apm.lock.yaml").read_bytes() == lock
+
+
+def test_a_receiptless_clone_install_receipts_every_file_quietly(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Cell (b): committed output with receipts evicted installs quietly and receipts all."""
+    isolated, project, apm = _setup(tmp_path, apm_binary_path)
+    apm("install", "--no-policy")
+    _drop_receipts(isolated, project)
+
+    installed = apm("install", "--no-policy")
+
+    assert "adopted" not in installed, installed
+    receipts = _receipts(isolated)
+    for relative in _FILE_PRIMITIVES:
+        path = project / relative
+        assert receipts.get(path.resolve().as_posix()) == compute_file_hash(path), (
+            relative,
+            receipts,
+        )
+    apm("audit", "--ci", "--no-policy")
+
+
 def test_a_differing_file_is_never_receipted_by_adoption(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
