@@ -1,0 +1,1253 @@
+"""GitHubPackageDownloader package, subdirectory and virtual-file downloads against a real install tree."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from apm_cli.cache.git_cache import GitCache
+from apm_cli.deps.github_downloader import (
+    GitHubPackageDownloader,
+)
+from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy, build_tiered_ref_resolver
+from apm_cli.models.apm_package import (
+    DependencyReference,
+    GitReferenceType,
+    ResolvedReference,
+)
+
+pytestmark = pytest.mark.component
+
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked clones carry no Git objects; real-git tests cover link materialization."""
+    with (
+        patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+    ):
+        yield
+
+
+# ---------------------------------------------------------------------------
+# Helpers / shared fixtures
+# ---------------------------------------------------------------------------
+
+
+def _make_dep(
+    repo_url: str = "owner/repo",
+    *,
+    host: str | None = None,
+    reference: str | None = "main",
+    virtual_path: str | None = None,
+    is_virtual: bool = False,
+    artifactory_prefix: str | None = None,
+) -> DependencyReference:
+    return DependencyReference(
+        repo_url=repo_url,
+        host=host,
+        reference=reference,
+        virtual_path=virtual_path,
+        is_virtual=is_virtual,
+        artifactory_prefix=artifactory_prefix,
+    )
+
+
+def _make_resolved(
+    ref: str = "main",
+    *,
+    ref_type: GitReferenceType = GitReferenceType.BRANCH,
+    commit: str | None = "abc1234" * 5 + "ab",
+) -> ResolvedReference:
+    return ResolvedReference(
+        original_ref=ref,
+        ref_name=ref,
+        ref_type=ref_type,
+        resolved_commit=commit,
+    )
+
+
+@pytest.fixture
+def downloader() -> GitHubPackageDownloader:
+    """Downloader with a fully-stubbed auth resolver (no token, no network)."""
+    auth = MagicMock()
+    host_info = MagicMock()
+    host_info.kind = "github"
+    auth.classify_host.return_value = host_info
+    ctx = MagicMock()
+    ctx.token = None
+    ctx.auth_scheme = "basic"
+    ctx.git_env = {}
+    auth.resolve.return_value = ctx
+    auth.resolve_for_dep.return_value = ctx
+    auth._token_manager = MagicMock()
+    auth._token_manager.get_token_for_purpose.return_value = None
+    return GitHubPackageDownloader(auth_resolver=auth)
+
+
+# ---------------------------------------------------------------------------
+# _debug
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _close_repo
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# GitProgressReporter.update
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# GitProgressReporter._get_op_name
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _is_generic_dependency_host
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _resolve_dep_token
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _resolve_dep_auth_ctx
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat stubs (single-call delegation)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# registry_config property
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _get_clone_engine lazy construction
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# resolve_git_reference with tiered resolver
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# download_raw_file routing
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _download_github_file gitlab routing
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# validate_virtual_package_exists / shim methods
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# download_virtual_file_package — error paths
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadVirtualFilePackageErrors:
+    def test_raises_if_not_virtual(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()  # is_virtual=False
+        with pytest.raises(ValueError, match="virtual"):
+            downloader.download_virtual_file_package(dep, tmp_path / "out")
+
+    def test_raises_if_no_virtual_path(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path=None)
+        with pytest.raises(ValueError, match="virtual"):
+            downloader.download_virtual_file_package(dep, tmp_path / "out")
+
+    def test_raises_if_not_valid_file_extension(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/foo")  # not a file
+        with pytest.raises(ValueError, match="not a valid individual file"):
+            downloader.download_virtual_file_package(dep, tmp_path / "out")
+
+    def test_runtime_error_on_download_failure(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        downloader._strategies.download_github_file = MagicMock(side_effect=RuntimeError("404"))
+        with (
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            pytest.raises(RuntimeError, match="Failed to download virtual package"),
+        ):
+            downloader.download_virtual_file_package(dep, tmp_path / "out")
+
+    def test_progress_updates_when_provided(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        downloader._strategies.download_github_file = MagicMock(return_value=b"# Test\n")
+        progress_obj = MagicMock()
+        with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
+            downloader.download_virtual_file_package(
+                dep, tmp_path / "out", progress_task_id=1, progress_obj=progress_obj
+            )
+        assert progress_obj.update.call_count >= 2
+
+    def test_frontmatter_description_parsed(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        content = b'---\ndescription: "My great prompt"\n---\n\n# Content\n'
+        downloader._strategies.download_github_file = MagicMock(return_value=content)
+        with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
+            pkg_info = downloader.download_virtual_file_package(dep, tmp_path / "out")
+        assert pkg_info.package.description == "My great prompt"
+
+    def test_fallback_description_when_no_frontmatter(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        downloader._strategies.download_github_file = MagicMock(return_value=b"# No FM\n")
+        with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
+            pkg_info = downloader.download_virtual_file_package(dep, tmp_path / "out")
+        assert "test.prompt.md" in pkg_info.package.description
+
+    def test_commit_sha_ref_type_detected(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        sha = "a" * 40
+        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md", reference=sha)
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        downloader._strategies.download_github_file = MagicMock(return_value=b"# Test\n")
+        with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
+            pkg_info = downloader.download_virtual_file_package(dep, tmp_path / "out")
+        assert pkg_info.resolved_reference.ref_type == GitReferenceType.COMMIT
+
+    def test_instructions_subdir_mapping(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="instructions/code.instructions.md")
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        downloader._strategies.download_github_file = MagicMock(return_value=b"# Instructions\n")
+        with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
+            downloader.download_virtual_file_package(dep, tmp_path / "out")
+        assert (tmp_path / "out" / ".apm" / "instructions" / "code.instructions.md").exists()
+
+    def test_chatmode_subdir_mapping(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="agents/mymode.agent.md")
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        downloader._strategies.download_github_file = MagicMock(return_value=b"# Chat\n")
+        with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
+            downloader.download_virtual_file_package(dep, tmp_path / "out")
+        assert (tmp_path / "out" / ".apm" / "agents" / "mymode.agent.md").exists()
+
+    def test_agent_subdir_mapping(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="agents/myagent.agent.md")
+        downloader._refs = MagicMock()
+        downloader._refs.resolve_commit_sha_for_ref.return_value = None
+        downloader._strategies.download_github_file = MagicMock(return_value=b"# Agent\n")
+        with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
+            downloader.download_virtual_file_package(dep, tmp_path / "out")
+        assert (tmp_path / "out" / ".apm" / "agents" / "myagent.agent.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# download_subdirectory_package — error paths
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadSubdirectoryPackageErrors:
+    def test_raises_if_not_virtual(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()  # is_virtual=False
+        with pytest.raises(ValueError, match="virtual subdirectory"):
+            downloader.download_subdirectory_package(dep, tmp_path / "out")
+
+    def test_raises_if_no_virtual_path(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path=None)
+        with pytest.raises(ValueError, match="virtual subdirectory"):
+            downloader.download_subdirectory_package(dep, tmp_path / "out")
+
+    def test_raises_if_not_valid_subdirectory(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        # a file extension path is not a valid subdirectory
+        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        with pytest.raises(ValueError, match="not a valid subdirectory"):
+            downloader.download_subdirectory_package(dep, tmp_path / "out")
+
+    def test_subdir_not_found_raises_runtime_error(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        sparse_ok = False
+
+        def fake_sparse(*args: Any, **kwargs: Any) -> bool:
+            return sparse_ok
+
+        subdir_path = tmp_path / "clone"
+        subdir_path.mkdir()
+
+        def fake_mkdtemp(dir: Any = None) -> str:
+            subdir_path.mkdir(exist_ok=True)
+            return str(tmp_path)
+
+        with (
+            patch.object(downloader, "_try_sparse_checkout", return_value=False),
+            patch.object(
+                downloader,
+                "_clone_with_fallback",
+                return_value=MagicMock(),
+            ),
+            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch("apm_cli.utils.path_security.ensure_path_within"),
+        ):
+            with pytest.raises(RuntimeError, match="not found"):
+                downloader.download_subdirectory_package(dep, tmp_path / "out")
+
+    def test_progress_callbacks_called(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        """Progress updates are sent when progress_obj and task_id are provided."""
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        progress_obj = MagicMock()
+
+        import contextlib
+
+        with (
+            patch.object(downloader, "_try_sparse_checkout", return_value=False),
+            patch.object(downloader, "_clone_with_fallback", return_value=MagicMock()),
+            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch("apm_cli.utils.path_security.ensure_path_within"),
+        ):
+            # Will fail because subdir doesn't exist but progress must already be called
+            with contextlib.suppress(RuntimeError):
+                downloader.download_subdirectory_package(
+                    dep, tmp_path / "out", progress_task_id=1, progress_obj=progress_obj
+                )
+        progress_obj.update.assert_called()
+
+    def test_permission_error_converted_to_runtime(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        exc = PermissionError(13, "Access denied")
+        exc.filename = str(tmp_path / "some-file")
+
+        with (
+            patch.object(downloader, "_try_sparse_checkout", side_effect=exc),
+            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+        ):
+            with pytest.raises(RuntimeError, match="Access denied"):
+                downloader.download_subdirectory_package(dep, tmp_path / "out")
+
+    def test_oserror_13_in_temp_converted_to_runtime(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        exc = OSError(13, "Permission denied")
+        exc.errno = 13
+        exc.filename = str(tmp_path / "some-file")
+
+        with (
+            patch.object(downloader, "_try_sparse_checkout", side_effect=exc),
+            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+        ):
+            with pytest.raises(RuntimeError, match="Access denied"):
+                downloader.download_subdirectory_package(dep, tmp_path / "out")
+
+    def test_oserror_non_13_re_raised(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        exc = OSError(5, "Some other OS error")
+        exc.errno = 5
+        exc.filename = "/other/path"
+
+        with (
+            patch.object(downloader, "_try_sparse_checkout", side_effect=exc),
+            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+        ):
+            with pytest.raises(OSError):
+                downloader.download_subdirectory_package(dep, tmp_path / "out")
+
+    def test_ws2_resolved_commit_skips_repo_open(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        """When shared cache hits, _ws2_resolved_commit should skip Repo() open."""
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        sha = "a" * 40
+
+        # Build a source subdir that looks like a real APM package
+        skill_dir = tmp_path / "consumer" / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "apm.yml").write_text("name: my-skill\nversion: 1.0.0\n")
+
+        shared_cache = MagicMock()
+        shared_bare = tmp_path / "bare"
+        shared_bare.mkdir()
+        shared_cache.get_or_clone.return_value = shared_bare
+        downloader.shared_clone_cache = shared_cache
+
+        validation = MagicMock()
+        validation.is_valid = True
+        validation.package = MagicMock()
+        validation.package_type = MagicMock()
+
+        def fake_materialize(bare: Path, consumer: Path, **kwargs: Any) -> str:
+            consumer.mkdir(parents=True, exist_ok=True)
+            sub = consumer / "skills" / "my-skill"
+            sub.mkdir(parents=True, exist_ok=True)
+            (sub / "apm.yml").write_text("name: my-skill\nversion: 1.0.0\n")
+            return sha
+
+        with (
+            patch.object(downloader, "_materialize_from_bare", side_effect=fake_materialize),
+            patch.object(downloader, "_git_env_dict", return_value={}),
+            patch.object(downloader, "_bare_clone_with_fallback"),
+            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch("apm_cli.utils.path_security.ensure_path_within"),
+            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
+            patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+            patch("apm_cli.utils.file_ops.robust_copytree"),
+            patch("apm_cli.utils.file_ops.robust_copy2"),
+        ):
+            pkg_info = downloader.download_subdirectory_package(dep, tmp_path / "out")
+        # ws2 path — resolved_commit comes from _materialize_from_bare, not Repo()
+        assert pkg_info.resolved_reference.resolved_commit == sha
+
+
+# ---------------------------------------------------------------------------
+# _try_sparse_checkout
+# ---------------------------------------------------------------------------
+
+
+class TestTrySparseCheckout:
+    def test_returns_false_on_subprocess_nonzero(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        downloader._strategies.build_repo_url = MagicMock(return_value="https://github.com/o/r")
+        downloader.git_env = {}
+        ctx = MagicMock()
+        ctx.auth_scheme = "basic"
+        ctx.git_env = {}
+        downloader.auth_resolver.resolve_for_dep.return_value = ctx
+
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stderr = "some error"
+
+        with patch("apm_cli.deps.github_downloader.subprocess.run", return_value=fail_result):
+            result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
+        assert result is False
+
+    def test_returns_false_on_exception(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        downloader._strategies.build_repo_url = MagicMock(side_effect=RuntimeError("boom"))
+        downloader.git_env = {}
+        ctx = MagicMock()
+        ctx.auth_scheme = "basic"
+        ctx.git_env = {}
+        downloader.auth_resolver.resolve_for_dep.return_value = ctx
+        result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
+        assert result is False
+
+    def test_returns_true_on_success(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        downloader._strategies.build_repo_url = MagicMock(return_value="https://github.com/o/r")
+        downloader.git_env = {}
+        ctx = MagicMock()
+        ctx.auth_scheme = "basic"
+        ctx.git_env = {}
+        downloader.auth_resolver.resolve_for_dep.return_value = ctx
+        downloader.auth_resolver.git_env_for_remote.side_effect = lambda auth_ctx, _remote_url: (
+            dict(auth_ctx.git_env)
+        )
+
+        ok_result = MagicMock()
+        ok_result.returncode = 0
+
+        with patch("apm_cli.deps.github_downloader.subprocess.run", return_value=ok_result):
+            result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
+        assert result is True
+
+    def test_bearer_auth_scheme_uses_dep_auth_ctx_git_env(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(host="dev.azure.com")
+        downloader._strategies.build_repo_url = MagicMock(return_value="https://dev.azure.com/o/r")
+        downloader.git_env = {}
+        ctx = MagicMock()
+        ctx.auth_scheme = "bearer"
+        ctx.git_env = {"GIT_EXTRA_HEADER": "Authorization: Bearer tok"}
+        downloader.auth_resolver.resolve_for_dep.return_value = ctx
+        downloader.auth_resolver.git_env_for_remote.side_effect = lambda auth_ctx, _remote_url: (
+            dict(auth_ctx.git_env)
+        )
+
+        ok_result = MagicMock()
+        ok_result.returncode = 0
+
+        calls_seen: list[dict[str, Any]] = []
+
+        def fake_run(cmd: list[str], **kwargs: Any) -> MagicMock:
+            calls_seen.append(dict(env=kwargs.get("env", {})))
+            return ok_result
+
+        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+            result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
+        assert result is True
+        # env must contain the git header injected by the bearer auth ctx
+        assert any("GIT_EXTRA_HEADER" in c["env"] for c in calls_seen)
+
+    def test_generic_host_sparse_checkout_strips_repository_state(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(host="git.example.com")
+        downloader._strategies.build_repo_url = MagicMock(
+            return_value="https://git.example.com/o/r"
+        )
+        downloader.git_env = {
+            "PATH": "/usr/bin",
+            "GIT_DIR": "/invoking/.git",
+            "GIT_WORK_TREE": "/invoking",
+            "GITHUB_TOKEN": "must-not-reach-generic-host",
+            "GIT_HTTP_EXTRAHEADER": "Authorization: Basic stale",
+        }
+        downloader.auth_resolver.resolve_for_dep.return_value = None
+        generic_ctx = MagicMock()
+        downloader.auth_resolver.resolve_for_remote.return_value = generic_ctx
+        downloader.auth_resolver.git_env_for_remote.return_value = {"PATH": "/usr/bin"}
+        ok_result = MagicMock(returncode=0, stderr="")
+        environments: list[dict[str, str]] = []
+
+        def fake_run(cmd: list[str], **kwargs: Any) -> MagicMock:
+            environments.append(kwargs["env"])
+            return ok_result
+
+        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+            result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
+
+        assert result is True
+        assert environments
+        assert all("GIT_DIR" not in env for env in environments)
+        assert all("GIT_WORK_TREE" not in env for env in environments)
+        assert all("GITHUB_TOKEN" not in env for env in environments)
+        assert all("GIT_HTTP_EXTRAHEADER" not in env for env in environments)
+        downloader.auth_resolver.git_env_for_remote.assert_called_once_with(
+            generic_ctx,
+            "https://git.example.com/o/r",
+        )
+
+    def test_sparse_checkout_materializes_links_leniently(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        """The sparse clone hands its links to the Git-object owner (#3457)."""
+        dep = _make_dep()
+        downloader._strategies.build_repo_url = MagicMock(return_value="https://github.com/o/r")
+        downloader.git_env = {}
+        ctx = MagicMock()
+        ctx.auth_scheme = "basic"
+        ctx.git_env = {"MARK": "1"}
+        downloader.auth_resolver.resolve_for_dep.return_value = ctx
+        downloader.auth_resolver.git_env_for_remote.side_effect = lambda auth_ctx, _remote_url: (
+            dict(auth_ctx.git_env)
+        )
+        clone_path = tmp_path / "sparse"
+        ok_result = MagicMock(returncode=0)
+
+        with (
+            patch("apm_cli.deps.github_downloader.subprocess.run", return_value=ok_result),
+            patch(
+                "apm_cli.utils.git_env.init_git_remote_worktree",
+                side_effect=lambda _path, _url, env, **_kw: env,
+            ),
+            patch("apm_cli.deps.github_downloader.apply_sparse_cone"),
+            patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks") as materialize,
+        ):
+            result = downloader._try_sparse_checkout(dep, clone_path, "skills/foo", "main")
+
+        assert result is True
+        args, kwargs = materialize.call_args
+        assert args[1:] == (clone_path, ["skills/foo"])
+        assert kwargs["strict"] is False
+        assert kwargs["env"]["MARK"] == "1"
+
+
+# ---------------------------------------------------------------------------
+# download_package routing
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadPackage:
+    def test_invalid_string_ref_raises_value_error(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        with patch(
+            "apm_cli.models.apm_package.DependencyReference.parse",
+            side_effect=ValueError("bad ref"),
+        ):
+            with pytest.raises(ValueError, match="Invalid repository reference"):
+                downloader.download_package("!!bad!!", tmp_path / "out")
+
+    def test_virtual_file_routed_to_download_virtual_file_package(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        pkg_info = MagicMock()
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "download_virtual_file_package", return_value=pkg_info),
+        ):
+            result = downloader.download_package(dep, tmp_path / "out")
+        assert result is pkg_info
+
+    def test_virtual_subdir_routed_to_download_subdirectory_package(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        pkg_info = MagicMock()
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "download_subdirectory_package", return_value=pkg_info),
+        ):
+            result = downloader.download_package(dep, tmp_path / "out")
+        assert result is pkg_info
+
+    def test_artifactory_only_no_proxy_raises(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=True),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+        ):
+            with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY"):
+                downloader.download_package(dep, tmp_path / "out")
+
+    def test_non_virtual_artifactory_dep_routes_to_artifactory(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(
+            repo_url="owner/repo",
+            host="artifactory.example.com",
+            artifactory_prefix="apm-local",
+        )
+        pkg_info = MagicMock()
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_download_package_from_artifactory", return_value=pkg_info),
+        ):
+            result = downloader.download_package(dep, tmp_path / "out")
+        assert result is pkg_info
+
+    def test_non_virtual_proxy_dep_routes_to_artifactory(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        proxy = ("proxy.host", "apm-repo", "https")
+        pkg_info = MagicMock()
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=proxy),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=True),
+            patch.object(downloader, "_download_package_from_artifactory", return_value=pkg_info),
+        ):
+            result = downloader.download_package(dep, tmp_path / "out")
+        assert result is pkg_info
+
+    def test_artifactory_only_non_virtual_no_proxy_raises(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=True),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+        ):
+            with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY"):
+                downloader.download_package(dep, tmp_path / "out")
+
+    def test_regular_package_clones_and_validates(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        repo_mock = MagicMock()
+        validation = MagicMock()
+        validation.is_valid = True
+        validation.package = MagicMock()
+        validation.package_type = MagicMock()
+        pkg = MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", return_value=repo_mock),
+            patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+            patch("apm_cli.deps._shared._validate_and_load_package", return_value=pkg),
+        ):
+            result = downloader.download_package(dep, tmp_path / "pkg")
+        assert result.package is pkg
+
+    def test_git_command_error_auth_failure_raises_runtime(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from git.exc import GitCommandError
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(
+                downloader,
+                "_clone_with_fallback",
+                side_effect=GitCommandError("git clone", "Authentication failed"),
+            ),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch.object(
+                downloader.auth_resolver, "build_error_context", return_value="check your token"
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to clone"):
+                downloader.download_package(dep, tmp_path / "pkg")
+
+    def test_git_command_error_other_sanitizes_message(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from git.exc import GitCommandError
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(
+                downloader,
+                "_clone_with_fallback",
+                side_effect=GitCommandError("git clone", "network timeout"),
+            ),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to clone"):
+                downloader.download_package(dep, tmp_path / "pkg")
+
+    def test_commit_ref_type_checkouts_specific_commit(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        sha = "a" * 40
+        dep = _make_dep()
+        resolved = _make_resolved(ref=sha, ref_type=GitReferenceType.COMMIT, commit=sha)
+        repo_mock = MagicMock()
+        validation = MagicMock()
+        validation.is_valid = True
+        validation.package = MagicMock()
+        validation.package_type = MagicMock()
+        pkg = MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", return_value=repo_mock),
+            patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+            patch("apm_cli.deps._shared._validate_and_load_package", return_value=pkg),
+            patch("apm_cli.deps.github_downloader.checkout_git_worktree") as checkout,
+        ):
+            downloader.download_package(dep, tmp_path / "pkg")
+        checkout.assert_called_once_with(tmp_path / "pkg", sha, env=downloader.git_env)
+
+    def test_virtual_artifactory_subdir_routes_to_artifactory(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(
+            repo_url="owner/repo",
+            host="artifactory.example.com",
+            artifactory_prefix="apm-local",
+            is_virtual=True,
+            virtual_path="skills/my-skill",
+        )
+        pkg_info = MagicMock()
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(
+                downloader, "_download_subdirectory_from_artifactory", return_value=pkg_info
+            ),
+        ):
+            result = downloader.download_package(dep, tmp_path / "out")
+        assert result is pkg_info
+
+    def test_virtual_artifactory_only_proxy_routes_to_artifactory(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(is_virtual=True, virtual_path="skills/my-skill")
+        proxy = ("proxy.host", "apm-repo", "https")
+        pkg_info = MagicMock()
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=True),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=proxy),
+            patch.object(
+                downloader, "_download_subdirectory_from_artifactory", return_value=pkg_info
+            ),
+        ):
+            result = downloader.download_package(dep, tmp_path / "out")
+        assert result is pkg_info
+
+    def test_cache_hit_with_unrecognized_schema_falls_back_without_cloning(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from apm_cli.models.validation import PackageType
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        cached_dir = tmp_path / "cached"
+        cached_dir.mkdir()
+        (cached_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+                    "name": "future.plugin",
+                }
+            ),
+            encoding="utf-8",
+        )
+        cache = MagicMock()
+        cache.get_checkout.return_value = cached_dir
+        downloader.persistent_git_cache = cache
+        clone = MagicMock()
+
+        target = tmp_path / "pkg"
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", clone),
+        ):
+            result = downloader.download_package(dep, target)
+
+        assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+        assert result.package.name == "future.plugin"
+        assert (target / "apm.yml").exists()
+        clone.assert_not_called()
+
+    def test_native_agent_plugin_clone_returns_projected_package_without_apm_yml(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.models.validation import PackageType
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        target = tmp_path / "pkg"
+
+        def clone_native(repo_url, clone_path, **kwargs):
+            del repo_url, kwargs
+            clone_path.mkdir(parents=True, exist_ok=True)
+            (clone_path / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "$schema": PLUGIN_SCHEMA_ID,
+                        "name": "native.plugin",
+                        "version": "1.0.0",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=clone_native),
+        ):
+            result = downloader.download_package(dep, target)
+
+        assert result.package_type == PackageType.AGENT_PLUGIN
+        assert result.package.name == "native.plugin"
+        assert result.package.agent_plugin is not None
+        assert not (target / "apm.yml").exists()
+
+    def test_unrecognized_agent_plugin_schema_clone_falls_back_to_legacy_projection(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from apm_cli.models.validation import PackageType
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        target = tmp_path / "pkg"
+
+        def clone_unsupported(repo_url, clone_path, **kwargs):
+            del repo_url, kwargs
+            clone_path.mkdir(parents=True, exist_ok=True)
+            (clone_path / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "$schema": ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"),
+                        "name": "future.plugin",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=clone_unsupported),
+        ):
+            result = downloader.download_package(dep, target)
+
+        assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+        assert result.package.name == "future.plugin"
+        assert (target / "apm.yml").exists()
+
+
+# ---------------------------------------------------------------------------
+# _get_clone_progress_callback
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _sanitize_git_error
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Artifactory backward-compat stubs
+# ---------------------------------------------------------------------------
+
+
+class TestArtifactoryStubs:
+    def test_download_subdirectory_from_artifactory_delegates(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        pkg_info = MagicMock()
+        downloader._artifactory.download_subdirectory = MagicMock(return_value=pkg_info)
+        result = downloader._download_subdirectory_from_artifactory(
+            dep, tmp_path / "out", ("host", "pfx", "https")
+        )
+        assert result is pkg_info
+
+    def test_download_package_from_artifactory_delegates(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        pkg_info = MagicMock()
+        downloader._artifactory.download_package = MagicMock(return_value=pkg_info)
+        result = downloader._download_package_from_artifactory(dep, tmp_path / "out")
+        assert result is pkg_info
+
+
+# ---------------------------------------------------------------------------
+# Persistent git cache paths in download_package
+# ---------------------------------------------------------------------------
+
+
+class TestPersistentGitCacheInDownloadPackage:
+    def test_cache_hit_returns_package_without_clone(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+
+        # Set up cached checkout dir with a file in it
+        cached_dir = tmp_path / "cached"
+        cached_dir.mkdir()
+        (cached_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+
+        cache = MagicMock()
+        cache.get_checkout.return_value = cached_dir
+        downloader.persistent_git_cache = cache
+
+        pkg = MagicMock()
+        pkg.version = "1.0.0"
+        validation = MagicMock()
+        validation.is_valid = True
+        validation.package = pkg
+        validation.package_type = MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch("apm_cli.utils.file_ops.robust_copytree"),
+            patch("apm_cli.utils.file_ops.robust_copy2"),
+            patch.object(downloader, "_git_env_dict", return_value={}),
+        ):
+            result = downloader.download_package(dep, tmp_path / "out")
+        assert result.package is pkg
+        # No clone should have been attempted
+        assert not hasattr(downloader, "_clone_with_fallback_called")
+
+    def test_cache_exception_falls_through_to_clone(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+
+        cache = MagicMock()
+        cache.get_checkout.side_effect = RuntimeError("cache miss")
+        downloader.persistent_git_cache = cache
+
+        repo_mock = MagicMock()
+        validation = MagicMock()
+        validation.is_valid = True
+        validation.package = MagicMock()
+        validation.package_type = MagicMock()
+        pkg = MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", return_value=repo_mock) as clone_mock,
+            patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
+            patch("apm_cli.deps.github_downloader._rmtree"),
+            patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+            patch("apm_cli.deps._shared._validate_and_load_package", return_value=pkg),
+            patch.object(downloader, "_git_env_dict", return_value={}),
+        ):
+            downloader.download_package(dep, tmp_path / "out")
+        clone_mock.assert_called_once()
+
+
+@pytest.mark.parametrize("remote_observation", [True, False])
+@pytest.mark.parametrize("anonymous_first", [True, False])
+def test_persistent_cache_only_records_authoritative_named_ref(
+    tmp_path: Path, remote_observation: bool, anonymous_first: bool
+) -> None:
+    """Both auth paths record successful fresh observations, never old lock pins."""
+    downloader = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
+    downloader.auth_resolver = MagicMock()
+    downloader.auth_resolver.uses_public_github_anonymous_first.return_value = anonymous_first
+    downloader.auth_resolver.try_with_fallback.side_effect = lambda host, operation, **kwargs: (
+        operation(None, {})
+    )
+    downloader.git_env = {}
+    downloader._cache_git_env = MagicMock(return_value={})
+    downloader._tiered_resolver = MagicMock()
+    downloader._tiered_resolver.remotely_resolved.return_value = remote_observation
+    dependency = DependencyReference.parse("owner/repo#main")
+    cache = MagicMock()
+    cache.get_checkout.return_value = tmp_path
+    url = dependency.to_github_url()
+    assert (
+        downloader._persistent_cache_checkout(cache, dependency, url, "b" * 40, locked_sha="b" * 40)
+        == tmp_path
+    )
+    cache.get_checkout.assert_called_once()
+    if remote_observation:
+        cache.remember_resolved_ref.assert_called_once_with(url, "main", "b" * 40)
+    else:
+        cache.remember_resolved_ref.assert_not_called()
+
+
+@pytest.mark.parametrize("anonymous_first", [True, False])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "locked-match",
+        "locked-sibling",
+        "locked-stale-provider",
+        "locked-unrelated-stale-provider",
+        "current-api",
+        "current-legacy",
+        "sha-passthrough",
+        "failed-resolution",
+        "mismatched-repository",
+        "mismatched-ref",
+        "mismatched-sha",
+        "failed-checkout",
+    ],
+)
+def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    downloader: GitHubPackageDownloader,
+    anonymous_first: bool,
+    case: str,
+) -> None:
+    """A real resolver and receipt store agree across both checkout auth routes."""
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    old_sha, prior_sha, current_sha = "a" * 40, "b" * 40, "c" * 40
+    dependency = _make_dep()
+    stale_provider = case in {"locked-stale-provider", "locked-unrelated-stale-provider"}
+    if stale_provider:
+        monkeypatch.setenv("GITHUB_HOST", "code.example.com")
+        dependency = _make_dep(host="code.example.com")
+    cache = GitCache(tmp_path / "cache")
+    original_url = dependency.to_github_url()
+    cache.remember_resolved_ref(original_url, "main", prior_sha)
+    downloader.auth_resolver.uses_public_github_anonymous_first.return_value = anonymous_first
+    downloader.auth_resolver.try_with_fallback.side_effect = lambda host, operation, **kwargs: (
+        operation(None, {})
+    )
+    downloader._cache_git_env = MagicMock(return_value={})
+    downloader._refs = MagicMock()
+    downloader._refs.resolve_commit_sha_for_ref.return_value = (
+        None if case in {"current-legacy", "failed-resolution"} else current_sha
+    )
+    downloader._refs.resolve.return_value = _make_resolved(commit=current_sha)
+    if case == "failed-resolution":
+        downloader._refs.resolve.side_effect = RuntimeError("fixture remote unavailable")
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        git_cache=cache,
+        freshness_policy=(
+            RefFreshnessPolicy.LOCKED_OR_CURRENT
+            if case.startswith("locked-")
+            else RefFreshnessPolicy.CURRENT_REMOTE
+        ),
+    )
+    assert resolver is not None
+    downloader._tiered_resolver = resolver
+    if stale_provider:
+        seeded = DependencyReference(
+            repo_url=(
+                dependency.repo_url if case == "locked-stale-provider" else "removed/package"
+            ),
+            host="code.example.com",
+            host_type="gitlab",
+            reference="main",
+        )
+        assert resolver.seed(seeded, "main", old_sha) is False
+        assert resolver._lock_seeds == {}
+    elif case.startswith("locked-"):
+        seeded = (
+            dependency
+            if case == "locked-match"
+            else _make_dep(virtual_path="skills/sibling", is_virtual=True)
+        )
+        assert resolver.seed(seeded, "main", old_sha)
+    if case == "sha-passthrough":
+        dependency = _make_dep(reference=old_sha)
+    if case == "failed-resolution":
+        with pytest.raises(RuntimeError, match="fixture remote unavailable"):
+            resolver.resolve(dependency)
+        assert resolver.remotely_resolved(dependency, current_sha) is False
+        assert cache.read_resolved_ref(original_url, "main") == (True, prior_sha)
+        return
+    resolved = downloader.resolve_git_reference(dependency)
+    expected_sha = old_sha if case in {"locked-match", "sha-passthrough"} else current_sha
+    assert resolved.resolved_commit == expected_sha
+    if case == "locked-match":
+        downloader._refs.resolve_commit_sha_for_ref.assert_not_called()
+        downloader._refs.resolve.assert_not_called()
+    if case == "locked-sibling":
+        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        assert resolver.resolve(seeded).resolved_commit == old_sha
+        assert resolver.remotely_resolved(seeded, old_sha) is False
+    if stale_provider:
+        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        downloader._refs.resolve.assert_not_called()
+    if case == "mismatched-repository":
+        dependency = _make_dep(repo_url="other/repository")
+    elif case == "mismatched-ref":
+        dependency = _make_dep(reference="other")
+    elif case == "mismatched-sha":
+        expected_sha = old_sha
+    url = dependency.to_github_url()
+    before_receipt = cache.read_resolved_ref(url, dependency.reference)
+    authorized = case in {"current-api", "current-legacy", "failed-checkout"}
+    assert resolver.remotely_resolved(dependency, expected_sha) is authorized
+
+    def checkout(*args: object, **kwargs: object) -> Path:
+        assert cache.read_resolved_ref(url, dependency.reference) == before_receipt
+        if case == "failed-checkout":
+            raise RuntimeError("fixture checkout failed")
+        return tmp_path
+
+    with patch.object(cache, "get_checkout", side_effect=checkout) as get_checkout:
+        if case == "failed-checkout":
+            with pytest.raises(RuntimeError, match="fixture checkout failed"):
+                downloader._persistent_cache_checkout(
+                    cache, dependency, url, expected_sha, locked_sha=expected_sha
+                )
+        else:
+            assert (
+                downloader._persistent_cache_checkout(
+                    cache, dependency, url, expected_sha, locked_sha=expected_sha
+                )
+                == tmp_path
+            )
+        get_checkout.assert_called_once()
+    assert cache.read_resolved_ref(url, dependency.reference) == (
+        (True, current_sha) if case in {"current-api", "current-legacy"} else before_receipt
+    )
+    assert cache.read_resolved_ref(original_url, "main") == (
+        True,
+        current_sha if case in {"current-api", "current-legacy"} else prior_sha,
+    )

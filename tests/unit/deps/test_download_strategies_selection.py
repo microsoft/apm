@@ -22,13 +22,10 @@ all major classes, methods, and branches including:
 from __future__ import annotations
 
 import base64
-import io
 import json
 import threading
-import zipfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -43,11 +40,10 @@ from apm_cli.deps.transport_selection import (
     TransportSelector,
 )
 from apm_cli.models.apm_package import DependencyReference
-from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.path_security import PathTraversalError
 from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -142,17 +138,6 @@ def _fake_response(
     http_error = requests.exceptions.HTTPError(response=resp)
     resp.raise_for_status.side_effect = http_error if status_code >= 400 else None
     return resp
-
-
-def _make_zip(files: dict[str, bytes], root_prefix: str = "repo-main/") -> bytes:
-    """Build an in-memory zip archive with the given files under *root_prefix*."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        # Write the root directory entry first
-        zf.mkdir(root_prefix)
-        for rel_path, data in files.items():
-            zf.writestr(root_prefix + rel_path, data)
-    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -591,210 +576,6 @@ class TestGetArtifactoryHeaders:
 # ---------------------------------------------------------------------------
 
 
-class TestDownloadArtifactoryArchive:
-    def _delegate(self, resp_sequence=None) -> tuple[DownloadDelegate, MagicMock]:
-        host = _make_host()
-        d = DownloadDelegate(host)
-        if resp_sequence is not None:
-            host._resilient_get.side_effect = resp_sequence
-        return d, host
-
-    def test_success_extracts_files_stripping_root_prefix(self, tmp_path: Path) -> None:
-        zip_bytes = _make_zip({"apm.yml": b"name: test"}, root_prefix="repo-main/")
-        resp = _fake_response(200, zip_bytes)
-        d, host = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").read_bytes() == b"name: test"
-        assert host._resilient_get.call_args.kwargs["stream"] is True
-        assert host._resilient_get.call_args.kwargs["allow_netrc"] is False
-        assert "allow_redirects" not in host._resilient_get.call_args.kwargs
-
-    def test_http_non_200_tries_next_url(self, tmp_path: Path) -> None:
-        zip_bytes = _make_zip({"apm.yml": b"name: test"})
-        fail_resp = _fake_response(404, b"")
-        ok_resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([fail_resp, ok_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/fail.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_all_urls_fail_raises_runtime_error(self, tmp_path: Path) -> None:
-        fail_resp = _fake_response(404, b"")
-        d, _ = self._delegate([fail_resp, fail_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/a.zip",
-                "https://art.example.com/b.zip",
-            ],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download"):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-
-    def test_bad_zip_file_tries_next(self, tmp_path: Path) -> None:
-        bad_resp = _fake_response(200, b"not a zip")
-        zip_bytes = _make_zip({"apm.yml": b"ok"})
-        ok_resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([bad_resp, ok_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/bad.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_archive_too_large_skips_to_next(self, tmp_path: Path) -> None:
-        huge_resp = MagicMock()
-        huge_resp.status_code = 200
-        huge_resp.headers = {"Content-Length": str(600 * 1024 * 1024)}
-        huge_resp.iter_content.return_value = iter(())
-
-        zip_bytes = _make_zip({"apm.yml": b"ok"})
-        ok_resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([huge_resp, ok_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/huge.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_archive_stream_limit_skips_to_next_url(self, tmp_path: Path) -> None:
-        huge_resp = MagicMock()
-        huge_resp.status_code = 200
-        huge_resp.headers = {}
-        huge_resp.iter_content.return_value = iter([b"x" * (2 * 1024 * 1024)])
-
-        ok_resp = _fake_response(200, _make_zip({"apm.yml": b"ok"}))
-        d, _ = self._delegate([huge_resp, ok_resp])
-        with (
-            patch.dict("os.environ", {"ARTIFACTORY_MAX_ARCHIVE_MB": "1"}),
-            patch(
-                "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-                return_value=[
-                    "https://art.example.com/huge.zip",
-                    "https://art.example.com/ok.zip",
-                ],
-            ),
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_empty_archive_raises_runtime_error(self, tmp_path: Path) -> None:
-        """A valid zip that contains no entries raises RuntimeError."""
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w"):
-            pass  # empty zip
-        empty_zip = buf.getvalue()
-        resp = _fake_response(200, empty_zip)
-        d, _ = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/empty.zip"],
-        ):
-            with pytest.raises((RuntimeError, Exception)):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-
-    def test_single_file_archive_extracted_as_is(self, tmp_path: Path) -> None:
-        """A zip whose first entry is a plain file (not a directory) is extracted as-is."""
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("README.md", b"readme content")
-        single_file_zip = buf.getvalue()
-        resp = _fake_response(200, single_file_zip)
-        d, _ = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/single.zip"],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "README.md").exists()
-
-    def test_single_file_archive_rejects_path_traversal(self, tmp_path: Path) -> None:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("../escape.txt", b"nope")
-        resp = _fake_response(200, buf.getvalue())
-        d, _ = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/single.zip"],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download"):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-        assert not (tmp_path.parent / "escape.txt").exists()
-
-    def test_archive_rejects_uncompressed_size_limit(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        zip_bytes = _make_zip({"big.bin": b"x" * 2048}, root_prefix="repo-main/")
-        resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([resp])
-        monkeypatch.setitem(safe_extract_zip.__kwdefaults__, "max_uncompressed", 1024)
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download"):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-
-    def test_request_exception_tries_next(self, tmp_path: Path) -> None:
-        d, host_mock = self._delegate()
-        host_mock._resilient_get.side_effect = [
-            requests.RequestException("network error"),
-            _fake_response(200, _make_zip({"f.txt": b"data"})),
-        ]
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/fail.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "f.txt").exists()
-
-
 # ---------------------------------------------------------------------------
 # download_file_from_artifactory
 # ---------------------------------------------------------------------------
@@ -836,56 +617,6 @@ class TestDownloadFileFromArtifactory:
                 "main",
             )
         assert result == b"entry bytes"
-
-    def test_falls_back_to_archive_download_when_fetch_returns_none(
-        self,
-    ) -> None:
-        cfg = MagicMock()
-        cfg.host = "art.example.com"
-        client = MagicMock()
-        client.fetch_file.return_value = None  # entry not found
-        cfg.get_client.return_value = client
-
-        zip_bytes = _make_zip({"apm.yml": b"archive content"})
-        resp = _fake_response(200, zip_bytes)
-        host = _make_host(registry_config=cfg)
-        host._resilient_get.return_value = resp
-        d = DownloadDelegate(host)
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            result = d.download_file_from_artifactory(
-                "art.example.com", "apm", "owner", "repo", "apm.yml", "main"
-            )
-        assert result == b"archive content"
-
-    def test_raises_when_file_not_in_archive(self) -> None:
-        cfg = MagicMock()
-        cfg.host = "art.example.com"
-        client = MagicMock()
-        client.fetch_file.return_value = None
-        cfg.get_client.return_value = client
-
-        # Archive does NOT contain the requested file
-        zip_bytes = _make_zip({"other.yml": b"other"})
-        resp = _fake_response(200, zip_bytes)
-        host = _make_host(registry_config=cfg)
-        host._resilient_get.return_value = resp
-        d = DownloadDelegate(host)
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download file"):
-                d.download_file_from_artifactory(
-                    "art.example.com",
-                    "apm",
-                    "owner",
-                    "repo",
-                    "missing.yml",
-                    "main",
-                )
 
 
 # ---------------------------------------------------------------------------

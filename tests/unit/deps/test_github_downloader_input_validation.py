@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import base64
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,7 +44,6 @@ from apm_cli.deps.github_downloader_validation import (
     _build_validation_attempts,
     _directory_exists_at_ref,
     _is_sha_pin,
-    _path_exists_in_tree_at_ref,
     _ref_exists_via_ls_remote,
     _split_owner_repo,
     _ssh_attempt_allowed,
@@ -54,7 +52,7 @@ from apm_cli.deps.github_downloader_validation import (
 from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -709,95 +707,6 @@ class TestRefExistsViaLsRemote:
 # ---------------------------------------------------------------------------
 # _path_exists_in_tree_at_ref
 # ---------------------------------------------------------------------------
-
-
-class TestPathExistsInTreeAtRef:
-    def _log(self, _msg: str) -> None:
-        pass
-
-    def _winning_attempt(self) -> AttemptSpec:
-        return AttemptSpec("ssh", "git@github.com:owner/repo.git", {})
-
-    def test_fetch_failure_returns_false(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
-                side_effect=[
-                    MagicMock(),
-                    MagicMock(),
-                    subprocess.CalledProcessError(128, ["git", "fetch"]),
-                ],
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is False
-
-    def test_ls_tree_empty_output_returns_false(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
-                return_value=MagicMock(stdout=""),
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is False
-
-    def test_ls_tree_with_output_returns_true(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
-                return_value=MagicMock(stdout="040000 tree abc123\tskills/foo\n"),
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is True
-
-    def test_ls_tree_exception_returns_false(self, tmp_path: Path) -> None:
-        dl = _make_downloader()
-        dep = _make_github_dep()
-        attempt = self._winning_attempt()
-
-        with (
-            patch(
-                "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
-            ),
-            patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
-                side_effect=[
-                    MagicMock(),
-                    MagicMock(),
-                    MagicMock(),
-                    subprocess.CalledProcessError(128, ["git", "ls-tree"]),
-                ],
-            ),
-        ):
-            result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
-
-        assert result is False
 
 
 # ---------------------------------------------------------------------------

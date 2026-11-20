@@ -4,7 +4,8 @@
     1,
     2,
     3,
-    4
+    4,
+    5
   ],
   "folds": {
     "tests/unit/install/test_sources_phase3.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml": "tests/unit/install/test_sources_materialisation.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml",
@@ -40,11 +41,14 @@
     "Node-set mapping is computed against the branch base 49bcb1c50; origin/danielmeppiel-refactored-happiness advanced to 51e0e91e4 during the run and its new nodes are not removals by this branch.",
     "Placement: 16 modules that spawn processes (subprocess/Popen, multiprocessing spawn, or tests.utils git helpers such as git_link_fixture, git_credential_sentinel, local_git_repository) moved with git mv to tests/integration/ under the same name, marked component: deps test_bare_cache_sparse, test_git_auth_env, test_persistent_cache_ssh_transport, test_shared_clone_cache, test_versioned_directory_probe, test_git_file_transport_links, test_clone_engine_bearer_env, test_git_reference_resolver; install test_cache_pin, test_install_safety, test_install_target_copilot_app_e2e, test_install_transaction, test_partial_subtree_reconciliation, test_unix_install_ownership, test_workspace_locking, test_replacement_source_consumers. Repo-root parents[3] and sys.path depth adjusted for the new location; ci.yml #2238 comment repointed.",
     "Placement offender kept: tests/unit/deps/test_gitlab_sparse_transport_contract.py (one real git config call) -- tests/integration/test_gitlab_sparse_transport_contract.py already exists and tests/integration/test_gitlab_sparse_transport_mutations.py pins the unit path as UNIT_CONTRACT, so a same-name move is impossible without editing out-of-scope files.",
-    "AQ002: six pytest.raises(Exception) in test_mcp_registry_module.py narrowed to click.UsageError with the observed message (scheme, length, empty)."
+    "AQ002: six pytest.raises(Exception) in test_mcp_registry_module.py narrowed to click.UsageError with the observed message (scheme, length, empty).",
+    "AQ003 is dominated by pure-logic tests that sat in modules marked component only because a few tests (or helpers) touch the filesystem. Such modules are split: the filesystem-touching tests (with their helpers) move under the same test names to a behavior-named sibling marked component, the remaining tests stay in a module marked unit; no assertion is changed. A test counts as filesystem-touching when it, its class helpers/fixtures, or any module helper it reaches mentions tmp_path, tempfile, file reads/writes, mkdir, chdir, CliRunner, __file__ or path existence checks.",
+    "deps splits: download_strategies_selection -> download_strategies_artifactory_archive; github_downloader_error_handling -> github_downloader_package_download; replacement_model -> replacement_model_package_integration; apm_resolver_edge_cases -> apm_resolver_helpers (pure half moved, unit); github_downloader_input_validation -> github_downloader_tree_probe; tiered_ref_resolver -> tiered_ref_resolver_bare_cache; github_downloader_validation -> github_downloader_safe_rmtree; ref_enumeration_proxy -> ref_enumeration_registry_only; revision_pin_resolver -> revision_pin_manifest_write; bare_cache_clone_failure -> bare_cache_ssh_diagnostic; artifactory_orchestrator -> artifactory_orchestrator_downloads; github_throttle_fallback -> github_throttle_git_fallback; outdated_ref_cache -> outdated_ref_cache_command; lockfile_local_staging -> lockfile_staged_files; lock_parent_placement -> lock_parent_placement_manifest."
   ],
   "counts_left": {
     "same_body_groups": 32,
     "unclassified_modules": 21,
-    "placement_offenders": 1
+    "placement_offenders": 1,
+    "weak_tests": 1108
   }
 }
