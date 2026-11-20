@@ -1,7 +1,8 @@
 """The one writer for user-editable JSON MCP config files (#4526).
 
-``.github/mcp.json``, ``.mcp.json``, ``~/.claude.json`` and the IntelliJ MCP
-config are shared with the user. Like npm with ``package.json``, APM keeps the
+``.mcp.json``, ``~/.claude.json``, the retired Copilot project MCP file and
+the IntelliJ MCP config are shared with the user. Like npm with
+``package.json``, APM keeps the
 file's existing style when it rewrites one: indentation (N spaces or a tab),
 the final newline, LF or CRLF line endings, and literal non-ASCII text. Other
 layout is normalized by the JSON round trip: an inline array gets one item per
