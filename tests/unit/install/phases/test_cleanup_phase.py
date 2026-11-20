@@ -447,7 +447,9 @@ class TestFrozenKeepsOrphans:
 
         remove.assert_not_called()
         assert ctx.orphan_cleanup_retained == {"removed-pkg": {"a/b.md": "abc123", "a/c.md": None}}
-        assert trim.call_args.args[1] == frozenset()
+        settled = trim.call_args.args[1]
+        assert settled.removed_keys == frozenset()
+        assert settled.retained_keys == {"removed-pkg"}
         ctx.logger.frozen_orphans_kept.assert_called_once_with(["removed-pkg"])
 
 
