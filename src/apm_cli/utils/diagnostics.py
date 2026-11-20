@@ -460,7 +460,9 @@ class DiagnosticCollector:
         count = len(items)
         noun = "file" if count == 1 else "files"
         _rich_warning(f"  [!] {count} {noun} skipped -- local files exist, not managed by APM")
-        _rich_info("    Use 'apm install --force' to overwrite")
+        from apm_cli.core.remediation import LOCAL_FILES_UNMANAGED
+
+        _rich_info(f"    {LOCAL_FILES_UNMANAGED.sentence()}")
         # Per-dep attribution is now emitted inline by the integrate phase
         # (see services.integrate_package_primitives -- the
         # "(files unchanged)" annotation under each [+] header). The

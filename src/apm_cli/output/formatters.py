@@ -490,15 +490,13 @@ class CompilationFormatter:
 
         lines.append("")
 
-        # Call to action
+        from ..core.remediation import COMPILE_DRY_RUN
+
+        call_to_action = f"[DRY RUN] No files written. {COMPILE_DRY_RUN.sentence()}"
         if self.use_color:
-            lines.append(
-                self._styled(
-                    "[DRY RUN] No files written. Run 'apm compile' to apply changes.", "yellow"
-                )
-            )
+            lines.append(self._styled(call_to_action, "yellow"))
         else:
-            lines.append("[DRY RUN] No files written. Run 'apm compile' to apply changes.")
+            lines.append(call_to_action)
 
         return lines
 
