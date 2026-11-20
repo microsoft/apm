@@ -338,7 +338,9 @@ def test_bundle_skill_migration_removes_receipted_legacy_copies(
 
     A bundle cannot be rendered from a locked source; its receipts are the only
     deletion evidence (req-lk-024). An unedited legacy copy is removed when the
-    converged layout is installed; an edited one keeps the user's bytes.
+    converged layout is installed. An edited one is kept, named and refused
+    with the #4360 exit and wording, and the converged copy still deploys;
+    moving it aside, as the remedy says, lets the next install converge.
     """
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     bundle = _skill_bundle(world, tmp_path)
@@ -352,12 +354,19 @@ def test_bundle_skill_migration_removes_receipted_legacy_copies(
     if edited:
         legacy.write_text("# mine\n", encoding="ascii")
 
-    world.apm(consumer, *install)
+    result = world.apm(consumer, *install, expect=1 if edited else 0)
 
     assert (consumer / ".agents" / "skills" / "ss" / "SKILL.md").is_file()
     if edited:
-        assert legacy.read_text(encoding="ascii") == "# mine\n"
-        return
+        assert legacy.read_bytes() == b"# mine\n"
+        output = " ".join((result.stdout + result.stderr).split())
+        assert "Kept .github/skills/ss/SKILL.md:" in output, output
+        assert "Move it aside, then run 'apm install'" in output, output
+        # The remedy: move the edited copy aside, then the install converges.
+        aside = tmp_path / "SKILL.md.mine"
+        legacy.rename(aside)
+        world.apm(consumer, *install)
+        assert aside.read_bytes() == b"# mine\n"
     assert not legacy.exists()
     local = world.lock(consumer).get("local_deployed_files") or []
     assert not any(path.startswith(".github/skills/") for path in local), local
