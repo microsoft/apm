@@ -175,6 +175,7 @@ def _load_lockfile(apm_dir, logger: CommandLogger) -> LockFile | None:
 _HELP = (
     "Explain why a package is installed by walking the lockfile back to "
     "one or more direct dependencies that pulled it in.\n\n"
+    "\b\n"
     "Examples:\n"
     "  apm deps why shared-utils\n"
     "  apm deps why acme-org/shared-utils --json\n"

@@ -25,6 +25,8 @@ from ...marketplace.errors import (
     BuildError,
     GitLsRemoteError,
     HeadNotAllowedError,
+    MarketplaceEgressRefusedError,
+    MarketplaceFetchError,
     MarketplaceNotFoundError,
     MarketplaceYmlError,
     NoMatchingVersionError,
@@ -505,6 +507,17 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             )
         except (MarketplaceManifestNotFoundError, MarketplaceCatalogPathError) as exc:
             logger.error(str(exc), symbol="error")
+            sys.exit(1)
+        except MarketplaceFetchError as exc:
+            if isinstance(exc, MarketplaceEgressRefusedError):
+                raise
+            # Nothing is registered yet, so 'apm marketplace update' cannot retry (#3994).
+            detail = f": {exc.reason}" if exc.reason else ""
+            logger.error(
+                f"Failed to fetch marketplace '{probe_name}'{detail}. It was not "
+                "registered; fix the cause, then rerun this 'apm marketplace add' command.",
+                symbol="error",
+            )
             sys.exit(1)
         detected_path = fetch_source.path
         plugin_count = len(manifest.plugins)

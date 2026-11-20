@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import click
 
@@ -33,7 +33,7 @@ def build_reverse_index(lockfile: LockFile) -> dict[str, list[str]]:
     lockfile and each value is the ordered list of package unique keys that
     claim that path.
 
-    Multi-contributor files (e.g. AGENTS.md) naturally accumulate multiple
+    A file several packages deploy accumulates multiple
     owners -- the index stores them in the order they are encountered, which
     is deterministic (``get_all_dependencies()`` returns deps sorted by depth
     then repo_url).
@@ -187,6 +187,7 @@ def find(ctx: click.Context, file_path: str, show_source: bool, show_path: bool)
         _rich_error(
             f"No lockfile found at {_APM_LOCK_YAML}. Run 'apm install' first.",
             symbol="error",
+            err=True,
         )
         sys.exit(2)
 
@@ -195,6 +196,7 @@ def find(ctx: click.Context, file_path: str, show_source: bool, show_path: bool)
         _rich_error(
             f"Could not read {_APM_LOCK_YAML}. The file may be corrupt.",
             symbol="error",
+            err=True,
         )
         sys.exit(2)
 
@@ -209,10 +211,15 @@ def find(ctx: click.Context, file_path: str, show_source: bool, show_path: bool)
     owner_keys = _lookup_in_index(normalized_query, index)
 
     if not owner_keys:
-        _rich_error(
-            f"'{file_path}' is not tracked by any installed package in {_APM_LOCK_YAML}.",
-            symbol="error",
-        )
+        message = f"'{file_path}' is not tracked by any installed package in {_APM_LOCK_YAML}."
+        from ..compilation.root_context_protection import catalog_root_context_markers
+
+        if PurePosixPath(normalized_query).name in catalog_root_context_markers():
+            # Compiled roots are written by 'apm compile', not recorded deployments (#3994).
+            message += (
+                " It is compiled by 'apm compile'; trace the instruction files it includes instead."
+            )
+        _rich_error(message, symbol="error", err=True)
         sys.exit(1)
 
     for dep_key in owner_keys:
