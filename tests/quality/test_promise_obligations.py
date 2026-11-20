@@ -398,8 +398,8 @@ def test_i9_reports_one_violation_per_duplicated_cause(tmp_path: Path) -> None:
 def test_i9_leaves_a_duplicate_owned_by_a_known_output_cell_to_the_global_hook(
     tmp_path: Path,
 ) -> None:
-    warning = "[!] Org policy not applied (outcome=empty, source=org:x/.github)"
-    stdout = f"[i] p declares:\n{warning}\n{warning}\n[i] a\n[i] a\n[+] Approved p\n"
-    result = CommandResult(("apm", "approve", "p"), 0, stdout, "", tmp_path)
+    warning = "[!] Parked MCP server srv: denied by org policy"
+    stdout = f"[i] Installing\n{warning}\n{warning}\n[i] a\n[i] a\n[+] Installed p\n"
+    result = CommandResult(("apm", "install", "--frozen"), 0, stdout, "", tmp_path)
     found = [v.message for v in oracles._i9_no_noise(None, None, result, None, None)]
     assert found == ["identical consecutive line: '[i] a'"]
