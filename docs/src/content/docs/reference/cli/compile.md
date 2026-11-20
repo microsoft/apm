@@ -378,7 +378,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `cursor` | `AGENTS.md` |
 | `codex` | `AGENTS.md` |
 | `opencode` | `AGENTS.md` |
-| `gemini` | `AGENTS.md`, `GEMINI.md` |
+| `gemini` | `AGENTS.md`, `GEMINI.md` (a stub that imports `AGENTS.md`; not written, and an APM stub is removed, when there is no `AGENTS.md`) |
 | `antigravity` | `AGENTS.md` |
 | `windsurf` | `AGENTS.md` |
 | `kiro` | `AGENTS.md` |

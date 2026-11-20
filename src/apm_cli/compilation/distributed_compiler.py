@@ -345,9 +345,10 @@ class DistributedAgentsCompiler:
             )
 
             if orphaned_files and not defer_orphan_warnings:
-                # Always show warnings about orphaned files
+                # Without --clean, tell the user how to remove them; with it,
+                # the cleanup messages report the outcome instead (#3994).
                 warning_messages = self._generate_orphan_warnings(orphaned_files)
-                if warning_messages:
+                if warning_messages and not clean_orphaned:
                     self.warnings.extend(warning_messages)
                 # Standalone callers retain the established cleanup behavior.
                 # AgentsCompiler defers cleanup until its full write preflight has

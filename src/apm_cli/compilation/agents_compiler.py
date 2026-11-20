@@ -1259,7 +1259,7 @@ class AgentsCompiler:
         from .gemini_formatter import GeminiFormatter
 
         gemini_formatter = GeminiFormatter(str(self.base_dir))
-        gemini_result = gemini_formatter.format_distributed(primitives)
+        gemini_result = gemini_formatter.format_distributed(primitives, dry_run=config.dry_run)
 
         protected_gemini_paths = {
             path

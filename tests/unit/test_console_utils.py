@@ -606,3 +606,18 @@ def test_warning_never_wraps_remediation_command(monkeypatch, capsys):
     finally:
         _reset_console()
     assert f"    Approve: {command}\n" in out
+
+
+def test_info_never_splits_a_url(monkeypatch, capsys):
+    """A docs URL is printed as one copyable token at 80 columns (#3994)."""
+    from apm_cli.utils.console import _reset_console, _rich_info
+
+    monkeypatch.setenv("COLUMNS", "80")
+    _reset_console()
+    url = "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
+    try:
+        _rich_info(f"See: {url}", symbol="info")
+        out = capsys.readouterr().out
+    finally:
+        _reset_console()
+    assert url in out

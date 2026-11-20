@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from yaml import YAMLError
 
+from apm_cli.adapters.client._remote_shapes import harness_label
 from apm_cli.core.apm_yml import (
     ConflictingTargetsError,
     EmptyTargetsListError,
@@ -395,7 +396,7 @@ def _install_registry_group(  # noqa: PLR0913
                     console.print(f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep}")
                     console.print(
                         f"|     +- {action_text} for "
-                        f"{', '.join([rt.title() for rt in target_runtimes])}..."
+                        f"{', '.join([harness_label(rt) for rt in target_runtimes])}..."
                     )
                 else:
                     logger.progress(
@@ -529,7 +530,7 @@ def _install_registry_group(  # noqa: PLR0913
                         label = "updated" if is_update else "configured"
                         console.print(
                             f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep} -> "
-                            f"{', '.join([rt.title() for rt in successful_runtimes])}"
+                            f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
                             f" [dim]({label})[/dim]"
                         )
                     configured_count += 1
@@ -1336,6 +1337,20 @@ def _resolve_target_runtimes(
     return target_runtimes
 
 
+def _print_user_wide_configs(console: Any, runtimes: list[str]) -> None:
+    """Name user-wide configs a project install wrote (Windsurf has no workspace config)."""
+    from apm_cli.factory import ClientFactory
+
+    for rt in runtimes:
+        path = ClientFactory.user_wide_config_display(rt)
+        if path:
+            console.print(
+                f"|     +- user-wide: {path} (all {harness_label(rt)} workspaces)",
+                markup=False,
+                highlight=False,
+            )
+
+
 def _declared_mcp_targets(dep: Any) -> list[str] | None:
     declared = getattr(dep, "targets", None)
     return list(declared) if isinstance(declared, (list, tuple)) and declared else None
@@ -1490,7 +1505,7 @@ def _install_self_defined_deps(
                 f"[dim](self-defined, {transport_label})[/dim]"
             )
             console.print(
-                f"|     +- {action_text} for {', '.join([rt.title() for rt in target_runtimes])}..."
+                f"|     +- {action_text} for {', '.join([harness_label(rt) for rt in target_runtimes])}..."
             )
         else:
             logger.progress(
@@ -1643,9 +1658,11 @@ def _install_self_defined_deps(
                 label = "updated" if is_update else "configured"
                 console.print(
                     f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
-                    f"{', '.join([rt.title() for rt in successful_runtimes])}"
+                    f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
                     f" [dim]({label})[/dim]"
                 )
+                if not user_scope:
+                    _print_user_wide_configs(console, successful_runtimes)
             configured_count += 1
             if is_update:
                 successful_updates.add(dep.name)

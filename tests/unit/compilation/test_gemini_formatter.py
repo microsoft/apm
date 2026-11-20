@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
 from apm_cli.compilation.gemini_formatter import (
@@ -32,6 +32,11 @@ class TestGeminiFormatterInit:
 
 class TestGeminiFormatterFormatDistributed:
     """Tests for format_distributed() stub generation."""
+
+    @pytest.fixture(autouse=True)
+    def _root_agents_md(self, tmp_path: Path) -> None:
+        # The stub imports AGENTS.md, which compiles first.
+        (tmp_path / "AGENTS.md").write_text("# AGENTS.md\n", encoding="utf-8")
 
     def test_returns_successful_result(self, tmp_path: Path) -> None:
         """format_distributed returns a successful result with one placement."""
@@ -92,3 +97,32 @@ class TestGeminiFormatterFormatDistributed:
         assert result.success is True
         assert len(result.placements) == 1
         assert result.placements[0].gemini_path == tmp_path / "GEMINI.md"
+
+
+class TestGeminiStubWithoutAgentsMd:
+    """No stub may import a missing AGENTS.md (#3994)."""
+
+    def test_no_stub_when_agents_md_is_absent(self, tmp_path: Path) -> None:
+        result = GeminiFormatter(str(tmp_path)).format_distributed(PrimitiveCollection())
+        assert result.success is True
+        assert result.content_map == {}
+        assert result.placements == []
+
+    def test_stale_apm_stub_is_removed(self, tmp_path: Path) -> None:
+        formatter = GeminiFormatter(str(tmp_path))
+        (tmp_path / "GEMINI.md").write_text(formatter._generate_stub(), encoding="utf-8")
+        result = formatter.format_distributed(PrimitiveCollection())
+        assert not (tmp_path / "GEMINI.md").exists()
+        assert any("Removed GEMINI.md" in warning for warning in result.warnings)
+
+    def test_hand_authored_gemini_md_is_kept(self, tmp_path: Path) -> None:
+        gemini_md = tmp_path / "GEMINI.md"
+        gemini_md.write_text("# Mine\n@./AGENTS.md\n", encoding="utf-8")
+        GeminiFormatter(str(tmp_path)).format_distributed(PrimitiveCollection())
+        assert gemini_md.read_text(encoding="utf-8") == "# Mine\n@./AGENTS.md\n"
+
+    def test_dry_run_previews_the_stub(self, tmp_path: Path) -> None:
+        result = GeminiFormatter(str(tmp_path)).format_distributed(
+            PrimitiveCollection(), dry_run=True
+        )
+        assert len(result.content_map) == 1

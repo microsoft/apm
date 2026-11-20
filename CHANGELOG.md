@@ -135,6 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex `marketplace.json` records full `https://` source URLs, and a plugin declaring a missing component names the likely upstream cause. (closes #3994, #4004)
 - Copy-paste hints work as printed: `apm pack` shares `./build/...`, plugin next steps lock before packing, `apm approve <pkg>` never wraps, bulk trust is offered only when an org set exists, policy blocks name `APM_POLICY_DISABLE=1`, and uninstalling a local bundle states that bundles cannot be uninstalled. (closes #3994, #4004)
 - `apm pack --json` reports the built bundle, `apm outdated` wraps long package names instead of clipping them, and `apm init` lists the `apm config set target` default in its target precedence comment. (closes #3994, #4004)
+- A project install for Windsurf names the user-wide `~/.codeium/windsurf/mcp_config.json` it changes, MCP output uses product names (`OpenCode`, `VS Code`), compile names the `.agents/skills/` directory Cursor, Gemini and OpenCode deploy to, and URLs are never split across lines. (closes #3994, #4004)
+- `apm compile` never leaves a `GEMINI.md` importing a missing `AGENTS.md`, `--clean` no longer tells you to run `--clean`, and a project with no instructions gets `No instructions to compile` instead of a target warning. (closes #3994, #4004)
 
 ### Security
 

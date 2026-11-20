@@ -185,6 +185,8 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
+    # A hard-wrapped URL is split into lines that no longer open (#3994).
+    soft_wrap = soft_wrap or "://" in message
     console = _get_stderr_console() if err else _get_console()
     if console:
         try:

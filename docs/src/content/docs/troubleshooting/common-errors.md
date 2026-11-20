@@ -276,7 +276,7 @@ Fix: restore the exact value the message names (keep the `:-.` default), or rena
 
 ### `Compilation completed but produced no output files`
 
-Printed when compile produces zero output.
+Printed when compile produces zero output although the project has primitives. A project with no instructions at all prints `No instructions to compile -- nothing written.` instead.
 
 Cause: no primitives in the project (or filtered subset) match the active target's compilation rules. Common causes: wrong `--target`, missing frontmatter, glob filter matched nothing, or org policy stripped everything.
 

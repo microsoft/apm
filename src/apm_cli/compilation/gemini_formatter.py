@@ -12,7 +12,11 @@ from pathlib import Path
 
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..version import get_version
-from .constants import BUILD_ID_PLACEHOLDER, GEMINI_MD_GENERATED_MARKER
+from .constants import (
+    BUILD_ID_PLACEHOLDER,
+    GEMINI_MD_GENERATED_MARKER,
+    has_generated_marker_header,
+)
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -63,18 +67,35 @@ class GeminiFormatter:
         primitives: PrimitiveCollection,
         placement_map: builtins.dict[Path, builtins.list[Instruction]] | None = None,
         config: dict | None = None,
+        *,
+        dry_run: bool = False,
     ) -> GeminiCompilationResult:
         """Generate a GEMINI.md stub that imports AGENTS.md.
 
         The *placement_map* argument is accepted for interface
         compatibility with other formatters but is not used -- the
         stub always lives at the project root.
+
+        AGENTS.md compiles first. When it is absent afterwards (no
+        instructions, or ``--clean`` removed it), the stub would import a
+        missing file, so none is written and a stale APM stub is removed;
+        a hand-authored GEMINI.md is never touched (#3994).
         """
         self.warnings.clear()
         self.errors.clear()
 
         try:
             gemini_path = self.base_dir / "GEMINI.md"
+            if not dry_run and not (self.base_dir / "AGENTS.md").is_file():
+                self._retire_stub(gemini_path)
+                return GeminiCompilationResult(
+                    success=True,
+                    placements=[],
+                    content_map={},
+                    warnings=self.warnings.copy(),
+                    errors=self.errors.copy(),
+                    stats={"gemini_files_generated": 0},
+                )
             content = self._generate_stub()
 
             placement = GeminiPlacement(
@@ -105,6 +126,16 @@ class GeminiFormatter:
                 errors=self.errors.copy(),
                 stats={},
             )
+
+    def _retire_stub(self, gemini_path: Path) -> None:
+        """Remove an APM-generated GEMINI.md whose AGENTS.md import is gone."""
+        try:
+            header = gemini_path.read_text(encoding="utf-8")[:2048]
+        except (OSError, UnicodeDecodeError):
+            return
+        if has_generated_marker_header(header, (GEMINI_MD_GENERATED_MARKER,)):
+            gemini_path.unlink()
+            self.warnings.append("Removed GEMINI.md: the AGENTS.md it imported no longer exists")
 
     def _generate_stub(self) -> str:
         """Generate the GEMINI.md stub content."""
