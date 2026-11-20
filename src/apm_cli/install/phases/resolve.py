@@ -22,6 +22,7 @@ from apm_cli.install.helpers.ref_reuse import (
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
+from apm_cli.install.repository_access import not_found_next_step
 from apm_cli.install.source_helpers import download_registry_package
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
@@ -321,10 +322,12 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     )
 
 
-def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
-    """Raise when the resolver recorded fatal dependency-resolution errors."""
+def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=()) -> None:
+    """Raise on fatal resolution errors; show the download *failures* behind them once."""
     if not dependency_graph.resolution_errors:
         return
+    for _display, failure in failures if ctx.logger else ():
+        ctx.logger.verbose_detail(f"  {failure}")
     for error in dependency_graph.resolution_errors:
         if ctx.logger and not error.startswith("Marketplace package materialization failed:"):
             ctx.logger.error(error)
@@ -731,16 +734,9 @@ def _resolve_dependencies(
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
             fail_msg = _with_preserved_install_hint(fail_msg, install_path)
+            fail_msg += not_found_next_step(e, dep_ref, is_direct=is_direct)
 
-            # Verbose: inline detail via logger (single output path).
-            # Deferred diagnostics below cover the non-logger case.
-            # F7 (#1116): single critical section for both the logger
-            # emission and the result-recording so concurrent failures
-            # don't interleave their lines.
             with callback_lock:
-                if logger:
-                    logger.verbose_detail(f"  {fail_msg}")
-                # Collect for deferred diagnostics summary (always, even non-verbose)
                 callback_failures.add(dep_key)
                 transitive_failures.append((dep_display, fail_msg))
             _tui = getattr(ctx, "tui", None)
@@ -781,7 +777,7 @@ def _resolve_dependencies(
 
     # The graph reads source_root; apm_modules_dir remains the deployment root.
     dependency_graph = _build_dependency_graph(ctx, resolver)
-    _fail_on_resolution_errors(ctx, dependency_graph)
+    _fail_on_resolution_errors(ctx, dependency_graph, transitive_failures)
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so
     # the integrate phase skips them via the same gate used for download
@@ -986,5 +982,9 @@ def run(ctx: InstallContext) -> None:
     _record_update_plan_complete_dep_keys(ctx)
     _record_partial_subtree_reconciliation(ctx)
     if ctx.only_packages:
+        from apm_cli.install.package_selection import with_unlocked_local_dependencies
+
+        complete = ctx.deps_to_install
         _apply_only_filter(ctx)
+        ctx.deps_to_install = with_unlocked_local_dependencies(ctx, complete)
     _compute_intended_dep_keys(ctx)

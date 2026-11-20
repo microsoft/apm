@@ -1208,6 +1208,70 @@ class AuthResolver:
         lines.append("Run with --verbose for detailed auth diagnostics.")
         return "\n".join(lines)
 
+    def describe_credential_tried(
+        self,
+        host: str,
+        org: str | None = None,
+        *,
+        port: int | None = None,
+        host_type: str | None = None,
+    ) -> str:
+        """Name the credential source(s) resolved for *host* in this process.
+
+        Renders ``credential tried: <source>`` (an env var name or helper
+        label, never the value), the ordered sources checked when none held a
+        credential, or ``no credential sent`` when access stayed anonymous.
+        Reads only contexts already resolved, so a diagnostic never runs a
+        credential helper.
+        """
+        host_info = self.classify_host(host, port=port, host_type=host_type)
+        wanted_host = host.lower() if host else host
+        wanted_org = (org or "").lower()
+        with self._lock:
+            contexts = [
+                ctx
+                for key, ctx in self._cache.items()
+                if key.host == wanted_host and key.port == port and key.org in (wanted_org, "")
+            ]
+        sources = list(dict.fromkeys(ctx.source for ctx in contexts if ctx.token))
+        if sources:
+            label = "credential" if len(sources) == 1 else "credentials"
+            return f"{label} tried: {', '.join(sources)}"
+        if not contexts:
+            return "no credential sent"
+        return f"no credential found in {', '.join(self._credential_sources(host_info, org))}"
+
+    def build_not_found_message(
+        self,
+        host: str,
+        repo: str,
+        org: str | None = None,
+        *,
+        port: int | None = None,
+        host_type: str | None = None,
+    ) -> str:
+        """Render the canonical "repository not found" diagnostic for *repo*."""
+        display = self.classify_host(host, port=port, host_type=host_type).display_name
+        tried = self.describe_credential_tried(host, org, port=port, host_type=host_type)
+        return (
+            f"Repository {repo} not found on {display} ({tried}). Check the name, and "
+            "for a private repository that the credential can read it."
+        )
+
+    def _credential_sources(self, host_info: HostInfo, org: str | None) -> list[str]:
+        """Return the credential sources ``_resolve_token`` consults, in order."""
+        if host_info.kind == "ado":
+            return ["ADO_APM_PAT", "az cli", "git credential helper"]
+        github_class = host_info.kind in ("github", "ghe_cloud", "ghes")
+        names = [f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"] if org and github_class else []
+        names.extend(
+            self._token_manager.TOKEN_PRECEDENCE.get(self._purpose_for_host(host_info), [])
+        )
+        if github_class:
+            names.append("gh auth token")
+        names.append("git credential helper")
+        return names
+
     # -- internals ----------------------------------------------------------
 
     def _resolve_token(
