@@ -577,6 +577,21 @@
       ]
     },
     {
+      "issue": 4173,
+      "fixed_in": "0.37.0",
+      "summary": "After apm deny, install deleted the package's hook files without naming them and warned that the deleted paths were retained historical dependency claims.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_executables_deny_retires_hooks_lifecycle.py::test_deny_names_each_retired_hook_file_and_never_reports_it_retained"
+      ]
+    },
+    {
       "issue": 4174,
       "fixed_in": "0.37.0",
       "summary": "An install of an inaccessible repository on a configured host did not name the credential source tried, and its advice ('run with --verbose') was not a runnable command and its verbose form named no source.",

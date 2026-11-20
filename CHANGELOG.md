@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - With registries disabled, `apm install` names the `$APM_HOME` file that configures registries instead of blaming apm.yml, and prints `Run 'apm experimental enable registries'` (#4217)
 - `apm install <pkg>` also locks declared local-path dependencies missing from `apm.lock.yaml`, and reports byte-identical pre-existing skills as adopted (#4217)
 - `apm update` lists a moved SHA pin once (under Revision pin updates) and its Total line counts only changed dependencies. (#4217)
+- After `apm deny`, `apm install` names each hook file it removes and no longer reports those removed files as retained historical claims (#4217)
 
 ## [0.37.0] - 2026-11-20
 
