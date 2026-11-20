@@ -255,8 +255,16 @@ class InstallLogger(CommandLogger):
     full install (all deps from apm.yml). Adjusts messages accordingly.
     """
 
-    def __init__(self, verbose: bool = False, dry_run: bool = False, partial: bool = False):
-        super().__init__("install", verbose=verbose, dry_run=dry_run)
+    def __init__(
+        self,
+        verbose: bool = False,
+        dry_run: bool = False,
+        partial: bool = False,
+        *,
+        command: str = "install",
+    ):
+        # ``apm update`` reuses this logger; ``command`` keeps hints true for it.
+        super().__init__(command, verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
         self._dry_run_apm_update_count = 0
@@ -925,7 +933,12 @@ class InstallLogger(CommandLogger):
                 _rich_echo(
                     "  "
                     + self._policy_reason_blocked(
-                        dep_ref, source, remedy=remedy, declared_by=declared_by, rule=rule
+                        dep_ref,
+                        source,
+                        remedy=remedy,
+                        declared_by=declared_by,
+                        rule=rule,
+                        command=self.command,
                     ),
                     color="dim",
                     err=True,
@@ -956,12 +969,23 @@ class InstallLogger(CommandLogger):
         )
 
     @staticmethod
-    def _policy_reason_unreachable(source: str) -> str:
+    def _policy_bypass_hint(command: str) -> str:
+        """One-off bypass the *command* actually accepts (#3994).
+
+        ``apm install`` has ``--no-policy``; other commands (``apm update``)
+        only honour a one-shot ``APM_POLICY_DISABLE=1`` prefix, which must
+        never be exported where it would disable policy for a whole CI job.
+        """
+        if command == "install":
+            return "use `--no-policy` for one-off bypass"
+        return f"bypass once with `APM_POLICY_DISABLE=1 apm {command}` (never export it in CI)"
+
+    @staticmethod
+    def _policy_reason_unreachable(source: str, *, command: str = "install") -> str:
         """Actionable reason for unreachable policy source."""
         return (
             f"Policy source {source} is unreachable "
-            "-- retry, check VPN/firewall, or bypass once with `--no-policy` "
-            "(install) or `APM_POLICY_DISABLE=1 apm <command>` (never export it in CI)"
+            f"-- retry, check VPN/firewall, or {InstallLogger._policy_bypass_hint(command)}"
         )
 
     @staticmethod
@@ -977,6 +1001,7 @@ class InstallLogger(CommandLogger):
         remedy: PolicyRemedy | None = None,
         declared_by: str | None = None,
         rule: str | None = None,
+        command: str = "install",
     ) -> str:
         """Actionable reason for a blocked dependency.
 
@@ -999,8 +1024,7 @@ class InstallLogger(CommandLogger):
         return (
             f"Blocked by org policy at {source}{rule_part} "
             f"-- {edit}contact admin to update policy, "
-            "or bypass once with `--no-policy` (install) or "
-            "`APM_POLICY_DISABLE=1 apm <command>` (never export it in CI)"
+            f"or {InstallLogger._policy_bypass_hint(command)}"
         )
 
     # --- Install summary ---

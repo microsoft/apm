@@ -141,7 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack` names the command each format needs (`apm unpack` for `--format apm`), reports the bundle in `--json`, and counts the embedded lockfile. (closes #3994, #4004)
 - `apm pack --format agent-plugin` packs a dependency-free project without a lockfile; `apm unpack` points plugin-format bundles to `apm install`. (closes #3994, #4004)
 - Hints copy-paste as printed: commands and URLs never wrap, bulk trust appears only with an org set, and `apm init` adds `-t <harness>` when needed. (closes #3994, #4004)
-- Policy output names a one-shot `APM_POLICY_DISABLE=1 apm <command>`, warn-mode `apm audit --ci` names the dependencies, and `apm policy explain` stops promising deployment. (closes #3994, #4004)
+- Policy blocks name a bypass the command accepts (`--no-policy` for install, a one-shot `APM_POLICY_DISABLE=1 apm update` for update), warn-mode `apm audit --ci` names the dependencies, and `apm policy explain` stops promising deployment. (closes #3994, #4004)
 - `apm uninstall` names the removal route for an MCP server and states that local bundles cannot be uninstalled yet; `apm install -g` warns only for selected targets. (closes #3994, #4004)
 - `apm audit` tells you to reinstall the bundle to restore an edited file a local bundle deployed. (closes #3994, #4004)
 - MCP installs print one success line per server with product names and name the files they write outside each harness: root `.mcp.json` and Windsurf's `~/.codeium/windsurf/mcp_config.json`. (closes #3994, #4004)
