@@ -29,7 +29,7 @@ from ..install.orphans import (
 )
 from ..install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ..integration.base_integrator import BaseIntegrator
-from ..integration.cleanup import remove_stale_deployed_files
+from ..integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
 from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
@@ -257,6 +257,23 @@ def prune(ctx, dry_run):
             logger.success("Dry run complete - no changes made")
             return
 
+        # Deletion evidence (#3701): receipts, or the locked render, which is
+        # materialized now while the orphaned package sources still exist.
+        deletion_evidence = DeploymentEvidence.collect(
+            project_root,
+            user_scope=False,
+            lockfile=lockfile,
+            lockfile_root=project_root,
+            diagnostics=logger.diagnostics,
+        )
+        if lockfile is not None:
+            deletion_evidence.prepare(
+                path
+                for key in planned_pruned_keys
+                if key in lockfile.dependencies
+                for path in lockfile.dependencies[key].deployed_files
+            )
+
         removed_count = 0
         failed_count = 0
         removed_packages: list[str] = []
@@ -317,6 +334,7 @@ def prune(ctx, dry_run):
                     dep_key=dep_key,
                     targets=None,
                     diagnostics=logger.diagnostics,
+                    evidence=deletion_evidence,
                     recorded_hashes=hashes,
                     failed_path_retained=False,
                 )

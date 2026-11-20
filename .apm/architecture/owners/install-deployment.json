@@ -347,7 +347,11 @@
       "id": "locked-copy-validity",
       "decision": "Whether an existing apm_modules package copy holds its locked commit or content, so resolution, pre-download and integrate reuse only lock-matching copies (#3884)",
       "owner": "drift.py (locked_copy_proof: a readable git HEAD decides, else the verified content hash; the install/cache_pin.py .apm-pin marker counts only with trust_marker for resolution freshness via locked_copy_is_stale behind should_force_ref_recheck, never for deployed bytes); consumers: deps/apm_resolver.py and install/phases/resolve.py via should_force_ref_recheck, install/phases/download.py, install/phases/integrate.py, and the install/cache_pin.py marker writer via locked_copy_is_stale; apm update keeps the install/sources.py fresh-download content-hash check for any dependency whose resolved commit did not move (#4027)",
-      "selectors": ["src/apm_cli/install/cache_pin.py", "src/apm_cli/install/phases/_redownload.py"],
+      "selectors": [
+        "src/apm_cli/install/cache_pin.py",
+        "src/apm_cli/install/phases/_redownload.py",
+        "src/apm_cli/install/phases/lockfile_cache_pins.py"
+      ],
       "guards": ["install-deployment-locked-copy-validity", "install-deployment-update-content-integrity"]
     },
     {

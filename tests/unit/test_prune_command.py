@@ -34,9 +34,10 @@ from apm_cli.core.deployment_state import (
 )
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.integration.cleanup import remove_stale_deployed_files
+from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -138,6 +139,14 @@ class TestPruneCommand:
         except (FileNotFoundError, OSError):
             repo_root = Path(__file__).parent.parent.parent
             os.chdir(str(repo_root))
+
+    def _receipted(self, *roots: Path, deploy_root: Path):
+        """Patch evidence collection: APM deployed *roots* on this machine (#3701)."""
+        return patch.object(
+            DeploymentEvidence,
+            "collect",
+            return_value=receipted_evidence(*roots, deploy_root=deploy_root),
+        )
 
     @contextlib.contextmanager
     def _chdir_tmp(self):
@@ -682,7 +691,8 @@ dependencies:
             deployed = tmp / ".github" / "prompts" / "orphan-prompt.md"
             deployed.parent.mkdir(parents=True, exist_ok=True)
             deployed.write_text("# Orphan prompt\n")
-            result = self.runner.invoke(cli, ["prune"])
+            with self._receipted(deployed, deploy_root=tmp):
+                result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
             assert not deployed.exists(), "Deployed file must be removed by prune"
 
@@ -869,10 +879,13 @@ dependencies:
                 ),
             )
 
-            with patch(
-                "apm_cli.commands.prune.remove_stale_deployed_files",
-                wraps=remove_stale_deployed_files,
-            ) as cleanup:
+            with (
+                self._receipted(beta, deploy_root=tmp),
+                patch(
+                    "apm_cli.commands.prune.remove_stale_deployed_files",
+                    wraps=remove_stale_deployed_files,
+                ) as cleanup,
+            ):
                 result = self.runner.invoke(cli, ["prune"])
 
             assert result.exit_code == 0, result.output
@@ -1079,6 +1092,8 @@ dependencies:
             _make_package_dir(tmp, "orphan-org", "orphan-repo")
             deployed = tmp / deployed_path
             deployed.parent.mkdir(parents=True)
+            deployed.write_text("# Deployed\n")
+            receipts = self._receipted(deployed, deploy_root=tmp)
             deployed.write_text("# User edit\n")
             _write_canonical_lockfile(
                 tmp,
@@ -1099,7 +1114,8 @@ dependencies:
                 ),
             )
 
-            result = self.runner.invoke(cli, ["prune"])
+            with receipts:
+                result = self.runner.invoke(cli, ["prune"])
 
             assert result.exit_code == 0, result.output
             assert deployed.read_text() == "# User edit\n"

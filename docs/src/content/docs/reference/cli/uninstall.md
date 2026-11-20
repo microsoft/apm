@@ -168,8 +168,13 @@ and lockfile ownership. Resolve the filesystem problem and retry the same
 command; `--verbose` includes the underlying error. Earlier deletions in a
 multi-package request are not rolled back.
 
-If a target-scoped file owned only by a removed package was edited or cannot be
-deleted, uninstall lists the retained paths and exits before changing `apm.yml`.
+Uninstall deletes a removed package's files only with evidence that APM wrote
+their current bytes: a local deployment receipt, or byte equality with what the
+locked version renders. It renders before removing the package from
+`apm_modules/`, fetching the locked commit when the checkout is gone; a lockfile
+hash alone is never evidence. If a target-scoped file owned only by a removed
+package was edited, has no evidence, or cannot be deleted, uninstall lists the
+retained paths and exits before changing `apm.yml`.
 Files it already removed are dropped from `apm.lock.yaml`, so the lockfile
 claims only what is still on disk. Direct and orphan directories run first and
 may already be gone; declarations remain. Resolve the listed files and retry the
