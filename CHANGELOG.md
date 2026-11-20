@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` stops before writing `apm.lock.yaml` or deployed files when a check fails, and `--dry-run` previews through the same pipeline. (closes #4085, #4138)
+- `apm install` stops before writing `apm.lock.yaml` or deployed files when a check fails, and `--dry-run` previews through the same pipeline. (#4138)
 - `apm install --frozen` succeeds as a no-op when `apm.yml` declares no APM, MCP or LSP dependency, matching `apm audit --ci`. (closes #4050, #4138)
 - Cleanup no longer removes a target root such as a pre-existing `.github/` when it retires the last file APM deployed there, so repeat installs are byte-stable. (closes #4132, #4138)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
