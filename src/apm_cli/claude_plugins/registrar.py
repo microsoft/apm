@@ -355,15 +355,17 @@ def _report(logger, declared, retiring, kept, changed, settings_changed, restore
         )
 
 
-def native_deployed_drift(deploy_root: Path, lockfile: Any) -> list[tuple[str, str, str, str]]:
-    """``(name, root, expected, observed)`` for each locked native plugin whose copy differs.
+def native_deployed_drift(deploy_root: Path, lockfile: Any) -> list[Any]:
+    """A ``DeployedHashDrift`` for each locked native plugin whose deployed copy differs.
 
     The deployed root must carry its record's fingerprint, as audit's drift
     replay checks (:func:`verify_claude_native_cache`). A root that does not
     exist yet is not drift: the install deploys it.
     """
+    from apm_cli.policy.ci_checks import DeployedHashDrift
+
     found = []
-    for record in lock_native_plugins(lockfile).values():
+    for key, record in lock_native_plugins(lockfile).items():
         path = plugins_root(deploy_root) / record.name
         if not path.exists() and not path.is_symlink():
             continue
@@ -376,7 +378,14 @@ def native_deployed_drift(deploy_root: Path, lockfile: Any) -> list[tuple[str, s
         except ClaudeNativePluginError:
             observed = "unreadable"
         if observed != record.fingerprint:
-            found.append((record.name, record.root, record.fingerprint, observed))
+            found.append(
+                DeployedHashDrift(
+                    owner=key,
+                    path=f"native plugin '{record.name}' ({record.root})",
+                    expected=record.fingerprint,
+                    actual=f"{observed}; run 'apm install --global' to restore it",
+                )
+            )
     return found
 
 
