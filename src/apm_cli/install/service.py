@@ -509,7 +509,8 @@ class InstallService:
                 lockfile,
                 modules_dir,
                 admission=admission,
-                logger=request.logger,
+                # The hydrated check and the MCP phase report parked servers.
+                logger=None,
                 allow_pending=allow_pending_mcp,
             )
         )
@@ -749,7 +750,8 @@ class InstallService:
             lockfile,
             modules_dir,
             admission=admission,
-            logger=logger,
+            # The MCP phase is the one printer of parked servers (#4422).
+            logger=None,
             allow_pending=False,
             active_package_keys=active_package_keys,
         )
