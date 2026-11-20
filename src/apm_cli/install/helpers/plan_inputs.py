@@ -45,20 +45,27 @@ def confirm_update_plan(
 
     if lockfile is None:
         return True
-    # An install without --update re-resolves locked dependencies to the
-    # same lock rows; adding or removing a dependency changes the lockfile.
-    would_mutate = (
-        ctx.update_refs
-        or plan_callback is not None
-        or any(
-            entry.action in {"add", "remove"}
-            for entry in build_resolved_update_plan(ctx, lockfile).entries
-        )
-    )
     refuse_lockfile_before_mutation(
-        lockfile, get_lockfile_path(ctx.apm_dir), would_mutate=would_mutate
+        lockfile,
+        get_lockfile_path(ctx.apm_dir),
+        would_mutate=writes_lockfile(ctx, lockfile, updating=plan_callback is not None),
     )
     return True
+
+
+def writes_lockfile(ctx: InstallContext, lockfile: LockFile, *, updating: bool) -> bool:
+    """Whether this install rewrites *lockfile* (#4168).
+
+    An update rewrites it (even an unchanged plan can change the deployment
+    ledger). An install without ``--update`` re-resolves locked dependencies
+    to the same rows; adding or removing a dependency changes the lockfile.
+    """
+    if updating or ctx.update_refs:
+        return True
+    return any(
+        entry.action in {"add", "remove"}
+        for entry in build_resolved_update_plan(ctx, lockfile).entries
+    )
 
 
 def build_resolved_update_plan(ctx: InstallContext, lockfile: LockFile | None) -> UpdatePlan:
