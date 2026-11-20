@@ -32,11 +32,11 @@ _DIRECTORY_DEPTH = 6
 
 _KEPT_REASONS = {
     "adopted": (
-        "already on disk before this install (not written by it); "
-        f"{remediation.FROZEN_KEPT_ADOPTED.clause()}"
+        "already on disk before this install (not written by it)",
+        remediation.FROZEN_KEPT_ADOPTED,
     ),
-    "edited": f"edited after this install wrote it; {remediation.FROZEN_KEPT_EDITED.clause()}",
-    "failed": f"could not be removed; {remediation.FROZEN_KEPT_UNREMOVABLE.clause()}",
+    "edited": ("edited after this install wrote it", remediation.FROZEN_KEPT_EDITED),
+    "failed": ("could not be removed", remediation.FROZEN_KEPT_UNREMOVABLE),
 }
 
 
@@ -229,7 +229,10 @@ def _remove_created_directories(
 
 def kept_lines(kept: Mapping[str, str]) -> list[str]:
     """Name each kept file with its reason and the runnable next step."""
-    return [f"  - kept {path}: {_KEPT_REASONS[reason]}" for path, reason in sorted(kept.items())]
+    return [
+        f"  - {remediation.kept_file_message(path, *_KEPT_REASONS[reason])}"
+        for path, reason in sorted(kept.items())
+    ]
 
 
 def refusal_tip(kept: Mapping[str, str]) -> str:

@@ -146,13 +146,13 @@ def test_each_kept_reason_is_named_with_a_next_step(
     )
 
     assert kept_lines(outcome.kept) == [
-        "  - kept .claude/skills/adopted/SKILL.md: already on disk before this install "
-        "(not written by it); delete or move it aside if it is not yours to keep, then "
-        "run 'apm install --frozen' to retry the frozen install",
-        "  - kept .claude/skills/edited/SKILL.md: edited after this install wrote it; "
-        "move it aside, then run 'apm install --frozen' to retry the frozen install",
-        "  - kept .claude/skills/stuck/SKILL.md: could not be removed; delete it, then "
-        "run 'apm install --frozen' to retry the frozen install",
+        "  - Kept .claude/skills/adopted/SKILL.md: already on disk before this install "
+        "(not written by it). Delete or move it aside if it is not yours to keep, then "
+        "run 'apm install --frozen' to retry the frozen install.",
+        "  - Kept .claude/skills/edited/SKILL.md: edited after this install wrote it. "
+        "Move it aside, then run 'apm install --frozen' to retry the frozen install.",
+        "  - Kept .claude/skills/stuck/SKILL.md: could not be removed. Delete it, then "
+        "run 'apm install --frozen' to retry the frozen install.",
     ]
     assert adopted.is_file() and edited.is_file() and stuck.is_file()
     assert refusal_tip(outcome.kept).startswith(
