@@ -29,6 +29,12 @@ from tests.utils.artifact_snapshot import assert_unchanged
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.promise(
+        "P-INV-I1",
+        "P-OWN-process-interrupt-signals",
+        "P-LAW-transaction.failed_command_preserves_state",
+    ),
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="POSIX signals"),
 ]
