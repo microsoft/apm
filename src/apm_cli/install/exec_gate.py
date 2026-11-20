@@ -739,11 +739,10 @@ class ReplayExecAllowMap:
     def _resolve(self) -> None:
         if self._resolved:
             return
-        from apm_cli.core.scope import manifest_root
+        from apm_cli.core.scope import manifest_root, scope_manifest_path
         from apm_cli.security.executables import (
             exec_trust_context_for_project,
             materialize_exec_map,
-            project_manifest_path,
         )
 
         if self._policy_provider is not None:
@@ -752,13 +751,12 @@ class ReplayExecAllowMap:
             from apm_cli.policy.outcome_routing import resolve_trust_policy
 
             # The replaying command reports the policy outcome itself.
-            policy = resolve_trust_policy(self._project_root, announce=False)
+            policy = resolve_trust_policy(
+                manifest_root(self._project_root, user_scope=self._user_scope), announce=False
+            )
         # Audit is read-only: never migrate legacy user consent here.
-        # Grants come from the scope's manifest (APM_HOME/apm.yml under -g,
-        # #3954); policy stays anchored at the deploy root.
-        manifest = project_manifest_path(
-            manifest_root(self._project_root, user_scope=self._user_scope)
-        )
+        # Grants come from the scope's manifest (APM_HOME/apm.yml under -g, #3954).
+        manifest = scope_manifest_path(self._project_root, user_scope=self._user_scope)
         self._trust_ctx_value = exec_trust_context_for_project(
             manifest, policy=policy, migrate_user_legacy=False
         )

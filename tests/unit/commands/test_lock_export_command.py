@@ -15,6 +15,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 _LOCKFILE = """\
 lockfile_version: "2"
 generated_at: "2024-01-01T00:00:00+00:00"

@@ -14,6 +14,8 @@ from click.testing import CliRunner
 
 from apm_cli.commands.mcp import mcp
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@ from click.testing import CliRunner
 
 from apm_cli.commands.pack import pack_cmd
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _reset_console_state():

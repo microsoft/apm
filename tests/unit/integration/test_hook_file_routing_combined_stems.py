@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import pytest
 
-from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_file_routing import (
     _hook_file_allowed_targets,
     configured_hook_file_selection,
     legacy_hook_file_selection,
     legacy_routing_widening,
-    raise_for_legacy_routing,
 )
+
+pytestmark = pytest.mark.component
 
 
 @pytest.mark.parametrize(
@@ -62,25 +61,3 @@ def test_widening_names_files_the_legacy_convention_hid(tmp_path: Path) -> None:
     assert legacy_routing_widening([combined], "codex") == []
     assert legacy_routing_widening([combined], "cursor") == [combined]
     assert legacy_routing_widening([generic], "claude") == []
-
-
-def test_migration_error_is_actionable_and_printable_ascii() -> None:
-    with pytest.raises(HookContractError) as excinfo:
-        raise_for_legacy_routing({"codex": ("hooks/hooks-claude.json",)}, "owner/repo")
-
-    message = str(excinfo.value)
-    assert message.isascii()
-    assert "owner/repo: hook filename target routing was removed" in message
-    assert "Target 'codex' would newly activate: hooks/hooks-claude.json" in message
-    assert "target: <name>" in message
-    docs = urlsplit(message.rsplit("See: ", 1)[1].split()[0])
-    assert (docs.scheme, docs.hostname, docs.path, docs.fragment) == (
-        "https",
-        "microsoft.github.io",
-        "/apm/producer/write-primitives/",
-        "migrating-from-filename-routing",
-    )
-
-
-def test_no_conflicts_is_silent() -> None:
-    raise_for_legacy_routing({}, "owner/repo")

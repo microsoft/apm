@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_detection import (
     read_manifest_target as _read_apm_yml_target,  # noqa: F401 -- compatibility re-export
 )
@@ -476,7 +477,7 @@ def _build_package_info(
         pkg = validation.package
         package_type = validation.package_type
     else:
-        apm_yml = install_path / "apm.yml"
+        apm_yml = manifest_file(install_path)
         pkg = None
         if apm_yml.exists():
             try:
@@ -620,8 +621,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
         declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
-        apm_yml = project_root / "apm.yml"
-        if apm_yml.exists():
+        if (apm_yml := manifest_file(project_root)).exists():
             manifest = APMPackage.from_apm_yml(apm_yml)
             declared_transports.record(
                 [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]

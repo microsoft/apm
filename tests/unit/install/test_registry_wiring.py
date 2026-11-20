@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.install.registry_wiring import (
     get_effective_default_registry,
     should_skip_github_probe_for_dep,
     validate_registry_ref,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # should_skip_github_probe_for_dep

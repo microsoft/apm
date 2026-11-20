@@ -32,6 +32,8 @@ from apm_cli.utils import yaml_io
 
 from .conftest import sentinel_command
 
+pytestmark = pytest.mark.component
+
 BENIGN_YML = 'name: pkg\nlifecycle:\n  post-install:\n    - type: command\n      run: "true"\n'
 
 

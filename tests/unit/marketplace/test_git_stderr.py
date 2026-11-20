@@ -14,6 +14,8 @@ from apm_cli.marketplace.git_stderr import (
     translate_git_stderr,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # AUTH classification
 # ---------------------------------------------------------------------------

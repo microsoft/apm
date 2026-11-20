@@ -544,7 +544,7 @@ def _i7_failure_preserves_state(
         path
         for path in _changed_paths(before.artifacts, after.artifacts)
         if path.split(":", 1)[1].rsplit("/", 1)[-1] not in {"apm.yml", "apm.lock.yaml"}
-        and not any(_within(path.split(":", 1)[1], prefix) for prefix in _FAILURE_BOOKKEEPING)
+        and not any(_bookkeeping(path.split(":", 1)[1], prefix) for prefix in _FAILURE_BOOKKEEPING)
         and not _within_retirement(path, retirement)
         and not (retirement and _RETIREMENT_BOOKKEEPING in path)
     ]
@@ -555,6 +555,11 @@ def _i7_failure_preserves_state(
             Violation("I7", f"failed {op.name} exited {result.returncode} without announcing why")
         )
     return found
+
+
+def _bookkeeping(path: str, prefix: str) -> bool:
+    """*path* is bookkeeping under *prefix*, or a directory created on the way to it."""
+    return _within(path, prefix) or _within(prefix, path)
 
 
 # Retiring a file rewrites its receipt (under APM_HOME at user scope).
@@ -588,6 +593,8 @@ _FAILURE_BOOKKEEPING = (
     ".apm-local",
     ".local/state/gh",
     ".cache/apm",
+    # Recovery data a failed install retains and announces, for a safe manual restore.
+    "apm_modules/.apm-resolution-staging",
 )
 # A failed command announces its failure: an [x] line or an error/failure word.
 _FAILURE_ANNOUNCEMENT = re.compile(

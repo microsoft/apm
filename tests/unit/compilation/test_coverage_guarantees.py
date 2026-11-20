@@ -17,6 +17,8 @@ import pytest
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
 
+pytestmark = pytest.mark.component
+
 
 class TestCoverageGuarantees:
     """Test mathematical coverage guarantees and constraint satisfaction."""

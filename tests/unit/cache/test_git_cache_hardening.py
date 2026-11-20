@@ -28,7 +28,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
+import pytest
+
 from apm_cli.cache.git_cache import GitCache, _safe_git_args
+
+pytestmark = pytest.mark.component
 
 
 def _all_cmd_argvs(mock_run: MagicMock) -> list[list[str]]:
