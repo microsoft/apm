@@ -220,10 +220,10 @@ def test_c4_frozen_install_of_untouched_pre036_project_writes_nothing(
     world = _World(tmp_path / "c4", apm_binary_path, FIXTURE_035)
     before = world.snapshot()
 
-    code, out, err = world.run("install", "--frozen")
+    result = world.runner.run(("install", "--frozen"), cwd=world.project, env=world.env)
 
-    assert code == 0, f"{out}\n{err}"
-    assert _kept_lines(out + err) == []
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert _kept_lines(result.stdout + result.stderr) == []
     assert world.snapshot() == before
 
 

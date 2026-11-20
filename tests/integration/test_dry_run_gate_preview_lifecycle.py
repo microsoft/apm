@@ -14,7 +14,12 @@ import yaml
 from tests.integration._mcp_chain_kit import Chain, stdio_server
 from tests.integration._policy_scope_kit import tree_snapshot
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-OWN-prospective-dry-run-install-plan"),
+]
 
 _PACKAGE = "./pkgs/tools"
 

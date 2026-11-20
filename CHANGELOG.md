@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Updating `.mcp.json`, `.github/mcp.json`, `~/.claude.json` or the IntelliJ MCP config keeps its indentation, final newline, line endings and non-ASCII text; other layout is normalized. (#4530)
+- `apm update` records restored marketplace provenance in its single lockfile write; a failed update leaves `apm.lock.yaml` unchanged. (#4525)
 - `apm install` and `apm update` run `post-install` scripts after MCP and LSP reconciliation, so scripts see the final lockfile and it is written once. (#4486)
 - `apm install --dry-run` after `apm deny`, a revoked approval or an org executables deny names each hook, MCP server, LSP server and bin/ the next install retires, and writes nothing. (#4478)
 - A failed `apm install <bundle>` no longer leaves a pending-executables record behind; `apm approve --pending` lists only bundles whose install completed. (closes #4492, #4505)
@@ -124,12 +125,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A refreshed org policy that fails validation no longer drops a valid cached policy: install and `apm audit --ci` keep applying the cached policy, as for an unreachable policy host. (#4476, #4481)
 - `apm audit --ci` verifies the skill selection of a local Claude plugin without `apm.yml` installed with `--skill`, instead of reporting it as unverified. (#4494)
 - `apm audit --ci` names every changed package copy with one message, `package cache differs from its locked content`, whichever check detects it. (#4480, #4485)
+- A parked local-bundle executable prints one remedy from the remediation catalog: run the printed `apm approve '<key>'`, then rerun the install. (#4506)
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
 - `apm audit --ci` names a local dependency whose content changed since the lock, as `apm install --frozen` does. (closes #4447, #4474)
 - `apm audit --ci` fails and names a user's MCP entry that differs from a declared server with the same name, matching `apm install --frozen`. (#4493)
 - `apm audit --ci` names locked git and registry entries that carry no content hash and points at `security.integrity.require_hashes`, without changing the exit code. (closes #4453, #4495)
+- `apm update --dry-run` no longer writes the marketplace catalog cache while it re-verifies locked provenance. (#4475)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)

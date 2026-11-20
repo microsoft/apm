@@ -187,6 +187,7 @@ def integrate_mcp_entry(
                 stored_configs=old_configs,
                 native_hashes=retired.hashes,
                 project_root=project_root,
+                keep_signal_files=False,
             ),
             logger,
         )

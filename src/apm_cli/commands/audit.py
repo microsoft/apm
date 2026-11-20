@@ -38,6 +38,7 @@ from ..utils.console import (
     _rich_error,
     _rich_success,
     _rich_warning,
+    ascii_safe,
 )
 from ..utils.diagnostics import printable_ascii_text
 
@@ -547,10 +548,13 @@ def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:
 
 def _warn_unhashed_dependencies(project_root: Path, fetch_result) -> None:
     """Name locked entries without a content hash when policy does not require one."""
-    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
     from ..install.integrity import unhashed_dependencies_advisory
 
-    lockfile = LockFile.read(get_lockfile_path(project_root))
+    try:
+        lockfile = LockFile.read(get_lockfile_path(project_root))
+    except LockfileFormatError:
+        return  # the lockfile checks already fail closed and name the remedy
     if lockfile is None:
         return
     policy = fetch_result.policy if fetch_result is not None and fetch_result.found else None
@@ -939,11 +943,13 @@ def _audit_ci_gate(
 
             click.echo("")
             click.echo(
-                render_drift_text(
-                    drift_findings,
-                    verbose=cfg.verbose,
-                    lockfile=lockfile,
-                    project_root=cfg.project_root,
+                ascii_safe(
+                    render_drift_text(
+                        drift_findings,
+                        verbose=cfg.verbose,
+                        lockfile=lockfile,
+                        project_root=cfg.project_root,
+                    )
                 )
             )
 
@@ -1351,12 +1357,14 @@ def _audit_content_scan(
 
             click.echo("")
             click.echo(
-                render_drift_text(
-                    drift_findings,
-                    verbose=cfg.verbose,
-                    lockfile=lockfile,
-                    project_root=cfg.project_root,
-                    advisory=not drift_gates,
+                ascii_safe(
+                    render_drift_text(
+                        drift_findings,
+                        verbose=cfg.verbose,
+                        lockfile=lockfile,
+                        project_root=cfg.project_root,
+                        advisory=not drift_gates,
+                    )
                 )
             )
     elif effective_format == "markdown":

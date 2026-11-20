@@ -2811,8 +2811,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-update-marketplace-provenance",
         rule_id="install-deployment-update-marketplace-provenance",
         path="src/apm_cli/commands/update.py",
-        old="    _existing_lock = _reverified_lock(LockFile.read(_lock_path), _lock_path, logger, dry_run)\n",
-        new="    _existing_lock = LockFile.read(_lock_path)\n",
+        old="    _existing_lock, _restored_provenance = _reverified_lock(\n",
+        new="    _existing_lock, _restored_provenance = LockFile.read(_lock_path), {}\n    (\n",
         intent="apm update carries locked marketplace provenance forward without re-verifying it.",
     ),
     MutationCase(
@@ -3973,8 +3973,8 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="registry-delegation-scope-manifest-path",
         rule_id="registry_delegation.scope_manifest_path",
         path="src/apm_cli/commands/update.py",
-        old="manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)",
-        new="get_deploy_root(scope)",
+        old="        manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER),\n",
+        new="        get_deploy_root(scope),\n",
         intent="User-scope update discovers policy from the deploy root.",
     ),
     MutationCase(

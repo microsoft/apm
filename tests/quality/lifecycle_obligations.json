@@ -23641,8 +23641,8 @@
   },
   "E2": {
    "evidence": [
-    "src/apm_cli/install/mcp/retired_destinations.py:84",
-    "src/apm_cli/install/mcp/retired_destinations.py:165"
+    "src/apm_cli/install/mcp/retired_destinations.py:93",
+    "src/apm_cli/install/mcp/retired_destinations.py:194"
    ],
    "text": "targets are equivalent except MCP ownership (MCPOWN)"
   },
@@ -23706,15 +23706,15 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:947"
+    "src/apm_cli/commands/install.py:949"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1227",
-    "src/apm_cli/commands/install.py:991",
-    "src/apm_cli/commands/install.py:965",
+    "src/apm_cli/commands/install.py:1229",
+    "src/apm_cli/commands/install.py:993",
+    "src/apm_cli/commands/install.py:967",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:749",
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "aff0f9a9c7e79d984206015439b5818ec70497426f49ae237de0f3d0590a9ca6"
+ "sha256": "13940840c4fa070712da652ec3595b2794806dfdc20c3d878604f9c80c71f9f1"
 }
