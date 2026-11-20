@@ -21,7 +21,7 @@ This module is a framework of two tables; a row is data, never code:
 
 Add a site: add one ``SiteSlice`` to ``SITE_SLICES``. Add a class: add its
 setup to ``CLASS_SETUPS`` and an ``Expect`` to each slice that covers it.
-A row whose CLI behavior is wrong today carries ``xfail="#0 <neutral text>"``
+A row whose CLI behavior is wrong today carries ``xfail="#<issue> <neutral text>"``
 and becomes a strict expected failure.
 """
 
@@ -415,7 +415,7 @@ SITE_SLICES["install-pipeline"] = SiteSlice(
             1,
             (DENIED, r"(?i)stale"),
             absent=(SKILL, HOOK),
-            xfail="#0 with a stale cached org policy and no network, install skips the cached policy",
+            xfail="S-pending (neutral issue to follow): offline use of cached policy",
         ),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), present=(SKILL,)),
     },
@@ -431,7 +431,7 @@ SITE_SLICES["mcp-install-preflight"] = SiteSlice(
             (KNOB_BLOCK,),
             absent=(".mcp.json",),
             unchanged=("apm.yml",),
-            xfail="#0 the MCP-only install exits 1 without printing the block reason",
+            xfail="#4179 the MCP-only install exits 1 without printing the reason",
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,)),
         "cache=cold": Expect(
@@ -499,7 +499,7 @@ SITE_SLICES["exec-map(getattr: uninstall/hook rebuild/lsp)"] = SiteSlice(
             1,
             (TRUST_BLOCK + "policy hash mismatch",),
             absent=(HOOK,),
-            xfail="#0 uninstall exits 1 after it already removed the package and its manifest entry",
+            xfail="#4185 uninstall exits 1 after it already changed the manifest, lock and disk",
         ),
     },
 )
@@ -516,7 +516,7 @@ SITE_SLICES["audit-ci"] = SiteSlice(
         "hash_mismatch": Expect(
             1,
             (HASH,),
-            xfail="#0 audit --ci exits 0 on a policy hash mismatch that install refuses",
+            xfail="S-pending (neutral issue to follow): audit and install disagree on policy pin",
         ),
         "absent/block": Expect(1, (r"No org policy found", _CI_FAILED)),
         "absent/warn": Expect(0),
@@ -531,7 +531,7 @@ SITE_SLICES["audit-ci"] = SiteSlice(
 
 # commands/approve.py -- approval loads the org policy best-effort.
 _APPROVE_UNRESOLVED = r"Org policy could not be resolved; approval is proceeding"
-_APPROVE_TWICE = "#0 approve prints its org policy warning twice"
+_APPROVE_TWICE = "#4178 approve prints its org policy warning twice"
 SITE_SLICES["approve"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm approve p-exec",
@@ -583,7 +583,7 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
             0,
             (KNOB_BLOCK,),
             unchanged=("*",),
-            xfail="#0 install --dry-run does not preview that the install would be blocked",
+            xfail="S-pending (neutral issue to follow): dry-run preview of policy outcome",
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), unchanged=("*",)),
         "cache=cold": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=True),
@@ -591,7 +591,9 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
 )
 
 # commands/update.py -- the re-gate short circuit of an update with nothing to change.
-_SHORTCIRCUIT = "#0 update with nothing to change exits 0 where install fails closed"
+_SHORTCIRCUIT = (
+    "S-pending (neutral issue to follow): update and install exit agreement under policy"
+)
 SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm update",
@@ -686,7 +688,7 @@ def test_site_routes_the_outcome(lifecycle_world: World, cell_id: str) -> None:
 
 
 @pytest.mark.xfail(
-    strict=True, reason="#0 a blocked install also prints that it proceeds without enforcement"
+    strict=True, reason="#4180 a blocked install also prints that it proceeds without enforcement"
 )
 def test_blocked_install_never_claims_to_proceed(lifecycle_world: World) -> None:
     replay = _replay(lifecycle_world)
