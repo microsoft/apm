@@ -24,6 +24,7 @@
     "P-LAW-filesystem.open_world_observation": "lifecycle law (tests/fixtures/lifecycle_bug_ledger.json): No command may create, change, or remove files outside its declared write set.",
     "P-LAW-idempotency.byte_stable": "lifecycle law (tests/fixtures/lifecycle_bug_ledger.json): Repeating a converged operation leaves durable bytes unchanged.",
     "P-LAW-lockfile.frozen_preserves_bytes": "lifecycle law (tests/fixtures/lifecycle_bug_ledger.json): Frozen install preserves the committed lockfile bytes, including when deployment adds an unrecorded path and the command fails after deployment.",
+    "P-LAW-lockfile.version_monotonic": "lifecycle law (tests/fixtures/lifecycle_bug_ledger.json): A written lockfile_version is never lowered by a rewrite (req-lk-002).",
     "P-LAW-outcome.status_matches_state": "lifecycle law (tests/fixtures/lifecycle_bug_ledger.json): Exit status and diagnostics truthfully describe the durable outcome.",
     "P-LAW-ownership.preserve_unowned": "lifecycle law (tests/fixtures/lifecycle_bug_ledger.json): Cleanup changes only APM-owned state and preserves user and surviving-package ownership.",
     "P-LAW-portability.byte_deterministic": "lifecycle law (tests/fixtures/lifecycle_bug_ledger.json): Equivalent inputs produce portable paths and deterministic bytes across supported platforms.",

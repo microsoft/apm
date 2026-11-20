@@ -67,6 +67,12 @@
       "phase": 0,
       "oracle_tier": "outcome",
       "law": "Credentials remain scoped to their intended host and never enter persisted URLs or output."
+    },
+    {
+      "id": "lockfile.version_monotonic",
+      "phase": 0,
+      "oracle_tier": "semantic",
+      "law": "A written lockfile_version is never lowered by a rewrite (req-lk-002)."
     }
   ],
   "bugs": [
@@ -3002,6 +3008,23 @@
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_removed_from_source_is_still_cleaned",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_skipped_as_modified_is_never_stale"
+      ]
+    },
+    {
+      "issue": 4232,
+      "fixed_in": "0.37.0",
+      "summary": "A rewrite of a lockfile at lockfile_version 2 or later keeps version 2 or later after the registry or git-semver entries that required it are removed; version 4 follows framed package content hashes.",
+      "failure_modes": [
+        "portability",
+        "outcome"
+      ],
+      "properties": [
+        "lockfile.version_monotonic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lockfile_version_monotonic_lifecycle.py::test_lockfile_version_is_kept_after_the_v2_dependency_is_removed",
+        "tests/unit/test_lockfile_version_floor.py::test_rewrite_keeps_v2_after_the_v2_entry_is_removed",
+        "tests/unit/test_lockfile_version_floor.py::test_v4_marker_follows_framed_content_hashes_not_the_floor"
       ]
     },
     {
