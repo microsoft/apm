@@ -30,7 +30,7 @@ import pytest
 
 pytestmark = pytest.mark.component
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SH = REPO_ROOT / "install.sh"
 SENTINEL_BEGIN = re.compile(r"^# INSTALL_SAFETY_BEGIN", re.MULTILINE)
 SENTINEL_END = re.compile(r"^# INSTALL_SAFETY_END", re.MULTILINE)

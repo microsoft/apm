@@ -3,7 +3,8 @@
   "steps_done": [
     1,
     2,
-    3
+    3,
+    4
   ],
   "folds": {
     "tests/unit/install/test_sources_phase3.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml": "tests/unit/install/test_sources_materialisation.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml",
@@ -36,10 +37,13 @@
     "Reclassified unit -> component: test_replacement_model.py, test_local_rows_need_reconciling.py, test_mcp_retired_shape_heal.py (all use tmp_path). Existing scheduling marks (windows_compat, usefixtures, skipif) kept in a pytestmark list.",
     "Pre-existing sandbox failures unrelated to this change (also fail at the pre-change HEAD): real-git commits in test_bare_cache_sparse, test_shared_clone_cache, test_cache_pin, test_persistent_cache_ssh_transport, test_unix_install_ownership, and the src LOC budget in test_architecture_invariants.",
     "Left unclassified (may not be edited): 21 modules owned by open pull requests or protected by name (test_architecture_*, *_lifecycle*): test_lockfile_cross_package_reconcile.py, test_lockfile_orphan_prune.py, test_lockfile_union.py, test_architecture_invariants.py, test_claude_native_registration.py, test_frozen.py, test_install_local_bundle.py, test_install_target_copilot_cowork_e2e.py, test_legacy_plugin_compat.py, test_lifecycle_trust_gate.py, test_local_bundle_hook_trust.py, test_lsp_integration.py, test_replay_exec_allow_map.py, test_require_hashes.py, test_services.py, test_services_branches.py, test_services_hook_scope.py, test_services_phase3.py, test_services_rendering.py, test_skill_path_migration.py, test_target_contraction_logging.py",
-    "Node-set mapping is computed against the branch base 49bcb1c50; origin/danielmeppiel-refactored-happiness advanced to 51e0e91e4 during the run and its new nodes are not removals by this branch."
+    "Node-set mapping is computed against the branch base 49bcb1c50; origin/danielmeppiel-refactored-happiness advanced to 51e0e91e4 during the run and its new nodes are not removals by this branch.",
+    "Placement: 16 modules that spawn processes (subprocess/Popen, multiprocessing spawn, or tests.utils git helpers such as git_link_fixture, git_credential_sentinel, local_git_repository) moved with git mv to tests/integration/ under the same name, marked component: deps test_bare_cache_sparse, test_git_auth_env, test_persistent_cache_ssh_transport, test_shared_clone_cache, test_versioned_directory_probe, test_git_file_transport_links, test_clone_engine_bearer_env, test_git_reference_resolver; install test_cache_pin, test_install_safety, test_install_target_copilot_app_e2e, test_install_transaction, test_partial_subtree_reconciliation, test_unix_install_ownership, test_workspace_locking, test_replacement_source_consumers. Repo-root parents[3] and sys.path depth adjusted for the new location; ci.yml #2238 comment repointed.",
+    "Placement offender kept: tests/unit/deps/test_gitlab_sparse_transport_contract.py (one real git config call) -- tests/integration/test_gitlab_sparse_transport_contract.py already exists and tests/integration/test_gitlab_sparse_transport_mutations.py pins the unit path as UNIT_CONTRACT, so a same-name move is impossible without editing out-of-scope files."
   ],
   "counts_left": {
     "same_body_groups": 32,
-    "unclassified_modules": 21
+    "unclassified_modules": 21,
+    "placement_offenders": 1
   }
 }

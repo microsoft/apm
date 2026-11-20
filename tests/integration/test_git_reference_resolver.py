@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from git.exc import GitCommandError
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
 from apm_cli.deps.git_reference_resolver import GitReferenceResolver
