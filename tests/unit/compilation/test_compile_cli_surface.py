@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import unittest
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -370,6 +371,21 @@ class TestMergeResults:
     def compiler(self):
         """Create a compiler instance for testing."""
         return AgentsCompiler(".")
+
+    def test_merge_single_result_passes_through(self, compiler):
+        single = CompilationResult(
+            success=True, output_path="custom.md", content="hello", warnings=[], errors=[], stats={}
+        )
+        assert compiler._merge_results([single]) is single
+
+    def test_merge_empty_paths_excluded(self, compiler):
+        r1 = CompilationResult(
+            success=True, output_path="", content="", warnings=[], errors=[], stats={}
+        )
+        r2 = CompilationResult(
+            success=True, output_path="b.md", content="", warnings=[], errors=[], stats={}
+        )
+        assert compiler._merge_results([r1, r2]).output_path == "b.md"
 
     def test_merge_empty_results_list(self, compiler):
         """Test merging an empty results list."""
@@ -774,3 +790,36 @@ class TestCompilationConfigNoDedup:
         """from_apm_yml propagates the no_dedup kwarg."""
         config = CompilationConfig.from_apm_yml(no_dedup=True)
         assert config.no_dedup is True
+
+
+class TestCompilationConfigPostInit(unittest.TestCase):
+    def test_single_agents_true_sets_strategy(self) -> None:
+        config = CompilationConfig(single_agents=True)
+        self.assertEqual(config.strategy, "single-file")
+
+    def test_single_agents_false_keeps_default_strategy(self) -> None:
+        config = CompilationConfig(single_agents=False)
+        self.assertEqual(config.strategy, "distributed")
+
+    def test_exclude_defaults_to_empty_list(self) -> None:
+        config = CompilationConfig()
+        self.assertEqual(config.exclude, [])
+
+    def test_exclude_none_becomes_empty_list(self) -> None:
+        config = CompilationConfig(exclude=None)
+        self.assertEqual(config.exclude, [])
+
+
+class TestLogDelegation(unittest.TestCase):
+    def test_log_delegates_to_logger(self) -> None:
+        compiler = AgentsCompiler("/tmp")
+        logger = MagicMock()
+        compiler._logger = logger
+        compiler._log("progress", "test message", symbol="info")
+        logger.progress.assert_called_once_with("test message", symbol="info")
+
+    def test_log_noop_when_no_logger(self) -> None:
+        compiler = AgentsCompiler("/tmp")
+        compiler._logger = None
+        # Should not raise
+        compiler._log("progress", "test")

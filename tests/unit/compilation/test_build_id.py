@@ -6,9 +6,11 @@ the placeholder line removed (so the hash is not self-referential).
 """
 
 import re
+import unittest
 
 import pytest
 
+from apm_cli.compilation.agents_compiler import AgentsCompiler
 from apm_cli.compilation.build_id import (
     has_build_id_line,
     has_valid_build_id,
@@ -125,3 +127,29 @@ def test_has_build_id_line_distinguishes_presence_from_validity():
     assert not has_build_id_line("# A\nbody\n")
     assert not has_build_id_line(f"{AGENTS_MD_GENERATED_MARKER}\n# Legacy content\n")
     assert not has_build_id_line(valid + valid.splitlines()[1] + "\n")
+
+
+class TestFinalizeBuildId(unittest.TestCase):
+    def test_with_placeholder_replaced_by_hash(self) -> None:
+        from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
+
+        compiler = AgentsCompiler("/tmp")
+        content = f"Line before\n{BUILD_ID_PLACEHOLDER}\nLine after\n"
+        result = compiler._finalize_build_id(content)
+        self.assertNotIn(BUILD_ID_PLACEHOLDER, result)
+        self.assertIn("<!-- Build ID:", result)
+
+    def test_without_placeholder_unchanged(self) -> None:
+        compiler = AgentsCompiler("/tmp")
+        content = "No placeholder here\nLine 2\n"
+        result = compiler._finalize_build_id(content)
+        self.assertEqual(result, content)
+
+    def test_hash_is_deterministic(self) -> None:
+        from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
+
+        compiler = AgentsCompiler("/tmp")
+        content = f"A\n{BUILD_ID_PLACEHOLDER}\nB\n"
+        r1 = compiler._finalize_build_id(content)
+        r2 = compiler._finalize_build_id(content)
+        self.assertEqual(r1, r2)

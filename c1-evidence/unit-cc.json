@@ -32,7 +32,12 @@
   "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_empty_findings_returns_immediately": "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_nothing_rendered_without_visible_rows",
   "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_info_filtered_in_non_verbose_mode": "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_nothing_rendered_without_visible_rows",
   "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_none_returns_none": "tests/unit/compilation/test_compile_cli_surface.py::TestResolveCompileTarget::test_scalar_target_resolution",
-  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_single_string_passthrough": "tests/unit/compilation/test_compile_cli_surface.py::TestResolveCompileTarget::test_scalar_target_resolution"
+  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_single_string_passthrough": "tests/unit/compilation/test_compile_cli_surface.py::TestResolveCompileTarget::test_scalar_target_resolution",
+  "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_empty_list_returns_success": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_empty_results_list",
+  "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_single_result_passes_through": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_single_result_passes_through",
+  "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_two_results_combines_content": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_multiple_results_success",
+  "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_any_failure_propagates": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_results_with_one_failure",
+  "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_empty_paths_excluded": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_empty_paths_excluded"
  },
  "decisions": [
   "step0: the 6 nodes unmapped after 011445baa/08030d1b4 each have a same-named or same-scenario survivor in the kept module whose assertions are a superset (pack: exact share line and extra help flags; distributed: same asserts on a markerless fixture constant, plus suppressed_empty_paths default)",
@@ -50,12 +55,14 @@
   "step5 lane split: TestConstitutionInjector (on-disk injection) -> test_constitution.py; test_constitution_injector.py keeps the pure constitution_block helpers and is now unit",
   "step5 lane split: compile command CliRunner/filesystem classes -> test_compile_target_flag.py; pure compile helper, config and merge classes from test_compile_target_flag.py and test_compile_no_dedup_flag.py -> test_compile_cli_surface.py (now unit)",
   "step5 lane split: TestEnterpriseBootstrapSelfUpdate (CliRunner + scratch dirs) -> new tests/unit/commands/test_self_update_enterprise_bootstrap.py marked component with promise P-OWN-self-update-release-resolution (owner commands/self_update.py); test_self_update_air_gapped.py keeps the pure installer-URL tests and is now unit",
-  "step5 lane split: link resolver filesystem classes -> test_link_resolver.py; test_link_resolver_resolution.py keeps the pure link-classification helpers with a resolver fixture rooted at a fixed path (the helpers never read base_dir) and is now unit"
+  "step5 lane split: link resolver filesystem classes -> test_link_resolver.py; test_link_resolver_resolution.py keeps the pure link-classification helpers with a resolver fixture rooted at a fixed path (the helpers never read base_dir) and is now unit",
+  "step5 fold: test_agents_compiler_coverage TestMergeResults duplicated test_compile_cli_surface TestMergeResults; empty/multi/failure cases map to the stronger survivors (the stats-sum assertion is covered by test_merge_results_combines_numeric_stats), the identity pass-through and empty-path cases were rewritten into the survivor class",
+  "step5 lane split: pure AgentsCompiler classes TestCompilationConfigPostInit and TestLogDelegation -> test_compile_cli_surface.py, TestFinalizeBuildId -> test_build_id.py (both unit)"
  ],
  "counts_left": {
   "same_body_groups": 0,
   "unclassified_modules": 3,
   "placement_offenders": 0,
-  "weak_tests": 863
+  "weak_tests": 849
  }
 }

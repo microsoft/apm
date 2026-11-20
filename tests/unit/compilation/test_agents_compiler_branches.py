@@ -106,24 +106,6 @@ def _make_result(
 # ---------------------------------------------------------------------------
 
 
-class TestCompilationConfigPostInit(unittest.TestCase):
-    def test_single_agents_true_sets_strategy(self) -> None:
-        config = CompilationConfig(single_agents=True)
-        self.assertEqual(config.strategy, "single-file")
-
-    def test_single_agents_false_keeps_default_strategy(self) -> None:
-        config = CompilationConfig(single_agents=False)
-        self.assertEqual(config.strategy, "distributed")
-
-    def test_exclude_defaults_to_empty_list(self) -> None:
-        config = CompilationConfig()
-        self.assertEqual(config.exclude, [])
-
-    def test_exclude_none_becomes_empty_list(self) -> None:
-        config = CompilationConfig(exclude=None)
-        self.assertEqual(config.exclude, [])
-
-
 # ---------------------------------------------------------------------------
 # AgentsCompiler.compile() — unknown target paths
 # ---------------------------------------------------------------------------
@@ -335,32 +317,6 @@ class TestCompileGeminiMd(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # AgentsCompiler._finalize_build_id()
 # ---------------------------------------------------------------------------
-
-
-class TestFinalizeBuildId(unittest.TestCase):
-    def test_with_placeholder_replaced_by_hash(self) -> None:
-        from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
-
-        compiler = AgentsCompiler("/tmp")
-        content = f"Line before\n{BUILD_ID_PLACEHOLDER}\nLine after\n"
-        result = compiler._finalize_build_id(content)
-        self.assertNotIn(BUILD_ID_PLACEHOLDER, result)
-        self.assertIn("<!-- Build ID:", result)
-
-    def test_without_placeholder_unchanged(self) -> None:
-        compiler = AgentsCompiler("/tmp")
-        content = "No placeholder here\nLine 2\n"
-        result = compiler._finalize_build_id(content)
-        self.assertEqual(result, content)
-
-    def test_hash_is_deterministic(self) -> None:
-        from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
-
-        compiler = AgentsCompiler("/tmp")
-        content = f"A\n{BUILD_ID_PLACEHOLDER}\nB\n"
-        r1 = compiler._finalize_build_id(content)
-        r2 = compiler._finalize_build_id(content)
-        self.assertEqual(r1, r2)
 
 
 # ---------------------------------------------------------------------------
@@ -861,21 +817,6 @@ class TestValidatePrimitivesLinkErrors(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # AgentsCompiler._log() — delegates when logger wired
 # ---------------------------------------------------------------------------
-
-
-class TestLogDelegation(unittest.TestCase):
-    def test_log_delegates_to_logger(self) -> None:
-        compiler = AgentsCompiler("/tmp")
-        logger = MagicMock()
-        compiler._logger = logger
-        compiler._log("progress", "test message", symbol="info")
-        logger.progress.assert_called_once_with("test message", symbol="info")
-
-    def test_log_noop_when_no_logger(self) -> None:
-        compiler = AgentsCompiler("/tmp")
-        compiler._logger = None
-        # Should not raise
-        compiler._log("progress", "test")
 
 
 # ---------------------------------------------------------------------------
