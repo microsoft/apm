@@ -1,9 +1,9 @@
-"""Approving a Claude plugin's hook file takes effect on the next install.
+"""Approving a project-scope Claude plugin takes effect on the next install.
 
-``apm approve`` pins a local plugin's hook file on its source tree
-(``hooks/hooks.json``) while install gates APM's normalized cache copy
-(``.apm/hooks/hooks.json``). Both name the hook by its publisher path, so
-the pin admits the copy; a copy whose bytes differ still parks.
+A Claude plugin is native at project scope (#3921): ``apm approve`` pins
+the whole plugin (path and bytes), install deploys it intact to
+``.agents/plugins/`` and enables it in ``.claude/settings.json``. A source
+whose bytes no longer match the approved pin parks again.
 """
 
 from __future__ import annotations
@@ -54,21 +54,32 @@ def test_approved_claude_plugin_hook_deploys_on_reinstall(
         result = runner.run(args, scenario_id="claude-plugin-hook-approval", cwd=project, env=env)
         assert result.returncode == 0, result.stdout + result.stderr
 
-    def deployed() -> str:
+    def enabled() -> list[str]:
         settings = project / ".claude/settings.json"
-        return settings.read_text(encoding="utf-8") if settings.exists() else ""
+        if not settings.exists():
+            return []
+        plugins = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins", {})
+        return [key for key, value in plugins.items() if value is True]
+
+    def deployed() -> str:
+        hook = project / ".agents/plugins/hooky/hooks/hooks.json"
+        return hook.read_text(encoding="utf-8") if hook.exists() else ""
 
     run("install")
+    assert enabled() == []
     assert "HOOKY_RAN" not in deployed()
 
     run("approve", "--all")
     grants = load_yaml(project / "apm.yml")["executables"]["allow"]
-    assert list(next(iter(grants.values()))["hooks"]) == ["hooks/hooks.json"]
+    grant = next(iter(grants.values()))
+    assert str(grant["plugin"]).startswith("sha256:")
     run("install")
+    assert [key.split("@")[0] for key in enabled()] == ["hooky"]
     assert "HOOKY_RAN" in deployed()
 
-    # A normalized copy that no longer matches the approved bytes parks again.
-    copy = next((project / "apm_modules").rglob(".apm/hooks/hooks.json"))
-    copy.write_text(copy.read_text().replace("HOOKY_RAN", "TAMPERED"))
+    # A source whose bytes no longer match the approved pin parks again.
+    hooks = plugin / "hooks/hooks.json"
+    hooks.write_text(hooks.read_text().replace("HOOKY_RAN", "TAMPERED"))
     run("install")
+    assert enabled() == []
     assert "TAMPERED" not in deployed()

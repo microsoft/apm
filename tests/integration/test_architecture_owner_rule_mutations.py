@@ -2108,7 +2108,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-claude-ownership",
         rule_id="marketplace-integrations-claude-ownership",
         path="src/apm_cli/native_plugins/settings.py",
-        old="if enabled.get(key) is True:",
+        old="if enabled.get(key) is True or (plugin in managed and enabled.get(key) is False):",
         new="if key in enabled:",
         intent="Retiring a native plugin deletes the user's explicit enabledPlugins false.",
     ),
@@ -2124,9 +2124,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-copilot-ownership",
         rule_id="marketplace-integrations-copilot-ownership",
         path="src/apm_cli/copilot_plugins/registrar.py",
-        old="def synchronize_copilot_plugins(",
-        new="def synchronize_copilot_plugins_X(",
-        intent="Copilot marketplace ownership loses its single synchronization owner.",
+        old="def plan_legacy_copilot_retirement(",
+        new="def plan_legacy_copilot_retirement_X(",
+        intent="The legacy Copilot registration loses its single migration owner.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-dependency-confusion",
@@ -3265,7 +3265,7 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
     [
         (
             "src/apm_cli/install/deployment_plan.py",
-            "if codex_native is not None\n        else plan_native_claude_plugin(",
+            "if codex_native is not None or is_first_party\n        else plan_native_claude_plugin(",
             "if False\n        else plan_native_claude_plugin(",
         ),
         (
@@ -3300,8 +3300,8 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/native_plugins/settings.py",
-            "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
-            "for plugin in sorted(frozenset(enabled) - declaration.plugins):",
+            "for plugin in sorted((owned or frozenset()) - wanted):",
+            "for plugin in sorted(frozenset(enabled) - wanted):",
         ),
         (
             "src/apm_cli/install/phases/claude_plugins.py",
@@ -3330,7 +3330,17 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/claude_plugins/registrar.py",
-            "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+            "if fingerprint_of(source) != own.record.fingerprint:",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "changes[harness] = write_declaration(target, declarations[harness])",
+            "changes[harness] = SettingsChange()",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            'if result.get("native_plugin") and lock_dep.native_plugin is not None:',
             "if False:",
         ),
         (

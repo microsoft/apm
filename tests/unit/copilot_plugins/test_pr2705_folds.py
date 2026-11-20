@@ -1,4 +1,5 @@
-"""Regression folds for PR #2705 (native Agent Plugin registration).
+"""Regression folds for PR #2705 (native Agent Plugin registration, now
+activated from ``.agents/plugins`` per #3921).
 
 Each test here pins one security or correctness guard added while folding the
 apm-review-panel advisory. They are hermetic: admission is a pure function of
@@ -17,8 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.copilot_plugins.constants import ENABLED_PLUGINS_KEY, EXTRA_MARKETPLACES_KEY
-from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
+from apm_cli.core.scope import InstallScope
 from apm_cli.install.native_plugin_admission import finalize_native_plugin
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.executables import (
@@ -28,7 +28,14 @@ from apm_cli.security.executables import (
 )
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-from ._builders import read_json, write_agent_plugin, write_legacy_package
+from ._builders import (
+    copilot_project_settings,
+    legacy_copilot_settings,
+    native_catalog_path,
+    native_plugins_root,
+    write_agent_plugin,
+    write_legacy_package,
+)
 
 pytestmark = pytest.mark.component
 
@@ -68,12 +75,14 @@ def _install(monkeypatch, project: Path, *args: str):
     )
 
 
-def _settings_path(project: Path) -> Path:
-    return project / ".github" / "copilot" / "settings.local.json"
-
-
 def _modules(project: Path) -> Path:
     return project / "apm_modules"
+
+
+def _assert_no_native_state(project: Path) -> None:
+    assert not native_plugins_root(project).exists()
+    assert not copilot_project_settings(project).exists()
+    assert not legacy_copilot_settings(project).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -98,11 +107,9 @@ def test_dependency_target_restriction_excludes_native_registration(
     )
 
     assert result.exit_code == 0, result.output
-    # The consumer excluded copilot for this dependency, so the settings
-    # document is never created and no catalog is written.
-    assert not _settings_path(project).exists()
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not ledger_path_for(_modules(project)).exists()
+    # The consumer excluded copilot for this dependency, so nothing is
+    # deployed to .agents/plugins and no settings document is written.
+    _assert_no_native_state(project)
 
 
 def test_project_target_excluding_copilot_skips_plugin_and_installs_the_rest(
@@ -140,8 +147,7 @@ def test_project_target_excluding_copilot_skips_plugin_and_installs_the_rest(
     assert result.exit_code == 0, result.output
     # The ordinary package installs; the plugin is skipped, not fatal.
     assert (_modules(project) / "_local" / "plainpkg").exists()
-    assert not _settings_path(project).exists()
-    assert not catalog_path_for(_modules(project)).exists()
+    _assert_no_native_state(project)
 
 
 # ---------------------------------------------------------------------------
@@ -246,18 +252,27 @@ def test_denied_exec_policy_refuses_native_registration_and_records_status() -> 
     assert "apm approve owner/plugin" in refusal
 
 
-def test_approved_exec_policy_admits_native_registration() -> None:
-    """The same plugin with MCP approved is admitted natively."""
+def test_approved_exec_policy_admits_native_registration(tmp_path: Path) -> None:
+    """The same plugin with MCP approved is queued for Copilot native activation."""
+    root = write_agent_plugin(tmp_path / "plugin", name="plugin")
     trust_ctx = build_exec_trust_context(
         policy=None,
         project_data={"executables": {"allow": {"owner/plugin": {"mcp": True}}}},
     )
-    ctx = SimpleNamespace(exec_trust_ctx=trust_ctx, package_exec_status={})
+    ctx = SimpleNamespace(
+        exec_trust_ctx=trust_ctx,
+        package_exec_status={},
+        scope=InstallScope.PROJECT,
+        claude_native_plugins={},
+    )
+    package_info = _native_package_info()
+    package_info.install_path = root
+    package_info.package.agent_plugin.identity = SimpleNamespace(name="plugin")
     result = {"native_plugin": False}
 
     finalized = finalize_native_plugin(
         result,
-        _native_package_info(),
+        package_info,
         "owner/plugin",
         [SimpleNamespace(name="copilot")],
         hooks_approved=True,
@@ -271,6 +286,13 @@ def test_approved_exec_policy_admits_native_registration() -> None:
     )
 
     assert finalized["native_plugin"] is True
+    queued = ctx.claude_native_plugins["owner/plugin"]
+    assert (queued.name, queued.source_root, queued.harnesses) == (
+        "plugin",
+        root.resolve(),
+        frozenset({"copilot"}),
+    )
+    assert queued.bundle_hash.startswith("sha256:")
 
 
 def test_record_native_exec_status_folds_and_never_downgrades() -> None:
@@ -306,7 +328,7 @@ def test_on_disk_hooks_absent_from_ir_still_refuse_native_registration(
     """A live-loaded hooks component the IR never models must gate registration.
 
     Item 3: for a natively registered plugin PRESENCE IS DEPLOYMENT -- Copilot
-    loads the whole apm_modules directory live. The IR only models MCP/BIN, so
+    loads the whole deployed plugin root. The IR only models MCP/BIN, so
     an unapproved ``hooks/hooks.json`` on disk would execute with no gate unless
     finalize unions the on-disk exec types with the IR-derived ones.
     """
@@ -376,7 +398,7 @@ def test_finalize_drops_native_when_copilot_target_excluded() -> None:
 def test_integrity_gate_failure_leaves_no_registration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A require-hashes failure leaves no marketplace, ledger, or enabledPlugins."""
+    """A require-hashes failure leaves no deployed root, catalog, or settings."""
     from apm_cli.install.errors import PolicyViolationError
 
     project = tmp_path / "project"
@@ -392,64 +414,7 @@ def test_integrity_gate_failure_leaves_no_registration(
     result = _install(monkeypatch, project)
 
     assert result.exit_code != 0
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not ledger_path_for(_modules(project)).exists()
-    assert not _settings_path(project).exists()
-
-
-# ---------------------------------------------------------------------------
-# Item 6: the ownership ledger self-heals after ``rm -rf apm_modules``.
-# ---------------------------------------------------------------------------
-
-
-def test_reinstall_after_ledger_deletion_self_heals(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Deleting the ledger and reinstalling re-adopts instead of colliding."""
-    project = tmp_path / "project"
-    source = tmp_path / "source" / "sentinel"
-    write_agent_plugin(source, name="sentinel")
-    _write_project(project, [str(source)])
-
-    assert _install(monkeypatch, project).exit_code == 0
-    settings = read_json(_settings_path(project))
-    assert settings[ENABLED_PLUGINS_KEY] == {"sentinel@apm": True}
-
-    # Simulate the common recovery ritual: the ledger lives under the disposable
-    # materialization root, so it is gone while the settings it governs survive.
-    ledger_path_for(_modules(project)).unlink()
-    catalog_path_for(_modules(project)).unlink()
-
-    result = _install(monkeypatch, project, "--force")
-
-    assert result.exit_code == 0, result.output
-    healed = read_json(_settings_path(project))
-    assert healed[ENABLED_PLUGINS_KEY] == {"sentinel@apm": True}
-    assert healed[EXTRA_MARKETPLACES_KEY]["apm"]["source"] == {
-        "source": "directory",
-        "path": "apm_modules",
-    }
-    assert ledger_path_for(_modules(project)).is_file()
-
-
-def test_foreign_marketplace_value_still_collides(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A non-APM 'apm' marketplace whose value DIFFERS still hard-collides."""
-    project = tmp_path / "project"
-    source = tmp_path / "source" / "sentinel"
-    write_agent_plugin(source, name="sentinel")
-    _write_project(project, [str(source)])
-    settings_path = _settings_path(project)
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps({EXTRA_MARKETPLACES_KEY: {"apm": {"source": {"source": "git", "url": "x"}}}}),
-        encoding="ascii",
-    )
-
-    result = _install(monkeypatch, project)
-
-    assert result.exit_code != 0, result.output
+    _assert_no_native_state(project)
 
 
 # ---------------------------------------------------------------------------
@@ -472,13 +437,10 @@ def test_prune_never_touches_the_inner_skills_of_a_still_declared_plugin(
     )
     assert inner_skill.is_file()
 
-    # Make the inner skill orphan-SHAPED: give it its own apm.yml so that, absent
-    # the ``_is_agent_plugin_root`` nesting guard, prune's package scan would see a
-    # standalone, undeclared package here and delete it. With the guard intact it
-    # stays recognized as part of the plugin unit.
-    (inner_skill.parent / "apm.yml").write_text(
-        "name: sentinel-skill\nversion: 1.0.0\n", encoding="ascii"
-    )
+    # The inner skill is orphan-SHAPED: its SKILL.md alone makes prune's package
+    # scan see a standalone, undeclared package here, absent the
+    # ``_is_agent_plugin_root`` nesting guard. The plugin bytes stay untouched
+    # so the locked native fingerprint still matches.
 
     # An unrelated true orphan that prune should remove.
     orphan = _modules(project) / "owner" / "orphan"
@@ -489,9 +451,9 @@ def test_prune_never_touches_the_inner_skills_of_a_still_declared_plugin(
 
     assert result.exit_code == 0, result.output
     # The plugin's inner skill is part of the plugin unit, never a standalone
-    # orphan, so prune leaves it intact even though it now looks package-shaped.
+    # orphan, so prune leaves it intact even though it looks package-shaped.
     assert inner_skill.is_file()
-    assert (inner_skill.parent / "apm.yml").is_file()
+    assert not orphan.exists()
     assert "sentinel-skill" not in result.output
 
 
@@ -514,11 +476,11 @@ def test_inner_skill_of_an_agent_plugin_is_recognized_as_nested(tmp_path: Path) 
 
 
 # ---------------------------------------------------------------------------
-# Item: apm deps list reports the natively registered plugin and its version.
+# Item: apm deps list reports the natively activated plugin and its version.
 # ---------------------------------------------------------------------------
 
 
-def test_deps_list_reports_the_natively_registered_plugin_with_its_version(
+def test_deps_list_reports_the_natively_activated_plugin_with_its_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``apm deps list`` shows the plugin name, its real version, and the line."""
@@ -534,7 +496,7 @@ def test_deps_list_reports_the_natively_registered_plugin_with_its_version(
     assert "sentinel" in result.output
     assert "2.3.4" in result.output
     assert "unknown" not in result.output
-    assert "registered natively with GitHub Copilot" in _flat(result.output)
+    assert "1 native plugin(s) activated from .agents/plugins: sentinel" in _flat(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -556,11 +518,19 @@ def _forbid_copilot_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mcp_integrator_install, "find_runtime_binary", _boom)
     import subprocess as _subprocess
 
-    def _subprocess_boom(*args, **kwargs):
-        raise AssertionError(f"unexpected subprocess invocation: {args!r} {kwargs!r}")
+    def _guarded(original):
+        def _call(*args, **kwargs):
+            argv = args[0] if args else kwargs.get("args")
+            # Only git may run: the project-scope marketplace name reads the
+            # origin remote (#3921). Nothing else may be spawned.
+            if isinstance(argv, (list, tuple)) and argv and Path(str(argv[0])).stem == "git":
+                return original(*args, **kwargs)
+            raise AssertionError(f"unexpected subprocess invocation: {args!r} {kwargs!r}")
+
+        return _call
 
     for attr in ("run", "Popen", "check_output", "check_call"):
-        monkeypatch.setattr(_subprocess, attr, _subprocess_boom)
+        monkeypatch.setattr(_subprocess, attr, _guarded(getattr(_subprocess, attr)))
 
 
 def test_discovery_guard_restores_cold_imported_runtime_alias() -> None:
@@ -655,10 +625,12 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     )
     assert updated.exit_code == 0, updated.output
 
-    catalog = catalog_path_for(project / "apm_modules")
-    settings = project / ".github" / "copilot" / "settings.local.json"
+    catalog = native_catalog_path(project)
+    settings = copilot_project_settings(project)
+    deployed = native_plugins_root(project) / "sentinel" / "plugin.json"
     catalog.unlink()
     settings.unlink()
+    deployed.unlink()
 
     restored = CliRunner().invoke(
         cli,
@@ -668,44 +640,7 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     assert restored.exit_code == 0, restored.output
     assert catalog.is_file()
     assert settings.is_file()
-
-
-def test_transitive_dependency_is_not_marked_direct_on_the_install_path() -> None:
-    """The in-flight overlay must not re-derive directness and mark everything direct.
-
-    ``ctx.deps_to_install`` is the full transitive closure, and
-    ``declaring_parent`` is only stamped on local path sub-dependencies, so
-    deriving ``direct`` from it marks every transitive git dependency direct.
-    That defeats both precedence gates in ``discover_native_plugins``: the
-    direct-beats-transitive branch never fires, and the ledger owner-flip
-    refusal (guarded on ``not entry.direct``) lets a transitive package
-    silently re-point an existing registration.
-    """
-    from apm_cli.install.phases.copilot_plugins import resolved_candidates
-
-    def _dep(key: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            get_unique_key=lambda key=key: key,
-            get_install_path=lambda modules, key=key: modules / key,
-            declaring_parent=None,
-            target_subset=None,
-        )
-
-    direct = _dep("owner/declared")
-    transitive = _dep("other/pulled-in")
-    ctx = SimpleNamespace(
-        apm_modules_dir=Path("apm_modules"),
-        lockfile=None,
-        existing_lockfile=None,
-        deps_to_install=[direct, transitive],
-        all_apm_deps=[direct],
-        package_exec_status={},
-    )
-
-    by_key = {candidate.dependency_key: candidate for candidate in resolved_candidates(ctx)}
-
-    assert by_key["owner/declared"].direct is True
-    assert by_key["other/pulled-in"].direct is False
+    assert deployed.is_file()
 
 
 def test_unknown_exec_status_is_not_registrable(tmp_path: Path) -> None:
@@ -735,37 +670,6 @@ def test_unknown_exec_status_is_not_registrable(tmp_path: Path) -> None:
     assert "github.com/testowner/futureplugin" not in keys
 
 
-def test_in_flight_gated_dependency_is_dropped_from_install_candidates(
-    tmp_path: Path,
-) -> None:
-    """The in-flight overlay re-adds every deps_to_install key AFTER the
-    lockfile gate ran, so its sibling guard is the only thing stopping a
-    package this very install gated from being registered natively.
-    """
-    from apm_cli.install.phases.copilot_plugins import resolved_candidates
-
-    key = "github.com/testowner/gatedplugin"
-
-    def _dep() -> SimpleNamespace:
-        return SimpleNamespace(
-            get_unique_key=lambda: key,
-            get_install_path=lambda modules: modules / "gatedplugin",
-            declaring_parent=None,
-            target_subset=None,
-        )
-
-    ctx = SimpleNamespace(
-        apm_modules_dir=tmp_path / "apm_modules",
-        lockfile=None,
-        existing_lockfile=None,
-        deps_to_install=[_dep()],
-        all_apm_deps=[_dep()],
-        package_exec_status={key: TRUST_GATED},
-    )
-
-    assert [c.dependency_key for c in resolved_candidates(ctx)] == []
-
-
 def test_root_layout_components_absent_from_ir_refuse_native_registration(
     tmp_path: Path,
 ) -> None:
@@ -774,7 +678,7 @@ def test_root_layout_components_absent_from_ir_refuse_native_registration(
     ``scan_package_executables`` only understands APM's ``.apm/`` layout, so a
     skills-only Agent Plugin carrying root ``extensions/``, ``lsp.json`` or
     ``hooks/`` used to reach native registration with zero exec approvals --
-    even though Copilot loads the whole directory live.
+    even though Copilot loads the whole deployed root.
     """
     from apm_cli.install.native_plugin_admission import plugin_root_exec_types
 

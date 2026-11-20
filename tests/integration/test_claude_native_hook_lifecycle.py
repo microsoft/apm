@@ -295,7 +295,7 @@ def test_installed_hook_source_reinstall_and_removal(
         (isolated.config_root / "apm.lock.yaml").unlink(missing_ok=True)
         before = corrupt_settings()
         output = run("install", "--global", "--target", "claude", "--only", "apm", expected=1)
-        assert "Claude native plugin declaration failed" in output
+        assert "Native plugin declaration failed" in output
         assert "Failed to resolve APM dependencies" not in output
         assert scenario.settings.read_bytes() == before
         # One rollback unit: a first install that cannot declare keeps no lock or roots.
@@ -365,7 +365,7 @@ def test_installed_hook_source_reinstall_and_removal(
         scenario.settings.unlink()
         run("install", "--global", "--target", "claude", "--only", "apm")
     else:
-        assert "native Claude plugin(s) removed" in output
+        assert "native plugin(s) removed" in output
     assert scenario.declared().get("enabledPlugins", {}) == {}
     assert not deployed.exists()
     assert personal_skill.read_bytes() == personal_before

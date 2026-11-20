@@ -1,10 +1,11 @@
 """Opt-in binary qualification for native Agent Plugin loading (issue #2703).
 
-These tests prove the whole PR #2705 contract against the real, SHA-pinned
+These tests prove the whole PR #2705 contract, on the #3921 route that
+activates Agent Plugins from ``.agents/plugins``, against the real, SHA-pinned
 GitHub Copilot CLI artifact that qualified the feature:
 
     ``apm pack --format agent-plugin`` -> ``apm install --target copilot``
-    -> plain ``copilot`` loads the plugin live.
+    -> plain ``copilot`` loads the deployed plugin.
 
 They are doubly opt-in (``APM_E2E_TESTS=1`` **and**
 ``APM_RUN_INTEGRATION_TESTS=1``) because they download an 80+ MB release
@@ -43,11 +44,12 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.copilot_plugins.constants import (
-    ENABLED_PLUGINS_KEY,
-    EXTRA_MARKETPLACES_KEY,
+from tests.unit.copilot_plugins._builders import (
+    copilot_project_settings,
+    native_catalog_path,
+    native_marketplace,
+    native_plugins_root,
 )
-from apm_cli.copilot_plugins.registrar import catalog_path_for
 
 pytestmark = [
     pytest.mark.integration,
@@ -63,6 +65,9 @@ COPILOT_ASSET_SIZE = 84675389
 COPILOT_ASSET_URL = (
     f"https://github.com/github/copilot-cli/releases/download/{COPILOT_RELEASE_TAG}/{COPILOT_ASSET}"
 )
+
+ENABLED_PLUGINS_KEY = "enabledPlugins"
+EXTRA_MARKETPLACES_KEY = "extraKnownMarketplaces"
 
 _PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 _MCP_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
@@ -251,7 +256,7 @@ def _write_author_plugin(project: Path, *, name: str, marker: str) -> Path:
     skill = project / "skills" / f"{name}-skill"
     skill.mkdir(parents=True, exist_ok=True)
     # The skill description carries the live-update marker: ``copilot skill
-    # list`` reads it straight from the materialized bytes every session.
+    # list`` reads it straight from the deployed bytes every session.
     (skill / "SKILL.md").write_text(
         f"---\nname: {name}-skill\ndescription: {marker}\n---\n\nqualification skill body\n",
         encoding="ascii",
@@ -437,13 +442,12 @@ def test_project_install_loads_live_in_plain_copilot(
     consumer = tmp_path / "consumer"
     _install_consumer(consumer, packed_bundle["dir"], monkeypatch)
 
-    modules = consumer / "apm_modules"
-    settings = json.loads(
-        (consumer / ".github" / "copilot" / "settings.local.json").read_text(encoding="utf-8")
-    )
-    assert catalog_path_for(modules).is_file()
-    assert settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]["path"] == "apm_modules"
-    assert settings[ENABLED_PLUGINS_KEY] == {"apm-qualification@apm": True}
+    marketplace = native_marketplace(consumer)
+    plugin_key = f"apm-qualification@{marketplace}"
+    settings = json.loads(copilot_project_settings(consumer).read_text(encoding="utf-8"))
+    assert native_catalog_path(consumer).is_file()
+    assert settings[EXTRA_MARKETPLACES_KEY][marketplace]["source"]["path"] == "./.agents/plugins"
+    assert settings[ENABLED_PLUGINS_KEY] == {plugin_key: True}
 
     _make_git_root(consumer)
     home = tmp_path / "copilot-home"
@@ -453,24 +457,23 @@ def test_project_install_loads_live_in_plain_copilot(
     plugins = _run_copilot(copilot_binary, home, consumer, "plugin", "list")
     skills = _run_copilot(copilot_binary, home, consumer, "skill", "list")
     servers = _run_copilot(copilot_binary, home, consumer, "mcp", "list")
-    assert "apm-qualification@apm" in plugins.stdout, plugins.stdout + plugins.stderr
+    assert plugin_key in plugins.stdout, plugins.stdout + plugins.stderr
     assert "apm-qualification-skill" in skills.stdout, skills.stdout + skills.stderr
     assert "apm-qualification-mcp" in servers.stdout, servers.stdout + servers.stderr
 
-    # (h) No plugin copy and no private Copilot registration were created.
+    # (h) No Copilot-private plugin copy and no private registration were created.
     installed = home / "installed-plugins"
     assert not installed.exists() or not any(installed.rglob("*"))
     config = home / "config.json"
     if config.is_file():
         assert not _read_jsonc(config).get("installedPlugins")
 
-    # (f) A live edit of the materialized skill reaches a fresh session with no
+    # (f) An edit of the deployed skill reaches a fresh session with no
     # ``copilot plugin update``. The skill description ("MARK_V1") is read
-    # straight from the bytes on disk every session.
+    # straight from the deployed bytes in .agents/plugins every session.
     live_skill = (
-        modules
-        / "_local"
-        / packed_bundle["dir"].name
+        native_plugins_root(consumer)
+        / "apm-qualification"
         / "skills"
         / "apm-qualification-skill"
         / "SKILL.md"
@@ -487,7 +490,7 @@ def test_project_install_loads_live_in_plain_copilot(
     outside = tmp_path / "outside"
     outside.mkdir()
     away = _run_copilot(copilot_binary, home, outside, "plugin", "list")
-    assert "apm-qualification@apm" not in away.stdout
+    assert plugin_key not in away.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -580,16 +583,18 @@ def test_global_install_visible_from_unrelated_directory(
     # The operator's real ~/.apm must be untouched; the install landed in tmp.
     assert (apm_dir / "apm_modules").exists()
     global_settings = json.loads((copilot_home / "settings.json").read_text(encoding="utf-8"))
+    marketplace = native_marketplace(fake_home)
+    plugin_key = f"apm-qualification@{marketplace}"
     # Global marketplace paths are absolute so cwd cannot matter.
-    assert global_settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]["path"] == str(
-        apm_dir / "apm_modules"
+    assert global_settings[EXTRA_MARKETPLACES_KEY][marketplace]["source"]["path"] == str(
+        native_plugins_root(fake_home)
     )
-    assert global_settings[ENABLED_PLUGINS_KEY] == {"apm-qualification@apm": True}
+    assert global_settings[ENABLED_PLUGINS_KEY] == {plugin_key: True}
 
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
     plugins = _run_copilot(copilot_binary, copilot_home, unrelated, "plugin", "list")
-    assert "apm-qualification@apm" in plugins.stdout, plugins.stdout + plugins.stderr
+    assert plugin_key in plugins.stdout, plugins.stdout + plugins.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -607,7 +612,8 @@ def test_apm_lifecycle_and_copilot_uninstall_semantics(
     """deps list, idempotent re-install, prune, uninstall -> Copilot drops it."""
     consumer = tmp_path / "consumer"
     runner = _install_consumer(consumer, packed_bundle["dir"], monkeypatch)
-    catalog = catalog_path_for(consumer / "apm_modules")
+    catalog = native_catalog_path(consumer)
+    plugin_key = f"apm-qualification@{native_marketplace(consumer)}"
 
     listed = runner.invoke(cli, ["deps", "list"], catch_exceptions=False)
     assert listed.exit_code == 0, listed.output
@@ -635,20 +641,19 @@ def test_apm_lifecycle_and_copilot_uninstall_semantics(
     home = tmp_path / "copilot-home"
     _seed_trust(home, consumer)
     present = _run_copilot(copilot_binary, home, consumer, "plugin", "list")
-    assert "apm-qualification@apm" in present.stdout, present.stdout + present.stderr
+    assert plugin_key in present.stdout, present.stdout + present.stderr
 
     # Uninstall retires only APM-owned rows; the source bundle bytes survive.
     removed = runner.invoke(cli, ["uninstall", str(packed_bundle["dir"])], catch_exceptions=False)
     assert removed.exit_code == 0, removed.output
-    cleaned = json.loads(
-        (consumer / ".github" / "copilot" / "settings.local.json").read_text(encoding="utf-8")
-    )
-    assert ENABLED_PLUGINS_KEY not in cleaned
+    cleaned = json.loads(copilot_project_settings(consumer).read_text(encoding="utf-8"))
+    assert plugin_key not in cleaned.get(ENABLED_PLUGINS_KEY, {})
+    assert not native_plugins_root(consumer).exists()
     assert (packed_bundle["dir"] / "plugin.json").is_file()
 
     # The REAL client no longer loads it after uninstall.
     gone = _run_copilot(copilot_binary, home, consumer, "plugin", "list")
-    assert "apm-qualification@apm" not in gone.stdout, gone.stdout + gone.stderr
+    assert plugin_key not in gone.stdout, gone.stdout + gone.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -671,18 +676,20 @@ def test_direct_and_transitive_plugins_load_from_one_catalog(
     consumer = tmp_path / "consumer"
     _install_consumer(consumer, direct, monkeypatch, name="transitive-consumer")
 
-    catalog = json.loads(catalog_path_for(consumer / "apm_modules").read_text(encoding="utf-8"))
-    assert catalog["name"] == "apm"
+    catalog = json.loads(native_catalog_path(consumer).read_text(encoding="utf-8"))
+    marketplace = catalog["name"]
+    assert marketplace.startswith("apm-p-")
     names = sorted(entry["name"] for entry in catalog["plugins"])
     assert names == ["plugin-a", "plugin-b"]
-    settings = json.loads(
-        (consumer / ".github" / "copilot" / "settings.local.json").read_text(encoding="utf-8")
-    )
-    assert settings[ENABLED_PLUGINS_KEY] == {"plugin-a@apm": True, "plugin-b@apm": True}
+    settings = json.loads(copilot_project_settings(consumer).read_text(encoding="utf-8"))
+    assert settings[ENABLED_PLUGINS_KEY] == {
+        f"plugin-a@{marketplace}": True,
+        f"plugin-b@{marketplace}": True,
+    }
 
     _make_git_root(consumer)
     home = tmp_path / "copilot-home"
     _seed_trust(home, consumer)
     plugins = _run_copilot(copilot_binary, home, consumer, "plugin", "list")
-    assert "plugin-a@apm" in plugins.stdout, plugins.stdout + plugins.stderr
-    assert "plugin-b@apm" in plugins.stdout, plugins.stdout + plugins.stderr
+    assert f"plugin-a@{marketplace}" in plugins.stdout, plugins.stdout + plugins.stderr
+    assert f"plugin-b@{marketplace}" in plugins.stdout, plugins.stdout + plugins.stderr

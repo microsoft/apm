@@ -23,7 +23,6 @@ from apm_cli.commands.uninstall.cli import uninstall
 from apm_cli.commands.uninstall.engine import (
     _preflight_uninstall_survivors,
 )
-from apm_cli.copilot_plugins.registrar import catalog_path_for
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.outcome import finalize_install_result
 from apm_cli.install.services import (
@@ -1032,8 +1031,8 @@ def test_uninstall_honors_declared_non_copilot_target_despite_github_directory(
     result = CliRunner().invoke(uninstall, ["owner/removed"], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
-    assert not catalog_path_for(project / "apm_modules").exists()
-    assert not (project / ".github" / "copilot" / "settings.local.json").exists()
+    assert not (project / ".agents" / "plugins").exists()
+    assert not (project / ".github" / "copilot" / "settings.json").exists()
 
 
 def test_uninstall_allows_native_transitive_orphan_removal(

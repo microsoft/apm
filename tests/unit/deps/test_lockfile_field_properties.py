@@ -190,6 +190,10 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
             )
         ),
     )
+    # Recorded only beside a native_plugin record, so it round-trips only there.
+    kwargs["native_declared"] = (
+        None if kwargs["native_plugin"] is None else maybe(None, st.just(["claude", "copilot"]))
+    )
     # Empty maps are omitted from to_dict(); from_dict restores {}. Include
     # both so the round trip covers omission and a non-empty vendor map.
     kwargs["extensions"] = draw(
