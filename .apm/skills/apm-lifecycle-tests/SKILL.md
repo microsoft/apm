@@ -147,8 +147,8 @@ Start from `assets/templates.md`. Mandatory properties:
   when `--no-policy` is the behavior under test.
 - Apply I1-I9 after every mutating step. Read `references/oracles.md`
   when writing the assertions.
-- Module-level `pytestmark` with one behavioral marker (`e2e`) plus
-  scheduling and prerequisite markers.
+- Module markers: follow "Test module markers (tm006)" in
+  `.apm/instructions/tests.instructions.md`.
 
 ### Step 5 -- run red
 
