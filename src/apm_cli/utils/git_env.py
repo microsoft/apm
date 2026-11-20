@@ -152,16 +152,70 @@ class GitUrlRewriteError(ValueError):
         super().__init__(f"{message}; {_URL_REWRITE_RECOVERY}")
 
 
+_CONFIG_ORIGIN_COMMAND = "'git config --show-origin --list'"
+_PROBE_DETAIL_MAX_CHARS = 200
+_PROBE_SEVERITY_RE = re.compile(r"^(?:fatal|error|warning):\s*", re.IGNORECASE)
+_PROBE_CONFIG_VALUE_RE = re.compile(r"(config value )'[^']*'", re.IGNORECASE)
+_PROBE_FILE_LINE_RE = re.compile(r"\bline (\d+) in file (.+?)\s*$")
+_PROBE_FILE_AT_LINE_RE = re.compile(r"in file '([^']+)' at line (\d+)")
+_PROBE_FILE_ACCESS_RE = re.compile(r"unable to (?:access|read config file) '([^']+)'")
+
+
+def _probe_stderr_detail(stderr: bytes | str | None) -> str:
+    """Return Git's first diagnostic line, redacted, printable ASCII and bounded."""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not stderr:
+        return ""
+    first = next((line.strip() for line in stderr.splitlines() if line.strip()), "")
+    detail = _PROBE_SEVERITY_RE.sub("", first)
+    detail = _PROBE_CONFIG_VALUE_RE.sub(r"\1'***'", redact_git_diagnostic(detail))
+    detail = "".join(ch if " " <= ch <= "~" else "?" for ch in detail)
+    if len(detail) > _PROBE_DETAIL_MAX_CHARS:
+        detail = f"{detail[: _PROBE_DETAIL_MAX_CHARS - 3]}..."
+    return detail
+
+
+def _probe_remedy(detail: str) -> str:
+    """Return one runnable next step for the configuration Git reported."""
+    if "'$GIT_DIR' too big" in detail:
+        return (
+            "the project path is too long for Git; move the project to a shorter path "
+            "or run 'git config --global core.longpaths true', then retry"
+        )
+    if match := _PROBE_FILE_LINE_RE.search(detail):
+        line, path = match.groups()
+    elif match := _PROBE_FILE_AT_LINE_RE.search(detail):
+        path, line = match.groups()
+    elif match := _PROBE_FILE_ACCESS_RE.search(detail):
+        return (
+            f"fix or remove the config file '{match.group(1)}', "
+            f"then check with {_CONFIG_ORIGIN_COMMAND} and retry"
+        )
+    else:
+        return f"check Git configuration with {_CONFIG_ORIGIN_COMMAND} and retry"
+    return f"fix line {line} of '{path}', then check with {_CONFIG_ORIGIN_COMMAND} and retry"
+
+
 class GitUrlRewriteProbeError(ValueError):
     """An actionable failure to inspect effective Git configuration."""
 
-    def __init__(self, category: str) -> None:
-        """Initialize a safe probe failure without rendering raw Git output."""
+    def __init__(self, category: str, *, stderr: bytes | str | None = None) -> None:
+        """Initialize a probe failure; Git's first stderr line is shown redacted."""
         self.category = category
-        super().__init__(
-            f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
-        )
+        self.detail = _probe_stderr_detail(stderr)
+        if self.detail:
+            message = (
+                f"Unable to verify Git URL rewrite safety ({category}: {self.detail}); "
+                f"{_probe_remedy(self.detail)}"
+            )
+        else:
+            message = (
+                f"Unable to verify Git URL rewrite safety ({category}); "
+                f"check Git configuration and retry; locate each config file with "
+                f"{_CONFIG_ORIGIN_COMMAND}; {_URL_REWRITE_INSPECTION}"
+            )
+        super().__init__(message)
 
 
 def _run_git_config(
@@ -624,7 +678,7 @@ def _read_effective_git_config(
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git config probe could not start") from exc
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git config probe failed")
+        raise GitUrlRewriteProbeError("Git config probe failed", stderr=result.stderr)
 
     fields = tuple(field for field in result.stdout.split(b"\0") if field)
     if len(fields) % 2:

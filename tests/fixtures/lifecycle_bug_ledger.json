@@ -2923,6 +2923,17 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4390,
+      "fixed_in": "Unreleased",
+      "summary": "When the Git config probe behind URL rewrite safety fails, the install still refuses, and the error shows Git's first diagnostic line with credentials redacted, the config file Git reports, and a runnable command to inspect it.",
+      "failure_modes": ["outcome", "auth"],
+      "properties": ["outcome.status_matches_state", "auth.credentials_isolated"],
+      "regression_tests": [
+        "tests/integration/test_git_config_probe_diagnostic_lifecycle.py::test_unreadable_git_config_refuses_naming_the_fault_and_a_remedy",
+        "tests/unit/cache/test_git_env.py::TestGitSubprocessEnv::test_rewrite_probe_failure_shows_first_redacted_stderr_line"
+      ]
     }
   ],
   "lifecycle_contracts": [
