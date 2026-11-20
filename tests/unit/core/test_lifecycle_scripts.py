@@ -322,6 +322,7 @@ class TestBuildRunnerFromContext:
         assert runner._scripts == []
 
     def test_deny_all_true_suppresses_all_scripts(self, tmp_path: Path, monkeypatch) -> None:
+        """deny_all suppresses scripts; one command logger gets the notice once (#4333)."""
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
         _write_yaml(
             tmp_path / "apm.yml",
@@ -333,21 +334,6 @@ class TestBuildRunnerFromContext:
         mock_fetch.policy = mock_policy
         mock_fetch.outcome = "found"
         mock_fetch.source = "org"
-        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch):
-            runner = build_runner_from_context(project_root=str(tmp_path))
-        assert runner._scripts == []
-
-    def test_deny_all_notice_prints_once_per_command_logger(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """Two runners built for one command print the deny_all notice once (#4333)."""
-        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
-        _write_yaml(
-            tmp_path / "apm.yml",
-            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo hi"}]}},
-        )
-        mock_fetch = MagicMock()
-        mock_fetch.policy.executables.deny_all = True
 
         class _Logger:
             def __init__(self) -> None:
@@ -358,8 +344,10 @@ class TestBuildRunnerFromContext:
 
         logger = _Logger()
         with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch):
-            build_runner_from_context(project_root=str(tmp_path), logger=logger)
-            build_runner_from_context(project_root=str(tmp_path), logger=logger)
+            runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+            second = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+        assert runner._scripts == []
+        assert second._scripts == []
         assert logger.lines == [
             "Lifecycle scripts suppressed by org policy (executables.deny_all)."
         ]
