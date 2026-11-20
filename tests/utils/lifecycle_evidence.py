@@ -370,6 +370,11 @@ def _scenario(*ids: str) -> Callable[[tuple[str, ...], str], bool]:
     return lambda _args, scenario_id: scenario_id in ids
 
 
+def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: *command* runs inside one of the lifecycle scenarios *ids*."""
+    return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
+
+
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
@@ -393,8 +398,10 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "uninstall-unattributed-survivor-lines",
         "I9",
         "#4219",
-        _scenario("diamond-uninstall-root-a", "diamond-uninstall-root-b"),
+        _scenario_runs("uninstall", "diamond-uninstall-root-a", "diamond-uninstall-root-b"),
         r"\(files unchanged\)",
+        # Two or more survivor tree lines with no package line naming them.
+        output=r"\A(?!.*^  \[\+\] )(?=(?:.*^  \|-- ){2})",
     ),
     KnownOutputCell(
         "install-hook-line-per-target",
@@ -417,7 +424,10 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4242",
         _runs("install", "hermes"),
         r"'hermes-stdio': unknown key\(s\) preserved in extra",
-        output=r"'hermes-stdio': unknown key\(s\) preserved.*^\+- MCP Servers",
+        output=(
+            r"^\+- MCP Servers.*'hermes-stdio': unknown key"
+            r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
+        ),
     ),
     KnownOutputCell(
         "install-frozen-trust-notice-repeats",
