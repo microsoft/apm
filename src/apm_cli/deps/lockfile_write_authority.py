@@ -24,7 +24,8 @@ audit block, anywhere in the error's cause chain), an interrupt (Ctrl-C) or a
 ``sys.exit`` with a non-zero code discards what was staged.  Two explicit commit points
 flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
 transaction must agree with the lockfile (native plugin registration, user
-lifecycle scripts, a command's own durable checkpoint).  Removal and rollback
+lifecycle scripts, a command's own durable checkpoint).  State bound to the
+committed lockfile waits for the commit through :func:`after_lockfile_commit`.  Removal and rollback
 go through :func:`remove_lockfile` and :func:`restore_lockfile_bytes` so a
 staged document never resurrects a lockfile a writer deleted or restored.
 
@@ -82,6 +83,7 @@ class _WriteScope:
 
     writer: LockfileWriter
     pending: dict[Path, str | _Removed] = field(default_factory=dict)
+    after_commit: list[Callable[[], None]] = field(default_factory=list)
 
 
 @dataclass
@@ -279,6 +281,20 @@ def lockfile_scratch_writes() -> Iterator[None]:
         _active_writer.reset(writer)
 
 
+def after_lockfile_commit(action: Callable[[], None]) -> None:
+    """Run *action* once what this command staged is on disk.
+
+    State bound to the committed lockfile (deployment receipt claims) waits
+    for the commit; a discarded or failed commit never runs it. With nothing
+    staged, the lockfile on disk is already the committed one.
+    """
+    scope = _scope()
+    if scope is None or not scope.pending:
+        action()
+        return
+    scope.after_commit.append(action)
+
+
 def flush_lockfile_writes() -> None:
     """Commit what this command staged now; it keeps staging afterwards."""
     scope = _scope()
@@ -297,3 +313,6 @@ def _commit(scope: _WriteScope) -> None:
             ensure_lockfile_writable(key)
             atomic_write_text(key, document, new_file_mode=umask_file_mode(key))
         del scope.pending[key]
+    actions, scope.after_commit = scope.after_commit, []
+    for action in actions:
+        action()
