@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Sequence, cast  # noqa: UP035
 
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
+from ..core.remediation import DEPLOYED_FILES_MISSING, LOCKFILE_MISSING, ORPHANED_PACKAGES
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
@@ -96,8 +97,9 @@ def _check_lockfile_exists(
     return CheckResult(
         name="lockfile-exists",
         passed=False,
-        message="Lockfile missing -- run 'apm install' to generate apm.lock.yaml",
+        message=f"Lockfile missing -- {LOCKFILE_MISSING.clause()}",
         details=["apm.yml declares dependencies but apm.lock.yaml is absent"],
+        remediations=(LOCKFILE_MISSING,),
     )
 
 
@@ -291,8 +293,9 @@ def _check_deployed_files_present(
     return CheckResult(
         name="deployed-files-present",
         passed=False,
-        message=(f"{n} deployed {noun} missing -- run 'apm install' to restore"),
+        message=f"{n} deployed {noun} missing -- {DEPLOYED_FILES_MISSING.clause()}",
         details=missing,
+        remediations=(DEPLOYED_FILES_MISSING,),
     )
 
 
@@ -364,9 +367,10 @@ def _check_no_orphans(
         name="no-orphaned-packages",
         passed=False,
         message=(
-            f"{len(orphaned)} orphaned package(s) in lockfile -- run 'apm install' to clean up"
+            f"{len(orphaned)} orphaned package(s) in lockfile -- {ORPHANED_PACKAGES.clause()}"
         ),
         details=orphaned,
+        remediations=(ORPHANED_PACKAGES,),
     )
 
 

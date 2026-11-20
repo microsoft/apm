@@ -391,6 +391,12 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 
 CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 
+A failing CI JSON check can carry `remediation`: the structured advice that clears it, with `id`, `command` (the exact `apm` command line), `fixes` (the state it clears) and optional `before` (a manual step first, such as deleting edited files) and `then` (a step after it succeeds). `remediations` lists every applicable remediation; `remediation` is the first. The text message renders the same advice.
+
+```json
+{"name": "lockfile-exists", "passed": false, "remediation": {"id": "lockfile-missing", "command": "apm install", "fixes": "generate apm.lock.yaml"}}
+```
+
 ## Related
 
 - [`apm install`](../install/) -- the built-in scan that blocks critical findings before deployment.

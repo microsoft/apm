@@ -97,7 +97,7 @@
     "src/apm_cli/models/dependency/provider_coordinates.py": 1,
     "src/apm_cli/models/dependency/subsets.py": 1,
     "src/apm_cli/output/formatters.py": 2,
-    "src/apm_cli/policy/ci_checks.py": 10,
+    "src/apm_cli/policy/ci_checks.py": 7,
     "src/apm_cli/policy/policy_checks.py": 4,
     "src/apm_cli/runtime/manager.py": 1,
     "src/apm_cli/security/audit_report.py": 2,
