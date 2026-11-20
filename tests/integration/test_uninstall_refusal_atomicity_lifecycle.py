@@ -1,7 +1,7 @@
 """Installed-CLI proofs: a refused uninstall changes nothing (#4185).
 
-``apm uninstall`` validates what it will need before its first write: the
-survivors' org-policy trust and every recorded path. A refusal leaves
+``apm uninstall`` resolves the survivors' org-policy trust before its first
+write, and refuses out-of-project paths before any change. A refusal leaves
 apm.yml, apm.lock.yaml and every deployed file byte-identical.
 """
 
@@ -45,10 +45,10 @@ def test_policy_refusal_mid_uninstall_changes_nothing(
     world.assert_user_file_intact()
 
 
-def test_uninstall_validates_every_recorded_path_before_changing_state(
+def test_uninstall_refuses_out_of_project_paths_before_any_change(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A recorded path outside the project stops uninstall before any write."""
+    """Uninstall refuses out-of-project paths before any change."""
     from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
     world = build_world(tmp_path, apm_binary_path, packages=("alpha", "beta"))

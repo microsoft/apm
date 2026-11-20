@@ -214,10 +214,9 @@ def _preflight_uninstall_writes(
 ):
     """Refuse before the first write; return the survivors' trust context (#4185).
 
-    Every recorded path the command removes must pass the deploy-path gate,
-    and survivor re-integration needs the org-policy trust map. Either
-    refusal stops the command while apm.yml, the lockfile and deployed files
-    are still untouched.
+    Uninstall refuses out-of-project paths before any change, and survivor
+    re-integration needs the org-policy trust map; either refusal stops the
+    command while apm.yml, the lockfile and deployed files are untouched.
     """
     from ...core.scope import InstallScope
     from ...security.executables import resolve_project_exec_allow_map
@@ -243,11 +242,10 @@ def _preflight_uninstall_writes(
 
 
 def _refuse_unvalidated_paths(lockfile, dependency_keys, deploy_root, scope, logger) -> None:
-    """Validate every recorded path this uninstall removes before changing state.
+    """Refuse out-of-project paths before any change.
 
-    Each path goes through the deploy-path gate the cleanup uses; one that
-    fails stops the command while apm.yml, the lockfile and deployed files are
-    untouched.
+    Each path this uninstall removes goes through the deploy-path gate the
+    cleanup uses.
     """
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.scope import InstallScope

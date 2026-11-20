@@ -669,12 +669,12 @@
     {
       "issue": 4185,
       "fixed_in": "0.37.0",
-      "summary": "apm uninstall could exit 1 after it had already changed apm.yml, the lockfile and deployed files, when a check it needed (survivor trust, recorded-path validation) refused mid-command.",
+      "summary": "apm uninstall could exit 1 after it had already changed apm.yml, the lockfile and deployed files when the remaining packages' org-policy trust refused mid-command; uninstall now also refuses out-of-project paths before any change",
       "failure_modes": ["transaction", "outcome"],
       "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
       "regression_tests": [
         "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_policy_refusal_mid_uninstall_changes_nothing",
-        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_uninstall_validates_every_recorded_path_before_changing_state"
+        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_uninstall_refuses_out_of_project_paths_before_any_change"
       ]
     }
   ],
