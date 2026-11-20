@@ -190,7 +190,13 @@
     },
     "dependency-selection-merge": {
       "architecture_owner": "dependency-selection-merge",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.models.dependency.subsets._levenshtein_distance__mutmut_9",
+          "reason": "The extra trailing cell in the first DP row is never read: the inner loop only indexes previous[j] for j <= len(right), and previous is replaced by a correctly sized row after each pass."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,
@@ -215,7 +221,8 @@
       ],
       "test_seams": [
         "tests/unit/test_skill_subset_persistence.py",
-        "tests/unit/test_dep_targets_persistence.py"
+        "tests/unit/test_dep_targets_persistence.py",
+        "tests/unit/models/test_subset_field_validation.py"
       ]
     },
     "deployment-provenance-state": {
