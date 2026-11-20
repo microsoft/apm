@@ -23,6 +23,20 @@ _NOT_APPROVABLE = (
     "#4154 apm approve does not find a Claude plugin installed from a local path, so "
     "its executables cannot be approved"
 )
+# gate_paths/native_plugin.py: the git-served p-native-claude-bin at user scope; the
+# approved plugin lands whole under ~/.agents/plugins and goes as one unit.
+_PLUGIN = {"home": (".agents/plugins/p-native-claude-bin/.claude-plugin/plugin.json",)}
+# definition-changed needs a new published revision of the git package: residual.
+_PLUGIN_CHANGES = (
+    "local-deny",
+    "org-deny",
+    "org-enables-gate",
+    "policy-dep-deny",
+    "revoke-approval",
+)
+_PLUGIN_UNLOCKED = (
+    "#4225 the user lockfile does not record the files a native Claude plugin deployed"
+)
 _UNINSTALL_SIBLING = (
     "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
 )
@@ -34,6 +48,7 @@ _XFAIL = {
         if change != "org-enables-gate"
     },
     "G|uninstall-prune-rebuild|org-enables-gate|native": _UNINSTALL_SIBLING,
+    **{f"G|native-plugin|{change}|native": _PLUGIN_UNLOCKED for change in _PLUGIN_CHANGES},
 }
 _SMOKE = {"G|install|org-enables-gate|native"}
 
@@ -61,5 +76,14 @@ SLICE = GateSlice(
         )
         for path, (changes, surface) in _PATHS.items()
         for change in changes
+    )
+    + tuple(
+        GateRow(
+            f"G|native-plugin|{change}|native",
+            surface=_PLUGIN,
+            package="p-native-claude-bin",
+            xfail=_XFAIL.get(f"G|native-plugin|{change}|native", ""),
+        )
+        for change in _PLUGIN_CHANGES
     ),
 )

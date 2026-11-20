@@ -47,6 +47,7 @@ from tests.lifecycle import driver, oracles, rows
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.rows import Row, RowReplay
 from tests.lifecycle.world import World, use_policy
+from tests.lifecycle.world.packages import INERT_COMMAND as INERT_SERVER
 from tests.lifecycle.world.services import API_HOST, ORG, REGISTRY_SERVER
 
 pytestmark = [
@@ -246,6 +247,8 @@ class Expect:
     setup: Callable[[World, RowReplay], None] | None = None
     # HOME paths the command may write besides receipts and bookkeeping.
     home_writes: tuple[str, ...] = ()
+    # Overrides the slice command when the class needs another command line.
+    command: Callable[[World], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -307,19 +310,26 @@ def _disabled(world: World, replay: RowReplay) -> None:
     world.env["APM_POLICY_DISABLE"] = "1"
 
 
-def _warm(world: World, replay: RowReplay) -> None:
+def _warmed(variant: str) -> Callable[[World, RowReplay], None]:
     """A found policy already in the cache, fetched moments ago."""
-    use_policy(world, "deny-pkg")
-    result = driver.run(world, ["policy", "status"])
-    assert result.returncode == 0, result.stdout + result.stderr
-    del replay
+
+    def setup(world: World, replay: RowReplay) -> None:
+        del replay
+        use_policy(world, variant)
+        result = driver.run(world, ["policy", "status"])
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    return setup
 
 
-def _aged(seconds: int) -> Callable[[World, RowReplay], None]:
+_warm = _warmed("deny-pkg")
+
+
+def _aged(seconds: int, variant: str = "deny-pkg") -> Callable[[World, RowReplay], None]:
     """A found policy cached *seconds* ago, and every refresh now fails to connect."""
 
     def setup(world: World, replay: RowReplay) -> None:
-        _warm(world, replay)
+        _warmed(variant)(world, replay)
         _set_knob(world, "warn")
         _age_cache(world, seconds)
         for key in [key for key in world.env if key.lower() in _PROXY_KEYS]:
@@ -477,6 +487,39 @@ SKILL = ".agents/skills/p-skill/SKILL.md"
 HOOK = ".github/hooks/p-exec-session.json"
 
 _OFFLINE = "S-pending (neutral issue to follow): offline use of cached policy"
+_PIN_DISAGREE = "S-pending (neutral issue to follow): audit and install disagree on policy pin"
+_PARTIAL_UNINSTALL = "#4185 uninstall exits 1 after it already changed the manifest, lock and disk"
+_CHECK_FAILED = r"check\(s\) failed"
+_UNAVAILABLE = r"Org policy unavailable \("
+_CONSENT_OK = r"config-consistency\s*\|\s*MCP configs match lockfile baseline"
+_POLICY_DENY_PKG = r"Policy: org:policy-deny-pkg/\.github -- enforcement=block"
+_DENY_ALL_SUPPRESSED = r"Lifecycle scripts suppressed by org policy \(executables\.deny_all\)"
+
+
+def _unavailable(outcome: str) -> str:
+    return rf"Org policy unavailable \({outcome}\); consent was evaluated without org deny"
+
+
+def _not_applied(outcome: str) -> str:
+    return rf"Org policy not applied \(outcome={outcome},"
+
+
+def _replay_blocked(reason: str) -> Expect:
+    return Expect(
+        0,
+        (r"drift check could not run: drift replay blocked: Blocked by org policy: " + reason,),
+        unchanged=("*",),
+    )
+
+
+def _replay_ran() -> Expect:
+    return Expect(0, forbids=(r"drift replay blocked",), unchanged=("*",))
+
+
+def _local_mcp(world: World) -> str:
+    del world
+    return f"apm install --mcp t7b-local -- {INERT_SERVER} --stdio"
+
 
 # The decision sites, keyed by the obligation site name.
 SITE_SLICES: dict[str, SiteSlice] = {}
@@ -518,6 +561,11 @@ SITE_SLICES["mcp-install-preflight"] = SiteSlice(
         "cache=cold": Expect(
             0, (r"Policy: org:policy-deny-pkg/\.github -- enforcement=block",), policy_fetch=True
         ),
+        "cache=warm-fresh": Expect(
+            0, (r"\(cached, fetched \d+s ago\) -- enforcement=block",), policy_fetch=False
+        ),
+        "cache=stale<7d": Expect(0, (r"(?i)stale",), command=_local_mcp, xfail=_OFFLINE),
+        "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), command=_local_mcp),
     },
 )
 
@@ -542,6 +590,28 @@ SITE_SLICES["lifecycle-scripts"] = SiteSlice(
             policy_fetch=True,
             setup=_variant("exec-deny-all", "warn"),
         ),
+        "cache=warm-fresh": Expect(
+            0,
+            (_DENY_ALL_SUPPRESSED,),
+            absent=(SCRIPT_MARKER,),
+            policy_fetch=False,
+            setup=_warmed("exec-deny-all"),
+        ),
+        "cache=stale<7d": Expect(
+            0,
+            (_DENY_ALL_SUPPRESSED,),
+            absent=(SCRIPT_MARKER,),
+            setup=_aged(2 * _HOUR, "exec-deny-all"),
+            home_writes=SCRIPT_LOG,
+            xfail=_OFFLINE,
+        ),
+        "cache=stale>7d-or-expired": Expect(
+            0,
+            forbids=(r"Lifecycle scripts suppressed",),
+            present=(SCRIPT_MARKER,),
+            setup=_aged(8 * _DAY, "exec-deny-all"),
+            home_writes=SCRIPT_LOG,
+        ),
     },
 )
 
@@ -554,6 +624,59 @@ SITE_SLICES["bundle-allow-map(getattr cache_only)"] = SiteSlice(
             1, (TRUST_BLOCK + "no enforceable", KNOB_BLOCK), absent=(HOOK, ".mcp.json"), smoke=True
         ),
         "hash_mismatch": Expect(1, (TRUST_BLOCK + "policy hash mismatch",), absent=(HOOK,)),
+        "absent/block": Expect(
+            1,
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=absent\\)",),
+            absent=(HOOK, ".mcp.json"),
+        ),
+        "empty/block": Expect(
+            1,
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=empty\\)",),
+            absent=(HOOK, ".mcp.json"),
+        ),
+        "no_git_remote/block": Expect(
+            1,
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=no_git_remote\\)",),
+            absent=(HOOK, ".mcp.json"),
+        ),
+        "malformed/block": Expect(
+            1,
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=malformed\\)",),
+            absent=(HOOK, ".mcp.json"),
+        ),
+        "garbage_response/block": Expect(
+            1,
+            (
+                TRUST_BLOCK
+                + r"no enforceable org policy was resolved \\(outcome=garbage_response\\)",
+            ),
+            absent=(HOOK, ".mcp.json"),
+        ),
+        "incomplete_chain": Expect(
+            1,
+            (TRUST_BLOCK + r"org policy inheritance chain is incomplete",),
+            absent=(HOOK, ".mcp.json"),
+        ),
+        "cached_stale/org-block": Expect(
+            1,
+            (TRUST_BLOCK + r"org policy refresh failed and the cached policy",),
+            absent=(HOOK, ".mcp.json"),
+        ),
+        "found": Expect(0, (_POLICY_DENY_PKG,), absent=(HOOK,)),
+        "cache=cold": Expect(0, (_POLICY_DENY_PKG,), absent=(HOOK,)),
+        "disabled": Expect(
+            0, (r"Policy enforcement disabled by APM_POLICY_DISABLE=1",), absent=(HOOK,)
+        ),
+        "absent/warn": Expect(0, (), absent=(HOOK,)),
+        "empty/warn": Expect(0, (EMPTY,), absent=(HOOK,)),
+        "no_git_remote/warn": Expect(0, (), absent=(HOOK,)),
+        "malformed/warn": Expect(0, (r"is malformed",), absent=(HOOK,)),
+        "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
+        "garbage_response/warn": Expect(0, (r"is not valid YAML",), absent=(HOOK,)),
+        "cached_stale/warn": Expect(0, (r"\(cached, fetched 2h ago\)",), absent=(HOOK,)),
+        "cache=warm-fresh": Expect(0, (r"\(cached, fetched \d+s ago\)",), absent=(HOOK,)),
+        "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
+        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,), xfail=_OFFLINE),
     },
 )
 
@@ -568,6 +691,27 @@ SITE_SLICES["audit-exec-replay(getattr)"] = SiteSlice(
             unchanged=("*",),
             smoke=True,
         ),
+        "absent/block": _replay_blocked("no enforceable"),
+        "empty/block": _replay_blocked("no enforceable"),
+        "no_git_remote/block": _replay_blocked("no enforceable"),
+        "malformed/block": _replay_blocked("no enforceable"),
+        "cache_miss_fetch_fail/block": _replay_blocked("no enforceable"),
+        "garbage_response/block": _replay_blocked("no enforceable"),
+        "incomplete_chain": _replay_blocked("org policy inheritance chain is incomplete"),
+        "cached_stale/org-block": _replay_blocked("org policy refresh failed"),
+        "found": _replay_ran(),
+        "disabled": _replay_ran(),
+        "absent/warn": _replay_ran(),
+        "empty/warn": _replay_ran(),
+        "no_git_remote/warn": _replay_ran(),
+        "malformed/warn": _replay_ran(),
+        "cache_miss_fetch_fail/warn": _replay_ran(),
+        "garbage_response/warn": _replay_ran(),
+        "cached_stale/warn": _replay_ran(),
+        "cache=stale>7d-or-expired": _replay_ran(),
+        "cache=cold": dataclasses.replace(_replay_ran(), policy_fetch=True),
+        "cache=warm-fresh": dataclasses.replace(_replay_ran(), policy_fetch=False),
+        "cache=stale<7d": _replay_ran(),
     },
 )
 
@@ -580,8 +724,41 @@ SITE_SLICES["exec-map(getattr: uninstall/hook rebuild/lsp)"] = SiteSlice(
             1,
             (TRUST_BLOCK + "policy hash mismatch",),
             absent=(HOOK,),
-            xfail="#4185 uninstall exits 1 after it already changed the manifest, lock and disk",
+            xfail=_PARTIAL_UNINSTALL,
         ),
+        "absent/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
+        "empty/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
+        "no_git_remote/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
+        "malformed/block": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
+        "cache_miss_fetch_fail/block": Expect(
+            1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL
+        ),
+        "garbage_response/block": Expect(
+            1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL
+        ),
+        "incomplete_chain": Expect(1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL),
+        "cached_stale/org-block": Expect(
+            1, (TRUST_BLOCK,), absent=(HOOK,), xfail=_PARTIAL_UNINSTALL
+        ),
+        "found": Expect(0, (), absent=(HOOK, SKILL)),
+        "disabled": Expect(0, (), absent=(HOOK, SKILL)),
+        "absent/warn": Expect(0, (), absent=(HOOK, SKILL)),
+        "no_git_remote/warn": Expect(0, (), absent=(HOOK, SKILL)),
+        "cache=warm-fresh": Expect(0, (), absent=(HOOK, SKILL)),
+        "cache=cold": Expect(0, (), absent=(HOOK, SKILL)),
+        "empty/warn": Expect(0, (_not_applied("empty"),), absent=(HOOK, SKILL)),
+        "malformed/warn": Expect(0, (_not_applied("malformed"),), absent=(HOOK, SKILL)),
+        "cache_miss_fetch_fail/warn": Expect(
+            0, (_not_applied("cache_miss_fetch_fail"),), absent=(HOOK, SKILL)
+        ),
+        "garbage_response/warn": Expect(
+            0, (_not_applied("garbage_response"),), absent=(HOOK, SKILL)
+        ),
+        "cached_stale/warn": Expect(0, (r"Using stale cached org policy",), absent=(HOOK, SKILL)),
+        "cache=stale>7d-or-expired": Expect(
+            0, (_not_applied("cache_miss_fetch_fail"),), absent=(HOOK, SKILL)
+        ),
+        "cache=stale<7d": Expect(0, (r"Using stale cached org policy",), xfail=_OFFLINE),
     },
 )
 
@@ -597,7 +774,7 @@ SITE_SLICES["audit-ci"] = SiteSlice(
         "hash_mismatch": Expect(
             1,
             (HASH,),
-            xfail="S-pending (neutral issue to follow): audit and install disagree on policy pin",
+            xfail=_PIN_DISAGREE,
         ),
         "absent/block": Expect(1, (r"No org policy found", _CI_FAILED)),
         "absent/warn": Expect(0),
@@ -605,8 +782,19 @@ SITE_SLICES["audit-ci"] = SiteSlice(
         "no_git_remote/warn": Expect(0),
         "empty/block": Expect(1, (EMPTY, _CI_FAILED)),
         "empty/warn": Expect(0),
-        "found": Expect(1, (r"check\(s\) failed",)),
+        "found": Expect(1, (_CHECK_FAILED,)),
         "disabled": Expect(0),
+        "malformed/block": Expect(1, (r"Policy fetch failed: Invalid policy", _CI_FAILED)),
+        "malformed/warn": Expect(0, (_unavailable("malformed"),)),
+        "garbage_response/block": Expect(1, (r"is not a YAML mapping", _CI_FAILED)),
+        "garbage_response/warn": Expect(0, (_unavailable("garbage_response"),)),
+        "incomplete_chain": Expect(1, (r"Policy fetch failed: Policy chain incomplete",)),
+        "cached_stale/org-block": Expect(1, (_CHECK_FAILED,)),
+        "cached_stale/warn": Expect(1, (_CHECK_FAILED,)),
+        "cache=cold": Expect(1, (_CHECK_FAILED,), policy_fetch=True),
+        "cache=warm-fresh": Expect(1, (_CHECK_FAILED,), policy_fetch=False),
+        "cache=stale<7d": Expect(1, (_CHECK_FAILED,), xfail=_OFFLINE),
+        "cache=stale>7d-or-expired": Expect(0, (r"enforcement skipped",)),
     },
 )
 
@@ -628,6 +816,17 @@ SITE_SLICES["approve"] = SiteSlice(
         "empty/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "found": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "disabled": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "malformed/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "malformed/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "garbage_response/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "garbage_response/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "incomplete_chain": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "cached_stale/org-block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "cached_stale/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "cache=cold": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=True),
+        "cache=warm-fresh": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=False),
+        "cache=stale<7d": Expect(0, forbids=(_APPROVE_UNRESOLVED,), xfail=_OFFLINE),
+        "cache=stale>7d-or-expired": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
     },
 )
 
@@ -681,6 +880,9 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), unchanged=("*",)),
         "cache=cold": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=True),
+        "cache=warm-fresh": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=False),
+        "cache=stale<7d": Expect(0, (DENIED,), unchanged=("*",), xfail=_OFFLINE),
+        "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), unchanged=("*",)),
     },
 )
 
@@ -703,6 +905,17 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "empty/warn": Expect(0, present=(SKILL,)),
         "found": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
         "disabled": Expect(0, present=(SKILL,)),
+        "malformed/block": Expect(1, (KNOB_BLOCK,), present=(SKILL,)),
+        "malformed/warn": Expect(0, (r"is malformed",), present=(SKILL,)),
+        "garbage_response/block": Expect(1, (KNOB_BLOCK,), present=(SKILL,)),
+        "garbage_response/warn": Expect(0, (r"is not valid YAML",), present=(SKILL,)),
+        "incomplete_chain": Expect(1, (r"inheritance chain is incomplete",), present=(SKILL,)),
+        "cached_stale/org-block": Expect(1, (r"fetch_failure=block",), xfail=_SHORTCIRCUIT),
+        "cached_stale/warn": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
+        "cache=cold": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
+        "cache=warm-fresh": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
+        "cache=stale<7d": Expect(1, (DENIED,), xfail=_OFFLINE),
+        "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), present=(SKILL,)),
     },
 )
 
@@ -720,14 +933,54 @@ def _installed_approved_exec(world: World, replay: RowReplay) -> None:
 SITE_SLICES["mcp-admission(trust.py)"] = SiteSlice(
     arrange=_installed_approved_exec,
     command=lambda world: "apm audit --ci",
-    classes={},
+    classes={
+        "absent/block": Expect(1, (r"No org policy found", _CI_FAILED)),
+        "empty/block": Expect(1, (EMPTY, _CI_FAILED)),
+        "no_git_remote/block": Expect(1, (r"Could not determine org from git remote", _CI_FAILED)),
+        "malformed/block": Expect(1, (r"Invalid policy", _CI_FAILED)),
+        "cache_miss_fetch_fail/block": Expect(1, (r"HTTP 503", _CI_FAILED)),
+        "garbage_response/block": Expect(1, (r"is not a YAML mapping", _CI_FAILED)),
+        "incomplete_chain": Expect(1, (r"Policy chain incomplete",)),
+        "malformed/warn": Expect(0, (_unavailable("malformed"), _CONSENT_OK)),
+        "cache_miss_fetch_fail/warn": Expect(
+            0, (_unavailable("cache_miss_fetch_fail"), _CONSENT_OK)
+        ),
+        "garbage_response/warn": Expect(0, (_unavailable("garbage_response"), _CONSENT_OK)),
+        "absent/warn": Expect(0, (_CONSENT_OK,), forbids=(_UNAVAILABLE,)),
+        "empty/warn": Expect(0, (_CONSENT_OK,), forbids=(_UNAVAILABLE,)),
+        "no_git_remote/warn": Expect(0, (_CONSENT_OK,), forbids=(_UNAVAILABLE,)),
+        "disabled": Expect(0, (_CONSENT_OK,), forbids=(_UNAVAILABLE,)),
+        "found": Expect(1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,)),
+        "cached_stale/org-block": Expect(1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,)),
+        "cached_stale/warn": Expect(1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,)),
+        "cache=cold": Expect(
+            1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,), policy_fetch=True
+        ),
+        "cache=warm-fresh": Expect(
+            1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,), policy_fetch=False
+        ),
+        "cache=stale<7d": Expect(1, (_CHECK_FAILED,), forbids=(_UNAVAILABLE,), xfail=_OFFLINE),
+        "cache=stale>7d-or-expired": Expect(0, (_unavailable("cache_miss_fetch_fail"),)),
+        "hash_mismatch": Expect(1, (HASH,), xfail=_PIN_DISAGREE),
+    },
 )
 
 # install/local_bundle_handler.py preflight (cache_only) -- a local bundle install.
 SITE_SLICES["bundle-install-preflight(cache_only)"] = SiteSlice(
     arrange=_nothing,
     command=lambda world: f"apm install {world.packages['p-exec:bundle'].spec}",
-    classes={},
+    classes={
+        "cache_miss_fetch_fail/block": Expect(
+            1, (TRUST_BLOCK + "no enforceable", KNOB_BLOCK), absent=(HOOK, ".mcp.json")
+        ),
+        "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
+        "cache=cold": Expect(0, (_POLICY_DENY_PKG,), absent=(HOOK,), policy_fetch=True),
+        "cache=warm-fresh": Expect(
+            0, (r"\(cached, fetched \d+s ago\)",), absent=(HOOK,), policy_fetch=False
+        ),
+        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,), xfail=_OFFLINE),
+        "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
+    },
 )
 
 
@@ -772,7 +1025,8 @@ def run_site_row(world: World, cell_id: str) -> None:
         if expect.home_writes:
             allowed = (*rows._PROJECT_HOME_ALLOWED, *expect.home_writes)
             patch.setattr(rows, "_PROJECT_HOME_ALLOWED", allowed)
-        replay.step({"run": slice_.command(world), "exit": expect.exit})
+        command = (expect.command or slice_.command)(world)
+        replay.step({"run": command, "exit": expect.exit})
     after = replay.observe()
     egress = tuple(world.services.egress_log())
     requested = any(entry["path"].endswith(POLICY_CONTENTS) for entry in egress)

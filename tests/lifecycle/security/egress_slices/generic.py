@@ -2,7 +2,9 @@
 
 The world's generic host is its MCP registry. No platform credential belongs
 to it, so a row passes when none reaches it. Unregistered, missing world
-support: EP|CRED=helper|HOST=generic (the world serves no generic git host).
+support: EP|CRED=helper|HOST=generic and the generic clone and marketplace-fetch
+rows (the world serves no generic git host), and every registry row (no APM
+package registry service).
 """
 
 from __future__ import annotations
@@ -19,5 +21,6 @@ SLICE = HostSlice(
     rows=(
         EgressRow("EP|CRED=PAT|HOST=generic", "PAT", "mcp-registry", presented=False),
         EgressRow("EP|CRED=none|HOST=generic", "none", "mcp-registry"),
+        EgressRow("E2|HOST=generic|CRED=none|EGRESS=mcp-registry", "none", "mcp-registry"),
     ),
 )

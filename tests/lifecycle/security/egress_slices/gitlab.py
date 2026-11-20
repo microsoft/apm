@@ -1,4 +1,10 @@
-"""Egress rows for HOST GitLab: gitlab.com."""
+"""Egress rows for HOST GitLab: gitlab.com.
+
+Unregistered, missing world support: E2|HOST=GitLab|*|EGRESS=marketplace-fetch
+(no GitLab repository-file API route is served, so marketplace add finds no
+marketplace.json) and E2|HOST=GitLab|*|EGRESS=policy-fetch (policy status with a
+gitlab.com origin sends no request the world answers).
+"""
 
 from __future__ import annotations
 
@@ -15,5 +21,10 @@ SLICE = HostSlice(
         EgressRow("EP|CRED=PAT|HOST=GitLab", "PAT", "clone", smoke=True),
         EgressRow("EP|CRED=helper|HOST=GitLab", "helper", "clone"),
         EgressRow("EP|CRED=none|HOST=GitLab", "none", "clone"),
+        *(
+            EgressRow(f"E2|HOST=GitLab|CRED={cred}|EGRESS={egress}", cred, egress)
+            for cred in ("PAT", "helper", "none")
+            for egress in ("api-probe", "clone")
+        ),
     ),
 )

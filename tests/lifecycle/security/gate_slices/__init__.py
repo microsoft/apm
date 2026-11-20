@@ -34,6 +34,9 @@ class GateRow:
     # Strict expected failure: "#<issue> <neutral text>" (output defects) or
     # "S-pending (neutral issue to follow): <neutral phrase>" (gate enforcement).
     xfail: str = ""
+    # World package and target that replace the slice's for this row.
+    package: str | None = None
+    target: str | None = None
 
     @property
     def parts(self) -> tuple[str, str, str]:

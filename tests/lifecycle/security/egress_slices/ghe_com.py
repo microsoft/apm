@@ -1,4 +1,9 @@
-"""Egress rows for HOST ghe.com: a GitHub Enterprise Cloud tenant (*.ghe.com)."""
+"""Egress rows for HOST ghe.com: a GitHub Enterprise Cloud tenant (*.ghe.com).
+
+Unregistered, missing world support: E2|HOST=ghe.com|*|EGRESS=marketplace-fetch
+(the CLI reads a ghe.com catalog through a repository contents API route the
+world does not serve for this host; marketplace add finds no marketplace.json).
+"""
 
 from __future__ import annotations
 
@@ -17,5 +22,10 @@ SLICE = HostSlice(
         EgressRow("EP|CRED=PAT|HOST=ghe.com", "PAT", "clone"),
         EgressRow("EP|CRED=gh|HOST=ghe.com", "gh", "clone"),
         EgressRow("EP|CRED=none|HOST=ghe.com", "none", "clone"),
+        *(
+            EgressRow(f"E2|HOST=ghe.com|CRED={cred}|EGRESS={egress}", cred, egress)
+            for cred in ("PAT", "gh", "none")
+            for egress in ("api-probe", "clone", "policy-fetch")
+        ),
     ),
 )
