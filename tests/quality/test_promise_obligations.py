@@ -66,7 +66,9 @@ _APPROVED_APPLY = {
     ],
     **{law: list(_OPS) for law in ("I5", "I6", "I7", "I8", "I9")},
 }
-_APPROVED_GATE_CELLS = 107
+# 107 less the 12 user-scope org-deny cells (user scope is not governed by org
+# policy, #4087) plus the user-scope undeclare|plugin|deny cell.
+_APPROVED_GATE_CELLS = 96
 _LANES = {
     "T-1": "#4095",
     "T-2": "#4096",

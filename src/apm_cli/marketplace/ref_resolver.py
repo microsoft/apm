@@ -402,7 +402,6 @@ class RefResolver:
             url = build_https_clone_url(
                 self._host,
                 owner_repo,
-                token=None,
                 port=self._port,
             )
         from apm_cli.core.auth import AuthResolver

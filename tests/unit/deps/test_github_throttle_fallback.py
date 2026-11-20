@@ -199,7 +199,7 @@ def test_private_fallback_uses_only_auth_resolver_git_environment() -> None:
     assert entries["credential.helper"] == [""]
     _assert_github_basic_header(entries["http.extraheader"][-1], "private-token")
     assert "GIT_TOKEN" not in git_env
-    assert url.call_args.kwargs["token"] == ""
+    assert url.call_args.kwargs == {"dep_ref": _dep()}
 
 
 def test_private_fallback_sets_header_after_retained_git_config() -> None:

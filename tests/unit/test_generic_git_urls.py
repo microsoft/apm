@@ -522,10 +522,6 @@ class TestCloneURLBuilding:
         url = build_https_clone_url("gitlab.com", "acme/repo")
         assert url == "https://gitlab.com/acme/repo.git"
 
-    def test_gitlab_https_clone_url_with_token(self):
-        url = build_https_clone_url("gitlab.com", "acme/repo", token="glpat-xxx")
-        assert url == "https://x-access-token:glpat-xxx@gitlab.com/acme/repo.git"
-
     def test_bitbucket_https_clone_url(self):
         url = build_https_clone_url("bitbucket.org", "acme/repo")
         assert url == "https://bitbucket.org/acme/repo.git"
@@ -589,10 +585,6 @@ class TestCloneURLBuilding:
 
         with pytest.raises(ValueError, match="non-empty"):
             build_ssh_url("github.com", "acme/repo", user="")
-
-    def test_https_clone_url_with_token_and_port(self):
-        url = build_https_clone_url("bitbucket.domain.ext", "team/repo", token="pat-xxx", port=8443)
-        assert url == "https://x-access-token:pat-xxx@bitbucket.domain.ext:8443/team/repo.git"
 
 
 class TestToGithubURLGenericHosts:

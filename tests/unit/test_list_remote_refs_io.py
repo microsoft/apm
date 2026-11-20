@@ -124,8 +124,6 @@ class TestListRemoteRefsGitHub:
             "owner/repo",
             use_ssh=False,
             dep_ref=dep,
-            token="",
-            auth_scheme="basic",
         )
         mock_git.ls_remote.assert_called_once()
         # The token travels through transient Git config, not URL userinfo.

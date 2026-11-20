@@ -74,6 +74,8 @@ def _run_pipeline(
             "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
             return_value=_registry_only_config(),
         ),
+        # The egress-route owner reads registry-only mode from the environment.
+        patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}),
         patch(
             "apm_cli.integration.base_integrator.BaseIntegrator.normalize_managed_files",
             return_value=set(),

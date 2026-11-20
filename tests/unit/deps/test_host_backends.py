@@ -127,32 +127,13 @@ def test_capability_flags(backend_cls, host, kind, is_family, is_generic):
 
 
 class TestGitHubFamilyCloneUrls:
-    def test_https_no_token(self):
+    def test_https_url(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
-        url = backend.build_clone_https_url(_dep_ref(), token=None)
-        # The unauthenticated path keeps the ".git" suffix, same as the token,
-        # SSH, and plain-HTTP builders (#1995).
+        url = backend.build_clone_https_url(_dep_ref())
+        # The HTTPS URL keeps the ".git" suffix, same as the SSH and
+        # plain-HTTP builders (#1995), and never carries credentials.
         assert url == "https://github.com/owner/repo.git"
-
-    def test_https_with_token(self):
-        backend = GitHubBackend(host_info=_info("github.com", "github"))
-        url = backend.build_clone_https_url(_dep_ref(), token="ghp_abc")
-        # x-access-token is the GH Enterprise / GH Actions compatible form.
-        assert url == "https://x-access-token:ghp_abc@github.com/owner/repo.git"
-
-    def test_https_empty_token_suppresses_credential(self):
-        backend = GitHubBackend(host_info=_info("github.com", "github"))
-        url = backend.build_clone_https_url(_dep_ref(), token="")
         parsed = urlparse(url)
-        assert parsed.username is None and parsed.password is None
-        assert parsed.hostname == "github.com"
-
-    def test_https_bearer_scheme_does_not_embed_token(self):
-        backend = GitHubBackend(host_info=_info("github.com", "github"))
-        # Bearer is ADO-only; GitHub family should fall through to plain URL.
-        url = backend.build_clone_https_url(_dep_ref(), token="ghp_abc", auth_scheme="bearer")
-        parsed = urlparse(url)
-        assert "ghp_abc" not in url
         assert parsed.username is None and parsed.password is None
 
     def test_ssh_url(self):
@@ -161,17 +142,17 @@ class TestGitHubFamilyCloneUrls:
 
     def test_ghes_https(self):
         backend = GHESBackend(host_info=_info("git.acme.com", "ghes"))
-        url = backend.build_clone_https_url(_dep_ref(host="git.acme.com"), token="ghp_x")
-        assert url == "https://x-access-token:ghp_x@git.acme.com/owner/repo.git"
+        url = backend.build_clone_https_url(_dep_ref(host="git.acme.com"))
+        assert url == "https://git.acme.com/owner/repo.git"
 
     def test_ghe_cloud_https(self):
         backend = GHECloudBackend(host_info=_info("octo.ghe.com", "ghe_cloud"))
-        url = backend.build_clone_https_url(_dep_ref(host="octo.ghe.com"), token=None)
+        url = backend.build_clone_https_url(_dep_ref(host="octo.ghe.com"))
         assert url == "https://octo.ghe.com/owner/repo.git"
 
     def test_https_with_custom_port(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
-        url = backend.build_clone_https_url(_dep_ref(port=8443), token=None)
+        url = backend.build_clone_https_url(_dep_ref(port=8443))
         assert ":8443" in url
 
     def test_http_insecure(self):
@@ -235,28 +216,14 @@ class TestADOBackend:
             ado_repo="myrepo",
         )
 
-    def test_https_with_pat(self):
+    def test_https_url_is_credential_free(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
-        url = backend.build_clone_https_url(self._ado_dep(), token="ado_pat_xyz")
+        url = backend.build_clone_https_url(self._ado_dep())
         parsed = urlparse(url)
+        assert "@" not in url
         assert parsed.username is None
         assert parsed.hostname == "dev.azure.com"
         assert parsed.path == "/myorg/myproj/_git/myrepo"
-
-    def test_https_bearer_scheme_drops_token(self):
-        backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
-        url = backend.build_clone_https_url(
-            self._ado_dep(), token="bearer_jwt", auth_scheme="bearer"
-        )
-        # Bearer goes via env, NOT in URL.
-        assert "bearer_jwt" not in url
-        # Still a valid ADO URL.
-        assert "myorg" in url
-
-    def test_https_empty_token(self):
-        backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
-        url = backend.build_clone_https_url(self._ado_dep(), token="")
-        assert "@" not in url
 
     def test_ssh_url(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
@@ -278,7 +245,7 @@ class TestADOBackend:
             ado_repo="myrepo",
         )
         with pytest.raises(ValueError, match=r"missing ado_organization"):
-            backend.build_clone_https_url(bad_dep, token="x")
+            backend.build_clone_https_url(bad_dep)
 
     def test_ssh_missing_org_raises_value_error(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
@@ -308,13 +275,11 @@ class TestADOBackend:
 
 
 class TestGenericGitBackend:
-    def test_https_never_embeds_token(self):
+    def test_https_url_is_credential_free(self):
         backend = GenericGitBackend(host_info=_info("gitea.example.com", "generic"))
-        # Even when a token is passed, generic hosts defer to credential
-        # helpers -- we never embed the token in the URL.
-        url = backend.build_clone_https_url(_dep_ref(host="gitea.example.com"), token="some_token")
+        # Generic hosts defer to credential helpers / git env.
+        url = backend.build_clone_https_url(_dep_ref(host="gitea.example.com"))
         parsed = urlparse(url)
-        assert "some_token" not in url
         assert parsed.username is None and parsed.password is None
         assert parsed.hostname == "gitea.example.com"
         assert parsed.path == "/owner/repo.git"
