@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.quality.taxonomy_inventory_plugin import spawns_processes
+
 RATCHET_TEST_SCOPE = "repository"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -689,3 +691,118 @@ def test_tm010_legacy_moved_compliant_and_removed_entries_do_not_fail(
             {key: frozenset() for key in BASELINE_LISTS},
             frozenset(),
         )
+
+
+@pytest.mark.parametrize(
+    ("source", "spawns"),
+    [
+        pytest.param(
+            "def test_a():\n    import subprocess as api\n    api.run(['x'])\n\n"
+            "def test_b():\n    import os as api\n    api.getcwd()\n",
+            True,
+            id="conflicting-aliases-in-separate-tests",
+        ),
+        pytest.param(
+            "def test_a():\n    from os import system\n\ndef test_b():\n    system('x')\n",
+            False,
+            id="alias-does-not-leak-across-functions",
+        ),
+        pytest.param(
+            "from asyncio.subprocess import create_subprocess_exec\n\n"
+            "async def test():\n    await create_subprocess_exec('x')\n",
+            True,
+            id="asyncio-subprocess-direct-import",
+        ),
+        pytest.param(
+            "import asyncio\n\nasync def test():\n"
+            "    await asyncio.subprocess.create_subprocess_shell('x')\n",
+            True,
+            id="asyncio-subprocess-attribute",
+        ),
+    ],
+)
+def test_tm014_spawn_detection_respects_scopes_and_asyncio(source: str, spawns: bool) -> None:
+    assert spawns_processes(source) is spawns
+
+
+def _allowance_repo(root: Path, lists: dict[str, list[str]]) -> Path:
+    baseline = root / "tests" / "quality" / "test_taxonomy_baseline.json"
+    baseline.parent.mkdir(parents=True)
+    payload = {"doc": "x", "schema_version": 1, **lists}
+    baseline.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for command in (
+        ["init", "-q"],
+        ["add", "-A"],
+        [
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    ):
+        subprocess.run(["git", "-C", str(root), *command], check=True, capture_output=True)
+    return baseline
+
+
+def _run_allowances(root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "check_taxonomy_allowances.py"),
+            "--root",
+            str(root),
+            "--base-ref",
+            "HEAD",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_tm015_appending_an_allowance_fails_against_base(tmp_path: Path) -> None:
+    lists = {
+        "misplaced_modules": [],
+        "promise_exempt_modules": ["tests/unit/test_old.py"],
+        "unclassified_modules": ["tests/unit/test_old.py"],
+    }
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "test_old.py").write_text("", encoding="utf-8")
+    baseline = _allowance_repo(tmp_path, lists)
+    grown = {**lists, "unclassified_modules": ["tests/unit/test_new.py", "tests/unit/test_old.py"]}
+    baseline.write_text(json.dumps({"doc": "x", "schema_version": 1, **grown}), encoding="utf-8")
+
+    result = _run_allowances(tmp_path)
+
+    assert result.returncode == 1
+    assert (
+        "[x] tests/unit/test_new.py: added to unclassified_modules in "
+        "tests/quality/test_taxonomy_baseline.json. Fix:"
+    ) in result.stderr
+
+
+def test_tm015_validated_move_rekey_passes(tmp_path: Path) -> None:
+    lists = {
+        "misplaced_modules": [],
+        "promise_exempt_modules": ["tests/unit/test_moved.py"],
+        "unclassified_modules": ["tests/unit/test_moved.py"],
+    }
+    baseline = _allowance_repo(tmp_path, lists)
+    (tmp_path / "tests" / "integration").mkdir(parents=True)
+    (tmp_path / "tests" / "integration" / "test_moved.py").write_text("", encoding="utf-8")
+    moved = {
+        key: [entry.replace("unit", "integration") for entry in value]
+        for key, value in lists.items()
+    }
+    baseline.write_text(json.dumps({"doc": "x", "schema_version": 1, **moved}), encoding="utf-8")
+
+    result = _run_allowances(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "[+] taxonomy allowances did not grow" in result.stdout

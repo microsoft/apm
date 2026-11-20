@@ -475,6 +475,7 @@ These checks run without a policy file:
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
+- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
 Marketplace object declarations must match one locked coordinate through
@@ -775,10 +776,18 @@ with at least one violation (exit `1`) and `hash_mismatch` (always exit
 
 Discovery outcomes APM can emit (see `PolicyFetchResult.outcome`):
 `found`, `absent`, `cached_stale`, `cache_miss_fetch_fail`, `garbage_response`,
-`malformed`, `disabled`, `no_git_remote`, `empty`, `hash_mismatch`.
-`hash_mismatch` is always fail-closed; the other fetch-failure outcomes
-are fail-open by default and become fail-closed when the project opts in
-via `policy.fetch_failure_default: block`.
+`malformed`, `disabled`, `no_git_remote`, `empty`, `hash_mismatch`,
+`incomplete_chain`. `install`, `audit --ci`, `approve` and `update` handle
+each outcome the same way:
+
+- `hash_mismatch` and `incomplete_chain` always block.
+- `cached_stale` enforces the cached policy; it blocks when that policy sets
+  `fetch_failure: block`.
+- `absent`, `no_git_remote`, `empty`, `malformed`, `cache_miss_fetch_fail`
+  and `garbage_response` proceed without org policy by default and block
+  when the project sets `policy.fetch_failure_default: block`.
+- A policy field of the wrong type (for example `enforcement: [block]`) is
+  `malformed`.
 
 A malformed project manifest (`apm.yml`) is a separate concern from a
 malformed policy file. When `apm.yml` cannot be parsed (invalid YAML or

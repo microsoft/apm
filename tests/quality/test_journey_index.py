@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = [pytest.mark.component]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-DOC-journey-index")]
 
 RATCHET_TEST_SCOPE = "repository"
 

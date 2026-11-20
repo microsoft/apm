@@ -607,10 +607,21 @@ def _i9_no_noise(before, after, result: CommandResult | None, model, op) -> list
                 repeated[line.strip()] = None
             seen.add(line.strip())
     found.extend(Violation("I9", f"duplicate 'integrated' line: {line!r}") for line in repeated)
+    # A duplicate that a strict known output cell owns is reported by the global
+    # output hook on the same command; the family law does not report it twice.
+    from tests.utils.lifecycle_evidence import owned_duplicate_lines
+
+    owned = owned_duplicate_lines(result)
+    found = [v for v in found if _duplicated_line(v.message) not in owned]
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
         if "Traceback (most recent call last)" in text:
             found.append(Violation("I9", f"{stream} has a Python traceback"))
     return found
+
+
+def _duplicated_line(message: str) -> str | None:
+    match = re.search(r": '(.*)'$", message)
+    return match.group(1) if match else None
 
 
 _CHECKS: dict[str, _Check] = {

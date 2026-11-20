@@ -358,3 +358,23 @@ def test_provisional_baseline_requires_explicit_allow(tmp_path: Path) -> None:
     assert provisional.stderr == ""
     assert finalized.returncode == 0
     assert finalized.stderr == ""
+
+
+def test_unique_but_present_test_is_not_a_move_source(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    named = "class TestX:\n    def test_value(self):\n        assert 1 == 1\n"
+    _write(root, "test_a.py", named.replace("1 == 1", "2 == 2"))
+    _write(root, "test_b.py", named)
+    _write(root, "integration/test_c.py", named)
+    _track_tests(root)
+    baseline = root / "baseline.json"
+    pair = {"tests/test_a.py": ["TestX::test_value"], "tests/test_b.py": ["TestX::test_value"]}
+    _write_baseline(baseline, _payload(bodies=pair))
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 1
+    assert "[x] tests/integration/test_c.py: test TestX::test_value duplicates the body" in (
+        result.stderr
+    )
+    assert "moved" not in result.stdout

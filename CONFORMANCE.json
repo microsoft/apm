@@ -50,8 +50,11 @@
       "keyword": "MUST",
       "section": "4.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_ext_behavior_reqs.py::test_apm_dependency_entry_vendor_keys_are_ignored[git]",
+        "tests/spec_conformance/test_ext_behavior_reqs.py::test_apm_dependency_entry_vendor_keys_are_ignored[path]",
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_preserves_x_extension_keys_on_round_trip"
       ]
     },
@@ -198,8 +201,9 @@
       "keyword": "SHOULD",
       "section": "5.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_reinstall_with_matching_checkout_skips_download_and_keeps_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_resolution_metadata"
       ]
     },
@@ -233,8 +237,9 @@
       "keyword": "MUST",
       "section": "5.6",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_update_redownloads_direct_semver_dependency_when_tag_is_unchanged",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_records_registry_digest"
       ]
     },
@@ -268,8 +273,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_hash_mismatch_fails_before_any_extraction",
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_with_matching_hash_extracts",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed"
       ]
@@ -280,8 +287,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
       ]
     },
@@ -291,8 +299,12 @@
       "keyword": "MUST",
       "section": "5.6.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[install-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[install-frozen]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_tree_sha256_canonicalisation_invariant"
       ]
     },
@@ -302,8 +314,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 12,
+      "test_count": 14,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[1-False]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[4-True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-bare64-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-fresh]",
@@ -324,8 +338,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[install-frozen]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_reverifies_deployed_file_hashes_and_fails_closed",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_deployed_file_hash_mismatch_fails_closed"
       ]
@@ -336,8 +352,9 @@
       "keyword": "SHOULD",
       "section": "5.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
       ],
       "waivers": [
@@ -465,8 +482,16 @@
       "keyword": "MUST",
       "section": "4.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 9,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[blank-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[empty-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[float]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[int-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[int]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-version]",
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_reqs.py::test_manifest_name_is_non_empty_string"
       ]
     },
@@ -476,8 +501,16 @@
       "keyword": "MUST",
       "section": "4.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 9,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[blank-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[empty-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[float]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[int-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[int]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-name]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_manifest_without_string_identity_is_refused[no-version]",
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_reqs.py::test_manifest_missing_name_rejected_by_schema"
       ]
     },
@@ -487,8 +520,9 @@
       "keyword": "SHOULD",
       "section": "4.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_init_emits_named_project_with_semver_version_string",
         "tests/spec_conformance/test_manifest_reqs.py::test_manifest_version_is_semver_2_0_0"
       ]
     },
@@ -498,8 +532,9 @@
       "keyword": "MUST",
       "section": "4.2.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_vendor_extension_target_identifier_is_accepted",
         "tests/spec_conformance/test_manifest_reqs.py::test_manifest_target_enum_is_pinned"
       ]
     },
@@ -509,8 +544,9 @@
       "keyword": "MUST",
       "section": "4.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_install_rewrite_preserves_unknown_top_level_keys",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_missing_source_key"
       ]
     },
@@ -520,8 +556,18 @@
       "keyword": "MUST",
       "section": "4.3.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 11,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_local_path_production_parses_as_local[../shared/pkg]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_local_path_production_parses_as_local[./packages/local]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_dependency_productions_parse[https-url]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_dependency_productions_parse[scp-url-ref]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_dependency_productions_parse[shorthand-host]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_dependency_productions_parse[shorthand-ref]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_dependency_productions_parse[ssh-port]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_outside_the_grammar_is_rejected_naming_the_entry[a b/c]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_outside_the_grammar_is_rejected_naming_the_entry[https://]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_string_outside_the_grammar_is_rejected_naming_the_entry[lonely]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_apm_source_field_has_supported_shapes"
       ]
     },
@@ -544,8 +590,17 @@
       "keyword": "MUST",
       "section": "4.3.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 10,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[None-git@github.com:acme/x.git-acme/x]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[None-git@gitlab.com:acme/x.git-gitlab.com/acme/x]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[None-https://github.com/acme/x#v1.0.0-acme/x#v1.0.0]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[None-https://github.com/acme/x.git-acme/x]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[None-https://gitlab.example.com/acme/x-gitlab.example.com/acme/x]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[gitlab.com-git@github.com:acme/x.git-github.com/acme/x]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[gitlab.com-git@gitlab.com:acme/x.git-acme/x]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[gitlab.com-https://github.com/acme/x-github.com/acme/x]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_writer_strips_only_the_selected_default_host[gitlab.com-https://gitlab.com/acme/x-acme/x]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_pinned_commit"
       ]
     },
@@ -630,8 +685,10 @@
       "keyword": "MUST",
       "section": "4.2.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_registry_entry_rejects_typos_but_keeps_vendor_keys[default]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_registry_entry_rejects_typos_but_keeps_vendor_keys[openapm-v0.1]",
         "tests/spec_conformance/test_manifest_reqs.py::test_producer_rejects_unknown_registries_keys"
       ]
     },
@@ -655,8 +712,19 @@
       "keyword": "MUST",
       "section": "4.7",
       "status": "active",
-      "test_count": 1,
+      "test_count": 12,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_accepts_safe_package_source[./tools/a]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_accepts_safe_package_source[acme/tool]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_accepts_safe_package_source[https://example.com/acme/tool.git]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[absolute-local]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[dotdot]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[http]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[nested-dotdot]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[port]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[query]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[ssh]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_marketplace_rejects_unsafe_package_source[userinfo]",
         "tests/spec_conformance/test_manifest_reqs.py::test_producer_publishes_apm_yml_at_repo_root"
       ]
     },
@@ -666,8 +734,10 @@
       "keyword": "MUST",
       "section": "4.6.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix[sha384-96]",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix[sha512-128]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_restricts_policy_hash_algorithm_to_strong_set"
       ]
     },
@@ -924,8 +994,11 @@
       "keyword": "MUST",
       "section": "6.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_explicit_policy_wins_and_skips_every_provider",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_no_provider_yields_means_no_policy",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_providers_run_in_configured_order_and_first_policy_wins",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_valid_extends_passes_schema"
       ]
     },
@@ -957,8 +1030,13 @@
       "keyword": "MUST",
       "section": "6.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 6,
       "tests": [
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_cross_host_extends_is_rejected_before_any_fetch",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_extends_host_must_match_the_leaf_host[acme/.github-True]",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_extends_host_must_match_the_leaf_host[github.com/acme/.github-True]",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_extends_host_must_match_the_leaf_host[gitlab.com/acme/.github-False]",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_extends_host_must_match_the_leaf_host[https://evil.example.com/acme/.github-False]",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_cycle_is_rejected"
       ]
     },
@@ -1050,8 +1128,10 @@
       "keyword": "MUST",
       "section": "6.1.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_several_non_origin_remotes_fail_closed_naming_candidates",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_single_non_origin_remote_identifies_the_project",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_deny_list_shape"
       ]
     },
@@ -1430,9 +1510,15 @@
       "keyword": "MUST",
       "section": "7.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 7,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_resolution_provenance_in_lockfile"
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_resolution_provenance_in_lockfile",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_semver_range_drifts_unless_character_equal[equal-compound]",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_semver_range_drifts_unless_character_equal[equal]",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_semver_range_drifts_unless_character_equal[extra-space]",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_semver_range_drifts_unless_character_equal[lock-extra-space]",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_semver_range_drifts_unless_character_equal[operator]",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_semver_range_drifts_unless_character_equal[same-set]"
       ]
     },
     {
@@ -1441,9 +1527,11 @@
       "keyword": "MUST",
       "section": "7.6",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_rejects_unresolvable_dependency"
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_rejects_unresolvable_dependency",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_why_returns_every_root_chain_in_lexicographic_order",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_why_terminates_deterministically_on_a_cyclic_lock"
       ]
     },
     {
@@ -1452,9 +1540,10 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_handles_commit_pin"
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_handles_commit_pin",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_exceeding_depth_cap_fails_naming_the_chain"
       ]
     },
     {
@@ -1501,9 +1590,10 @@
       "keyword": "MUST",
       "section": "7.5.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_tilde_range"
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_tilde_range",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
       ]
     },
     {
@@ -1695,9 +1785,13 @@
       "keyword": "MUST",
       "section": "10.9",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_archive_path_traversal_fails_closed"
+        "tests/spec_conformance/test_manifest_reqs.py::test_archive_path_traversal_fails_closed",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_rejected_archive_leaves_no_partial_extraction",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_unsafe_archive_entry_is_rejected[absolute]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_unsafe_archive_entry_is_rejected[dotdot]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_unsafe_archive_entry_is_rejected[symlink]"
       ]
     },
     {
@@ -1706,9 +1800,15 @@
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 7,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_credentials_per_host_class"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_credentials_per_host_class",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_cross_host_redirect_drops_every_credential_header",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_github_credential_is_never_resolved_for_another_host[bitbucket.org]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_github_credential_is_never_resolved_for_another_host[evil-github.com]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_github_credential_is_never_resolved_for_another_host[github.com.evil.example]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_github_credential_is_never_resolved_for_another_host[gitlab.com]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_origin_bound_fetch_never_contacts_another_host"
       ]
     },
     {
@@ -1728,9 +1828,10 @@
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases"
+        "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
       ]
     },
     {
@@ -1739,9 +1840,12 @@
       "keyword": "MUST",
       "section": "4.2.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_http_registry_url_without_opt_in"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_http_registry_url_without_opt_in",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[openapm-v0.1]"
       ]
     },
     {
@@ -1750,9 +1854,12 @@
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_redacts_credential_material"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_redacts_credential_material",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files[.env]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files[id_ed25519]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files[server.pem]"
       ]
     },
     {
@@ -1792,9 +1899,10 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_persist_approvals_user_locally_not_in_project_manifest"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_persist_approvals_user_locally_not_in_project_manifest",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_interactive_approval_is_persisted_per_user_never_in_apm_yml"
       ]
     },
     {
@@ -1803,8 +1911,9 @@
       "keyword": "MUST",
       "section": "10.14",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_hook_pin_parity_reqs.py::test_frozen_install_and_audit_agree_on_a_hook_approval_pin",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_resolve_executable_trust_through_deny_wins_precedence",
         "tests/spec_conformance/test_portable_mcp_approval_reqs.py::test_frozen_install_reaches_the_install_verdict"
       ]
@@ -1815,9 +1924,10 @@
       "keyword": "MUST",
       "section": "10.14",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_required_package_audit_asserts_presence_not_deployment"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_required_package_audit_asserts_presence_not_deployment",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_parked_required_package_satisfies_presence_and_is_reported_separately"
       ]
     },
     {
@@ -1889,9 +1999,19 @@
       "keyword": "MUST",
       "section": "8.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 11,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_target_detection_predicate_binding"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_target_detection_predicate_binding",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_explicit_only_targets_are_never_auto_detected_or_in_all",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[claude]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[codex]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[copilot]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[cursor]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[gemini]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[grok-build]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[kiro]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[opencode]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_target_is_detected_only_by_its_own_root[windsurf]"
       ]
     },
     {
@@ -1925,9 +2045,10 @@
       "keyword": "MUST",
       "section": "4.2.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_routes_vendor_target_identifiers_to_handlers"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_routes_vendor_target_identifiers_to_handlers",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_vendor_target_identifier_parses"
       ]
     },
     {
@@ -2012,9 +2133,12 @@
       "keyword": "MUST",
       "section": "8.5.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_project_scoped_native_hook_command_is_portably_anchored"
+        "tests/spec_conformance/test_manifest_reqs.py::test_project_scoped_native_hook_command_is_portably_anchored",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_claude_hook_command_runs_from_outside_the_project",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_claude_hook_path_with_shell_expansion_character_is_rejected[backtick]",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_claude_hook_path_with_shell_expansion_character_is_rejected[dollar]"
       ]
     },
     {
