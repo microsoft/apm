@@ -441,9 +441,14 @@ def test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout(
     for path, content in expected.items():
         if path != "apm.lock.yaml":
             assert after.get(path) == content, path
-    assert set(after) - set(expected) <= {_LEGACY_COPILOT_MCP}
-    if _LEGACY_COPILOT_MCP in after:
-        assert "notes" not in _mcp_servers(world.project / _LEGACY_COPILOT_MCP)
+    # APM created .github/mcp.json and the move empties it, so it is deleted
+    # and named in the move summary (#4524).
+    assert set(after) == set(expected)
+    assert not (world.project / _LEGACY_COPILOT_MCP).exists()
+    summary = " ".join((out + err).split())
+    assert (
+        f"Removed empty {_LEGACY_COPILOT_MCP} (APM created it and no longer writes it)" in summary
+    )
     assert _mcp_servers(world.project / ".mcp.json")["notes"] == {
         "type": "stdio",
         "command": "node",
@@ -451,6 +456,44 @@ def test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout(
     }
     assert "@notes" in (world.project / ".kiro/agents/notes-agent.md").read_text()
     _assert_lock_matches_disk(world)
+
+    world.ok("audit", "--ci")
+    world.ok("install", "--frozen")
+    assert world.snapshot() == after
+    world.ok("install")
+    assert world.snapshot() == after
+
+
+# #4524: a user-created .github/mcp.json that also holds APM's entry. The
+# Copilot MCP move removes only APM's entry and keeps the file: its parsed
+# content is the user's file minus that entry, the user's server is unchanged
+# and is not moved to .mcp.json, and a repeat run changes no bytes.
+_USER_SERVER = {"type": "local", "command": "uvx", "args": ["my-server"], "tools": ["*"]}
+
+
+def _user_mcp_json(servers: dict) -> bytes:
+    """A hand-written file in the user's own style (4-space indent, final newline)."""
+    return (json.dumps({"mcpServers": servers}, indent=4) + "\n").encode("utf-8")
+
+
+def test_c7_036_user_created_copilot_mcp_file_keeps_user_server_on_upgrade(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _World(tmp_path / "c7", apm_binary_path, FIXTURE_036_COPILOT_KIRO)
+    legacy = world.project / _LEGACY_COPILOT_MCP
+    apm_entry = _mcp_servers(legacy)["notes"]
+    legacy.write_bytes(_user_mcp_json({"mine": _USER_SERVER, "notes": apm_entry}))
+
+    code, out, err = world.run("install")
+
+    assert code == 0, f"{out}\n{err}"
+    assert legacy.is_file()
+    assert json.loads(legacy.read_text(encoding="utf-8")) == {"mcpServers": {"mine": _USER_SERVER}}
+    root_servers = _mcp_servers(world.project / ".mcp.json")
+    assert "mine" not in root_servers
+    assert root_servers["notes"] == {"type": "stdio", "command": "node", "args": ["server.js"]}
+    _assert_lock_matches_disk(world)
+    after = world.snapshot()
 
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")

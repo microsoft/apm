@@ -85,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm uninstall` prints each output line at most once per cause when packages survive the removal. (#4219, #4338)
 - `apm update` re-verifies each marketplace dependency's recorded provenance against its registered catalog: it restores the catalog origin and digest, and refuses a lockfile whose provenance no longer matches. (#4338)
 - A top-level `workspaces:` key in `apm.yml` now gets a warning that names it as reserved for OpenAPM v0.2, and `dependencies.conflict_resolution: nest` refuses the install before anything is written. (#4283)
+- Upgrading from 0.36 no longer leaves an empty `.github/mcp.json` behind: when APM created it and the move to `.mcp.json` empties it, install deletes it and says so; a file with other entries keeps them. (#4524)
 - A lockfile whose `apm_version` is `unknown` now moves APM-written entries out of the retired `.github/mcp.json` and reports it, like a lockfile from an earlier known version. (#4283)
 - `apm uninstall` of another package exits 0 and reconciles LSP servers when a remaining package declares only LSP servers, whether approved, ungated or denied. (#4283)
 - A package that declares only LSP servers installs from git and marketplace sources, as it already did from a local path. (#4283)
