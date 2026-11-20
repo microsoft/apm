@@ -8,7 +8,10 @@ import pytest
 
 # The downloader stack imports these modules lazily, on first use. Load them
 # now: first imported inside a test below, each would bind the patched
-# ``is_github_hostname`` (returns False) for the rest of the worker.
+# ``is_github_hostname`` (returns False) for the rest of the worker. The tests
+# must patch it at its source: _preflight_auth_check imports it inside the
+# function. The session check in tests/conftest.py (pytest_sessionfinish)
+# fails the run if any such mock is left behind.
 import apm_cli.deps.artifactory_orchestrator
 import apm_cli.deps.clone_engine
 import apm_cli.deps.download_strategies
