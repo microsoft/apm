@@ -267,6 +267,8 @@ class InstallService:
             update_refs=request.update_refs,
             frozen=request.frozen,
             trust_transitive_mcp=request.trust_transitive_mcp,
+            install_mcp=request.install_mcp,
+            mcp_runtime=request.mcp_runtime,
             verbose=request.verbose,
             only_packages=request.only_packages,
             force=request.force,

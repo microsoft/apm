@@ -80,6 +80,7 @@ class TestInstallContextFields:
         # effective executable-trust projection consumed by service reconciliation
         "exec_allow_map",
         "exec_allow_resolved",
+        "mcp_policy_enforced",
         # issue #2549: read-only config mode for global dry-run
         "create_config",
     )

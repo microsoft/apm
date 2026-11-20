@@ -228,10 +228,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-require-hashes-enforcement",
         path="src/apm_cli/install/pipeline.py",
-        old="        _enforce_require_hashes(ctx)",
+        old="        LockfileBuilder(ctx).build_and_save()",
         new=(
             "        if ctx.policy.security.integrity.require_hashes:\n"
-            "            _enforce_require_hashes(ctx)"
+            "            LockfileBuilder(ctx).build_and_save()"
         ),
         intent="The install pipeline re-reads require_hashes from policy itself.",
     ),

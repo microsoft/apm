@@ -13,7 +13,7 @@ Coverage matrix (plan.md section F, 17 scenarios):
   I5  block + transport SSH denied -> fails with transport detail
   I6  block + target mismatch -> fails after targets phase
   I7  CLI --target override fixes I6 -> succeeds
-  I8  block + transitive MCP denied -> APM installed, MCP NOT written, non-zero
+  I8  block + transitive MCP denied -> nothing committed, non-zero
   I9  block + APM_POLICY_DISABLE=1 -> succeeds with loud warning
   I10 dry-run + denied deps -> exit 0, 'Would be blocked' lines, no fs mutation
   I11 dry-run + 6+ denied deps -> 5 lines + tail "and N more"
@@ -498,13 +498,14 @@ class TestI7TargetOverrideFixes:
 
 
 # =====================================================================
-# I8: block + transitive MCP denied -> APM installed, MCP NOT written
+# I8: block + transitive MCP denied -> nothing committed (req-pl-002)
 # =====================================================================
 
 
 class TestI8TransitiveMCPDenied:
-    """Transitive MCP dep denied -> APM packages installed,
-    MCP configs NOT written, exit non-zero."""
+    """Transitive MCP dep denied -> exit non-zero before any commit: the
+    lockfile is byte-identical, no package file deploys, no MCP config is
+    written."""
 
     @patch(_PATCH_UPDATES, return_value=None)
     @patch(_PATCH_MCP_INSTALL, return_value=0)
@@ -556,13 +557,28 @@ class TestI8TransitiveMCPDenied:
         downloaded.package = APMPackage.from_apm_yml(carrier_dir / "apm.yml")
         downloaded.install_path = carrier_dir
 
+        lock_path = project_dir / "apm.lock.yaml"
+        lock_before = lock_path.read_bytes()
+        outside_modules_before = sorted(
+            p.relative_to(project_dir).as_posix()
+            for p in project_dir.rglob("*")
+            if p.is_file() and p.relative_to(project_dir).parts[0] != "apm_modules"
+        )
+
         result = _invoke_install(runner, ["--trust-transitive-mcp"])
 
         out = result.output
         assert result.exit_code != 0, f"Expected non-zero exit for transitive MCP block:\n{out}"
-        assert "mcp" in out.lower() or "transitive" in out.lower(), (
-            f"Expected transitive MCP error detail:\n{out}"
+        assert "evil-mcp-server" in out, f"Expected the denied server named:\n{out}"
+        assert "remain installed" not in out, out
+        assert lock_path.read_bytes() == lock_before, out
+        outside_modules_after = sorted(
+            p.relative_to(project_dir).as_posix()
+            for p in project_dir.rglob("*")
+            if p.is_file() and p.relative_to(project_dir).parts[0] != "apm_modules"
         )
+        assert outside_modules_after == outside_modules_before, out
+        mock_mcp_install.assert_not_called()
 
 
 # =====================================================================

@@ -34,7 +34,7 @@ class PreparedMcpIntegration:
         return self.omission_view.omission_evidence(lockfile)
 
 
-def prepare_mcp_integration(
+def prepare_mcp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
     mcp_deps: list["MCPDependency"],
@@ -51,12 +51,14 @@ def prepare_mcp_integration(
     executable_context: tuple[dict | None, bool] = (None, False),
     no_policy: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
+    prospective_lock: "LockFile | None" = None,
 ) -> PreparedMcpIntegration:
     """Collect and admit once, without native writes or ownership adoption.
 
     Every dependency-declared server is admitted by the security/trust.py
     owner inside ``CurrentMcpConfigView.select``; parked servers carry their
-    omission evidence on the same view.
+    omission evidence on the same view. *prospective_lock* names the package
+    set an install is about to commit, before ``apm.lock.yaml`` is written.
     """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
@@ -75,8 +77,10 @@ def prepare_mcp_integration(
         trust_context=getattr(allow_map, "trust_context", None),
     )
     current_view = None
-    if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
-        lockfile = LockFile.read(lock_path) if lock_path.exists() else None
+    lockfile = prospective_lock
+    if lockfile is None and lock_path.exists():
+        lockfile = LockFile.read(lock_path)
+    if should_install or mcp_deps or apm_modules_path.exists() or lockfile is not None:
         # This run records new omission evidence, so none is verified here.
         current_view = CurrentMcpConfigView.select(
             apm_package,
@@ -325,6 +329,7 @@ def run_mcp_integration(  # noqa: PLR0913
     pre_install_lock: "LockFile | None" = None,
     frozen: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
+    policy_enforced: bool = False,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -374,8 +379,8 @@ def run_mcp_integration(  # noqa: PLR0913
     Raises:
         apm_cli.policy.install_preflight.PolicyBlockError: When the merged
             MCP set is blocked by org policy. Callers must catch this,
-            report the violation, and exit non-zero; already-installed APM
-            packages are left in place.
+            report the violation, and exit non-zero. A package install
+            enforces the same policy before anything deploys.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import LockFile
@@ -391,7 +396,6 @@ def run_mcp_integration(  # noqa: PLR0913
         split_mcp_claims,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
-    from apm_cli.policy.install_preflight import run_policy_preflight
 
     previous_lock = LockFile.read(lock_path) if lock_path.exists() else None
     native_hashes = DeploymentLedgerCodec.mcp_native_hashes(previous_lock) if previous_lock else {}
@@ -417,38 +421,22 @@ def run_mcp_integration(  # noqa: PLR0913
     if frozen and current_view is not None:
         mcp_deps = current_view.replay_recorded_roots(mcp_deps, old_mcp_configs)
 
-    # The pipeline gate phase (policy_gate.py) checks direct APM deps
-    # and direct MCP deps from apm.yml.  However, transitive MCP
-    # servers (discovered via collect_transitive above) are only known
-    # after APM packages are installed.  Run a second preflight
-    # against the *merged* MCP set (direct + transitive) BEFORE
-    # MCPIntegrator writes runtime configs.  The caller is responsible
-    # for catching PolicyBlockError and aborting the MCP write while
-    # leaving already-installed APM packages in place.
-    from apm_cli.install.mcp.native_runtimes import native_runtimes_of
+    # Org policy on the merged (direct + transitive) MCP set is owned by
+    # install/commit_gate.py. A package install enforced it before anything
+    # deployed (policy_enforced); service-only entries enforce it here,
+    # before MCPIntegrator writes runtime configs.
+    if should_install and not policy_enforced:
+        from apm_cli.install.commit_gate import enforce_mcp_policy
 
-    # A server every active runtime loads natively from its plugin is written
-    # nowhere by APM; native admission already applied org MCP policy to it.
-    active_runtimes = (
-        [runtime]
-        if runtime is not None
-        else target_decision.runtime_targets_for_scope(user_scope=user_scope)
-        if target_decision is not None
-        else None
-    )
-    policy_deps = [
-        dep
-        for dep in mcp_deps
-        if not active_runtimes or not set(active_runtimes) <= native_runtimes_of(dep)
-    ]
-    if should_install and policy_deps:
-        run_policy_preflight(
+        enforce_mcp_policy(
+            mcp_deps,
+            brought_in_by=current_view.brought_in_by if current_view is not None else None,
+            runtime=runtime,
+            target_decision=target_decision,
+            user_scope=user_scope,
             project_root=project_root,
-            mcp_deps=policy_deps,
-            mcp_brought_in_by=(current_view.brought_in_by if current_view is not None else None),
             no_policy=no_policy,
             logger=logger,
-            dry_run=False,
         )
 
     mcp_count = 0

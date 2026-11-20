@@ -138,6 +138,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
                 frozenset(complete_dep_keys) if complete_dep_keys is not None else None
             ),
             claude_native_keys=frozenset(getattr(ctx, "claude_native_keys", ())),
+            mcp_policy_enforced=bool(getattr(ctx, "mcp_policy_enforced", False)),
         ),
         force=bool(getattr(ctx, "force", False)),
     )

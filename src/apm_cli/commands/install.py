@@ -1909,6 +1909,8 @@ def _install_apm_packages(ctx, outcome):
                 audit_override=ctx.audit_override,
                 legacy_skill_paths=ctx.legacy_skill_paths,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
+                install_mcp=should_install_mcp,
+                mcp_runtime=ctx.runtime,
                 frozen=ctx.frozen,
                 plan_callback=ctx.plan_callback,
                 skill_subset=ctx.skill_subset,
@@ -1928,6 +1930,7 @@ def _install_apm_packages(ctx, outcome):
             ctx.target_decision = install_result.target_decision
             ctx.exec_allow_map = install_result.exec_allow_map
             ctx.exec_allow_resolved = install_result.exec_allow_resolved
+            ctx.mcp_policy_enforced = install_result.mcp_policy_enforced
             if install_result.disposition not in {
                 InstallDisposition.SUCCESS,
                 InstallDisposition.PARTIAL_SUCCESS,
@@ -2008,10 +2011,7 @@ def _install_apm_packages(ctx, outcome):
             ),
         )
     except PolicyBlockError:
-        logger.refusal(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()
         raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
     except RequiredIntegrationError as exc:

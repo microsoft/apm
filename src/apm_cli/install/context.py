@@ -74,6 +74,11 @@ class InstallContext:
     allow_insecure_hosts: tuple[str, ...] = ()
     trust_bin: bool | None = None
     trust_transitive_mcp: bool = False
+    # MCP servers the command integrates after this pipeline: the commit gate
+    # enforces their policy before any deploy (install/commit_gate.py).
+    install_mcp: bool = True
+    mcp_runtime: str | None = None
+    mcp_policy_enforced: bool = False
     transaction: Any = None  # InstallTransaction
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
     # Dependency keys routed to native Claude this run, admitted or parked.

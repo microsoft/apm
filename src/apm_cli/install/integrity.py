@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..deps.lockfile import LockedDependency
+from ..deps.lockfile import LockedDependency, LockFile
 
 if TYPE_CHECKING:
     from ..policy.schema import IntegrityPolicy
@@ -70,20 +70,19 @@ def enforce_require_hashes(deps: list[LockedDependency], *, enabled: bool) -> No
     )
 
 
-def enforce_installed_hash_policy(ctx: InstallContext) -> None:
-    """Enforce ``require_hashes`` against the freshly written lockfile."""
-    if ctx.no_policy:
+def enforce_installed_hash_policy(ctx: InstallContext, lockfile: LockFile | None) -> None:
+    """Enforce ``require_hashes`` against the lockfile this install would commit."""
+    if getattr(ctx, "no_policy", False):
         return
     policy_fetch = getattr(ctx, "policy_fetch", None)
     policy = getattr(policy_fetch, "policy", None) if policy_fetch else None
     if policy is None or not require_hashes_enabled(policy.security.integrity):
         return
 
-    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..deps.lockfile import get_lockfile_path
     from .phases.policy_gate import PolicyViolationError
 
     lockfile_path = get_lockfile_path(ctx.apm_dir)
-    lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise PolicyViolationError(
             "security.integrity.require_hashes is enabled but the lockfile at "

@@ -65,7 +65,6 @@ from .errors import (
 )
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
-from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
 from .outcome import (
     direct_dependency_failed,
     raise_direct_dependency_failure,
@@ -386,6 +385,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     frozen: bool = False,
     trust_transitive_mcp: bool = False,
     lsp_preflight=None,
+    install_mcp: bool = True,
+    mcp_runtime: str | None = None,
 ):
     """Install APM package dependencies.
 
@@ -526,6 +527,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
     ctx = InstallContext(
         trust_transitive_mcp=trust_transitive_mcp,
+        install_mcp=install_mcp,
+        mcp_runtime=mcp_runtime,
         project_root=project_root,
         apm_dir=apm_dir,
         source_root=source_root,
@@ -910,13 +913,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
         from .phases.lockfile import LockfileBuilder
 
+        # The commit gate checks the built lockfile (require_hashes) before
+        # this writes it; see install/commit_gate.py.
         LockfileBuilder(ctx).build_and_save()
-
-        # Fail-closed integrity gate: when security.integrity.require_hashes is
-        # on, every non-local lockfile entry must carry a content hash. A
-        # missing hash stops the install (the key only asserts hash-presence on
-        # the freshly-built lockfile; it does not add a second hashing pass).
-        _enforce_require_hashes(ctx)
 
         # ------------------------------------------------------------------
         # Phase: Post-deps local .apm/ content.

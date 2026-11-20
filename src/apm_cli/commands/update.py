@@ -289,6 +289,7 @@ def _run_mcp_lsp_integration(
     effective_allow_resolved: bool = False,
     force: bool = False,
     trust_transitive_mcp: bool = False,
+    mcp_policy_enforced: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -362,12 +363,10 @@ def _run_mcp_lsp_integration(
             scope=scope,
             executable_context=(effective_allow_executables, effective_allow_resolved),
             pre_install_lock=existing_lock,
+            policy_enforced=mcp_policy_enforced,
         )
     except PolicyBlockError:
-        logger.refusal(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()
         sys.exit(1)
 
@@ -930,6 +929,7 @@ def _run_dep_update_locked(
             target=target,
             legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
+            trust_transitive_mcp=trust_transitive_mcp,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -1006,6 +1006,7 @@ def _run_dep_update_locked(
                 effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
                 force=force,
                 trust_transitive_mcp=trust_transitive_mcp,
+                mcp_policy_enforced=getattr(result, "mcp_policy_enforced", False),
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))

@@ -1,0 +1,173 @@
+"""Install commit order: every check passes before anything is committed.
+
+An install commits two things: the files integrators deploy to targets and
+``apm.lock.yaml``. Spec req-pl-002 requires a blocking check to stop the
+install before any of those bytes is written, so this module is the single
+owner of the checks that guard both commit points:
+
+* :func:`check_before_deploy` runs once inside the integrate phase, after
+  every package is acquired and before the first integrator write.
+* :func:`check_before_lockfile` runs on the fully built lockfile before it
+  is written.
+
+A failing check raises; :class:`~apm_cli.install.transaction.InstallTransaction`
+then restores ``apm.yml`` and ``apm_modules`` staging, so nothing is committed.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.context import InstallContext
+
+
+class _SilentLogger:
+    """Discard collection output; the service stage reports admissions once."""
+
+    verbose = False
+
+    def __getattr__(self, _name: str) -> Any:
+        return lambda *_args, **_kwargs: None
+
+
+def policy_subject_mcp_deps(
+    mcp_deps: list[Any],
+    *,
+    runtime: str | None,
+    target_decision: EffectiveTargetDecision | None,
+    user_scope: bool,
+) -> list[Any]:
+    """Return the MCP servers APM itself would write for the active runtimes.
+
+    A server every active runtime loads natively from its plugin is written
+    nowhere by APM; native admission already applied org MCP policy to it.
+    """
+    from apm_cli.install.mcp.native_runtimes import native_runtimes_of
+
+    active_runtimes = (
+        [runtime]
+        if runtime is not None
+        else target_decision.runtime_targets_for_scope(user_scope=user_scope)
+        if target_decision is not None
+        else None
+    )
+    return [
+        dep
+        for dep in mcp_deps
+        if not active_runtimes or not set(active_runtimes) <= native_runtimes_of(dep)
+    ]
+
+
+def enforce_mcp_policy(
+    mcp_deps: list[Any],
+    *,
+    brought_in_by: dict[str, str] | None,
+    runtime: str | None,
+    target_decision: EffectiveTargetDecision | None,
+    user_scope: bool,
+    project_root: Path,
+    no_policy: bool,
+    logger: Any,
+    dry_run: bool = False,
+) -> None:
+    """Enforce org MCP policy on the merged direct and transitive server set."""
+    from apm_cli.policy.install_preflight import run_policy_preflight
+
+    subjects = policy_subject_mcp_deps(
+        mcp_deps, runtime=runtime, target_decision=target_decision, user_scope=user_scope
+    )
+    if not subjects:
+        return
+    run_policy_preflight(
+        project_root=project_root,
+        mcp_deps=subjects,
+        mcp_brought_in_by=brought_in_by,
+        no_policy=no_policy,
+        logger=logger,
+        dry_run=dry_run,
+    )
+
+
+def prospective_lockfile(ctx: InstallContext) -> LockFile:
+    """Return the package set this install is about to commit.
+
+    Every package is acquired before the first deploy, so its lock row is
+    known: rows acquired this run replace the existing lockfile's rows, and
+    only packages in the resolved graph are kept.
+    """
+    from apm_cli.deps.lockfile import LockFile
+
+    acquired = LockFile.from_installed_packages(ctx.installed_packages, ctx.dependency_graph)
+    for key, dependency in acquired.dependencies.items():
+        if key in ctx.package_hashes:
+            dependency.content_hash = ctx.package_hashes[key]
+    prospective = LockFile(apm_version=acquired.apm_version)
+    active = ctx.update_plan_complete_dep_keys
+    existing = ctx.existing_lockfile
+    if existing is not None:
+        for key, dependency in existing.dependencies.items():
+            if key in active and key not in acquired.dependencies:
+                prospective.dependencies[key] = dependency
+    prospective.dependencies.update(acquired.dependencies)
+    return prospective
+
+
+def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None:
+    """Collect the merged MCP set from acquired packages and enforce policy."""
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.install.mcp.integration import prepare_mcp_integration
+    from apm_cli.install.template import effective_allow_map
+
+    user_scope = is_user_scope(ctx.scope)
+    prepared = prepare_mcp_integration(
+        apm_package=ctx.apm_package,
+        mcp_deps=list(ctx.apm_package.get_all_mcp_dependencies()),
+        apm_modules_path=ctx.apm_modules_dir,
+        lock_path=get_lockfile_path(ctx.apm_dir),
+        should_install=True,
+        trust_transitive_mcp=ctx.trust_transitive_mcp,
+        logger=_SilentLogger(),
+        active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
+        user_scope=user_scope,
+        project_root=ctx.project_root,
+        executable_context=(effective_allow_map(ctx), True),
+        no_policy=ctx.no_policy,
+        claude_native_keys=frozenset(ctx.claude_native_keys),
+        prospective_lock=prospective,
+    )
+    view = prepared.current_view
+    enforce_mcp_policy(
+        list(prepared.dependencies),
+        brought_in_by=view.brought_in_by if view is not None else None,
+        runtime=ctx.mcp_runtime,
+        target_decision=ctx.target_decision,
+        user_scope=user_scope,
+        project_root=ctx.project_root,
+        no_policy=ctx.no_policy,
+        logger=ctx.logger,
+        dry_run=ctx.dry_run,
+    )
+    ctx.mcp_policy_enforced = True
+
+
+def check_before_deploy(ctx: InstallContext) -> None:
+    """Run every check that must pass before the first deployed byte."""
+    from apm_cli.install.integrity import enforce_installed_hash_policy
+
+    prospective = prospective_lockfile(ctx)
+    enforce_installed_hash_policy(ctx, prospective)
+    if ctx.install_mcp and not ctx.lockfile_only and ctx.apm_package is not None:
+        _check_merged_mcp_policy(ctx, prospective)
+
+
+def check_before_lockfile(ctx: InstallContext, lockfile: LockFile | None) -> None:
+    """Run every check on the built lockfile before it is written."""
+    from apm_cli.install.integrity import enforce_installed_hash_policy
+
+    enforce_installed_hash_policy(ctx, lockfile)

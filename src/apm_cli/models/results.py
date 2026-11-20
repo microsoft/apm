@@ -41,6 +41,8 @@ class InstallResult:
     active_package_keys: frozenset[str] | None = None
     # Dependencies whose Claude servers Claude loads from the native plugin.
     claude_native_keys: frozenset[str] = frozenset()
+    # The commit gate already enforced org policy on the merged MCP set.
+    mcp_policy_enforced: bool = False
 
 
 @dataclass

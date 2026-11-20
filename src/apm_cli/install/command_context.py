@@ -66,4 +66,6 @@ class InstallContext:
     trust_bin: bool | None = None
     exec_allow_map: builtins.dict[str, builtins.dict[str, bool]] | None = None
     exec_allow_resolved: bool = False
+    # The package pipeline's commit gate already enforced merged MCP policy.
+    mcp_policy_enforced: bool = False
     create_config: bool = True
