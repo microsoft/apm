@@ -19,7 +19,6 @@ import pytest
 from tests.integration._policy_scope_kit import (
     POLICY_CACHE_DIR,
     PolicyScopeWorld,
-    output,
     run_step,
     tree_snapshot,
 )
@@ -78,14 +77,16 @@ def test_invalid_refresh_keeps_the_cached_deny_for_install_and_audit(
         before = tree_snapshot(project)
 
         install = run_step(runner, ("install",), cwd=project, env=env, step="3-install", expected=1)
-        out = " ".join(output(install).split())
+        assert install.returncode == 1, install.stdout + install.stderr
+        out = " ".join((install.stdout + install.stderr).split())
         assert package.slug in out, out
         assert "proceeding without policy enforcement" not in out, out
 
         audit = run_step(
             runner, ("audit", "--ci"), cwd=project, env=env, step="4-audit", expected=1
         )
-        out = " ".join(output(audit).split())
+        assert audit.returncode == 1, audit.stdout + audit.stderr
+        out = " ".join((audit.stdout + audit.stderr).split())
         assert "dependency-denylist" in out, out
         assert package.slug in out, out
         assert tree_snapshot(project) == before
