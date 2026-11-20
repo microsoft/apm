@@ -1,15 +1,24 @@
 {
  "partition": "train2 classification and placement",
- "steps_done": [],
+ "steps_done": [
+  3,
+  4
+ ],
  "folds": {},
  "decisions": [
   "Scope: baseline unclassified_modules + misplaced_modules minus open-PR files and tests/quality, tests/fixtures, tests/lifecycle (never-edit).",
   "Protected test_architecture_* and *_lifecycle* modules: marker-only commit; never moved, even when they spawn processes from tests/unit.",
   "e2e = module runs the installed CLI (ApmLifecycleRunner, apm_binary_path, apm_engine_command, packaged_sample, run_cli); component = tmp_path, CliRunner, real files, repo file reads, git, http; unit = pure logic with mocks only.",
-  "Modules mixing CliRunner and real-binary tests are classified e2e (module must be uniform)."
+  "Modules mixing CliRunner and real-binary tests are classified e2e (module must be uniform).",
+  "Integration modules with only mocks and no fs/git/http/process boundary were classified unit and git mv'd to tests/unit (same file name): test_ado_ref_resolution_fallback, test_artifactory_probe_pipeline_e2e, test_auth_resolver, test_credential_fill_disambiguation, test_deps_cli_coverage, test_ghe_marketplace_install_e2e, test_mcp_coverage, test_outdated_coverage, test_output_formatters_coverage, test_tiered_resolver_integration, test_tiered_resolver_seed_e2e, test_uninstall_engine_coverage.",
+  "test_auth_resolver keeps its requires_e2e_mode mark; in tests/unit the gate is inert, so its pure env-var tests now run in the unit suite (verified passing).",
+  "Process-spawning tests/unit modules moved to tests/integration mirroring their subpackage (cache/, deps/, scripts/ with empty __init__.py) to avoid a name clash with tests/integration/test_gitlab_sparse_transport_contract.py; ci.yml ratchet job path updated for test_check_complexity_ratchet.",
+  "Left in place (still offenders): tests/unit/cache/test_git_env.py (path pinned by ci.yml trusted-executable job, docs and test_windows_compat_gate_workflow), tests/unit/cache/test_git_symlink_config.py (imported by other tests and the Windows symlink probe script), tests/unit/scripts/test_check_test_assertions.py (path pinned by tests/quality/test_ci_topology.py, which is untouchable), tests/unit/scripts/test_architecture_registry_conflicts.py and tests/unit/test_lifecycle_executor_paths.py (never-move protected names).",
+  "tests/integration/test_producer_journey.py left unclassified: journey tests are never-edit.",
+  "e2e modules were only collected (marker-only change); component/unit modules were run. Failures seen were reproduced on the base commit (sandbox lacks git identity/network/real GitHub token): test_bare_cache_integration, test_agent_skills_target, test_gemini_integration, test_grok_bot_target, test_install_subdir_dedup_e2e, test_integrators_hooks_*, test_isolated_apm_environment_contract, test_release_homebrew_update, test_tls_child_runtime, test_tls_r2/r3_verify, test_wave6_integrators_coverage, test_check_complexity_ratchet, test_architecture_linter_entrypoint (flags pre-existing tests/integration/test_compile_rich_output.py)."
  ],
  "counts_left": {
   "unclassified_modules": 1,
-  "placement_offenders": 8
+  "placement_offenders": 5
  }
 }
