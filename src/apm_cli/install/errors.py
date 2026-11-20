@@ -44,6 +44,10 @@ class DirectDependencyError(RuntimeError):
     """
 
 
+class PreviewIncomplete(Exception):
+    """``--dry-run`` stops where install would refuse; errors are on the context."""
+
+
 class InstallFailureAlreadyRendered(RuntimeError):
     """Signal a failed install whose user-facing diagnostics are complete."""
 
@@ -153,10 +157,9 @@ def frozen_install_tip(error: FrozenInstallError) -> str:
         lock_state = "MCP lock state"
     else:
         lock_state = "package lock state"
-    return (
-        f"Tip: rerun 'apm install' without --frozen to create or repair {lock_state}, "
-        "retaining the original options, including --root DIR or --global if specified."
-    )
+    from apm_cli.core.remediation import FROZEN_LOCK_STATE_DRIFT
+
+    return f"Tip: {FROZEN_LOCK_STATE_DRIFT.bind(lock_state=lock_state).sentence()}"
 
 
 class PolicyViolationError(RuntimeError):
@@ -174,6 +177,9 @@ class PolicyViolationError(RuntimeError):
         Human-readable origin string (e.g. ``"org:acme/.github"``).  May
         be empty when discovery failed before a source was resolved.
     """
+
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
 
     def __init__(
         self,

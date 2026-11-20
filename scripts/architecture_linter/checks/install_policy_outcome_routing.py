@@ -40,7 +40,7 @@ _OWNER_NEEDLES = (
 _CONSUMERS: dict[str, str] = {
     "src/apm_cli/commands/audit.py": "route = classify_discovery_outcome(",
     "src/apm_cli/commands/approve.py": "policy = resolve_trust_policy(project_root, logger=logger)",
-    "src/apm_cli/install/exec_gate.py": "route = classify_project_policy(",
+    "src/apm_cli/commands/update.py": "route = classify_project_policy(",
     "src/apm_cli/security/trust.py": "route = classify_project_policy(policy_root)",
 }
 # Display-only readers that name outcomes to word a status line.

@@ -17,6 +17,7 @@ from ..runtime.registry import (
 )
 from ..runtime.utils import find_runtime_binary
 from .project_name import resolve_bootstrap_project_name
+from .remediation import DEPENDENCIES_NOT_INSTALLED
 from .token_manager import setup_runtime_environment
 
 
@@ -854,7 +855,9 @@ class ScriptRunner:
             return True
 
         except Exception as e:
-            print(f"  [x] Auto-install failed: {e}")
+            from ..utils.console import _rich_echo
+
+            _rich_echo(f"  [x] Auto-install failed: {e}", color="red")
             return False
 
     def _add_dependency_to_config(self, package_ref: str) -> None:
@@ -1106,7 +1109,7 @@ class PromptCompiler:
             f"Prompt file '{prompt_file}' not found.\n"
             f"Searched in:\n"
             + "\n".join(searched_locations)
-            + f"\n\nTip: Run 'apm install' to ensure dependencies are installed."  # noqa: F541
+            + f"\n\nTip: {DEPENDENCIES_NOT_INSTALLED.sentence()}"
         )
 
     def _substitute_parameters(self, content: str, params: dict[str, str]) -> str:

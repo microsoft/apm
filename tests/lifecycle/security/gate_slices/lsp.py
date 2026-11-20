@@ -25,7 +25,7 @@ _UNINSTALL_SIBLING = (
     "#4215 apm uninstall of another package exits 1 and reports incomplete integration "
     "cleanup after removing an LSP server the gate no longer allows"
 )
-_UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
+_UPDATE_DEP_DENY = "#4445 update and install agreement on a policy-denied dependency"
 _XFAIL = {
     **{
         f"G|{path}|{change}|lsp": _STALE_EXEC_STATUS

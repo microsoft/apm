@@ -8,10 +8,15 @@ the npm v12-style ``allowExecutables`` default-deny policy.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from apm_cli.core.remediation import (
+    BIN_EXECUTABLES_NOT_RETRUSTED,
+    BIN_EXECUTABLES_UNTRUSTED,
+)
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -321,15 +326,7 @@ class ExecPolicyUnavailable(Exception):
 def current_exec_decision(
     trust_ctx_provider: Callable[[], Any], package_info: Any, package_name: str
 ) -> tuple[str | None, tuple[str, ...]]:
-    """Return ``(exec_status, allowed_types)``; see :func:`current_exec_verdict`."""
-    status, allowed_types, _ = current_exec_verdict(trust_ctx_provider, package_info, package_name)
-    return status, allowed_types
-
-
-def current_exec_verdict(
-    trust_ctx_provider: Callable[[], Any], package_info: Any, package_name: str
-) -> tuple[str | None, tuple[str, ...], tuple[str, ...]]:
-    """Return ``(exec_status, allowed_types, exec_types)`` the install gate would decide now.
+    """Return ``(exec_status, allowed_types)`` the install gate would decide now.
 
     Scans the materialized package and resolves its declared executable
     types through the trust owner (:func:`package_type_verdicts`), as
@@ -338,11 +335,24 @@ def current_exec_verdict(
     ``None`` when the package declares no executables or the gate is
     disabled. ``allowed_types`` names the types still allowed when others
     are not, as the lock records them (``exec_allowed_types``, #3991).
-    ``exec_types`` are the types the package declares.
     *trust_ctx_provider* is called only for a package that declares some.
     """
+    from apm_cli.security.trust import package_exec_decision
+
+    pkg_key, install, native, exec_types = _declared_exec_types(package_info, package_name)
+    if not exec_types:
+        return None, ()
+    return package_exec_decision(
+        trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
+    )
+
+
+def _declared_exec_types(
+    package_info: Any, package_name: str
+) -> tuple[str, Path, bool, tuple[str, ...]]:
+    """Scan one materialized package as the install gate does (native union included)."""
     from apm_cli.security.executables import scan_package_executables
-    from apm_cli.security.trust import native_plugin_exec_types, package_exec_decision
+    from apm_cli.security.trust import native_plugin_exec_types
 
     pkg_key = resolve_package_key(package_info, package_name)
     install = Path(package_info.install_path)
@@ -353,12 +363,108 @@ def current_exec_verdict(
         exec_types = scan_package_executables(
             install, package_name, "", approval_identity=pkg_key
         ).exec_types
-    if not exec_types:
-        return None, (), ()
-    status, allowed_types = package_exec_decision(
-        trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
-    )
-    return status, allowed_types, tuple(exec_types)
+    return pkg_key, install, native, tuple(exec_types)
+
+
+def _recorded_deployed_types(dep: Any, exec_types: tuple[str, ...]) -> tuple[str, ...]:
+    """The declared types the lock records as deployed: all, or a partial approval's (#3991)."""
+    from apm_cli.security.executables import TRUST_DEPLOYED
+
+    if dep.exec_status in (None, TRUST_DEPLOYED):
+        return exec_types
+    return tuple(exec_type for exec_type in exec_types if exec_type in dep.exec_allowed_types)
+
+
+_ORG_DENY_LAYERS = frozenset({"org-deny-all", "org-deny"})
+_LOCAL_DENY_LAYERS = frozenset({"user-deny", "project-deny"})
+
+
+@dataclass(frozen=True)
+class WithheldExecutables:
+    """Why the gate withholds one locked package's executables, and which ones.
+
+    ``types`` pairs each withheld declared type with the gate's verdict state
+    (``denied`` or ``gated_pending_approval``).
+    """
+
+    source: str
+    types: tuple[tuple[str, str], ...]
+
+
+def withheld_executables(
+    lockfile: Any,
+    modules_dir: Path,
+    manifest_path: Path,
+    *,
+    policy_provider: Callable[[], Any],
+    targets: list[Any] | None = None,
+    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+) -> builtins.dict[str, WithheldExecutables]:
+    """Say why the gate now withholds each locked package's executables (#4043).
+
+    Keys are dependency keys; each value names the deciding source (``org
+    policy denies <pkg>``, ``<pkg> is denied locally`` or ``<pkg> is no
+    longer approved locally``) and the withheld types with their verdicts
+    (#4454). Only the types the lock records as deployed are judged, so a
+    partially admitted package counts when an approved type is revoked.
+    Packages the gate still allows are absent, as are packages whose decision
+    cannot be read now (an unreadable package, or *policy_provider* raising
+    :class:`ExecPolicyUnavailable`). ``install --frozen`` names retired files
+    with it and ``--dry-run`` previews them.
+    """
+    from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import TRUST_ABSENT, exec_trust_context_for_project
+    from apm_cli.security.trust import package_withheld_verdicts
+
+    trust: list[Any] = []
+
+    def _trust_ctx() -> Any:
+        if not trust:
+            trust.append(
+                exec_trust_context_for_project(
+                    manifest_path,
+                    policy=policy_provider(),
+                    fallback_allow_executables=fallback_allow_executables,
+                    migrate_user_legacy=False,
+                )
+            )
+        return trust[0]
+
+    withheld: builtins.dict[str, WithheldExecutables] = {}
+    with native_registration_scope(targets):
+        for key, dep in sorted((getattr(lockfile, "dependencies", None) or {}).items()):
+            if key == "." or dep.exec_status == TRUST_ABSENT:
+                continue
+            install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+            if not install_path.is_dir():
+                continue
+            try:
+                package_key, install, native, declared = _declared_exec_types(
+                    _build_package_info(dep, install_path), key
+                )
+                exec_types = _recorded_deployed_types(dep, declared)
+                verdicts = package_withheld_verdicts(
+                    _trust_ctx() if exec_types else None,
+                    tuple(_candidate_keys(package_key)),
+                    install,
+                    exec_types,
+                    native=native,
+                )
+            except (ExecPolicyUnavailable, OSError, ValueError):
+                continue
+            layers = {verdict.layer for verdict in verdicts.values()}
+            if layers & _ORG_DENY_LAYERS:
+                source = f"org policy denies {key}"
+            elif layers & _LOCAL_DENY_LAYERS:
+                source = f"{key} is denied locally"
+            elif layers:
+                source = f"{key} is no longer approved locally"
+            else:
+                continue
+            types = tuple((exec_type, verdicts[exec_type].state) for exec_type in sorted(verdicts))
+            withheld[key] = WithheldExecutables(source, types)
+    return withheld
 
 
 def recorded_exec_status_is_stale(
@@ -386,30 +492,54 @@ def recorded_exec_status_is_stale(
 
 
 @dataclass(frozen=True)
-class StaleExecRow:
-    """One lock row whose recorded executables decision no longer holds.
+class StaleExecDecision:
+    """A locked package whose recorded ``exec_status`` the gate no longer makes."""
 
-    ``status`` is ``None`` and ``unknown`` is set when the current decision
-    could not be read (unreadable package or unavailable org policy).
+    package: str
+    recorded: str | None
+    current: str | None
+    recorded_allowed: tuple[str, ...] = ()
+    current_allowed: tuple[str, ...] = ()
+
+    def describe(self) -> str:
+        recorded = self.recorded or "ungated"
+        current = self.current or "ungated"
+        if self.recorded_allowed != self.current_allowed:
+            # A partial package: the worst-case status hides a per-type change.
+            recorded += f" ({', '.join(self.recorded_allowed) or 'none'} allowed)"
+            current += f" ({', '.join(self.current_allowed) or 'none'} allowed)"
+        return f"{self.package}: recorded {recorded}, now {current}"
+
+
+def exec_policy_from_discovery(discover: Callable[[], Any]) -> Any:
+    """Return the org policy a discovery call resolved for the gate.
+
+    Raises :class:`ExecPolicyUnavailable` when discovery fails or reports a
+    resolution failure (for example no cache and an unreachable source), so
+    callers fail toward the install gate's fetch-failure posture instead of
+    deciding as if there were no org policy.
     """
+    from apm_cli.policy.outcome_routing import classify_discovery_outcome
 
-    dependency: Any
-    status: str | None
-    allowed_types: tuple[str, ...]
-    exec_types: tuple[str, ...]
-    unknown: bool = False
-
-    @property
-    def retired_types(self) -> tuple[str, ...]:
-        """Declared types the install gate would no longer deploy."""
-        from apm_cli.security.executables import TRUST_DEPLOYED
-
-        if self.unknown or self.status in (None, TRUST_DEPLOYED):
-            return ()
-        return tuple(t for t in self.exec_types if t not in self.allowed_types)
+    try:
+        fetch = discover()
+    except Exception as exc:
+        raise ExecPolicyUnavailable(str(exc)) from exc
+    route = classify_discovery_outcome(fetch, fetch_failure_default="warn")
+    # A blocking or unresolved outcome is indeterminate, never "no policy".
+    if route.blocks or route.unresolved:
+        raise ExecPolicyUnavailable(route.outcome)
+    return getattr(fetch, "policy", None)
 
 
-def lock_exec_decisions_stale(
+def discovered_exec_policy(deploy_root: Path) -> Any:
+    """Return the org policy the gate applies at *deploy_root* (see above)."""
+    from apm_cli.policy.discovery import discover_policy_with_chain
+
+    return exec_policy_from_discovery(lambda: discover_policy_with_chain(deploy_root))
+
+
+def stale_exec_decisions(
     lockfile: Any,
     modules_dir: Path,
     manifest_path: Path,
@@ -417,84 +547,20 @@ def lock_exec_decisions_stale(
     policy_provider: Callable[[], Any],
     targets: list[Any] | None = None,
     fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
-) -> bool:
-    """Return whether any lock row's executables decision may no longer hold.
+    first_only: bool = False,
+) -> tuple[list[StaleExecDecision], bool]:
+    """Return the lock rows whose executables decision no longer holds.
 
-    ``apm update`` short-circuits when no ref moved; this tells it that an
-    ``apm approve`` / ``apm deny`` or an org policy change still needs the
-    install gate to deploy or retire executables and rewrite the lock. See
-    :func:`stale_lock_exec_rows` for how each row is decided.
-    """
-    rows = stale_lock_exec_rows(
-        lockfile,
-        modules_dir,
-        manifest_path,
-        policy_provider=policy_provider,
-        targets=targets,
-        fallback_allow_executables=fallback_allow_executables,
-    )
-    return next(rows, None) is not None
-
-
-def scope_stale_exec_rows(
-    lockfile: Any,
-    modules_dir: Path,
-    scope: Any,
-    *,
-    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
-) -> Iterator[StaleExecRow]:
-    """:func:`stale_lock_exec_rows` for an install *scope*, with its org policy and targets.
-
-    A blocking or unresolved org policy outcome yields an ``unknown`` row:
-    the install gate routes the same outcome and reports it.
-    """
-    from apm_cli.core.scope import InstallScope, get_deploy_root, get_manifest_path, manifest_root
-    from apm_cli.integration.targets import resolve_audit_targets
-
-    user_scope = scope is InstallScope.USER
-
-    def _policy() -> Any:
-        from apm_cli.policy.outcome_routing import classify_project_policy
-
-        route = classify_project_policy(
-            manifest_root(get_deploy_root(scope), user_scope=user_scope)
-        )
-        if route.blocks or route.unresolved:
-            raise ExecPolicyUnavailable(route.outcome)
-        return route.policy
-
-    return stale_lock_exec_rows(
-        lockfile,
-        modules_dir,
-        get_manifest_path(scope),
-        policy_provider=_policy,
-        targets=resolve_audit_targets(
-            get_deploy_root(scope), user_scope=user_scope, lockfile=lockfile
-        ),
-        fallback_allow_executables=fallback_allow_executables,
-    )
-
-
-def stale_lock_exec_rows(
-    lockfile: Any,
-    modules_dir: Path,
-    manifest_path: Path,
-    *,
-    policy_provider: Callable[[], Any],
-    targets: list[Any] | None = None,
-    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
-) -> Iterator[StaleExecRow]:
-    """Yield each lock row whose executables decision may no longer hold.
-
+    The second value is true when the answer is indeterminate: an unreadable
+    package, or *policy_provider* raising :class:`ExecPolicyUnavailable`.
+    ``apm update`` treats that as stale and runs the gate; ``apm install
+    --frozen`` and ``apm audit --ci`` report only determinate rows (#4053).
     A row recorded while the gate was off is compared against the effective
-    gate, org policy included, so a policy that newly gates executables
-    re-gates it as ``apm install`` does (#3990). Org policy is fetched only
-    when a locked package declares executables. Packages are read the way
-    audit replay reads them, under the *targets*' native registration
-    capability. An unreadable package or a provider raising
-    :class:`ExecPolicyUnavailable` yields an ``unknown`` row and stops: the
-    install gate applies the policy fetch-failure posture and reports it.
-    ``apm install --dry-run`` previews the retirements from these rows.
+    gate, org policy included, so a policy that newly gates executables is
+    stale as ``apm install`` would re-gate it (#3990). Packages are read the
+    way audit replay reads them, under the *targets*' native registration
+    capability. Trust (and *policy_provider*) resolve only when a package
+    declares executables.
     """
     from apm_cli.copilot_plugins.capability import native_registration_scope
     from apm_cli.install.drift import _build_package_info
@@ -519,27 +585,68 @@ def stale_lock_exec_rows(
         for key, dep in (getattr(lockfile, "dependencies", None) or {}).items()
         if key != "." and dep.exec_status != TRUST_ABSENT
     ]
+    stale: list[StaleExecDecision] = []
     with native_registration_scope(targets):
         for dep in rows:
             install_path = dep.to_dependency_ref().get_install_path(modules_dir)
             if not install_path.is_dir():
                 continue
+            key = dep.get_unique_key()
             try:
                 package_info = _build_package_info(dep, install_path)
-                status, allowed_types, exec_types = current_exec_verdict(
-                    _trust_ctx, package_info, dep.get_unique_key()
-                )
-            except (ExecPolicyUnavailable, OSError, ValueError):
-                # Unknown now: let install, which reports it, decide.
-                yield StaleExecRow(dep, None, (), (), unknown=True)
-                return
+                status, allowed_types = current_exec_decision(_trust_ctx, package_info, key)
+            except ExecPolicyUnavailable:
+                return stale, True
+            except (OSError, ValueError):
+                # An unreadable package: let install, which reports it, decide.
+                return stale, True
             if recorded_exec_status_is_stale(
                 dep.exec_status,
                 status,
                 recorded_allowed=dep.exec_allowed_types,
                 current_allowed=allowed_types,
             ):
-                yield StaleExecRow(dep, status, tuple(allowed_types), exec_types)
+                stale.append(
+                    StaleExecDecision(
+                        key,
+                        dep.exec_status,
+                        status,
+                        tuple(dep.exec_allowed_types or ()),
+                        tuple(allowed_types),
+                    )
+                )
+                if first_only:
+                    break
+    return stale, False
+
+
+def lock_exec_decisions_stale(
+    lockfile: Any,
+    modules_dir: Path,
+    manifest_path: Path,
+    *,
+    policy_provider: Callable[[], Any],
+    targets: list[Any] | None = None,
+    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+) -> bool:
+    """Return whether any lock row's executables decision may no longer hold.
+
+    ``apm update`` short-circuits when no ref moved; this tells it that an
+    ``apm approve`` / ``apm deny`` or an org policy change still needs the
+    install gate to deploy or retire executables and rewrite the lock (#3990).
+    An indeterminate answer fails toward running the gate, which applies the
+    policy fetch-failure posture.
+    """
+    stale, indeterminate = stale_exec_decisions(
+        lockfile,
+        modules_dir,
+        manifest_path,
+        policy_provider=policy_provider,
+        targets=targets,
+        fallback_allow_executables=fallback_allow_executables,
+        first_only=True,
+    )
+    return indeterminate or bool(stale)
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:
@@ -636,8 +743,20 @@ def executable_skip_reason(
     if exec_type in denied.get(package_name, frozenset()):
         explain = explain_command(label, user_scope=user_scope)
         return f"{kind} skipped (denied). Run '{explain}' to see which deny applies."
-    approve = approve_command(label, user_scope=user_scope)
-    return f"{kind} skipped (not approved in executables.allow). Run '{approve}' to approve."
+    from apm_cli.core import remediation
+    from apm_cli.security.executables import EXEC_TYPE_BIN, EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS
+
+    # Only these kinds are skipped as unapproved here; another kind is a caller bug.
+    approve = {
+        EXEC_TYPE_BIN: remediation.BIN_EXECUTABLES_UNAPPROVED,
+        EXEC_TYPE_CANVAS: remediation.CANVAS_SKIPPED_UNAPPROVED,
+        EXEC_TYPE_HOOKS: remediation.HOOKS_UNAPPROVED,
+    }[exec_type]
+    command = approve_command(label, user_scope=user_scope)
+    return (
+        f"{kind} skipped (not approved in executables.allow). "
+        f"{approve.bind(package=label).with_command(command).sentence()}"
+    )
 
 
 def log_bin_status(
@@ -676,12 +795,12 @@ def log_bin_status(
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
             "  |-- bin/ executables skipped (not trusted). "
-            f"Run 'apm install --trust-bin {package_label}' to deploy."
+            f"{BIN_EXECUTABLES_UNTRUSTED.bind(package=package_label).sentence()}"
         )
     elif skill_result.bin_skipped_reason == "not_retrusted_on_uninstall":
         log_fn(
             "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-            f"Run 'apm install --trust-bin {package_label}' to restore them."
+            f"{BIN_EXECUTABLES_NOT_RETRUSTED.bind(package=package_label).sentence()}"
         )
 
 

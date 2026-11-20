@@ -8,7 +8,13 @@ trees live in sibling modules purely so no single check module outgrows the
 module size budget; they own no RULES of their own.
 """
 
+from scripts.architecture_linter.checks.contracts_ci_shard_file_lists import (
+    RULES as CI_SHARD_FILE_LIST_RULES,
+)
 from scripts.architecture_linter.checks.contracts_ci_topology import RULES as CI_TOPOLOGY_RULES
+from scripts.architecture_linter.checks.contracts_conformance_coverage import (
+    RULES as CONFORMANCE_COVERAGE_RULES,
+)
 from scripts.architecture_linter.checks.contracts_dependency_policy import RULES as POLICY_RULES
 from scripts.architecture_linter.checks.contracts_dependency_replacements import (
     RULES as REPLACEMENT_RULES,
@@ -17,11 +23,24 @@ from scripts.architecture_linter.checks.contracts_governance import RULES as GOV
 from scripts.architecture_linter.checks.contracts_lifecycle_script_gate import (
     RULES as LIFECYCLE_SCRIPT_GATE_RULES,
 )
+from scripts.architecture_linter.checks.contracts_linter_cache import RULES as LINTER_CACHE_RULES
+from scripts.architecture_linter.checks.contracts_local_path_anchor import (
+    RULES as LOCAL_PATH_ANCHOR_RULES,
+)
 from scripts.architecture_linter.checks.contracts_lockfile_generator import (
     RULES as LOCKFILE_GENERATOR_RULES,
 )
+from scripts.architecture_linter.checks.contracts_lockfile_write_authority import (
+    RULES as LOCKFILE_WRITE_AUTHORITY_RULES,
+)
+from scripts.architecture_linter.checks.contracts_remediation_advice import (
+    RULES as REMEDIATION_RULES,
+)
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
+from scripts.architecture_linter.checks.contracts_update_plan_ref import (
+    RULES as UPDATE_PLAN_REF_RULES,
+)
 from scripts.architecture_linter.checks.install_approve_command import (
     RULES as APPROVE_COMMAND_RULES,
 )
@@ -32,9 +51,16 @@ RULES = (
     *GOVERNANCE_RULES,
     *REPLACEMENT_RULES,
     *LOCKFILE_GENERATOR_RULES,
+    *LOCKFILE_WRITE_AUTHORITY_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
+    *LOCAL_PATH_ANCHOR_RULES,
+    *UPDATE_PLAN_REF_RULES,
+    *REMEDIATION_RULES,
+    *CONFORMANCE_COVERAGE_RULES,
     *APPROVE_COMMAND_RULES,
     *CI_TOPOLOGY_RULES,
+    *LINTER_CACHE_RULES,
+    *CI_SHARD_FILE_LIST_RULES,
 )
 
 __all__ = ["COLLECTORS", "RULES"]

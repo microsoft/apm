@@ -7,6 +7,12 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    AGENT_PLUGIN_BUNDLE_CONSUMER,
+    BUNDLE_TARGET_MISMATCH,
+    DEPLOYMENT_RECORDS_STALE,
+    LEGACY_BUNDLE_FORMAT,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..bundle.formats import BundleFormat, cli_format_choices, resolve_bundle_format
@@ -19,7 +25,9 @@ from ..core.build_orchestrator import (
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
+from ..core.plugin_manifest import plugin_manifest_notes_once
 from ..core.target_detection import TargetParamType
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..install.locking import serialized_lifecycle_unless
 
 MARKETPLACE_DOCS_URL = (
@@ -433,7 +441,8 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     )
 
     try:
-        result = BuildOrchestrator().run(options, logger=logger)
+        with plugin_manifest_notes_once():
+            result = BuildOrchestrator().run(options, logger=logger)
     except MetadataEnrichmentError as exc:
         if json_output:
             from ..marketplace.builder import BuildReport
@@ -728,19 +737,19 @@ def _emit_drift_recipe(
         pack_command += f" --marketplace-path {shlex.quote(f'{output_format}={output_override}')}"
     stage_command = f"git add -- {shlex.quote(out_path)}"
 
-    logger.info("")
+    click.echo("")  # a blank separator carries no status prefix
     logger.info("    To recover cleanly (fold into the current commit):")
-    logger.info("")
+    click.echo("")
     logger.info(f"      {pack_command}                       # regenerate locally")
     logger.info(f"      {stage_command}")
     logger.info("      git commit --amend --no-edit   # fold into the current commit")
     logger.info("      git push --force-with-lease    # safe re-push")
-    logger.info("")
+    click.echo("")
     logger.info("    Or as a follow-up commit:")
-    logger.info("")
+    click.echo("")
     logger.info(f"      {pack_command} && {stage_command}")
     logger.info("      git commit -m 'chore(marketplace): regen'")
-    logger.info("")
+    click.echo("")
     logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")
     logger.info("    so consumers can resolve packages without running 'apm pack'. CI")
     logger.info("    enforces that the checked-in copy matches the apm.yml source of truth.")
@@ -848,10 +857,7 @@ def _render_bundle_result(
             if fmt == BundleFormat.CLAUDE_PLUGIN:
                 logger.info(f"Share with: apm install {share_arg}")
             elif fmt == BundleFormat.AGENT_PLUGIN:
-                logger.info(
-                    "Share: consumers add the bundle path under dependencies.apm in their "
-                    "apm.yml, then run 'apm install --target copilot'."
-                )
+                logger.info(f"Share: consumers {AGENT_PLUGIN_BUNDLE_CONSUMER.clause()}.")
             else:
                 logger.info(
                     f"Share with: apm unpack {share_arg} (deprecated legacy layout; "
@@ -961,6 +967,7 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
 @serialized_lifecycle_unless("dry_run")
+@lockfile_writer(LockfileWriter.UNPACK)
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
     from ..core.command_logger import InstallLogger
@@ -970,7 +977,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
     logger.warning(
         "'apm unpack' is deprecated and will be removed in a future release. "
-        "Repack with the default plugin format and use 'apm install <bundle-path>'.",
+        f"{LEGACY_BUNDLE_FORMAT.sentence()}",
     )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
@@ -1073,7 +1080,8 @@ def _warn_empty(logger, target, result):
         else:
             logger.warning(f"No files to pack for target '{target}'")
             logger.verbose_detail(
-                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
+                "    Hint: check that apm.lock.yaml has deployed_files entries "
+                f"({DEPLOYMENT_RECORDS_STALE.clause()})"
             )
     else:
         logger.warning("No deployed files found -- empty bundle created")
@@ -1118,6 +1126,5 @@ def _log_bundle_meta(result, output_dir, logger):
             f"Bundle target '{display_bundle}' differs from project target '{display_project}'"
         )
         logger.verbose_detail(
-            f"    To get a {display_project}-targeted bundle, "
-            f"ask the publisher to declare targets: [{display_project}] in apm.yml and run apm pack"
+            f"    {BUNDLE_TARGET_MISMATCH.bind(target=display_project).sentence()}"
         )

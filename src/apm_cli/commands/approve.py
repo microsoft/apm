@@ -19,11 +19,19 @@ The deny-wins precedence is resolved by
 from __future__ import annotations
 
 import sys
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.remediation import (
+    EXECUTABLES_APPROVED,
+    EXECUTABLES_DENIED,
+    EXECUTABLES_UNAPPROVED,
+    INSTALLED_FILES_DIFFER,
+    LOCKFILE_RECORDS_INCONSISTENT,
+)
 from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import serialized_lifecycle
 
@@ -172,19 +180,33 @@ def _store_label(user_scope: bool) -> str:
     return "apm.yml"
 
 
+_ORG_POLICY_PER_COMMAND: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Return the merged org policy, routed as every other policy reader routes it.
+
+    One command resolves its policy once (#4178): the result is memoized per
+    command logger, so a miss is reported once however many trust readers ask.
 
     A blocking outcome raises :class:`PolicyViolationError`; an outcome that
     leaves no usable policy is reported and yields an empty policy.
     """
+    root = Path(project_root).resolve()
+    if logger is not None:
+        cached = _ORG_POLICY_PER_COMMAND.get(logger)
+        if cached is not None and cached[0] == root:
+            return cached[1]
     policy = resolve_trust_policy(project_root, logger=logger)
-    return policy if policy is not None else ApmPolicy()
+    policy = policy if policy is not None else ApmPolicy()
+    if logger is not None:
+        _ORG_POLICY_PER_COMMAND[logger] = (root, policy)
+    return policy
 
 
 def _report_policy_block(exc: PolicyViolationError) -> None:
     """Announce a blocking policy outcome; nothing was written."""
-    _rich_error(str(exc))
+    _rich_error(str(exc), symbol="error")
     _rich_info(
         "Nothing was written. Run 'apm policy status --no-cache' to diagnose "
         "the org policy source, fix it, then re-run the command.",
@@ -255,6 +277,11 @@ def approve_cmd(
 
         apm approve -g owner/repo
     """
+    if not (packages or pending or approve_all or recommended or list_decisions):
+        # A missing package is a usage error (exit 2), like `apm deny` (#4262).
+        raise click.UsageError(
+            "Specify at least one package, or use --pending / --all / --recommended."
+        )
     logger = CommandLogger("approve")
     try:
         manifest = _find_manifest(user_scope, global_scope)
@@ -276,12 +303,6 @@ def approve_cmd(
         if approve_all:
             _approve_all_pending(manifest, user_scope, allow, deny, logger=logger)
             return
-
-        if not packages:
-            logger.refusal(
-                "Specify at least one package, or use --pending / --all / --recommended."
-            )
-            sys.exit(1)
 
         packages = _canonical_specs(manifest, packages)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
@@ -375,7 +396,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
         # Deployed hooks keep firing until install retires them (#3924).
         _rich_info(
-            f"Run '{_install_command(manifest)}' to remove executables already deployed.",
+            EXECUTABLES_DENIED.with_command(_install_command(manifest)).sentence(),
             symbol="info",
         )
 
@@ -640,19 +661,49 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
     from dataclasses import replace
 
     pending = _pending_declarations(manifest, logger=logger)
-    if not pending:
+    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    bundles = _pending_bundles(manifest, ctx)
+    if not pending and not bundles:
         _rich_success("All packages with executables are approved.")
         return
 
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
-    _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
-    for decl in pending:
-        pins = _pins_for(decl)
-        _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
-        _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+    if pending:
+        _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
+        for decl in pending:
+            pins = _pins_for(decl)
+            _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
+            _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+        _rich_echo("")
+        _rich_info(EXECUTABLES_UNAPPROVED.sentence(), symbol="info")
+    if bundles:
+        _show_pending_bundles(manifest, bundles)
+
+
+def _pending_bundles(manifest: Path, ctx) -> list:
+    """Installed local bundles whose parked executables are still not approved (#4221)."""
+    from ..install.local_bundle_pending import pending_bundles
+    from ..security.executables import materialize_exec_map, package_type_approved
+
+    allow_map = materialize_exec_map(ctx)
+    return pending_bundles(
+        manifest.parent,
+        lambda key, exec_type: package_type_approved(allow_map, (key,), exec_type),
+    )
+
+
+def _show_pending_bundles(manifest: Path, bundles: list) -> None:
+    _rich_warning(f"{len(bundles)} local bundle(s) with parked executables:")
+    for bundle in bundles:
+        _rich_echo(
+            f"  local bundle '{bundle.slug}': {', '.join(bundle.exec_types)} not approved; "
+            "approval key:"
+        )
+        # The key is copied into apm.yml, so it is never wrapped.
+        _rich_echo(f'    "{bundle.approval_key}"', soft_wrap=True)
     _rich_echo("")
     _rich_info(
-        "Review each definition, then run 'apm approve <package>' to pin it.",
+        f"Review the bundle, add its approval key under executables.allow in {manifest.name}, "
+        "then rerun 'apm install <bundle>'.",
         symbol="info",
     )
 
@@ -826,7 +877,7 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> str | None:
     if not decl.content_verified:
         _rich_error(
             f"{identity}: installed files differ from apm.lock.yaml; not approved. "
-            "Run 'apm install' to restore them, then retry."
+            f"{INSTALLED_FILES_DIFFER.sentence()}"
         )
         return None
     pins = _pins_for(decl)
@@ -1010,10 +1061,10 @@ def _record_and_save(
             _rich_success(line, symbol="check")
     if successes:
         install = _install_command(manifest)
-        share = "" if user_scope or install.endswith("-g") else "; commit apm.yml to share"
+        share = "" if user_scope or install.endswith("-g") else " Commit apm.yml to share."
         _rich_info(
             f"Updated {_store_label(user_scope)} ({len(successes)} approved). "
-            f"Run '{_install_command(manifest)}' to deploy{share}.",
+            f"{EXECUTABLES_APPROVED.with_command(install).sentence()}{share}",
             symbol="info",
         )
         if share and not had_pins and has_any_pins(allow):
@@ -1187,8 +1238,8 @@ def scan_installed_executable_packages(manifest: Path) -> list:
         except LocalResolutionError as exc:
             raise click.ClickException(
                 "Cannot inspect installed packages because apm.lock.yaml has "
-                f"invalid local dependency ancestry: {exc}. Run 'apm install' "
-                "to regenerate the lockfile, then retry."
+                f"invalid local dependency ancestry: {exc}. "
+                f"{LOCKFILE_RECORDS_INCONSISTENT.sentence()}"
             ) from exc
         for locked in lockfile.get_package_dependencies():
             try:

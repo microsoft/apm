@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import HOOK_RECONCILE_INCOMPLETE
 from apm_cli.models.apm_package import canonical_package_targets
 
 if TYPE_CHECKING:
@@ -30,8 +31,9 @@ class EffectivePackageTargets:
 def log_package_target_restriction(
     logger: InstallLogger | None,
     target_selection: EffectivePackageTargets,
+    package_name: str,
 ) -> None:
-    """Name declared and effective targets when a package narrows them."""
+    """Name the package and its declared and effective targets when it narrows them."""
     if logger is None or not target_selection.package_restriction_active:
         return
     declared = (
@@ -41,7 +43,8 @@ def log_package_target_restriction(
     )
     effective = ", ".join(target.name for target in target_selection.targets) or "none"
     logger.verbose_detail(
-        f"Package target restriction: [{declared}]; effective targets: [{effective}]"
+        f"Package target restriction for {package_name}: [{declared}]; "
+        f"effective targets: [{effective}]"
     )
 
 
@@ -88,7 +91,7 @@ def warn_target_reconcile_failure(
         package=package_name,
         detail=(
             f"targets: [{', '.join(failed_targets)}]; "
-            f"configs: [{', '.join(failed_paths)}]; run apm install again"
+            f"configs: [{', '.join(failed_paths)}]; {HOOK_RECONCILE_INCOMPLETE.clause()}"
         ),
     )
 

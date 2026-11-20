@@ -307,6 +307,20 @@ class TestUnrecordedDeployedPaths:
 
         logger.failed_install_residue.assert_not_called()
 
+    @pytest.mark.parametrize("restores", [False, True])
+    def test_files_the_transaction_restores_are_not_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], restores: bool
+    ) -> None:
+        ctx = _ctx(tmp_path, InstallLogger())
+        ctx.transaction = SimpleNamespace(restores_deploy_targets=restores)
+        ctx.package_deployed_files = {"owner/new": [".claude/agents/new.md"]}
+
+        report_failed_install_residue(ctx)
+
+        output = capsys.readouterr()
+        shown = ".claude/agents/new.md" in output.out + output.err
+        assert shown is not restores
+
     @pytest.mark.parametrize(
         ("disposition", "reported"),
         [(InstallDisposition.SUCCESS, False), (InstallDisposition.FAILED, True)],

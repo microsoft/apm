@@ -317,11 +317,15 @@ class GitCache:
         refresh: If True, force revalidation even on cache hit.
     """
 
-    def __init__(self, cache_root: Path, *, refresh: bool = False) -> None:
+    def __init__(self, cache_root: Path, *, refresh: bool = False, read_only: bool = False) -> None:
         self._cache_root = cache_root
         self._refresh = refresh
+        self._read_only = read_only
         self._db_root = get_git_db_path(cache_root)
         self._checkouts_root = get_git_checkouts_path(cache_root)
+        if read_only:
+            # A reader (apm audit --ci) never creates, evicts or records entries.
+            return
 
         # Ensure bucket directories exist
         self._db_root.mkdir(parents=True, exist_ok=True)
@@ -360,6 +364,8 @@ class GitCache:
             git working copy at the expected SHA).
         """
         shard_key = cache_shard_key(url)
+        if self._read_only:
+            return self._read_only_checkout(shard_key, ref, locked_sha, sparse_paths, env)
         sha = self._resolve_sha(url, ref, locked_sha=locked_sha, env=env)
         variant = _variant_key(sparse_paths)
 
@@ -402,6 +408,31 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _read_only_checkout(
+        self,
+        shard_key: str,
+        ref: str | None,
+        locked_sha: str | None,
+        sparse_paths: list[str] | None,
+        env: dict[str, str] | None,
+    ) -> Path:
+        """Return an existing valid checkout for a pinned SHA, or raise ``LookupError``.
+
+        Callers fall back to a fresh clone on any miss, so nothing is written.
+        """
+        sha = next((v for v in (locked_sha, ref) if v and _SHA_RE.match(v)), None)
+        if sha is None:
+            raise LookupError("read-only git cache needs a pinned commit")
+        checkout_dir = self._checkouts_root / shard_key / sha.lower() / _variant_key(sparse_paths)
+        if not (
+            checkout_dir.is_dir()
+            and verify_checkout_sha(checkout_dir, sha.lower())
+            and _checkout_has_materialization_pins(checkout_dir)
+            and _sparse_checkout_is_complete(checkout_dir, sparse_paths, env=env)
+        ):
+            raise LookupError("no valid cached checkout for the pinned commit")
+        return checkout_dir
 
     def _resolved_ref_path(self, url: str, ref: str) -> Path:
         digest = hashlib.sha256(ref.encode("utf-8")).hexdigest()
@@ -1174,3 +1205,30 @@ def _sanitize_url(value: str) -> str:
     from ..utils.git_env import redact_git_diagnostic
 
     return redact_git_diagnostic(value)
+
+
+def attach_persistent_git_cache(
+    downloader: object, *, refresh: bool = False, read_only: bool = False
+) -> GitCache | None:
+    """Attach the one persistent cross-run git cache to *downloader*.
+
+    ``apm install`` (including ``--frozen`` and ``apm update``), the ``apm
+    audit --ci`` replay and ``apm outdated`` read locked git sources through
+    this same cache, so they recompute ``content_hash`` over the same bytes.
+    ``APM_NO_CACHE`` disables it; an unusable cache root degrades to no cache.
+    A *read_only* reader (``apm audit --ci``) uses existing checkouts and never
+    writes the cache; any miss falls back to a fresh clone.
+    """
+    if os.environ.get("APM_NO_CACHE"):
+        return None
+    from .paths import get_cache_root
+
+    try:
+        root = get_cache_root(ensure=not read_only)
+        if read_only and not get_git_checkouts_path(root).is_dir():
+            return None
+        cache = GitCache(root, refresh=refresh, read_only=read_only)
+    except (OSError, ValueError):
+        return None
+    downloader.persistent_git_cache = cache  # type: ignore[attr-defined]
+    return cache

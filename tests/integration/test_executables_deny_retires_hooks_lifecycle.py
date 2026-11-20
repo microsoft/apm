@@ -22,9 +22,11 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I3", "P-OWN-frozen-install-mutation-eligibility"),
 ]
 
 _SCRIPT = "hooky-guard.sh"
@@ -275,3 +277,77 @@ def test_deny_names_each_retired_hook_file_and_never_reports_it_retained(
         )
     assert "Historical dependency claims retained" not in output, output
     assert _exec_status(project) == "denied"
+
+
+@pytest.mark.parametrize("gate_off", ["deny", "revoke"])
+def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
+    tmp_path: Path, apm_binary_path: Path, gate_off: str
+) -> None:
+    """Frozen and audit agree once a gated hook leaves disk under an unchanged lock (#4043)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    _hook_package(isolated.work_root / "hooky")
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = {
+        "name": "consumer",
+        "version": "0.1.0",
+        "targets": ["copilot"],
+        "dependencies": {"apm": ["../hooky"]},
+    }
+    if gate_off == "revoke":
+        manifest["executables"] = {"allow": {"../hooky": {"hooks": True}}}
+    dump_yaml(manifest, project / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    lock_path = project / "apm.lock.yaml"
+
+    def apm(*args: str, expect: int = 0) -> str:
+        result = runner.run(args, cwd=project, env=env)
+        output = result.stdout + result.stderr
+        assert result.returncode == expect, f"apm {' '.join(args)}\n{output}"
+        return output
+
+    def claimed() -> set[str]:
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        (dependency,) = lock.dependencies.values()
+        return set(dependency.deployed_files)
+
+    apm("install", "--no-policy")
+    hook_paths = set(_hook_residue(project))
+    assert hook_paths, "the hook must deploy before it is gated"
+    assert hook_paths <= claimed()
+
+    if gate_off == "deny":
+        apm("deny", "../hooky")
+        source = "../hooky is denied locally"
+    else:
+        dump_yaml({**manifest, "executables": {}}, project / "apm.yml")
+        source = "../hooky is no longer approved locally"
+    lock_bytes = lock_path.read_bytes()
+
+    # Read-only modes report the retirement without applying it.
+    preview = " ".join(apm("install", "--dry-run", "--no-policy").split())
+    assert "Executables that would be retired" in preview, preview
+    assert f"- {source}" in preview, preview
+    assert set(_hook_residue(project)) == hook_paths
+    apm("audit", "--ci", "--no-policy", expect=1)
+
+    # I7-X1: deny wins, so frozen retires the hook, then fails naming each file;
+    # a second run changes nothing more and fails the same way.
+    for _attempt in range(2):
+        frozen = " ".join(apm("install", "--frozen", "--no-policy", expect=1).split())
+        assert "[x] --frozen: files recorded in apm.lock.yaml are missing from disk." in frozen
+        for path in sorted(hook_paths):
+            assert f"- {path}: retired because {source}" in frozen, frozen
+        assert "run 'apm install' without --frozen" in frozen, frozen
+        assert "commit apm.lock.yaml" in frozen, frozen
+        assert _hook_residue(project) == []
+        assert lock_path.read_bytes() == lock_bytes
+        apm("audit", "--ci", "--no-policy", expect=1)
+
+    apm("install", "--no-policy")
+    assert not hook_paths & claimed()
+    assert _exec_status(project) == ("denied" if gate_off == "deny" else "gated_pending_approval")
+    apm("install", "--frozen", "--no-policy")
+    apm("audit", "--ci", "--no-policy")

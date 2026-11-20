@@ -9,11 +9,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
+
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.mcp.entry_integration import McpEntryRequest
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.integration.mcp_integrator_install import ResolvedMcpTargets
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -34,7 +38,7 @@ class PreparedMcpIntegration:
         return self.omission_view.omission_evidence(lockfile)
 
 
-def prepare_mcp_integration(
+def prepare_mcp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
     mcp_deps: list["MCPDependency"],
@@ -51,12 +55,14 @@ def prepare_mcp_integration(
     executable_context: tuple[dict | None, bool] = (None, False),
     no_policy: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
+    prospective_lock: "LockFile | None" = None,
 ) -> PreparedMcpIntegration:
     """Collect and admit once, without native writes or ownership adoption.
 
     Every dependency-declared server is admitted by the security/trust.py
     owner inside ``CurrentMcpConfigView.select``; parked servers carry their
-    omission evidence on the same view.
+    omission evidence on the same view. *prospective_lock* names the package
+    set an install is about to commit, before ``apm.lock.yaml`` is written.
     """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
@@ -75,8 +81,10 @@ def prepare_mcp_integration(
         trust_context=getattr(allow_map, "trust_context", None),
     )
     current_view = None
-    if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
-        lockfile = LockFile.read(lock_path) if lock_path.exists() else None
+    lockfile = prospective_lock
+    if lockfile is None and lockfile_exists(lock_path):
+        lockfile = LockFile.read(lock_path)
+    if should_install or mcp_deps or apm_modules_path.exists() or lockfile is not None:
         # This run records new omission evidence, so none is verified here.
         current_view = CurrentMcpConfigView.select(
             apm_package,
@@ -325,6 +333,9 @@ def run_mcp_integration(  # noqa: PLR0913
     pre_install_lock: "LockFile | None" = None,
     frozen: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
+    policy_enforced: bool = False,
+    mcp_entry: "McpEntryRequest | None" = None,
+    resolved_targets: "ResolvedMcpTargets | None" = None,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -365,6 +376,10 @@ def run_mcp_integration(  # noqa: PLR0913
             running version, so retired-destination heal eligibility is read
             from this snapshot.
         frozen: ``--frozen`` replay; recorded pre-#3825 plugin roots are kept.
+        mcp_entry: The server ``apm install --mcp`` adds (#4085). Only it is
+            installed and re-targeted; the commit gate judged it before
+            apm.yml was written, and every other recorded server is kept.
+        resolved_targets: MCP targets this run already resolved, reused as-is.
 
     Returns:
         Tuple of ``(mcp_count, mcp_apm_config)``. ``mcp_apm_config`` is the
@@ -374,8 +389,8 @@ def run_mcp_integration(  # noqa: PLR0913
     Raises:
         apm_cli.policy.install_preflight.PolicyBlockError: When the merged
             MCP set is blocked by org policy. Callers must catch this,
-            report the violation, and exit non-zero; already-installed APM
-            packages are left in place.
+            report the violation, and exit non-zero. A package install
+            enforces the same policy before anything deploys.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import LockFile
@@ -391,9 +406,26 @@ def run_mcp_integration(  # noqa: PLR0913
         split_mcp_claims,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
-    from apm_cli.policy.install_preflight import run_policy_preflight
 
-    previous_lock = LockFile.read(lock_path) if lock_path.exists() else None
+    if mcp_entry is not None and should_install:
+        from apm_cli.install.mcp.entry_integration import integrate_mcp_entry
+
+        mcp_count = integrate_mcp_entry(
+            mcp_entry,
+            lock_path=lock_path,
+            project_root=project_root,
+            user_scope=user_scope,
+            scope=scope,
+            runtime=runtime,
+            exclude=exclude,
+            verbose=verbose,
+            explicit_target=explicit_target,
+            target_decision=target_decision,
+            logger=logger,
+        )
+        return mcp_count, {"scripts": apm_package.scripts or {}}
+
+    previous_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
     native_hashes = DeploymentLedgerCodec.mcp_native_hashes(previous_lock) if previous_lock else {}
     old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
 
@@ -417,40 +449,22 @@ def run_mcp_integration(  # noqa: PLR0913
     if frozen and current_view is not None:
         mcp_deps = current_view.replay_recorded_roots(mcp_deps, old_mcp_configs)
 
-    # The pipeline gate phase (policy_gate.py) checks direct APM deps
-    # and direct MCP deps from apm.yml.  However, transitive MCP
-    # servers (discovered via collect_transitive above) are only known
-    # after APM packages are installed.  Run a second preflight
-    # against the *merged* MCP set (direct + transitive) BEFORE
-    # MCPIntegrator writes runtime configs.  The caller is responsible
-    # for catching PolicyBlockError and aborting the MCP write while
-    # leaving already-installed APM packages in place.
-    from apm_cli.install.mcp.native_runtimes import native_runtimes_of
+    # Org policy on the merged (direct + transitive) MCP set is owned by
+    # install/commit_gate.py. A package install enforced it before anything
+    # deployed (policy_enforced); service-only entries enforce it here,
+    # before MCPIntegrator writes runtime configs.
+    if should_install and not policy_enforced:
+        from apm_cli.install.commit_gate import enforce_mcp_policy
 
-    # A server every active runtime loads natively from its plugin is written
-    # nowhere by APM; native admission already applied org MCP policy to it.
-    active_runtimes = (
-        [runtime]
-        if runtime is not None
-        else target_decision.runtime_targets_for_scope(user_scope=user_scope)
-        if target_decision is not None
-        else None
-    )
-    policy_deps = [
-        dep
-        for dep in mcp_deps
-        if not active_runtimes or not set(active_runtimes) <= native_runtimes_of(dep)
-    ]
-    if should_install and policy_deps:
-        from apm_cli.core.scope import manifest_root
-
-        run_policy_preflight(
-            project_root=manifest_root(project_root, user_scope=user_scope),
-            mcp_deps=policy_deps,
-            mcp_brought_in_by=(current_view.brought_in_by if current_view is not None else None),
+        enforce_mcp_policy(
+            mcp_deps,
+            brought_in_by=current_view.brought_in_by if current_view is not None else None,
+            runtime=runtime,
+            target_decision=target_decision,
+            user_scope=user_scope,
+            project_root=project_root,
             no_policy=no_policy,
             logger=logger,
-            dry_run=False,
         )
 
     mcp_count = 0
@@ -586,6 +600,7 @@ def run_mcp_integration(  # noqa: PLR0913
                         scope=scope,
                         managed_target_servers=managed_target_servers,
                         native_hashes=native_hashes,
+                        resolved_targets=resolved_targets,
                     )
                     if mcp_deps
                     else 0
@@ -809,7 +824,7 @@ def run_mcp_integration(  # noqa: PLR0913
             fail_on_write_error=True,
         )
 
-    if prepared.omission_view is not None and lock_path.exists():
+    if prepared.omission_view is not None and lockfile_exists(lock_path):
         lockfile = LockFile.read(lock_path)
         omissions = prepared.omissions(lockfile) if lockfile is not None else None
         if lockfile is not None and omissions != lockfile.mcp_omissions:

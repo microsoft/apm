@@ -27,6 +27,12 @@ from typing import Any
 
 from apm_cli.core.scope import manifest_file
 
+from ..core.remediation import (
+    EXECUTABLES_IDENTITY_UNLOCKED,
+    EXECUTABLES_PIN_MALFORMED,
+    MCP_EXECUTABLES_UNTRUSTED,
+)
+
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
 EXEC_TYPE_MCP = "mcp"
@@ -1461,6 +1467,7 @@ def _filter_declared_services(
         return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
+    denied_owners: set[str] = set()
     for dependency in dependencies:
         owner = getattr(dependency, "resolved_by", None)
         approval_keys = getattr(dependency, "approval_keys", ())
@@ -1473,24 +1480,60 @@ def _filter_declared_services(
             continue
         skipped[owner] = bool(approval_keys)
         dependency_name = getattr(dependency, "name", "(unnamed)")
-        if approval_keys:
+        trust_ctx = getattr(effective_allow_execs, "trust_context", None)
+        if (
+            approval_keys
+            and trust_ctx is not None
+            and denied_exec_types(trust_ctx, list(approval_keys), (exec_type,))
+        ):
+            denied_owners.add(owner)
+        if owner in denied_owners:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
-                f"executables not trusted. Run 'apm policy explain {owner}'; "
-                f"if policy permits, run 'apm approve {owner}'."
+                f"denied. Run 'apm policy explain {owner}' to see which deny applies."
+            )
+        elif approval_keys:
+            logger.verbose_detail(
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
+                f"executables not trusted. {MCP_EXECUTABLES_UNTRUSTED.bind(package=owner).sentence()}"
             )
         else:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': package "
-                "identity cannot be verified without lock state. Run 'apm install' "
-                "to regenerate apm.lock.yaml, then approve the package."
+                "identity cannot be verified without lock state. "
+                f"{EXECUTABLES_IDENTITY_UNLOCKED.bind(subject='the package').sentence()}"
             )
     if len(filtered) < len(dependencies):
         skipped_count = len(dependencies) - len(filtered)
         noun = "server" if skipped_count == 1 else "servers"
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
-        known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
+        known_owners = sorted(
+            owner for owner, has_keys in skipped.items() if has_keys and owner not in denied_owners
+        )
         unlocked_owners = sorted(owner for owner, has_keys in skipped.items() if not has_keys)
+        if denied_owners:
+            # A denied package is named as denied; approving cannot lift it (#4237).
+            denied_names = ", ".join(f"'{owner}'" for owner in sorted(denied_owners))
+            denied_count = sum(
+                1
+                for dependency in dependencies
+                if getattr(dependency, "resolved_by", None) in denied_owners
+            )
+            denied_noun = "server" if denied_count == 1 else "servers"
+            explain = (
+                f"Run 'apm policy explain {sorted(denied_owners)[0]}' to see which deny applies."
+                if len(denied_owners) == 1
+                else "Run 'apm policy explain <package>' to see which deny applies."
+            )
+            logger.warning(
+                f"Filtered {denied_count} {service_label} {denied_noun} from {denied_names}: "
+                f"declaring package {'is' if len(denied_owners) == 1 else 'are'} denied. "
+                f"{explain}",
+                symbol="warning",
+            )
+            skipped = {o: k for o, k in skipped.items() if o not in denied_owners}
+            skipped_count -= denied_count
+            owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
         remediation_parts = []
         if known_owners:
             remediation_parts.append(
@@ -1504,15 +1547,17 @@ def _filter_declared_services(
         if unlocked_owners:
             package_noun = "that package" if len(unlocked_owners) == 1 else "each package"
             remediation_parts.append(
-                f"Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
+                EXECUTABLES_IDENTITY_UNLOCKED.bind(subject=package_noun).sentence()
             )
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
-        logger.warning(
-            f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
-            f"{package_clause} not trusted yet.{remediation}",
-            symbol="warning",
-        )
+        if skipped:
+            noun = "server" if skipped_count == 1 else "servers"
+            logger.warning(
+                f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
+                f"{package_clause} not trusted yet.{remediation}",
+                symbol="warning",
+            )
     return filtered
 
 
@@ -1538,7 +1583,7 @@ PLUGIN_ITEM = "."
 def _item_error(where: str, pkg_key: str, exec_type: str, item: object) -> ValueError:
     return ValueError(
         f"apm.yml {where}.{pkg_key}.{exec_type}.{item}: expected 'sha256:<64 hex>'. "
-        f"Run 'apm approve {pkg_key}' to record it."
+        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
     )
 
 
@@ -1590,7 +1635,8 @@ def _parse_grant_block(
                 if not where.endswith(".allow") or not is_fingerprint(value):
                     raise ValueError(
                         f"apm.yml {where}.{pkg_key}.plugin: expected 'sha256:<64 hex>' under "
-                        f"executables.allow. Run 'apm approve {pkg_key}' to record it."
+                        "executables.allow. "
+                        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
                     )
                 parsed[exec_type_str] = value
                 continue

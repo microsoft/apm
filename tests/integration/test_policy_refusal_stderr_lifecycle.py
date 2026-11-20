@@ -1,7 +1,8 @@
 """Policy refusals and approve usage errors land on stderr (#3992).
 
 Under a blocking org policy, ``install``, ``install --frozen`` and ``update``
-refuse with exit 1, and a bare ``apm approve`` refuses with exit 1. A caller
+refuse with exit 1, and a bare ``apm approve`` is a usage error with exit 2
+(#4262), like ``apm deny`` with no package. A caller
 collecting errors with ``2>`` must receive the violation; stdout keeps only
 progress. Exit codes are unchanged.
 """
@@ -53,6 +54,9 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
         world.publish_policy({**_ALLOW_ALL, "dependencies": {"deny": [package.slug]}})
         world.clear_policy_cache()
         violation = f"Policy violation: github.com/{package.slug}"
+        # Upstream moves on, so `apm update` has a change to apply (#4166).
+        (package.repository.worktree / "NEXT.md").write_text("next\n", encoding="utf-8")
+        world.repositories.commit(package.repository, message="pkg-a next")
         # Each refusal names a bypass that command accepts: install has
         # --no-policy, update only the one-shot env prefix (#3994).
         install_bypass = "--no-policy` for one-off bypass"
@@ -67,5 +71,7 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
             if args[0] == "update":
                 assert "--no-policy" not in result.stdout + result.stderr, step
 
-        usage = run_step(runner, ("approve",), cwd=project, env=env, step="5-approve", expected=1)
-        _assert_refusal_on_stderr(usage, "Specify at least one package")
+        usage = run_step(runner, ("approve",), cwd=project, env=env, step="5-approve", expected=2)
+        _assert_refusal_on_stderr(
+            usage, "Error: Specify at least one package", "Try 'apm approve --help'"
+        )

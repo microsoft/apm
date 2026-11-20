@@ -210,7 +210,7 @@ class TestMCPTargetsGatingE2E:
         )
 
         captured = capsys.readouterr()
-        assert "Skipping all MCP config writes" in captured.out, (
+        assert "Skipping all MCP config writes" in captured.out + captured.err, (
             "Greenfield project must surface the closed-gate decision "
             "with a red [x] error -- silent no-op is exactly the "
             "asymmetry vs `apm install` that PR #1336 closes."

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE, normalize_repo_url
+from apm_cli.core.remediation import MARKETPLACE_HOST_CONFLICT
 from apm_cli.utils.github_host import default_host, is_valid_fqdn, validate_ssh_user
 from apm_cli.utils.path_security import decode_url_path_segments, validate_path_segments
 
@@ -343,7 +344,7 @@ def _reject_conflicting_host(host_flag: str | None, embedded_host: str | None, s
 
         raise ValueError(
             "Conflicting host: --host does not match the host embedded in SOURCE.\n"
-            f"To fix: drop --host and run: apm marketplace add {shlex.quote(source)}"
+            f"{MARKETPLACE_HOST_CONFLICT.bind(source=shlex.quote(source)).sentence()}"
         )
 
 

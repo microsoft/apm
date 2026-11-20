@@ -22,21 +22,12 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
-_UNINSTALL_SIBLING = (
-    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
-)
+_UPDATE_DEP_DENY = "#4445 update and install agreement on a policy-denied dependency"
+_UNINSTALL_SIBLING = "#4446 uninstall rebuild agreement on gated surfaces"
 _XFAIL = {
     "G|update|policy-dep-deny|mcp": _UPDATE_DEP_DENY,
     **{f"G|uninstall-prune-rebuild|{change}|mcp": _UNINSTALL_SIBLING for change in _ALL},
 }
-_BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
-_XFAIL.update(
-    {
-        f"G|bundle-install|{change}|mcp": _BUNDLE_KEEPS
-        for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
-    }
-)
 # A bundle approval pins the whole bundle digest: a changed definition reads as
 # a bundle that is not approved yet.
 _ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this exact bundle"}
@@ -44,9 +35,7 @@ _SMOKE = {"G|update|local-deny|mcp"}
 
 # G path -> (changes with a row, (surface files, other-scope prefixes))
 _MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
-_DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
-_XFAIL["G|marketplace-install|local-deny|mcp"] = _DENY_BY_SPEC
-_USER_ORG = "S-pending (neutral issue to follow): org policy for user-scope installs"
+_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL.update(
     {
         f"G|marketplace-install|{change}|mcp": _USER_ORG

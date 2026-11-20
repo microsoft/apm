@@ -141,7 +141,7 @@ class ArtifactoryRouter:
         * Mode 2 (shorthand routed by the registry-proxy config): host,
           prefix, and scheme come from that config, so installs that
           intentionally route through an ``http://`` proxy (isolated networks
-          using ``PROXY_REGISTRY_ALLOW_HTTP=1``) probe over the same transport.
+          on an explicit http opt-in) probe over the same transport.
 
         Returns ``None`` when no proxy routing applies (regular GitHub/ADO deps)
         or when host/prefix are not real strings (e.g. mocked dependency refs

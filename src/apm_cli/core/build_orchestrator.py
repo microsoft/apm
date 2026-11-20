@@ -26,6 +26,7 @@ from apm_cli.core.scope import manifest_file
 
 from ..bundle.formats import BundleFormat
 from ..utils.yaml_io import load_yaml
+from .remediation import CLAUDE_PLUGIN_LAYOUT
 
 
 class OutputKind(enum.Enum):
@@ -402,8 +403,8 @@ class PluginManifestProducer:
         ):
             raise BuildError(
                 "The selected targets only request Claude plugin metadata, but Agent Plugin "
-                "output is active. Run 'apm pack --claude-plugin' for the historical Claude "
-                "layout, or add dependencies to produce an Agent Plugin bundle."
+                "output is active. Add dependencies to produce an Agent Plugin bundle, "
+                f"or {CLAUDE_PLUGIN_LAYOUT.clause()}."
             )
 
         outputs: list[Path] = []

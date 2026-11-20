@@ -208,6 +208,9 @@ Re-approving replaces the package's pins with the current definitions.
 - an item cannot be pinned, for example a transitive registry server while the
   MCP registry is unreachable (`needs registry access to pin`).
 
+`apm approve` with no package and no `--pending`, `--all`, `--recommended`
+or `--list` is a usage error (exit 2).
+
 It exits 1 when a requested package is not installed, when any requested
 package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
@@ -294,7 +297,9 @@ Existing `owner/repo#1.2.0` keys still match the package regardless of the
 installed version; `apm approve` folds them into the version-blind key. Local
 bundle grants are different: copy the full `name#version@sha256:<digest>` key
 from the install diagnostic. A changed local bundle does not inherit the prior
-grant.
+grant. `apm approve` does not accept a local bundle key: add the key under
+`executables.allow` in `apm.yml`, as the install diagnostic prints it, then run
+`apm install` again.
 
 ## Examples
 

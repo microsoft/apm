@@ -138,6 +138,20 @@ class TestOutcomeRoutingTable:
         )
         assert result is None
 
+    def test_dry_run_previews_the_fetch_failure_default_block(self):
+        logger = MagicMock()
+        fetch = PolicyFetchResult(policy=None, source="org:acme/.github", outcome="malformed")
+        result = route_discovery_outcome(
+            fetch,
+            logger=logger,
+            fetch_failure_default="block",
+            raise_blocking_errors=False,
+        )
+        assert result is None
+        (message,) = [call.args[0] for call in logger.warning.call_args_list]
+        assert message.startswith("Would be blocked by policy: ")
+        assert "policy.fetch_failure_default=block" in message
+
     def test_fetch_failure_default_block_raises(self):
         logger = InstallLogger()
         fetch = PolicyFetchResult(

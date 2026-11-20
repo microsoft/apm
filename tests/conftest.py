@@ -207,6 +207,39 @@ def _reset_config_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_marketplace_registry_cache():
+    """Drop the process-wide marketplace registry cache around each test.
+
+    ``marketplace.registry`` caches ``marketplaces.json`` for the process. A
+    test that registers a marketplace under a temporary HOME would otherwise
+    leave that alias visible to later tests on the worker.
+    """
+    from apm_cli.marketplace import registry
+
+    registry._invalidate_cache()
+    yield
+    registry._invalidate_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_once_per_process_warnings():
+    """Forget which once-per-process CLI notices were shown (#4242, #4256).
+
+    One CLI process prints each such notice once; a test is one process
+    in production, so a notice seen by an earlier test must not hide it here.
+    """
+    from apm_cli.integration import mcp_config_view
+    from apm_cli.models.dependency import mcp
+
+    shown = (mcp._PASSTHROUGH_WARNED, mcp_config_view._TRUST_NOTICES_SHOWN)
+    for notices in shown:
+        notices.clear()
+    yield
+    for notices in shown:
+        notices.clear()
+
+
+@pytest.fixture(autouse=True)
 def _restore_executable_caches():
     """Restore the process-wide git/gh executable caches after each test.
 
@@ -303,15 +336,26 @@ _LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``.
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Imply ``lifecycle_smoke`` and bind OpenAPM req markers to the conformance map.
 
-    The merge-group selection is then a subset of the full lifecycle smoke
-    selection by construction. ``tryfirst`` runs this before ``-m``
-    deselection, so ``-m lifecycle_smoke`` collects merge-group nodes.
+    A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``, so the
+    merge-group selection is a subset of the full lifecycle smoke selection by
+    construction; ``tryfirst`` runs this before ``-m`` deselection. Running
+    first also means environment-dependent skip markers that other conftests
+    add at collection time never change a requirement's recorded status.
     """
     for item in items:
         if item.get_closest_marker(_LIFECYCLE_MERGE_GROUP_MARKER) and not item.get_closest_marker(
             _LIFECYCLE_SMOKE_MARKER
         ):
             item.add_marker(_LIFECYCLE_SMOKE_MARKER)
+
+    # Bounded candidate copies (mutation harnesses) ship no tests/spec_conformance.
+    if not config.getoption("collectonly", False) and not any(
+        item.get_closest_marker("req") for item in items
+    ):
+        return
+    from tests.spec_conformance.coverage_map import record
+
+    record(config, items)

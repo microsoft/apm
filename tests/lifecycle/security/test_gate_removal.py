@@ -157,9 +157,11 @@ class GateReplay(RowReplay):
             ref = self.world.packages[key]
             if ref.source == "local-bundle":
                 _redefine_bundle(Path(ref.spec), kind)
+                # The approval pins the whole bundle digest: every kind loses it.
+                self.model = self.model.revoke(key, self.kinds[key])
             else:
                 _redefine(Path(ref.spec), kind)
-            self.model = self.model.revoke(key, {kind})
+                self.model = self.model.revoke(key, {kind})
         elif edit == "policy":
             variant = str(step["variant"])
             use_policy(self.world, variant)
@@ -298,6 +300,7 @@ class GateReplay(RowReplay):
             deploy_root=root,
             lock=LockFile.read(workspace / "apm.lock.yaml"),
             managed_paths=frozenset(managed),
+            user_scope=user,
         )
 
     def check_then(self) -> None:
@@ -621,11 +624,9 @@ def test_gate_change_removes_on_the_next_mutating_command(
 
 # -- deny by install spec (#4189) --------------------------------------------
 #
-# The fix contract: a deny written under the install spec is canonicalized
-# on read (with a one-time notice), and ``apm policy explain`` agrees with
-# approve and deny. Strict until #4189 lands.
+# A deny written under the install spec is canonicalized on read (with a
+# one-time notice), and ``apm policy explain`` agrees with approve and deny.
 
-_DENY_SPEC_CELL = "#4189 deny by install spec and installed identity"
 _USER_HOOK = ".copilot/hooks/p-exec-session.json"
 
 
@@ -645,8 +646,8 @@ def _marketplace_exec_deployed(world) -> str:
     return spec
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_DENY_SPEC_CELL)
 def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_world) -> None:
+    """A deny stored under the install spec applies on read and is rewritten by the next deny."""
     world = lifecycle_world
     spec = _marketplace_exec_deployed(world)
     config = world.apm_home / "config.json"
@@ -654,14 +655,24 @@ def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_wo
     deny = data.setdefault("executables", {}).setdefault("deny", {})
     deny[spec] = {"hooks": True, "mcp": True, "bin": True}
     config.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    before = config.read_bytes()
     result = driver.run(world, ("install",), scope="user")
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (world.home / _USER_HOOK).exists(), "the existing deny must retire the hook"
+    notice = "names an install spec; it applies to"
+    output = result.stdout + result.stderr
+    assert output.count(f"{notice} {ORG}/p-exec.") == 1, output
+    assert config.read_bytes() == before, "install must not write the user store"
+    denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
+    assert denied.returncode == 0, denied.stdout + denied.stderr
     stored = json.loads(config.read_text(encoding="utf-8"))["executables"]["deny"]
     assert f"{ORG}/p-exec" in stored and spec not in stored, stored
+    again = driver.run(world, ("install",), scope="user")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert notice not in again.stdout + again.stderr, again.stdout + again.stderr
+    assert not (world.home / _USER_HOOK).exists(), "the rewritten deny must keep the hook retired"
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_DENY_SPEC_CELL)
 def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> None:
     world = lifecycle_world
     spec = _marketplace_exec_deployed(world)
@@ -676,11 +687,6 @@ def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> N
     assert "verdict: blocked" in explained.stdout, explained.stdout
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#4245 apm approve with a marketplace install spec reports not found and exits 0",
-)
 def test_approve_by_marketplace_install_spec_approves_or_refuses(lifecycle_world) -> None:
     world = lifecycle_world
     spec = world.packages["p-exec:marketplace"].spec
@@ -698,12 +704,8 @@ def test_approve_by_marketplace_install_spec_approves_or_refuses(lifecycle_world
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#4246 apm policy explain suggests approving a package the user denied",
-)
 def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecycle_world) -> None:
+    """A user deny explains as blocked; the only approve mention is the lift remedy (#4275)."""
     world = lifecycle_world
     _marketplace_exec_deployed(world)
     denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
@@ -712,8 +714,17 @@ def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecy
     explained = runner.run(
         ("policy", "explain", f"{ORG}/p-exec"), cwd=world.apm_home, env=world.env
     )
-    assert "verdict: blocked" in explained.stdout, explained.stdout
-    assert "apm approve" not in explained.stdout, explained.stdout
+    out = explained.stdout
+    assert explained.returncode == 0, out + explained.stderr
+    assert "verdict: blocked" in out, out
+    assert "(layer: user-deny)" in out, out
+    assert "not approved" not in out, out
+    approve_lines = [line for line in out.splitlines() if "apm approve" in line]
+    assert len(approve_lines) == 1, out
+    lift = approve_lines[0]
+    assert "executables.deny entry" in lift and "To lift it" in lift, lift
+    assert lift.index("To lift it") < lift.index("apm approve"), lift
+    assert not any(line.lstrip().startswith("Approve:") for line in out.splitlines()), out
 
 
 # -- local trust controls at user scope (-g) -----------------------------------

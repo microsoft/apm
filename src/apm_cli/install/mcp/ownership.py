@@ -99,6 +99,44 @@ def native_mcp_entry_present(
     return _native_config_key(client, name, stored_config=stored_config) in existing
 
 
+def native_mcp_entry_matches_declaration(
+    runtime: str,
+    name: str,
+    *,
+    stored_config: dict | None,
+    project_root: Any,
+    user_scope: bool,
+) -> bool:
+    """Whether a user's own entry for *name* already equals its self-defined declaration.
+
+    Such an entry needs no write and stays the user's, so replaying the lock
+    has nothing to claim for it. Registry declarations need their payload to
+    render and never match here.
+    """
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+
+    if not isinstance(stored_config, dict) or stored_config.get("registry") is not False:
+        return False
+    try:
+        dependency = MCPDependency.from_dict(stored_config)
+        client = ClientFactory.create_client(
+            runtime, project_root=project_root, user_scope=user_scope
+        )
+        state = compare_native_mcp_connection(
+            client,
+            name,
+            requested_info=MCPIntegrator._build_self_defined_info(dependency),
+            stored_config=stored_config,
+            managed=False,
+        )
+    except (TypeError, ValueError):
+        logger.debug("Could not compare %s MCP entry %s", runtime, name, exc_info=True)
+        return False
+    return state is NativeMcpConnectionState.MATCHING_FOREIGN
+
+
 def native_comparison_clients(
     target_runtimes: list[str], *, project_root: Any, user_scope: bool
 ) -> dict[str, Any]:
@@ -930,6 +968,9 @@ def reconcile_legacy_truncated_key(
     if legacy_key == dep_name or legacy_key in claimed_keys:
         return
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    # Runtimes that share one config file (Claude Code and Copilot CLI both
+    # read .mcp.json) report a left legacy entry once (#4289).
+    warned_paths: set[str] = set()
     for rt in runtimes:
         if rt in _DECLARED_KEY_RUNTIMES:
             continue
@@ -959,6 +1000,9 @@ def reconcile_legacy_truncated_key(
                     native_hashes={rt: {legacy_key: legacy_hash}} if legacy_hash else None,
                 )
             except RequiredIntegrationError:
+                if str(config_path) in warned_paths:
+                    continue
+                warned_paths.add(str(config_path))
                 logger.warning(
                     f"Left existing MCP server '{legacy_key}' in {config_path}: it changed "
                     f"since APM wrote it for '{dep_name}'. Remove it manually if it is "
@@ -966,7 +1010,8 @@ def reconcile_legacy_truncated_key(
                 )
                 continue
             logger.progress(f"Renamed MCP server '{legacy_key}' to '{dep_name}' in {config_path}")
-        else:
+        elif str(config_path) not in warned_paths:
+            warned_paths.add(str(config_path))
             logger.warning(
                 f"Left existing MCP server '{legacy_key}' in {config_path}: APM has no "
                 f"record of writing it for '{dep_name}'. Remove it manually if it is "

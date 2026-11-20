@@ -799,6 +799,80 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertEqual(mock_fetch.call_count, 1)
             self.assertFalse(result.found)
 
+    @staticmethod
+    def _age_cache(root: Path, age_seconds: int) -> None:
+        for meta in _get_cache_dir(root).glob("*.meta.json"):
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            data["cached_at"] = time.time() - age_seconds
+            meta.write_text(json.dumps(data), encoding="utf-8")
+
+    @staticmethod
+    def _resolve_online(root: Path, mock_fetch) -> None:
+        """.github-private answers 404 and .github serves the policy (recorded)."""
+        mock_fetch.side_effect = lambda ref, _path: (
+            (None, "404: Policy file not found")
+            if ref.endswith(".github-private")
+            else (VALID_POLICY_YAML, None)
+        )
+        assert _auto_discover(root).found
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_unreachable_github_private_serves_the_recorded_stale_github_cache(
+        self, mock_extract, mock_fetch
+    ):
+        """Offline, the policy last resolved from .github (under 7 days) applies (#4456)."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._resolve_online(root, mock_fetch)
+            self._age_cache(root, 2 * 3600)
+            mock_fetch.side_effect = None
+            mock_fetch.return_value = (None, "Connection error fetching policy from contoso")
+            result = _auto_discover(root)
+
+        self.assertEqual(result.outcome, "cached_stale")
+        self.assertTrue(result.cache_stale)
+        self.assertIsNotNone(result.policy)
+        self.assertEqual(result.source, "org:contoso/.github")
+        self.assertIn("Connection error", result.fetch_error)
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_unreachable_github_private_without_an_absence_record_does_not_downgrade(
+        self, mock_extract, mock_fetch
+    ):
+        """A cached .github never stands in for an unreachable .github-private
+        that was not recorded as absent: the failure stands (#4456)."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        mock_fetch.return_value = (None, "Connection error fetching policy from contoso")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_cache("contoso/.github", _make_test_policy(), root)
+            self._age_cache(root, 2 * 3600)
+            result = _auto_discover(root)
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIsNone(result.policy)
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_github_private_auth_error_fails_closed_despite_a_recorded_github(
+        self, mock_extract, mock_fetch
+    ):
+        """A readable-but-denied .github-private may hide a stricter policy (#4456)."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._resolve_online(root, mock_fetch)
+            self._age_cache(root, 2 * 3600)
+            mock_fetch.side_effect = None
+            mock_fetch.return_value = (None, "403: Access denied to contoso/.github-private")
+            result = _auto_discover(root)
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIsNone(result.policy)
+
     @patch("apm_cli.policy.discovery._fetch_from_repo")
     @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_private_absent_falls_back_to_github(self, mock_extract, mock_fetch):

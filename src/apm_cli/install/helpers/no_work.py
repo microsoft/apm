@@ -6,6 +6,8 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
+
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -27,7 +29,7 @@ def write_empty_lockfile(
     from apm_cli.install.phases.lockfile import LockfileBuilder
 
     lock_path = get_lockfile_path(apm_dir)
-    existing_lock = LockFile.read(lock_path) if lock_path.exists() else None
+    existing_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
     builder = LockfileBuilder(
         InstallContext(
             project_root=apm_dir,

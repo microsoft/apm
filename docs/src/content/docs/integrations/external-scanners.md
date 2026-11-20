@@ -167,6 +167,12 @@ apm install some/package --audit block
 apm install some/package --no-audit
 ```
 
+The audit scans the exact bytes APM wrote to each target, after format
+conversion. When it blocks, or the install fails before the audit passes,
+APM restores every target file, `.gitignore` and `apm.lock.yaml` to their
+previous bytes, so nothing the audit refused stays deployed. With the audit
+`off`, install takes no snapshot and pays no extra cost.
+
 Set a personal default so every install audits without a flag:
 
 ```bash

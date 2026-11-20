@@ -176,7 +176,7 @@ class TestKiroClientAdapter:
             "remotes": [{"transport_type": "websocket", "url": "https://mcp.example.com"}],
         }
 
-        with patch("apm_cli.adapters.client.kiro._rich_error") as rich_error:
+        with patch("apm_cli.core.null_logger._rich_error") as rich_error:
             assert adapter.configure_mcp_server("scope/server", server_name="srv") is False
 
         rich_error.assert_called_once_with(

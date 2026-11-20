@@ -44,8 +44,10 @@ def test_dry_run_previews_the_gate_removal_the_install_performs(
     preview = chain.ok("install", "--dry-run", "--no-policy")
 
     lines = preview.stdout.splitlines()
-    assert f"[i] Executables that would be retired (denied): {_PACKAGE}" in lines, _text(preview)
-    assert "[i]   - mcp: tools-server" in lines, _text(preview)
+    header = "[i] Executables that would be retired (decision changed since apm.lock.yaml): 1"
+    assert header in lines, _text(preview)
+    assert f"[i]   - {_PACKAGE} is denied locally" in lines, _text(preview)
+    assert "[i]       mcp (denied): tools-server" in lines, _text(preview)
     assert tree_snapshot(chain.project) == before, "dry-run changed state"
 
     chain.ok("install", "--no-policy")

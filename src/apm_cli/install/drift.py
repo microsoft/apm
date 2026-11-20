@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core import remediation as _advice
 from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_detection import (
     read_manifest_target as _read_apm_yml_target,  # noqa: F401 -- compatibility re-export
@@ -222,14 +223,13 @@ def _verify_remote_cache_candidate(
     ):
         raise CacheMissError(
             f"cannot replay {lock_dep.repo_url}: lockfile entry has no resolved_commit "
-            "(cache freshness unverifiable). Re-run 'apm install' with a pinned ref "
-            "(commit, tag, or specific branch HEAD) before audit."
+            f"(cache freshness unverifiable). {_advice.REMOTE_DEPENDENCY_UNPINNED.sentence()}"
         )
     if not candidate.exists():
         _ref_label = lock_dep.resolved_commit or lock_dep.version or "unknown"
         raise CacheMissError(
             f"cache miss for {lock_dep.repo_url}@{_ref_label}: "
-            f"expected {candidate}; run 'apm install' to populate the cache"
+            f"expected {candidate}; {_advice.REPLAY_CACHE_MISSING.clause()}"
         )
     if lock_dep.resolved_commit:
         from apm_cli.drift import locked_copy_holds_commit
@@ -238,12 +238,12 @@ def _verify_remote_cache_candidate(
         if not locked_copy_holds_commit(lock_dep, candidate):
             raise CacheMissError(
                 f"{candidate} does not hold the locked commit {lock_dep.resolved_commit}; "
-                "run 'apm install' to refresh apm_modules cache"
+                f"{_advice.REPLAY_CACHE_STALE.clause()}"
             )
     if locked_content_mismatch(lock_dep.get_unique_key(), lock_dep, candidate, lockfile=lockfile):
         raise CacheMissError(
             f"{candidate} does not hold the locked content of {lock_dep.get_unique_key()}; "
-            "run 'apm install' to refresh apm_modules cache"
+            f"{_advice.REPLAY_CACHE_CONTENT_STALE.clause()}"
         )
 
 
@@ -271,10 +271,8 @@ def _materialize_install_path(
     For local deps -- contents live at the source directory the install
     resolver anchored on: ``project_root`` for direct (root-declared) deps,
     or the declaring package's directory for transitive ``../sibling`` deps
-    (resolved via ``resolved_by``; see
-    :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`). The
-    ``lockfile`` is required to walk that chain; it is unused for remote
-    deps and for direct local deps (``resolved_by is None``).
+    (``resolved_by``; see :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`).
+    ``lockfile`` walks that chain; remote and direct local deps do not use it.
     For remote deps -- contents live at the canonical apm_modules subpath.
     In ``cache_only`` mode the replay reads a verified live cache entry. In
     self-hydrating mode it materializes a scratch-private copy using the lock's
@@ -433,10 +431,7 @@ def _build_package_info(
     install_path: Path,
 ):
     """Construct ``PackageInfo`` with the selected manifest's package identity."""
-    from apm_cli.agent_plugins.errors import (
-        AgentPluginDeploymentBoundaryError,
-        AgentPluginError,
-    )
+    from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError, AgentPluginError
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
     from apm_cli.models.apm_package import (
@@ -484,7 +479,10 @@ def _build_package_info(
         pkg = None
         if apm_yml.exists():
             try:
-                pkg = APMPackage.from_apm_yml(apm_yml, source_path=install_path)
+                # Replay reads config; it never creates it (dry-run and audit stay read-only).
+                pkg = APMPackage.from_apm_yml(
+                    apm_yml, source_path=install_path, create_config=False
+                )
             except Exception:
                 if lock_dep.replacement is not None:
                     raise
@@ -566,7 +564,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     if not config.lockfile_path.exists():
         raise CacheMissError(
-            f"lockfile not found at {config.lockfile_path}; run 'apm install' to generate it"
+            f"lockfile not found at {config.lockfile_path}; {_advice.LOCKFILE_MISSING.clause()}"
         )
 
     lock = LockFile.read(config.lockfile_path)
@@ -613,6 +611,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     registry_resolver = None
     declared_transports: DeclaredTransportIndex | None = None
     if not config.cache_only:
+        from apm_cli.cache.git_cache import attach_persistent_git_cache
         from apm_cli.core.auth import AuthResolver
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.registry.resolver import RegistryPackageResolver
@@ -620,6 +619,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         from apm_cli.models.apm_package import APMPackage
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+        attach_persistent_git_cache(downloader, read_only=True)
         declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
         if (apm_yml := manifest_file(project_root)).exists():
             manifest = APMPackage.from_apm_yml(apm_yml)

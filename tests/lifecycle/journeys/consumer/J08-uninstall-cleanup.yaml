@@ -64,9 +64,4 @@ steps:
     exit: 0
     files: []
     key_lines: ["No dependencies declared -- lockfile not required"]
-known_cells:
-  - id: frozen-fails-without-lock-when-audit-passes
-    law: I3
-    tracking: "#4197"
-    step: 5
-    match: "audit --ci exited 0 but install --frozen exited 1"
+known_cells: []
