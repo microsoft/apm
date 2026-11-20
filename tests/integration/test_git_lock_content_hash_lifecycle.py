@@ -3,11 +3,13 @@
 A hermetic git world (URL-rewritten local remotes) installs a direct git
 dependency, its transitive git dependency, a marketplace entry that resolves
 to git, and a user-scope (``-g``) git dependency. Every git-sourced lockfile
-entry carries a ``content_hash``.
+entry carries a ``content_hash`` in the ``sha256:<64 hex>`` envelope, and
+``audit --ci`` and ``install --frozen`` reach the same verdict on that lock.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,7 @@ pytestmark = [
     pytest.mark.promise("P-OWN-package-content-hash", "req-lk-015", "req-lk-016", "P-INV-I3"),
 ]
 
+_ENVELOPE = re.compile(r"sha256:[0-9a-f]{64}")
 _SKILL = "---\nname: {name}\ndescription: {name} skill\n---\n# {name}\n"
 
 
@@ -48,7 +51,7 @@ def _publish(scenario: _Scenario, name: str, *, dependencies=()) -> str:
     return f"{remote}#{commit.sha}"
 
 
-def _git_entries_without_hash(lock_path: Path) -> dict[str, list[str]]:
+def _git_entries_without_valid_hash(lock_path: Path) -> dict[str, list[str]]:
     lock = load_yaml(lock_path) or {}
     missing: dict[str, list[str]] = {}
     for entry in lock.get("dependencies") or []:
@@ -56,7 +59,7 @@ def _git_entries_without_hash(lock_path: Path) -> dict[str, list[str]]:
             continue
         if not entry.get("resolved_commit"):
             continue
-        if not entry.get("content_hash"):
+        if not _ENVELOPE.fullmatch(str(entry.get("content_hash") or "")):
             kind = "transitive" if entry.get("resolved_by") else "direct"
             if entry.get("marketplace_plugin") or entry.get("marketplace"):
                 kind = "marketplace"
@@ -104,7 +107,18 @@ def test_every_git_lock_entry_records_a_content_hash(tmp_path: Path, apm_binary_
     assert user.returncode == 0, user.stdout + user.stderr
 
     missing = {
-        "project": _git_entries_without_hash(consumer.root / "apm.lock.yaml"),
-        "user": _git_entries_without_hash(scenario.isolated.config_root / "apm.lock.yaml"),
+        "project": _git_entries_without_valid_hash(consumer.root / "apm.lock.yaml"),
+        "user": _git_entries_without_valid_hash(scenario.isolated.config_root / "apm.lock.yaml"),
     }
     assert missing == {"project": {}, "user": {}}, missing
+
+    audit = _run(scenario, consumer.root, ("audit", "--ci", "--no-policy"), "hashes-audit-ci")
+    frozen = _run(
+        scenario,
+        consumer.root,
+        ("install", "--frozen", "--target", "copilot", "--no-policy"),
+        "hashes-frozen",
+    )
+    assert (audit.returncode, frozen.returncode) == (0, 0), (
+        audit.stdout + audit.stderr + frozen.stdout + frozen.stderr
+    )
