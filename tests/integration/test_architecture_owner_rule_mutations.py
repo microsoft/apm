@@ -2184,7 +2184,12 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '            raise ValueError(f"{error} (in {apm_yml_path})")\n'
             "        registries_map[name] = url.strip()\n"
         ),
-        new="        registries_map[name] = url.strip()\n",
+        new=(
+            "        error = None\n"
+            "        if error is not None:\n"
+            '            raise ValueError(f"{error} (in {apm_yml_path})")\n'
+            "        registries_map[name] = url.strip()\n"
+        ),
         intent="The default-contract registries parse accepts any URL without the scheme owner.",
     ),
     MutationCase(
