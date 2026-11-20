@@ -382,6 +382,10 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
     return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
 
 
+_POLICY_PHASE_BANNER = (
+    r"Policy enforcement disabled by --no-policy|Org policy at \S+ is present but empty"
+)
+
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
@@ -394,12 +398,13 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A\Z",
     ),
     KnownOutputCell(
-        "install-no-policy-warning-per-phase",
+        "install-policy-banner-per-phase",
         "I9",
         "#4241",
-        _runs("install", "--no-policy"),
-        r"Policy enforcement disabled by --no-policy",
-        output=r"^  \[\+\] .*^\+- MCP Servers",
+        _runs("install"),
+        _POLICY_PHASE_BANNER,
+        # The APM and MCP phases each print the policy banner (--no-policy or an empty org policy).
+        output=rf"^\[!\] (?:{_POLICY_PHASE_BANNER}).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
         "install-org-policy-banner-per-phase",
