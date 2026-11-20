@@ -552,7 +552,35 @@ class InstallService:
                 reasons=reasons,
             )
 
+        InstallService._refuse_frozen_dropped_targets(request, lockfile, lockfile_path)
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
+
+    @staticmethod
+    def _refuse_frozen_dropped_targets(
+        request: InstallRequest, lockfile: LockFile, lockfile_path: Path
+    ) -> None:
+        """Refuse, before any write, a lock that records files of a target apm.yml dropped (#4517).
+
+        Retiring them deletes deployed files and rewrites apm.lock.yaml, which
+        ``--frozen`` may not do; a refused frozen install changes nothing.
+        """
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.manifest_reconcile import dropped_target_files
+
+        root = getattr(request.apm_package, "package_path", None) or lockfile_path.parent
+        dropped = dropped_target_files(
+            Path(root), lockfile, user_scope=is_user_scope(request.scope)
+        )
+        if not dropped:
+            return
+        targets = ", ".join(sorted(set(dropped.values())))
+        raise FrozenInstallError(
+            f"--frozen: apm.yml no longer declares target(s) {targets}, "
+            "but apm.lock.yaml still records their files.",
+            reasons=[f"  - {path} (target {dropped[path]})" for path in sorted(dropped)],
+            tip=f"Tip: {remediation.FROZEN_TARGET_DROPPED.sentence()}",
+        )
 
     @staticmethod
     def _selected_locked_replacements(

@@ -509,6 +509,7 @@ check maps to specific lockfile fields:
 | `skill-subset-consistency` | `skill_subset`, `target_subset` and `subset_pairings` per entry, matched against the merge declared by `apm.yml` and the installed packages' manifests, and against the resolved package tree |
 | `config-consistency` | `mcp_configs`, `mcp_config_provenance` and exact `mcp_omissions` evidence |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
+| `lockfile-targets-current` | `deployed_files` per entry vs. `apm.yml` `targets:` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically
 directory markers ending in `/`) are skipped by content-integrity. Missing

@@ -418,6 +418,37 @@ def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
     )
 
 
+def _check_lockfile_targets_current(
+    project_root: Path, lock: LockFile, *, user_scope: bool
+) -> CheckResult:
+    """Verify apm.lock.yaml records no files of a target apm.yml dropped (#4517).
+
+    The same dropped-target owner ``apm install --frozen`` refuses through, so
+    audit and frozen agree and share one remedy.
+    """
+    from ..install.manifest_reconcile import dropped_target_files
+
+    dropped = dropped_target_files(project_root, lock, user_scope=user_scope)
+    if not dropped:
+        return CheckResult(
+            name="lockfile-targets-current",
+            passed=True,
+            message="Lockfile records only declared targets",
+        )
+    fix = remediation.FROZEN_TARGET_DROPPED
+    targets = ", ".join(sorted(set(dropped.values())))
+    return CheckResult(
+        name="lockfile-targets-current",
+        passed=False,
+        message=(
+            f"apm.lock.yaml records {len(dropped)} file(s) of target(s) {targets} "
+            f"that apm.yml no longer declares -- {fix.clause()}"
+        ),
+        details=[f"{path} (target {dropped[path]})" for path in sorted(dropped)],
+        remediations=(fix,),
+    )
+
+
 def _check_no_orphans(
     manifest: APMPackage,
     lock: LockFile,
@@ -1518,7 +1549,10 @@ def run_baseline_checks(
         return result
 
     # Check 5: No orphaned packages
-    if _run(_check_no_orphans(manifest, lock)):
+    # 5b: no files of a target apm.yml dropped (#4517), as --frozen refuses
+    if _run(_check_no_orphans(manifest, lock)) or _run(
+        _check_lockfile_targets_current(project_root, lock, user_scope=user_scope)
+    ):
         return result
 
     # Check 6: Skill subset consistency (manifest vs lockfile)

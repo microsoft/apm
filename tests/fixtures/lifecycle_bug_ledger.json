@@ -4282,6 +4282,16 @@
       "regression_tests": [
         "tests/integration/test_native_mcp_collision_lifecycle.py::test_user_disabled_matching_codex_connection_installs_and_replays_frozen"
       ]
+    },
+    {
+      "issue": 4517,
+      "fixed_in": "Unreleased",
+      "summary": "apm install --frozen refuses, before any write, a lock that still records files of a target apm.yml dropped, naming the target, its files and the catalog remedy, instead of deleting them and then failing; apm audit --ci fails the same state (lockfile-targets-current), and the executed remedy converges both.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "lockfile.frozen_preserves_bytes", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_frozen_dropped_target_lifecycle.py::test_frozen_refuses_a_dropped_target_with_zero_writes_and_its_remedy_runs"
+      ]
     }
   ],
   "lifecycle_contracts": [

@@ -325,13 +325,14 @@ class TestCiWithoutPolicy:
         data = json.loads(result.stdout)
         # Baseline checks only, including deployment ownership and the
         # recorded executables decisions (#4053); no policy checks.
-        assert data["summary"]["total"] == data["summary"]["passed"] == 13
+        assert data["summary"]["total"] == data["summary"]["passed"] == 14
         assert [check["name"] for check in data["checks"]] == [
             "lockfile-exists",
             "ref-consistency",
             "deployment-ledger-owners",
             "deployed-files-present",
             "no-orphaned-packages",
+            "lockfile-targets-current",
             "skill-subset-consistency",
             "config-consistency",
             "native-mcp-ownership",
