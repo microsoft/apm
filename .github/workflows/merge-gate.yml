@@ -162,10 +162,12 @@ jobs:
           # 16-18m end-to-end; sized at 80m to absorb runner queueing
           # without false-failing the gate.
           TIMEOUT_MIN: '80'
-          # 5s poll keeps perceived gate latency low. With ~3 expected checks
-          # per poll = ~36 gh API calls/min, well under the 5000/hr quota.
+          # The Checks API calls of every open gate run share the repository's
+          # Actions installation quota with CodeQL and other repository
+          # automation. A 5s poll across dozens of concurrent gate runs exhausted
+          # it; 30s adds at most ~25s of gate latency.
           # cancel-in-progress concurrency bounds parallel polling per PR.
-          POLL_SEC: '5'
+          POLL_SEC: '30'
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh

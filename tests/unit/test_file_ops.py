@@ -92,7 +92,7 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             result = _retry_on_lock(flaky, "test op", max_retries=5)
 
         assert result == "ok"
@@ -104,7 +104,7 @@ class TestRetryOnLock:
         def always_fail():
             raise exc
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), pytest.raises(OSError, match="busy"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"), pytest.raises(OSError, match="busy"):
             _retry_on_lock(always_fail, "test op", max_retries=2)
 
     def test_non_transient_error_raises_immediately(self):
@@ -134,7 +134,7 @@ class TestRetryOnLock:
             return "ok"
 
         with patch(
-            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+            "apm_cli.utils.file_ops._retry_sleep", side_effect=lambda d: sleep_calls.append(d)
         ):
             _retry_on_lock(
                 fail_three_times,
@@ -163,7 +163,7 @@ class TestRetryOnLock:
             return "ok"
 
         with patch(
-            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+            "apm_cli.utils.file_ops._retry_sleep", side_effect=lambda d: sleep_calls.append(d)
         ):
             _retry_on_lock(
                 fail_many,
@@ -194,7 +194,7 @@ class TestRetryOnLock:
             nonlocal cleanup_calls
             cleanup_calls += 1
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             _retry_on_lock(fail_once, "test", before_retry=cleanup, max_retries=3)
 
         assert cleanup_calls == 1
@@ -213,7 +213,7 @@ class TestRetryOnLock:
         def bad_cleanup():
             raise OSError("cleanup failed")
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             result = _retry_on_lock(
                 fail_once,
                 "test",
@@ -233,7 +233,10 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), patch.dict(os.environ, {"APM_DEBUG": "1"}):
+        with (
+            patch("apm_cli.utils.file_ops._retry_sleep"),
+            patch.dict(os.environ, {"APM_DEBUG": "1"}),
+        ):
             _retry_on_lock(
                 fail_once,
                 "SENSITIVE_PATH_SENTINEL",
@@ -320,8 +323,8 @@ class TestRobustRmtree:
             return original_rmtree(*args, **kwargs)
 
         with (
-            patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=flaky_rmtree),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("shutil.rmtree", side_effect=flaky_rmtree),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             robust_rmtree(d)
 
@@ -376,8 +379,8 @@ class TestRobustCopytree:
             return original_copytree(*args, **kwargs)
 
         with (
-            patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("shutil.copytree", side_effect=flaky_copytree),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             result = robust_copytree(src, dst)
 
@@ -411,9 +414,9 @@ class TestRobustCopytree:
             return original_rmtree(*args, **kwargs)
 
         with (
-            patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree),
-            patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=spy_rmtree),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("shutil.copytree", side_effect=flaky_copytree),
+            patch("shutil.rmtree", side_effect=spy_rmtree),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             robust_copytree(src, dst, dirs_exist_ok=True)
 
@@ -462,7 +465,7 @@ class TestRobustCopy2:
 
         with (
             patch("apm_cli.utils.file_ops._reflink_copy_file", side_effect=flaky_reflink_copy),
-            patch("apm_cli.utils.file_ops.time.sleep"),
+            patch("apm_cli.utils.file_ops._retry_sleep"),
         ):
             result = robust_copy2(src, dst)  # noqa: F841
 
@@ -515,7 +518,7 @@ class TestRobustReplace:
 
         with (
             patch.object(Path, "replace", flaky_replace),
-            patch("apm_cli.utils.file_ops.time.sleep") as sleep,
+            patch("apm_cli.utils.file_ops._retry_sleep") as sleep,
         ):
             robust_replace(src, dst)
 
@@ -525,7 +528,7 @@ class TestRobustReplace:
 
     def test_non_transient_error_raises_immediately(self, tmp_path):
         with (
-            patch("apm_cli.utils.file_ops.time.sleep") as sleep,
+            patch("apm_cli.utils.file_ops._retry_sleep") as sleep,
             pytest.raises(FileNotFoundError),
         ):
             robust_replace(tmp_path / "missing", tmp_path / "dest")
@@ -589,7 +592,7 @@ class TestRmtreeIntegration:
         """_rmtree should not raise (ignore_errors=True)."""
         from apm_cli.deps.github_downloader import _rmtree
 
-        with patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=PermissionError("denied")):
+        with patch("shutil.rmtree", side_effect=PermissionError("denied")):
             # Should not raise
             _rmtree(str(tmp_path / "nonexistent-apm-test-dir"))
 
