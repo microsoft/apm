@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import shutil
 import statistics
@@ -254,7 +255,13 @@ def _codex_cli_skip_reason() -> str | None:
     return None
 
 
-_CODEX_SKIP = _codex_cli_skip_reason()
+# CI (or APM_REQUIRE_CODEX=1) never skips: a runner without the Codex CLI must fail
+# the cell loudly instead of silently dropping its coverage.
+_CODEX_SKIP = (
+    None
+    if os.environ.get("CI") or os.environ.get("APM_REQUIRE_CODEX")
+    else _codex_cli_skip_reason()
+)
 
 
 def _cell_marks(package: str, scope: str) -> list[pytest.MarkDecorator]:
