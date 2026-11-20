@@ -932,21 +932,6 @@ def _apply_only_filter(ctx: InstallContext) -> None:
     )
 
 
-def _include_unlocked_local_dependencies(ctx: InstallContext, complete: builtins.list[Any]) -> None:
-    """Install declared local deps the lock lacks alongside a partial selection (#4198)."""
-    from apm_cli.install.package_selection import unlocked_local_dependencies
-
-    locked = ctx.existing_lockfile.dependencies if ctx.existing_lockfile is not None else {}
-    selected = {dep.get_identity() for dep in ctx.deps_to_install}
-    extra = {
-        dep.get_identity()
-        for dep in unlocked_local_dependencies(
-            ctx.dependency_graph.dependency_tree, complete, locked
-        )
-    }
-    ctx.deps_to_install = [dep for dep in complete if dep.get_identity() in selected | extra]
-
-
 def _record_update_plan_complete_dep_keys(ctx: InstallContext) -> None:
     """Record complete graph keys before selective update filtering."""
     ctx.update_plan_complete_dep_keys = builtins.set(
@@ -1008,7 +993,9 @@ def run(ctx: InstallContext) -> None:
     _record_update_plan_complete_dep_keys(ctx)
     _record_partial_subtree_reconciliation(ctx)
     if ctx.only_packages:
+        from apm_cli.install.package_selection import with_unlocked_local_dependencies
+
         complete = ctx.deps_to_install
         _apply_only_filter(ctx)
-        _include_unlocked_local_dependencies(ctx, complete)
+        ctx.deps_to_install = with_unlocked_local_dependencies(ctx, complete)
     _compute_intended_dep_keys(ctx)

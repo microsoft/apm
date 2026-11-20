@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from apm_cli.core.command_logger import _ValidationOutcome
     from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.context import InstallContext
 
 
 def _selected_dependency_reference(
@@ -89,6 +90,18 @@ def unlocked_local_dependencies(
         and node.dependency_ref.get_unique_key() not in locked_keys
     }
     return _subtree_dependencies(roots, tree, dependencies) if roots else []
+
+
+def with_unlocked_local_dependencies(
+    ctx: InstallContext, complete: Sequence[DependencyReference]
+) -> list[DependencyReference]:
+    """Add declared local deps the lock lacks to a partial selection, in graph order (#4198)."""
+    lockfile = ctx.existing_lockfile
+    locked = lockfile.dependencies if lockfile is not None else {}
+    tree = ctx.dependency_graph.dependency_tree
+    keep = {dep.get_identity() for dep in ctx.deps_to_install}
+    keep |= {dep.get_identity() for dep in unlocked_local_dependencies(tree, complete, locked)}
+    return [dep for dep in complete if dep.get_identity() in keep]
 
 
 def existing_dependency_identities(current_dependencies: list[object]) -> set[str]:
