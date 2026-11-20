@@ -115,7 +115,7 @@ def run(ctx: InstallContext) -> None:
             _pd_ref, existing_lockfile, update_refs=update_refs, ref_changed=_pd_ref_changed
         )
         if parallel_downloads > 0:
-            stage_existing_copy(ctx, _pd_path)
+            stage_existing_copy(ctx, _pd_path, _pd_locked_chk)
         _need_download.append((_pd_ref, _pd_path, _pd_dlref))
 
     if _need_download and parallel_downloads > 0:
