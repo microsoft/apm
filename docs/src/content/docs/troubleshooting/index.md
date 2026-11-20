@@ -122,7 +122,7 @@ for one local run, but `apm audit --ci` still enforces it. See
 
 ## A file changed and audit reports drift
 
-**What you see:** `[x] Drift detected: 1 file(s)`, with the path under `modified`.
+**What you see:** `[!] Drift detected: 1 file(s)` from `apm audit` (`[x]` when the run fails: `apm audit --ci`, or `security.audit.fail_on_drift`), with the path under `modified`.
 
 A deployed file no longer matches the hash in the lockfile, usually because someone edited it.
 APM keeps local edits on install, so the drift stays until you choose. Find the package that

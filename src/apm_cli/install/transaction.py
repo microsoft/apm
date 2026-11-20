@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
+from apm_cli.marketplace.version_pins import open_ref_pin_stage
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
@@ -113,6 +114,8 @@ class InstallTransaction:
             self._manifest_existed = manifest_path.exists()
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
             self._resolution = ResolutionStagingSession(apm_modules_dir)
+            # Marketplace ref pins resolved by this attempt; written on commit only.
+            self._ref_pins = open_ref_pin_stage()
         except BaseException:
             self._release_workspace_lock()
             raise
@@ -149,6 +152,7 @@ class InstallTransaction:
                 if not self.committed:
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
+                    self._ref_pins.commit()
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
@@ -186,6 +190,7 @@ class InstallTransaction:
                 if self._rolled_back:
                     raise RuntimeError("Cannot complete an install transaction after rollback")
                 try:
+                    self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)
                     self._completed = True
@@ -207,6 +212,7 @@ class InstallTransaction:
             if self.committed or self._rolled_back:
                 return
             try:
+                self._ref_pins.discard()
                 try:
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)

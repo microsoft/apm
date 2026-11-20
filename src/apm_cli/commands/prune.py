@@ -339,7 +339,6 @@ def prune(ctx, dry_run):
                 for record in reconciled.ledger.records.values()
             }
             deleted_targets: list[Path] = []
-            deployed_cleaned = 0
             trusted_cleanup_paths: set[str] = set()
             for dep_key, (paths, hashes) in cleanup_claims.items():
                 trusted_paths = set(paths)
@@ -354,15 +353,13 @@ def prune(ctx, dry_run):
                     recorded_hashes=hashes,
                     failed_path_retained=False,
                 )
-                deployed_cleaned += len(cleanup.deleted)
+                logger.stale_cleanup(dep_key, cleanup)
                 deleted_targets.extend(cleanup.deleted_targets)
 
             BaseIntegrator.cleanup_empty_parents(
                 deleted_targets,
                 stop_at=project_root,
             )
-            if deployed_cleaned:
-                logger.progress(f"Cleaned {deployed_cleaned} deployed integration file(s)")
 
             for violation in owner_violations:
                 locator = violation.locator
@@ -442,7 +439,7 @@ def prune(ctx, dry_run):
                         "dependency(ies) -- some hook entries may be stale. "
                         "Run 'apm install' to rebuild hook configuration."
                     )
-                else:
+                elif hook_stats.get("merged_hooks_changed"):
                     logger.progress("Reconciled merged hook ownership for pruned package(s)")
             except Exception as e:
                 logger.warning(

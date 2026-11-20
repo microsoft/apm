@@ -19,11 +19,16 @@ code path, not just the unit logic.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
+
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
 APM_YML = """name: test-copilot-dedup
 version: 1.0.0
@@ -240,3 +245,37 @@ def test_compile_cleanup_preserves_root_under_linked_parent(
     assert compiled.returncode != 0, compiled.stdout + compiled.stderr
     assert (external / "copilot-instructions.md").read_bytes() == retained
     assert github_dir.is_symlink()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("compile_target", ["copilot", "agents"])
+def test_compile_after_full_dedup_does_not_warn_about_zero_output(
+    tmp_path: Path, apm_binary_path: Path, compile_target: str
+) -> None:
+    """An explained AGENTS.md skip is not a zero-output misconfiguration (#4209)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    env = dict(isolated.subprocess_env())
+    env.pop("CI", None)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    proj = isolated.work_root / "consumer"
+    (proj / ".apm" / "instructions").mkdir(parents=True)
+    (proj / "apm.yml").write_text(APM_YML, encoding="utf-8")
+    (proj / ".apm" / "instructions" / "style.instructions.md").write_text(
+        INSTRUCTION_BODY, encoding="utf-8"
+    )
+
+    installed = runner.run(("install",), cwd=proj, env=env)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert (proj / ".github" / "instructions" / "style.instructions.md").is_file()
+    before = LifecycleStateSnapshot.capture(proj, targets=("copilot",))
+
+    compiled = runner.run(("compile", "--target", compile_target), cwd=proj, env=env)
+    output = compiled.stdout + compiled.stderr
+    assert compiled.returncode == 0, output
+    assert output.isascii(), output
+    flat = " ".join(output.split())
+    assert flat.count("AGENTS.md not generated (1 file) -- .github/instructions/ already") == 1
+    assert "produced no output files" not in flat, output
+    assert "[!]" not in output, output
+    assert not list(proj.rglob("AGENTS.md"))
+    assert LifecycleStateSnapshot.capture(proj, targets=("copilot",)) == before
