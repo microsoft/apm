@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import uuid
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -32,6 +32,7 @@ from apm_cli.utils.paths import portable_relpath
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.skill_adoption import LockedSkillSources
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -106,6 +107,7 @@ class DeploymentMaterializationSession:
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
         self._written: dict[str, str] = {}
+        self._kept: set[str] = set()
         self._dirty = False
         self._claims: dict[str, list[DeploymentRecord]] = {}
         if lockfile is not None:
@@ -121,6 +123,10 @@ class DeploymentMaterializationSession:
         self._state_present = False
         # Update-only locked-version sources for receipt-less skill adoption (#3625).
         self.locked_sources: LockedSkillSources | None = None
+        # The install's locked-render evidence for receipt-less overwrites (#4360).
+        self.render_evidence: DeploymentEvidence | None = None
+        # Managed files kept because nothing proved APM wrote them: (owner, path).
+        self.kept_overwrites: list[tuple[str, Path]] = []
         self._load()
 
     def _validate_paths(self) -> None:
@@ -290,15 +296,57 @@ class DeploymentMaterializationSession:
             if (content_hash := self._records[key].content_hash) is not None
         }
 
-    def has_receipt(self, path: Path) -> bool:
-        """Return whether any receipt, trusted or not, exists for this physical path."""
-        return path.resolve().as_posix() in self._physical_keys
+    def receipt_held(self, path: Path) -> bool:
+        """Return whether *path* still holds the bytes this installation receipted there."""
+        record = self._records.get(self._physical_keys.get(path.resolve().as_posix(), ""))
+        return record is not None and self._holds(path, record)
 
-    def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
-        """Return a prior rendered hash only for a currently authorized physical member."""
+    def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
+        """Record a declared member this run deliberately left on disk unwritten."""
         from apm_cli.install.deployed_paths import deployed_path_entry
 
-        locator = self._locator(path, targets)
+        self._kept.add(deployed_path_entry(path, self.root, targets))
+
+    def kept_values(self) -> frozenset[str]:
+        """Return lock values of declared members this run kept; cleanup retains them."""
+        return frozenset(self._kept)
+
+    def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
+        """Return a prior rendered hash only for a currently authorized physical member.
+
+        A receipt is trusted only when it is bound to the current lock claim
+        (same owner and claim signature) and either the file still holds the
+        receipted bytes or the lock records the receipted hash for the path.
+        A receipt written under another checkout's lock therefore never
+        vouches for, or refuses, different bytes now on disk. The lock can
+        only withdraw trust here; it never grants it.
+        """
+        return self._trusted_hash(path, targets, self._locator)
+
+    def overwrite_authorized(
+        self, path: Path, claim: str, targets: Sequence[TargetProfile]
+    ) -> bool:
+        """Whether replacing an existing managed file has deployment evidence (#4360).
+
+        This checkout's trusted receipt for the file, or its bytes equal to what
+        the locked versions render. A lockfile hash alone never authorizes it.
+        """
+        from apm_cli.integration.cleanup import AUTHORIZED
+
+        if self._trusted_hash(path, targets, self._write_locator) is not None:
+            return True
+        evidence = self.render_evidence
+        return evidence is not None and evidence.verdict(claim, path) == AUTHORIZED
+
+    def _trusted_hash(
+        self,
+        path: Path,
+        targets: Sequence[TargetProfile],
+        locate: Callable[[Path, Sequence[TargetProfile]], DeploymentLocator | None],
+    ) -> str | None:
+        from apm_cli.install.deployed_paths import deployed_path_entry
+
+        locator = locate(path, targets)
         if locator is None:
             return None
         key = self._physical_keys.get(path.resolve().as_posix())
@@ -317,7 +365,7 @@ class DeploymentMaterializationSession:
                 if profile
                 else None
             )
-        if recorded_target is None or self._locator(path, [recorded_target]) != record.locator:
+        if recorded_target is None or locate(path, [recorded_target]) != record.locator:
             return None
         if key in self._written:
             return record.content_hash
@@ -328,7 +376,20 @@ class DeploymentMaterializationSession:
             or self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]
         ):
             return None
+        claimed = {claim.content_hash for claim in self._claims[value]} - {None}
+        if record.content_hash not in claimed and not self._holds(path, record):
+            return None
         return record.content_hash
+
+    @staticmethod
+    def _holds(path: Path, record: DeploymentRecord) -> bool:
+        """Return whether *path* still holds exactly the receipted bytes."""
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            return path.is_file() and compute_file_hash(path) == record.content_hash
+        except OSError:
+            return False
 
     def _claim_signature(self, value: str) -> str:
         """Bind to canonical ownership metadata, independently of the actual adapter writer."""
@@ -394,6 +455,10 @@ class DeploymentMaterializationSession:
             ]
             self._written[key] = value
         self._dirty = True
+
+    def written_entries(self) -> list[str]:
+        """Return the deployed entries this session wrote, sorted."""
+        return sorted(set(self._written.values()))
 
     def flush(self) -> None:
         """Publish successful writes once, including those preceding another package's failure."""
@@ -512,12 +577,47 @@ def recorded_writes(
     APM's bytes too and are recorded.
     """
     record_rendered_writes(None, integrator, targets=(), package_info=package_info)
+    session = getattr(skill_integrator, "_materialization_session", None)
+    integrator._overwrite_gate = OverwriteGate(
+        session if isinstance(session, DeploymentMaterializationSession) else None,
+        tuple(targets),
+        DeploymentMaterializationSession.receipt_owner(package_info),
+    )
     try:
         yield
     finally:
+        integrator._overwrite_gate = None
         record_rendered_writes(
             skill_integrator, integrator, targets=targets, package_info=package_info
         )
+
+
+@dataclass(frozen=True)
+class OverwriteGate:
+    """The evidence one integrator call needs to replace a deployed file (#4360).
+
+    Without an installation-bound session nothing is authorized.
+    """
+
+    session: DeploymentMaterializationSession | None
+    targets: tuple[TargetProfile, ...]
+    owner: str
+
+    def authorizes(self, path: Path, claim: str) -> bool:
+        return self.session is not None and self.session.overwrite_authorized(
+            path, claim, self.targets
+        )
+
+    def keep(self, path: Path) -> bool:
+        """Record a kept dependency file; its prior lock entry stays (reported at finalize)."""
+        if self.session is None or self.owner == ".":
+            return False
+        self.session.kept_overwrites.append((self.owner, path))
+        return True
+
+    @property
+    def user_scope(self) -> bool:
+        return self.session is not None and self.session.scope.value == "user"
 
 
 def record_rendered_writes(
@@ -1533,6 +1633,146 @@ class DeploymentLedgerCodec:
                 ),
             )
         return DeploymentLedger(records=records)
+
+    @staticmethod
+    def user_lockfile_rows(lockfile: LockFile) -> list[dict[str, Any]]:
+        """Return the rows a user lockfile (``$APM_HOME``) persists.
+
+        In memory a row keeps its compatibility value and inferred scope;
+        persisted, every row records scope ``user`` and a path under its
+        target's external user root is target-relative. A form read from the
+        lock is reused while it still maps back to the same row.
+        """
+        absolute = DeploymentLedgerCodec._absolute_values(lockfile)
+        read_forms: dict[str, DeploymentLocator] = getattr(lockfile, "_user_row_forms", {})
+        records: dict[str, DeploymentRecord] = {}
+        for record in lockfile.deployment_ledger.records.values():
+            locator = replace(record.locator, scope="user")
+            read_form = read_forms.get(record.locator.key)
+            if locator.kind == LocatorKind.PROJECT_RELATIVE and locator.value in absolute:
+                root = DeploymentLedgerCodec._user_root(locator.target)
+                if (
+                    read_form is not None
+                    and read_form.kind == LocatorKind.TARGET_RELATIVE
+                    and locator.value.endswith(f"/{read_form.value}")
+                ):
+                    root = locator.value[: -len(read_form.value) - 1]
+                relative = locator.value.removeprefix(f"{root}/") if root else ""
+                suffix = f"/{relative}"
+                if (
+                    relative
+                    and relative != locator.value
+                    and sum(value.endswith(suffix) for value in absolute) == 1
+                ):
+                    locator = replace(locator, kind=LocatorKind.TARGET_RELATIVE, value=relative)
+            if locator.key in records:
+                locator = record.locator
+            records[locator.key] = replace(record, locator=locator)
+        return DeploymentLedgerCodec.rows(DeploymentLedger(records=records))
+
+    @staticmethod
+    def adopt_lockfile_rows(lockfile: LockFile | None, path: Path) -> LockFile | None:
+        """Return *lockfile* read from *path*, a user lockfile's rows in memory form.
+
+        Only the user lockfile (``$APM_HOME``, decided by
+        :mod:`apm_cli.core.scope`) persists the user form; a project lockfile's
+        recorded scope is evidence and reads unchanged.
+        """
+        from apm_cli.core.scope import is_user_scope_root
+
+        if lockfile is not None and is_user_scope_root(path.parent):
+            DeploymentLedgerCodec.adopt_user_lockfile_rows(lockfile)
+        return lockfile
+
+    @staticmethod
+    def adopt_user_lockfile_rows(lockfile: LockFile) -> None:
+        """Map rows read from a user lockfile back to their in-memory form.
+
+        The inverse of :meth:`user_lockfile_rows`: a target-relative value
+        resolves through the lock's own compatibility views, else the
+        target's user root. A lock still carrying project-scope absolute rows
+        reads unchanged.
+        """
+        absolute = DeploymentLedgerCodec._absolute_values(lockfile)
+        forms: dict[str, DeploymentLocator] = {}
+        records: dict[str, DeploymentRecord] = {}
+        for record in lockfile.deployment_ledger.records.values():
+            locator = record.locator
+            if locator.scope == "user":
+                if locator.kind == LocatorKind.TARGET_RELATIVE:
+                    matches = [v for v in absolute if v.endswith(f"/{locator.value}")]
+                    root = DeploymentLedgerCodec._user_root(locator.target)
+                    value = (
+                        matches[0]
+                        if len(matches) == 1
+                        else f"{root}/{locator.value}"
+                        if root
+                        else None
+                    )
+                    if value is not None:
+                        locator = replace(locator, kind=LocatorKind.PROJECT_RELATIVE, value=value)
+                bundle = record.active_owner == _LOCAL_BUNDLE_OWNER
+                scope = "user" if bundle else DeploymentLedgerCodec.legacy_scope(locator.value)
+                locator = replace(locator, scope=scope)
+                forms[locator.key] = record.locator
+            records[locator.key] = replace(record, locator=locator)
+        lockfile.deployment_ledger = DeploymentLedger(records=records)
+        lockfile._user_row_forms = forms
+
+    @staticmethod
+    def persisted_rows(lockfile: LockFile, *, user_scope: bool) -> list[dict[str, Any]]:
+        """Return the rows *lockfile* persists; *user_scope* selects the user form."""
+        if user_scope:
+            return DeploymentLedgerCodec.user_lockfile_rows(lockfile)
+        return DeploymentLedgerCodec.rows(lockfile.deployment_ledger)
+
+    @staticmethod
+    def prepare_lockfile_write(lockfile: LockFile, existing: LockFile | None, path: Path) -> bool:
+        """Return whether *path* is the user lockfile, carrying its read row forms.
+
+        The user lockfile is the one in the user-scope manifest directory
+        (``$APM_HOME``), the single answer of :mod:`apm_cli.core.scope`.
+        """
+        from apm_cli.core.scope import is_user_scope_root
+
+        if not is_user_scope_root(path.parent):
+            return False
+        if existing is not None:
+            if not hasattr(existing, "_user_row_forms"):
+                DeploymentLedgerCodec.adopt_user_lockfile_rows(existing)
+            lockfile._user_row_forms = {
+                **existing._user_row_forms,
+                **getattr(lockfile, "_user_row_forms", {}),
+            }
+        return True
+
+    @staticmethod
+    def _absolute_values(lockfile: LockFile) -> set[str]:
+        """Return the absolute path values of a lockfile's compatibility views."""
+        values = set(lockfile.local_deployed_files)
+        for owner, dependency in lockfile.dependencies.items():
+            if owner != ".":
+                values.update(dependency.deployed_files)
+        values.update(
+            record.locator.value
+            for record in lockfile.deployment_ledger.records.values()
+            if record.locator.kind == LocatorKind.PROJECT_RELATIVE
+        )
+        return {
+            value
+            for value in values
+            if "://" not in value and (value.startswith("/") or Path(value).is_absolute())
+        }
+
+    @staticmethod
+    def _user_root(target_name: str) -> str | None:
+        """Return the absolute user-scope managed root of *target_name*, if any."""
+        from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+        profile = KNOWN_TARGETS.get(target_name)
+        scoped = scoped_profile_or_none(profile, user_scope=True) if profile else None
+        root = scoped.managed_deploy_root if scoped is not None else None
+        return root.resolve().as_posix() if root is not None else None
 
     @staticmethod
     def validate_rows(rows: Any) -> None:

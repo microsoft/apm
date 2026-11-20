@@ -29,6 +29,7 @@ from apm_cli.deps.lockfile_generator import (
     check_current_cli,
     refusal_exit,
 )
+from apm_cli.deps.registry.feature_gate import UserRegistryConfigDisabledError
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -110,6 +111,7 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
+from apm_cli.install.repository_access import inaccessible_package_reason
 
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
@@ -131,9 +133,9 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _uses_clone_root_probe,
     _validate_package_exists,
-    inaccessible_package_reason,
 )
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
+from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.policy.outcome_routing import discover_trust_policy
@@ -263,6 +265,8 @@ def _resolve_package_references(
 
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
+    # Marketplace ref pins each requested package staged while it resolved.
+    pins_by_package: dict[str, frozenset] = {}
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
     validated_packages = []
@@ -311,6 +315,7 @@ def _resolve_package_references(
                     if existing_lockfile is None:
                         existing_lockfile = _scoped_lockfile(scope)
                     require_locked_catalog_origin(marketplace_name, plugin_name, existing_lockfile)
+                    pins_before = staged_ref_pin_keys()
                     resolution = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,
@@ -319,6 +324,7 @@ def _resolve_package_references(
                         warning_handler=warning_handler,
                     )
                     canonical_str, _resolved_plugin = resolution
+                    pins_by_package[canonical_str] = staged_ref_pin_keys() - pins_before
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
                     # #1326: refuse before any outbound validation probe.
@@ -517,6 +523,10 @@ def _resolve_package_references(
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
+
+    # A package that will not install records no ref pin (#4322).
+    for rejected, _reason in invalid_outcomes:
+        withdraw_ref_pins(pins_by_package.get(rejected, frozenset()))
 
     return (
         valid_outcomes,
@@ -1613,7 +1623,11 @@ def install(  # noqa: PLR0913
             )
             summary_rendered = True
 
-            if frozen and apm_count > 0:
+            if (
+                frozen
+                and apm_count > 0
+                and getattr(command_result, "disposition", None) is not InstallDisposition.FAILED
+            ):
                 # --frozen verified lockfile structure and deployed hashes (req-lk-017).
                 logger.info(
                     "Deployed files verified against apm.lock.yaml.",
@@ -1735,6 +1749,9 @@ def _install_apm_packages(ctx, outcome):
             apm_package = outcome.prospective_package
     except click.UsageError:
         raise
+    except UserRegistryConfigDisabledError as e:
+        logger.error(str(e))
+        raise InstallFailureAlreadyRendered("Registry configuration needs registries") from e
     except Exception as e:
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         raise InstallFailureAlreadyRendered("Failed to parse install manifest") from e

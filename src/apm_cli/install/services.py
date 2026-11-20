@@ -19,6 +19,7 @@ from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundar
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
+from .deployed_paths import log_hook_display_payloads as _log_hook_display_payloads
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
@@ -69,28 +70,6 @@ class IntegratorBundle:
     # keep working. Production sites (template.py, integrate_local_content,
     # drift.py) pass a real CanvasIntegrator; when None the loop skips canvas.
     canvas: BaseIntegrator | None = None
-
-
-def _log_hook_display_payloads(
-    payloads: list,
-    verbose: bool,
-    log_fn: Any,
-    logger: Any,
-) -> None:
-    """Emit per-hook-file action summaries for hook transparency."""
-    for _payload in payloads:
-        _src = _payload.get("source_hook_file", "hook file")
-        _actions = _payload.get("actions", [])
-        if _actions:
-            for _act in _actions:
-                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
-        else:
-            log_fn(f"  |   Hook file integrated: {_src}")
-        if verbose and logger is not None:
-            _out_path = _payload.get("output_path", "")
-            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
-            for _jline in _payload.get("rendered_json", "").splitlines():
-                logger.verbose_detail(f"  |     {_jline}")
 
 
 def _label_and_deploy_dir(prim_name: str, mapping, target, deploy_dir: str) -> tuple[str, str]:
@@ -647,15 +626,11 @@ def integrate_package_primitives(  # noqa: PLR0913
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
     # One tree line per package, whatever mix of root and promoted skills (#4089).
-    from apm_cli.integration.skill_support import skills_integrated
+    from apm_cli.integration.skill_support import skill_line_label, skills_integrated
 
     _skill_count = skills_integrated(skill_result)
     if _skill_count > 0:
-        _skill_label = (
-            "Skill integrated"
-            if _skill_count == 1 and not skill_result.sub_skills_promoted
-            else f"{_skill_count} skill(s) integrated"
-        )
+        _skill_label = skill_line_label(skill_result, _skill_count)
         if _skill_expansion:
             _log_integration(f"  |-- {_skill_label}:")
             for line in _skill_expansion:

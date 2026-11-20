@@ -1298,6 +1298,16 @@ _LOG_TWICE = (
 )
 
 
+def test_logging_records_follow_the_child_env_not_pytest(monkeypatch) -> None:
+    """APM_DEBUG counts only in the command's own environment, both ways."""
+    args = ("install",)
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE), env={"APM_DEBUG": "1"})
+    monkeypatch.setenv("APM_DEBUG", "1")
+    with pytest.raises(OutputOracleError, match=r"I9: stderr repeats a line: 'DEBUG apm_cli"):
+        check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE), env={})
+
+
 def test_logging_records_repeat_freely_on_a_verbose_run(monkeypatch) -> None:
     """A run that asked for diagnostics may repeat Python logging records on stderr."""
     monkeypatch.delenv("APM_DEBUG", raising=False)

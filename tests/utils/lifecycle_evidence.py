@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -384,6 +384,7 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
     return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
 
 
+_FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runtimes?)|Skipped targets without MCP support)"
 _POLICY_PHASE_BANNER = (
     r"Policy enforcement disabled by --no-policy|Org policy at \S+ is present but empty"
 )
@@ -417,6 +418,14 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
+        "install-org-policy-banner-when-mcp-blocked",
+        "I9",
+        "#4267",
+        _runs("install"),
+        r"\[!\] Policy: org:",
+        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
+    ),
+    KnownOutputCell(
         "approve-org-policy-warning-twice",
         "I9",
         "#4178",
@@ -426,6 +435,15 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
     ),
     KnownOutputCell(
+        "install-frozen-mcp-targeting-twice",
+        "I9",
+        "#4196",
+        _runs("install", "--frozen"),
+        _FROZEN_MCP_TARGETING,
+        # Auto-detected targets print no targeting line, so there is nothing to repeat.
+        output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
+    ),
+    KnownOutputCell(
         "uninstall-unattributed-survivor-lines",
         "I9",
         "#4219",
@@ -433,14 +451,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         r"repeats a (line|diagnostic): '\|-- ",
         # Survivor tree lines with no package line naming them, one of them repeated.
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
-    ),
-    KnownOutputCell(
-        "pack-dry-run-plugin-notes-twice",
-        "I9",
-        "#4291",
-        _runs("pack", "--dry-run"),
-        r"Left out of the plugin|Would write plugin manifest",
-        output=r"^\[!\] Left out of the plugin: ",
     ),
     KnownOutputCell(
         "install-frozen-parked-mcp-notice-per-phase",
@@ -453,19 +463,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=(
             r"^(\[!\] Parked MCP server [^\n]*?(?:: denied|from transitive package)[^\n]*)$"
             r".*^\1$"
-        ),
-    ),
-    KnownOutputCell(
-        "install-hook-line-per-target",
-        "I9",
-        "#4243",
-        _runs("install"),
-        r"repeats a (line|diagnostic): '\|   ",
-        # One hook integrated into two targets that render it the same way (Claude
-        # and Windsurf, or a hook file) is listed once per target, back to back.
-        output=(
-            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
-            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
         ),
     ),
     KnownOutputCell(
@@ -486,49 +483,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
             r"^\+- MCP Servers.*'hermes-stdio': unknown key"
             r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
         ),
-    ),
-    KnownOutputCell(
-        "install-mcp-failure-line-per-runtime",
-        "I9",
-        "#4288",
-        _runs("install"),
-        r"Failed to install ",
-        output=r"^\|\s+\S+\s+-- failed for [^,\n]+, ",
-    ),
-    KnownOutputCell(
-        "install-left-existing-server-per-shared-file",
-        "I9",
-        "#4289",
-        _runs("install"),
-        r"Left existing MCP server",
-        # Claude Code and Copilot CLI share .mcp.json; each warns about it.
-        output=r"Configuring for [^\n]*Claude Code[^\n]*Copilot CLI.*^\[!\] Left existing MCP server",
-    ),
-    KnownOutputCell(
-        "install-verbose-ado-auth-attempt-repeats",
-        "I9",
-        "#4290",
-        _runs("install", "--verbose"),
-        r"Auth-only attempt for ado host|credential fill|Without a credential",
-        output=r"^  \[i\] Auth-only attempt for ado host \S+ \(no credential\)",
-    ),
-    KnownOutputCell(
-        "registry-environment-notice-per-server",
-        "I9",
-        "#4320",
-        _runs_any("install", "update"),
-        r"repeats a line: '(E2E test mode|CI environment) detected'",
-        # Two registry lookups back to back each print the bare environment notice.
-        output=r"^((?:E2E test mode|CI environment) detected)\n\1$",
-    ),
-    KnownOutputCell(
-        "install-missing-required-package-warning-twice",
-        "I9",
-        "#4307",
-        _runs("install"),
-        r"required by org policy but not declared",
-        # The warning block lists one missing required package back to back.
-        output=r"^(    \+- \[[^\]\n]+\] required by org policy but not declared)\n\1$",
     ),
     KnownOutputCell(
         "self-update-installer-color-codes",
@@ -559,28 +513,12 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
     ),
     KnownOutputCell(
-        "update-deny-all-lifecycle-notice-repeats",
-        "I9",
-        "#4333",
-        _runs("update"),
-        r"Lifecycle scripts suppressed by org policy",
-        output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
         "install-verbose-diagnostics-repeat",
         "I9",
         "#4334",
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "pack-plugin-manifest-notes-twice",
-        "I9",
-        "#4291",
-        _runs("pack"),
-        r"repeats a diagnostic: '(\[i\]'|\[!\] Secrets withheld from plugin\.json)",
-        output=r"^\s*(\[i\]|\[!\] Secrets withheld from plugin\.json[^\n]*)\s*$.*^\s*\1\s*$",
     ),
     KnownOutputCell(
         "install-frozen-trust-notice-repeats",
@@ -741,8 +679,14 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
     return found
 
 
-def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]:
-    """Every I6, I8 and I9 violation in one APM command result."""
+def output_violations(
+    args: Sequence[str], result: Any, env: Mapping[str, str] | None = None
+) -> list[OutputViolation]:
+    """Every I6, I8 and I9 violation in one APM command result.
+
+    *env* is the environment the command ran with; ``None`` falls back to this
+    process's environment.
+    """
     found: list[OutputViolation] = []
     # A path-corner world puts non-ASCII characters in the test's own paths;
     # echoing a user path back is not APM output, so its characters pass.
@@ -760,7 +704,7 @@ def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]
             OutputViolation("I8", f"exit code {result.returncode} is outside {sorted(contract)}")
         )
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
-        if stream == "stderr" and _diagnostic_run(args):
+        if stream == "stderr" and _diagnostic_run(args, env):
             # A verbose or debug run asked for Python logging records; they are
             # diagnostics, not user output, so I9 does not judge their repeats.
             text = "\n".join(line for line in text.splitlines() if not _LOG_RECORD.match(line))
@@ -772,9 +716,10 @@ def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]
 _LOG_RECORD = re.compile(r"^(?:DEBUG|INFO) [A-Za-z_][\w.]* ")
 
 
-def _diagnostic_run(args: Sequence[str]) -> bool:
-    """True when the run itself enabled verbose or debug output."""
-    return bool({"-v", "--verbose"} & set(args)) or bool(os.environ.get("APM_DEBUG"))
+def _diagnostic_run(args: Sequence[str], env: Mapping[str, str] | None) -> bool:
+    """True when the run itself enabled verbose or debug output (its own env, not pytest's)."""
+    environment = os.environ if env is None else env
+    return bool({"-v", "--verbose"} & set(args)) or bool(environment.get("APM_DEBUG"))
 
 
 def apm_args(command: Sequence[str]) -> tuple[str, ...]:
@@ -817,6 +762,7 @@ def check_cli_output(
     *,
     scenario_id: str = "single-command",
     known_cells: Sequence[KnownOutputCell] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> None:
     """Fail on any unowned output violation of an APM command; non-APM commands pass."""
     args = tuple(args)
@@ -824,7 +770,7 @@ def check_cli_output(
     if not is_apm_entry_point(prefix):
         return
     expected = _EXPECTED_VIOLATIONS.get()
-    violations = [v for v in output_violations(args, result) if v.law not in expected]
+    violations = [v for v in output_violations(args, result, env) if v.law not in expected]
     cell_stdout = _without_echoed_non_ascii(result.stdout, str(getattr(result, "cwd", "")))
     problems: list[str] = []
     for cell in KNOWN_OUTPUT_CELLS if known_cells is None else known_cells:

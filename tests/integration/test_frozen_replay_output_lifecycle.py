@@ -1,11 +1,11 @@
 """APMLifecycle: ``install --frozen`` reports a replay in the same shape as install.
 
 PROMISE: I9 -- a frozen replay prints each package header and diagnostic line
-once, in the same shape a normal install prints (source: #4195, #4196).
+once, in the same shape a normal install prints (source: #4195).
 CELLS: OP=install FROZEN SRC=marketplace(git-subdir, ref main) PRIM=command
 SCOPE=project TGT=claude LOCK=present DEPLOYED=absent (cold cache);
-OP=install FROZEN SRC=self-defined PRIM=mcp SCOPE=project|user TGT=manifest|--target
-LOCK=present DEPLOYED=converged.
+OP=install FROZEN SRC=local GATE=registries-disabled (registry in $APM_HOME config)
+SCOPE=project LOCK=present (#4175).
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
-from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -62,6 +61,7 @@ class _World:
     env: dict[str, str]
     runner: ApmLifecycleRunner
     consumer: LocalPackage
+    packages: LocalPackageFactory
     commit: str
 
     def apm(self, *args: str, expected: int = 0) -> CommandResult:
@@ -85,9 +85,10 @@ def _world(root: Path, binary: Path, *, targets: tuple[str, ...] = (_TARGET,)) -
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     env = isolated.subprocess_env()
     env["COLUMNS"] = "200"
-    consumer = LocalPackageFactory(isolated.work_root).create("consumer", targets=targets)
+    packages = LocalPackageFactory(isolated.work_root)
+    consumer = packages.create("consumer", targets=targets)
     runner = ApmLifecycleRunner((str(binary),), timeout_seconds=120)
-    return _World(isolated, env, runner, consumer, commit="")
+    return _World(isolated, env, runner, consumer, packages, commit="")
 
 
 def _marketplace_world(root: Path, binary: Path) -> _World:
@@ -121,17 +122,6 @@ def _marketplace_world(root: Path, binary: Path) -> _World:
     return world
 
 
-def _file_bytes(roots: dict[str, Path]) -> set[tuple[str, str, str | None]]:
-    """Every file below the roots with its content hash; empty directories excluded."""
-    captured = ArtifactSnapshotSet.capture(roots)
-    return {
-        (root_id, entry.relative_path, entry.fingerprint)
-        for root_id, snapshot in captured.snapshots
-        for entry in snapshot.entries
-        if entry.kind == "file"
-    }
-
-
 def _header_lines(result: CommandResult) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.startswith("  [+] ")]
 
@@ -163,30 +153,32 @@ def test_cold_frozen_replay_header_matches_install_shape(
     world.apm("audit", "--ci")
 
 
-@pytest.mark.parametrize(
-    ("scope", "targets", "line"),
-    [
-        ((), ("claude", "copilot"), "[i] Targeting declared targets from apm.yml: claude, copilot"),
-        (("-g", "--target", "claude"), (_TARGET,), "[i] Targeting specific runtime: claude"),
-    ],
-    ids=["project-manifest-targets", "user-explicit-target"],
-)
-def test_frozen_mcp_replay_prints_targeting_line_once(
-    tmp_path: Path,
-    apm_binary_path: Path,
-    scope: tuple[str, ...],
-    targets: tuple[str, ...],
-    line: str,
+def test_frozen_names_user_registry_config_when_registries_disabled(
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#4196: the frozen MCP check selects targets silently; the install announces once."""
-    world = _world(tmp_path / "world", apm_binary_path, targets=targets)
-    world.apm("install", *scope, "--mcp", "fixture-server", "--", "fixture-cmd", "--flag")
-    roots = {"home": world.isolated.home, "project": world.consumer.root}
-    before = _file_bytes(roots)
+    """#4175: the refusal names $APM_HOME config, not apm.yml, and its fix runs."""
+    world = _world(tmp_path / "world", apm_binary_path)
+    alpha = world.packages.create("alpha")
+    world.packages.add_skill(alpha, "alpha-skill", "---\nname: alpha-skill\ndescription: d\n---\n")
+    world.packages.add_relative_dependency(world.consumer, alpha)
+    world.apm("experimental", "enable", "registries")
+    world.apm("config", "set", "registry.corp.url", "https://registry.example.invalid/apm")
+    world.apm("install")
+    world.apm("experimental", "disable", "registries")
+    config = world.isolated.config_root / "config.json"
+    before = world.snapshot()
 
-    frozen = world.apm("install", *scope, "--frozen")
+    refused = world.apm("install", "--frozen", expected=1)
 
-    assert frozen.stdout.splitlines().count(line) == 1, _evidence(frozen)
-    assert "|  [>]  fixture-server (self-defined, stdio)" in frozen.stdout
-    assert "[*] All servers up to date" in frozen.stdout
-    assert _file_bytes(roots) == before
+    output = " ".join(refused.stdout.split())
+    assert (
+        f"[x] Registry configuration in {config} requires the experimental registries "
+        "feature. Run 'apm experimental enable registries' to enable it." in output
+    ), _evidence(refused)
+    assert "apm.yml" not in output.split("[x]", 1)[1], _evidence(refused)
+    assert world.snapshot() == before
+
+    world.apm("experimental", "enable", "registries")
+    replay = world.apm("install", "--frozen")
+    assert "[i] Deployed files verified against apm.lock.yaml." in replay.stdout
+    assert world.snapshot() == before

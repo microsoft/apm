@@ -395,6 +395,9 @@ class SkillIntegrator(BaseIntegrator):
             dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
         ) = None
         self._skill_files: list[Path] = []
+        # Promoted skills whose pre-existing unowned copy already matched, per skills root.
+        self._skill_adopted: dict[Path, set[str]] = {}
+        self._skill_primary_root: Path | None = None
         self._skill_recorded_hashes: dict[str, str] = {}
         self._skill_session_hashes: dict[str, str] = {}
         self._hash_snapshots: dict[Path, dict[str, str]] | None = None
@@ -439,8 +442,21 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
-    def _skill_member_skipped(self, _path: Path) -> None:
+    def install_user_scope(self) -> bool:
+        """Return whether the active materialization session deploys at user scope."""
+        scope = getattr(self._materialization_session, "scope", None)
+        return getattr(scope, "value", None) == "user"
+
+    def kept_values(self) -> frozenset[str]:
+        """Return lock values of declared skill members this batch left unwritten."""
+        session = self._materialization_session
+        return session.kept_values() if session is not None else frozenset()
+
+    def _skill_member_skipped(self, path: Path) -> None:
         self._skill_can_complete = False
+        # A declared member left on disk is kept, never cleaned as stale.
+        if self._materialization_session is not None and self._skill_targets:
+            self._materialization_session.keep(path, self._skill_targets)
 
     def _skill_materialization_complete(self, project_root: Path) -> bool:
         """Require positive discovery and every admitted source at every physical target."""
@@ -524,7 +540,7 @@ class SkillIntegrator(BaseIntegrator):
             is_managed=managed,
             recorded_hashes=hashes,
             baseline_hash=(
-                (lambda path: session.baseline(path, targets) or adopted.get(path))
+                (lambda path: adopted.get(path) or session.baseline(path, targets))
                 if session is not None
                 else None
             ),
@@ -954,6 +970,7 @@ class SkillIntegrator(BaseIntegrator):
                 sub_skill_path, target
             )
             is_self_overwrite = False
+            is_managed = False
             if target_existed:
                 # Check if this is a user-authored skill (not managed by APM)
                 is_managed = (
@@ -1010,6 +1027,10 @@ class SkillIntegrator(BaseIntegrator):
                 continue
             rewriter._native_skill_session_owners[target.resolve()] = parent_name
             promoted += 1
+            if unchanged and not is_managed and not is_self_overwrite:
+                rewriter._skill_adopted.setdefault(target_skills_root.resolve(), set()).add(
+                    sub_name
+                )
             if target / "SKILL.md" in copied:
                 deployed.append(target)
                 if warn and target_existed and not is_self_overwrite and not unchanged:
@@ -1028,6 +1049,10 @@ class SkillIntegrator(BaseIntegrator):
 
                         _rich_warning(detail)
         return promoted, deployed
+
+    def _primary_adopted_count(self) -> int:
+        """Count promoted skills adopted, not written, in the primary skills root."""
+        return len(self._skill_adopted.get(self._skill_primary_root, ()))
 
     _build_ownership_maps = staticmethod(build_skill_ownership_maps)
 
@@ -1154,6 +1179,8 @@ class SkillIntegrator(BaseIntegrator):
             seen_skill_dirs.add(resolved_root)
             is_primary = not primary_selected
             primary_selected = True
+            if is_primary:
+                self._skill_primary_root = resolved_root
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -1500,6 +1527,8 @@ class SkillIntegrator(BaseIntegrator):
             seen_skill_dirs.add(resolved_root)
             is_primary = not primary_selected
             primary_selected = True
+            if is_primary:
+                self._skill_primary_root = resolved_root
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -1546,6 +1575,7 @@ class SkillIntegrator(BaseIntegrator):
             references_copied=0,
             links_resolved=0,
             sub_skills_promoted=total_promoted,
+            sub_skills_adopted=self._primary_adopted_count(),
             target_paths=all_deployed,
             deployed_files=tuple(self._skill_files),
             complete=self._skill_materialization_complete(project_root),
@@ -1590,6 +1620,8 @@ class SkillIntegrator(BaseIntegrator):
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
         self._skill_files = []
+        self._skill_adopted = {}
+        self._skill_primary_root = None
         self._skill_targets = targets
         self._skill_source_plan = source_plan
         self._skill_can_complete = True
@@ -1635,6 +1667,7 @@ class SkillIntegrator(BaseIntegrator):
                 references_copied=0,
                 links_resolved=0,
                 sub_skills_promoted=sub_skills_count,
+                sub_skills_adopted=self._primary_adopted_count(),
                 target_paths=sub_deployed,
                 deployed_files=tuple(self._skill_files),
                 complete=self._skill_materialization_complete(project_root),

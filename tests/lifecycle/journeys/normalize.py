@@ -12,6 +12,7 @@ is written and compared through the same code.
 
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -59,6 +60,9 @@ _RULE = re.compile(r"^[\s+\-|=_.:]*$")
 _ADJACENT_TOKEN = re.compile(r"\b([A-Za-z][A-Za-z'-]*) \1\b")
 
 
+_WINDOWS_SEPARATOR = re.compile(r"(?<=[\w.>~-])\\(?=[\w.<-])")
+
+
 def strip_ansi(text: str) -> str:
     return _ANSI.sub("", text)
 
@@ -70,6 +74,9 @@ def normalize_text(text: str, paths: Mapping[str, Path | str]) -> str:
         raw = str(path)
         for form in {raw, raw.replace("\\", "/")}:
             text = text.replace(form, placeholder)
+    if os.name == "nt":
+        # APM prints native separators on Windows; goldens and key lines use "/".
+        text = _WINDOWS_SEPARATOR.sub("/", text)
     text = _ENTRY_POINT.sub("apm", text)
     for pattern, replacement in _SUBSTITUTIONS:
         text = pattern.sub(replacement, text)

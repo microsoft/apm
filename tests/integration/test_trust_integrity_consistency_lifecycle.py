@@ -1393,3 +1393,72 @@ def test_one_prune_retires_revoked_bundle_hooks_and_removes_an_orphan(
     lock = load_yaml(project / "apm.lock.yaml") or {}
     assert _COPILOT_HOOK not in (lock.get("local_deployed_files") or []), lock
     assert _COPILOT_HOOK not in {row.get("value") for row in lock.get("deployments") or []}, lock
+
+
+def _deny(project: Path, key: str) -> None:
+    manifest = load_yaml(project / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}, "deny": {key: {"hooks": True}}}
+    dump_yaml(manifest, project / "apm.yml")
+
+
+def _bundle_hook_residue(project: Path) -> list[str]:
+    """Every file under a harness root that is or registers the bundle hook script."""
+    residue = []
+    for root in (".claude", ".github"):
+        for path in sorted((project / root).rglob("*")):
+            if not path.is_file() or path.name == "apm-hooks.json":
+                continue
+            if path.name == "x.sh" or "scripts/x.sh" in path.read_text(encoding="utf-8"):
+                residue.append(path.relative_to(project).as_posix())
+    return residue
+
+
+def _lock_bundle_rows(project: Path) -> set[str]:
+    lock = load_yaml(project / "apm.lock.yaml") or {}
+    rows = set(lock.get("local_deployed_files") or [])
+    rows.update(row.get("value") for row in lock.get("deployments") or [])
+    return {row for row in rows if row and "/hooks/" in row}
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+@pytest.mark.parametrize("trigger", ["revoked", "bundle-deny", "org-deny-all"])
+def test_bundle_reinstall_retires_hooks_trust_no_longer_admits(
+    tmp_path: Path, apm_binary_path: Path, trigger: str, target: str
+) -> None:
+    """#4216: reinstalling a bundle re-evaluates the hooks it deployed (I4, I3, I7)."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_policy(_POLICY)
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
+        key = _bundle_key(bundle)
+        project = world.consumer(targets=(target,))
+        if target == "claude":
+            (project / ".claude").mkdir()
+        _allow(project, key)
+        result = run_step(runner, ("install", str(bundle)), cwd=project, env=env, step="granted")
+        assert _bundle_hook_residue(project), output(result)
+        assert _lock_bundle_rows(project), output(result)
+
+        if trigger == "revoked":
+            _revoke(project)
+        elif trigger == "bundle-deny":
+            _deny(project, key)
+        else:
+            world.publish_policy({**_POLICY, "executables": {"deny_all": True}})
+            world.clear_policy_cache()
+        result = run_step(runner, ("install", str(bundle)), cwd=project, env=env, step="reinstall")
+        text = " ".join(output(result).split())
+
+        assert _bundle_hook_residue(project) == [], text
+        assert _lock_bundle_rows(project) == set(), text
+        assert "Retired hooks from local bundle 'hookpkg'" in text, text
+        assert text.count("Retired hooks from local bundle") == 1, text
+
+        # Paired probe: install --frozen and audit --ci agree on the retired state.
+        frozen = runner.run(("install", "--frozen"), scenario_id="frozen", cwd=project, env=env)
+        audit = runner.run(("audit", "--ci"), scenario_id="audit", cwd=project, env=env)
+        assert (frozen.returncode, audit.returncode) == (0, 0), output(frozen) + output(audit)
+        assert _bundle_hook_residue(project) == []

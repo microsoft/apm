@@ -576,9 +576,16 @@ class TestInstallCommandAutoBootstrap:
             assert sorted(p.name for p in Path.cwd().iterdir()) == ["dep2", "local-package"]
 
     def test_positional_dry_run_excludes_unrequested_manifest_dependencies(self):
-        """Dry-run renders and counts only the requested positional package."""
+        """Dry-run names the requested package and what the partial install locks (#4198).
+
+        A locked unrequested dependency stays out of the preview; a declared
+        local dependency the lock lacks is named, because the real partial
+        install locks it too.
+        """
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
         with self._chdir_tmp():
-            for name in ("existing-package", "requested-package"):
+            for name in ("locked-package", "unlocked-package", "requested-package"):
                 package = Path(name)
                 package.mkdir()
                 (package / "apm.yml").write_text(
@@ -590,10 +597,21 @@ class TestInstallCommandAutoBootstrap:
                 "version: 1.0.0\n"
                 "dependencies:\n"
                 "  apm:\n"
-                "    - path: ./existing-package\n",
+                "    - path: ./locked-package\n"
+                "    - path: ./unlocked-package\n",
                 encoding="utf-8",
             )
+            lock = LockFile()
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="_local/locked-package",
+                    source="local",
+                    local_path="./locked-package",
+                )
+            )
+            Path("apm.lock.yaml").write_text(lock.to_yaml(), encoding="utf-8")
             manifest_before = Path("apm.yml").read_bytes()
+            lock_before = Path("apm.lock.yaml").read_bytes()
 
             result = self.runner.invoke(
                 cli,
@@ -601,10 +619,12 @@ class TestInstallCommandAutoBootstrap:
             )
 
             assert result.exit_code == 0, result.output
-            assert "APM dependencies (1):" in result.output
+            assert "APM dependencies (2):" in result.output
             assert "./requested-package" in result.output
-            assert "./existing-package" not in result.output
+            assert "./unlocked-package" in result.output
+            assert "./locked-package" not in result.output
             assert Path("apm.yml").read_bytes() == manifest_before
+            assert Path("apm.lock.yaml").read_bytes() == lock_before
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     def test_positional_dry_run_previews_ref_update_without_persisting(
@@ -664,15 +684,18 @@ class TestValidationFailureReasonMessages:
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_validation_failure_without_verbose_includes_verbose_hint(self, mock_validate):
-        """When validation fails without --verbose, reason should suggest --verbose."""
+        """Without --verbose the reason names host and credential, then one runnable step."""
         with self._chdir_tmp():
             # Create apm.yml so we exercise the validation path
             Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
             result = self.runner.invoke(cli, ["install", "owner/repo"])
             # Normalize terminal line-wrapping before checking
             output = " ".join(result.output.split())
-            # The next step is a runnable command naming the package (#4174).
-            assert "Run 'apm install --verbose owner/repo' to see each probe" in output
+            assert (
+                "[x] owner/repo -- not accessible or doesn't exist "
+                "(host: github.com, no credential sent). "
+                "Run 'apm install --verbose owner/repo' to see each probe and credential."
+            ) in output
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_validation_failure_with_verbose_omits_verbose_hint(self, mock_validate):
@@ -681,7 +704,7 @@ class TestValidationFailureReasonMessages:
             Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
             result = self.runner.invoke(cli, ["install", "owner/repo", "--verbose"])
             assert "not accessible or doesn't exist" in result.output
-            assert "to see each probe and credential" not in " ".join(result.output.split())
+            assert "Run 'apm install --verbose" not in " ".join(result.output.split())
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_failure_names_all_probes(self, mock_validate):

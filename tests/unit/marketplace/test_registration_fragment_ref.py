@@ -1,17 +1,10 @@
-"""Marketplace registration source parsing: fragment refs and local paths (#4200)."""
-
-from __future__ import annotations
-
-from pathlib import Path
+"""Fragment refs in marketplace registration sources (#4200)."""
 
 import pytest
 
 from apm_cli.marketplace.registration import parse_registration_source
 
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.promise("P-OWN-marketplace-source-admission"),
-]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-source-admission")]
 
 
 @pytest.mark.parametrize(
@@ -35,7 +28,7 @@ def test_registration_source_keeps_hash_in_local_paths(tmp_path):
     parsed = parse_registration_source(f"{tmp_path}/team#1")
 
     assert parsed.kind == "local"
-    assert Path(parsed.url).name == "team#1"
+    assert parsed.url.endswith("/team#1")
     assert parsed.fragment_ref == ""
 
 

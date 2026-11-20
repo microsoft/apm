@@ -14,7 +14,9 @@ same way.
 
 from __future__ import annotations
 
+import logging
 import re
+import traceback
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -27,6 +29,36 @@ from ..utils.credential_rendering import redact_secrets
 # utils/credential_rendering.py.
 
 _MAX_DETAIL_CHARS = 300
+
+
+class SecretRedactionFilter(logging.Filter):
+    """Logging filter that redacts secret patterns from all emitted log records.
+
+    Lives beside :func:`redact_secrets` so the root CLI can install it on every
+    run without importing the auth resolver. Install on logging handlers when
+    debug logging is enabled so that exception messages carrying HTTP client error strings --
+    which some libraries embed auth headers or token values in -- do not leak
+    credentials into the debug stream.
+
+    Usage::
+
+        logging.getLogger("apm_cli").addFilter(SecretRedactionFilter())
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            redacted = redact_secrets(msg)
+            if redacted != msg:
+                record.msg = redacted
+                record.args = ()
+            if record.exc_info is not None:
+                formatted = "".join(traceback.format_exception(*record.exc_info))
+                record.exc_text = redact_secrets(formatted)
+                record.exc_info = None
+        except Exception:
+            pass
+        return True
 
 
 def sanitize_diagnostic_detail(text: str | None) -> str:
@@ -537,6 +569,11 @@ def is_repository_not_found(error: object) -> bool:
     return outcome.kind is AuthOutcomeKind.NOT_FOUND
 
 
+def reports_repository_not_found(error: BaseException) -> bool:
+    """Return whether *error* or one of its causes is a :class:`RepositoryNotFoundError`."""
+    return any(isinstance(current, RepositoryNotFoundError) for current in _cause_chain(error))
+
+
 def raise_for_auth_outcome(
     response: Any,
     *,
@@ -558,15 +595,3 @@ def raise_for_auth_outcome(
     )
     if outcome.is_auth_failure:
         raise AuthAttemptFailed(outcome.detail, response=response)
-
-
-def reports_repository_not_found(error: BaseException) -> bool:
-    """Whether *error* (or a cause) is the canonical repository-not-found failure."""
-    seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        if isinstance(current, RepositoryNotFoundError):
-            return True
-        seen.add(id(current))
-        current = current.__cause__ or current.__context__
-    return False

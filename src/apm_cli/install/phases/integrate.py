@@ -69,8 +69,8 @@ def _resolve_download_strategy(
         detect_ref_change,
         locked_copy_proof,
     )
+    from apm_cli.install.transaction import stage_existing_copy
     from apm_cli.models.apm_package import GitReferenceType
-    from apm_cli.utils.path_security import safe_rmtree
 
     existing_lockfile = ctx.existing_lockfile
     update_refs = ctx.update_refs
@@ -298,7 +298,7 @@ def _resolve_download_strategy(
                 diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
                 if logger:
                     logger.progress(_hash_msg)
-            safe_rmtree(install_path, ctx.apm_modules_dir)
+            stage_existing_copy(ctx, install_path)
             skip_download = False
 
     # When registry-only mode is active, bypass cache if the
@@ -632,6 +632,27 @@ def _fail_explicit_target_without_deploy(ctx: InstallContext) -> None:
         raise DirectDependencyError(message)
 
 
+def _keep_prior_entries(ctx: InstallContext, kept: list[tuple[str, Path]]) -> None:
+    """Keep each unproven managed file's prior lock entry, as cleanup keeps its files (#4360)."""
+    from apm_cli.install.deployed_paths import deployed_path_entry
+
+    lockfile = ctx.existing_lockfile
+    for owner, path in kept:
+        entry = deployed_path_entry(path, ctx.project_root, ctx.targets)
+        previous = lockfile.get_dependency(owner) if lockfile is not None else None
+        prior = previous.deployed_file_hashes.get(entry) if previous is not None else None
+        ctx.package_cleanup_retained.setdefault(owner, {})[entry] = prior
+        ctx.kept_overwrites.append((owner, entry))
+
+
+def _kept_skill_values(ctx: InstallContext) -> frozenset[str]:
+    """Return declared skill members this batch left on disk; cleanup retains them."""
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+
+    skill = (getattr(ctx, "integrators", None) or {}).get("skill")
+    return skill.kept_values() if isinstance(skill, SkillIntegrator) else frozenset()
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the sequential integration phase.
 
@@ -659,6 +680,14 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.install.lsp.integration import preflight_lsp_targets
 
     preflight_lsp_targets(ctx)
+    session = getattr(
+        getattr(ctx, "integrators", {}).get("skill"), "_materialization_session", None
+    )
+    if session is not None:
+        from apm_cli.install.phases.cleanup import deployment_evidence
+
+        # Receipt-less managed files are replaced only when they equal the locked render (#4360).
+        session.render_evidence = deployment_evidence(ctx)
 
     # Direct dep keys: used to distinguish direct vs transitive failures
     # so direct failures can be surfaced immediately.
@@ -855,6 +884,7 @@ def run(ctx: InstallContext) -> None:
     ctx.total_commands_integrated = total_commands_integrated
     ctx.total_hooks_integrated = total_hooks_integrated
     ctx.total_links_resolved = total_links_resolved
+    ctx.kept_deployed_values = _kept_skill_values(ctx)
 
     # ------------------------------------------------------------------
     # Amendment 7: cowork 50-skill / 1 MB cap check (warn-only).
@@ -862,6 +892,9 @@ def run(ctx: InstallContext) -> None:
     # a cowork target with a resolved_deploy_root is active.
     # ------------------------------------------------------------------
     _check_cowork_caps(ctx)
+    if session is not None and session.kept_overwrites:
+        _keep_prior_entries(ctx, session.kept_overwrites)
+        ctx.kept_overwrite_written = session.written_entries()
 
     # ------------------------------------------------------------------
     # Executable approval prompt: if any packages had their hooks or

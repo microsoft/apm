@@ -469,6 +469,23 @@ def _handle_service_only_update(
     return True
 
 
+def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
+    """Re-verify locked marketplace provenance before planning; fail closed (#4228)."""
+    from apm_cli.marketplace.catalog_origin import reverify_locked_provenance
+    from apm_cli.marketplace.errors import MarketplaceError
+
+    try:
+        restored = reverify_locked_provenance(lockfile)
+    except MarketplaceError as exc:
+        _rich_error(str(exc), symbol="error")
+        sys.exit(1)
+    for row in restored:
+        logger.info(f"Restored marketplace provenance for {row} from its catalog.")
+    if restored and not dry_run:
+        lockfile.write(lock_path)
+    return lockfile
+
+
 @click.command(
     name="update",
     help="Refresh APM dependencies to the latest matching refs",
@@ -846,8 +863,10 @@ def _run_dep_update_locked(
             _rich_echo(revision_plan)
             _rich_echo("")
 
-        if plan.has_changes:
-            rendered = render_plan_text(plan, verbose=verbose)
+        # A moved revision pin is already listed above; list each package once (#4208).
+        unpinned_plan = plan.excluding(update.dep_key for update in revision_pin_updates)
+        if unpinned_plan.has_changes:
+            rendered = render_plan_text(unpinned_plan, verbose=verbose)
             if rendered:
                 _rich_echo(rendered)
                 _rich_echo("")
@@ -873,9 +892,9 @@ def _run_dep_update_locked(
                 return False
             plan_state.cache_rehydration_requested = True
 
-        if revision_pin_updates and plan.has_changes:
+        if revision_pin_updates and unpinned_plan.has_changes:
             pin_count = len(revision_pin_updates)
-            dep_count = len(plan.entries)
+            dep_count = len(unpinned_plan.changed_entries)
             pin_noun = "pin rewrite" if pin_count == 1 else "pin rewrites"
             dep_noun = "dependency change" if dep_count == 1 else "dependency changes"
             logger.info(f"Total: {pin_count} revision {pin_noun} + {dep_count} {dep_noun}.")
@@ -907,7 +926,7 @@ def _run_dep_update_locked(
     _modules_dir = get_modules_dir(scope)
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
-    _existing_lock = LockFile.read(_lock_path)
+    _existing_lock = _reverified_lock(LockFile.read(_lock_path), _lock_path, logger, dry_run)
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
@@ -955,8 +974,11 @@ def _run_dep_update_locked(
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
-    except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
-        _rich_error(str(e), err=isinstance(e, PolicyViolationError))
+    except PolicyViolationError as e:
+        _rich_error(str(e), err=True)
+        sys.exit(1)
+    except (DirectDependencyError, RequiredIntegrationError) as e:
+        logger.error(str(e))
         sys.exit(1)
     except click.UsageError:
         raise

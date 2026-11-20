@@ -238,10 +238,15 @@ def test_pre_037_lock_without_origin_evidence_still_updates(
         cwd=consumer.root,
         env=environment,
     )
+    # A lock as APM 0.36 wrote it: an older generator stamp, a pre-0.37 lockfile
+    # version, unframed hashes, and no origin evidence (#4228).
     lock = load_yaml(lock_path)
+    lock["apm_version"] = "0.36.0"
+    lock["lockfile_version"] = "1"
     for row in lock["dependencies"]:
         row.pop("source_url", None)
         row.pop("source_digest", None)
+        row.pop("content_hash", None)
     dump_yaml(lock, lock_path)
     legacy_lock = lock_path.read_bytes()
 
@@ -268,3 +273,5 @@ def test_pre_037_lock_without_origin_evidence_still_updates(
     locked = _locked_row(lock_path)
     assert locked["source_url"] == _REMOTE_A
     assert str(locked["source_digest"]).startswith("sha256:")
+    # One-way: the rewritten lock carries the current generator stamp.
+    assert not str(load_yaml(lock_path)["apm_version"]).startswith("0.36"), load_yaml(lock_path)

@@ -1012,6 +1012,60 @@ class TestTryWithFallbackCredentialChain:
 # ---------------------------------------------------------------------------
 
 
+class TestDescribeCredentialTried:
+    """Diagnostics name the credential source tried, never its value (#4174)."""
+
+    def test_names_the_resolved_source_not_the_value(self) -> None:
+        with patch.dict(os.environ, {"GITHUB_APM_PAT_ACME": "sentinel-acme-value"}, clear=True):
+            resolver = AuthResolver()
+            resolver.resolve("acme.ghe.com", org="acme")
+            text = resolver.describe_credential_tried("acme.ghe.com", "acme")
+        assert text == "credential tried: GITHUB_APM_PAT_ACME"
+
+    def test_never_resolves_to_render(self) -> None:
+        # GITHUB_APM_PAT would resolve; an unresolved host still reports no credential.
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "sentinel"}, clear=True):
+            text = AuthResolver().describe_credential_tried("github.com", "acme")
+        assert text == "no credential sent"
+
+    def test_lists_sources_checked_when_none_held_a_credential(self, tmp_path) -> None:
+        # An empty PATH leaves neither gh nor a git credential helper to answer.
+        with patch.dict(os.environ, {"PATH": str(tmp_path), "HOME": str(tmp_path)}, clear=True):
+            resolver = AuthResolver()
+            resolver.resolve("github.com", org="acme")
+            text = resolver.describe_credential_tried("github.com", "acme")
+        assert text == (
+            "no credential found in GITHUB_APM_PAT_ACME, GITHUB_APM_PAT, GITHUB_TOKEN, "
+            "GH_TOKEN, gh auth token, git credential helper"
+        )
+
+    def test_names_secondary_sources_tried_in_order_without_values(self) -> None:
+        """#4322: a PAT refused, then a credential helper answering 404, names both."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT_ACME": "sentinel-acme-value"}, clear=True):
+            resolver = AuthResolver()
+            with (
+                patch.object(
+                    resolver._token_manager, "resolve_credential_from_gh_cli", return_value=None
+                ),
+                patch.object(
+                    resolver._token_manager,
+                    "resolve_credential_from_git",
+                    return_value="sentinel-helper-value",
+                ),
+            ):
+
+                def _op(token, _env):
+                    if token == "sentinel-acme-value":
+                        raise RuntimeError("fatal: Authentication failed (HTTP 401)")
+                    raise RuntimeError("fatal: repository not found")
+
+                with pytest.raises(RuntimeError, match="not found"):
+                    resolver.try_with_fallback("acme.ghe.com", _op, org="acme")
+            text = resolver.describe_credential_tried("acme.ghe.com", "acme")
+        assert text == "credentials tried: GITHUB_APM_PAT_ACME, git credential helper"
+        assert "sentinel" not in text
+
+
 class TestBuildErrorContextNonADO:
     def test_github_com_with_token_mentions_saml(self) -> None:
         with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_tok"}, clear=True):
@@ -1148,22 +1202,3 @@ class TestResolveThreadSafety:
 
 def _helper_credential(password: str) -> GitHelperCredential:
     return GitHelperCredential(host="dev.azure.com", password=password, username="helper-user")
-
-
-class TestDescribeCredentialTried:
-    """Diagnostics name the credential source tried, never its value (#4174)."""
-
-    def test_names_the_resolved_source_not_the_value(self) -> None:
-        with patch.dict(os.environ, {"GITHUB_APM_PAT_ACME": "sentinel-acme-value"}, clear=True):
-            resolver = AuthResolver()
-            resolver.resolve("acme.ghe.com", org="acme")
-            text = resolver.describe_credential_tried("acme.ghe.com", "acme")
-        assert text == "credential tried: GITHUB_APM_PAT_ACME"
-        assert "sentinel" not in text
-
-    def test_never_resolves_to_render(self) -> None:
-        """A credential the process never resolved is not reported as tried."""
-        with patch.dict(os.environ, {"GITHUB_APM_PAT": "sentinel"}, clear=True):
-            resolver = AuthResolver()
-            text = resolver.describe_credential_tried("github.com", "acme")
-        assert text == "no credential sent"

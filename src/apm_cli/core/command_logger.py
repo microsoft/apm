@@ -285,9 +285,8 @@ class InstallLogger(CommandLogger):
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
-        # Policy lines already shown; a later phase that re-resolves the
-        # policy (the MCP preflight) does not announce it again (#4267).
-        self._policy_lines_shown: set[tuple] = set()
+        # Policy banners already shown; the package and MCP phases share them.
+        self._policy_banners: set[tuple[str, ...]] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -325,6 +324,16 @@ class InstallLogger(CommandLogger):
         self._failed_install_residue_note = (
             f"{total} native target {'item' if total == 1 else 'items'} listed above "
             f"{'remains' if total == 1 else 'remain'} in place."
+        )
+
+    def kept_overwrites(self, kept: int, written: Sequence[str]) -> None:
+        """Name the files an install wrote beside the managed files it kept (#4360)."""
+        if written:
+            self.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
+            for path in written:
+                self.error_detail(f"  {path}")
+        self._failed_install_residue_note = (
+            f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
         )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
@@ -736,6 +745,8 @@ class InstallLogger(CommandLogger):
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
+        if not self._first_policy_banner("resolved", source, enforcement):
+            return
         parts = [f"Policy: {source}"]
         if chain and len(chain) > 1:
             # The leaf is already the source; show its ancestors root first.
@@ -755,10 +766,6 @@ class InstallLogger(CommandLogger):
         parts.append(f"-- enforcement={enforcement}")
 
         message = " ".join(parts)
-        shown_key = (source, enforcement, tuple(chain or ()))
-        if shown_key in self._policy_lines_shown:
-            return
-        self._policy_lines_shown.add(shown_key)
 
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
@@ -797,6 +804,8 @@ class InstallLogger(CommandLogger):
             hint: Optional discovery diagnostic (``PolicyFetchResult.
                 discovery_hint``), shown with ``absent`` in verbose mode only.
         """
+        if not self._first_policy_banner("miss", outcome, source):
+            return
         err_text = error or "unknown"
 
         if outcome == "absent":
@@ -956,13 +965,27 @@ class InstallLogger(CommandLogger):
                     err=True,
                 )
 
+    def _first_policy_banner(self, *key: str) -> bool:
+        """Record a policy banner; False when this invocation already showed it.
+
+        The package phase and the MCP phase both route the same policy
+        outcome, so every policy banner is printed once per invocation.
+        """
+        if key in self._policy_banners:
+            return False
+        self._policy_banners.add(key)
+        return True
+
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
         active.  Always visible (never silenceable) -- matches the
-        ``--allow-insecure`` pattern.
+        ``--allow-insecure`` pattern.  Shown once per invocation even when
+        several install phases check the escape hatch.
         """
+        if not self._first_policy_banner("disabled", reason):
+            return
         _rich_warning(
             f"Policy enforcement disabled by {reason} for this invocation. "
             "This does NOT bypass apm audit --ci. "

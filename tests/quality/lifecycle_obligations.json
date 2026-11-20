@@ -23644,14 +23644,14 @@
   "E2": {
    "evidence": [
     "src/apm_cli/install/mcp/retired_destinations.py:84",
-    "src/apm_cli/install/mcp/retired_destinations.py:163"
+    "src/apm_cli/install/mcp/retired_destinations.py:165"
    ],
    "text": "targets are equivalent except MCP ownership (MCPOWN)"
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:848",
-    "src/apm_cli/install/services.py:1050"
+    "src/apm_cli/install/services.py:823",
+    "src/apm_cli/install/services.py:1025"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23683,19 +23683,19 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:596"
+    "src/apm_cli/core/deployment_ledger.py:696"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:756"
+    "src/apm_cli/install/manifest_reconcile.py:763"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:162"
+    "src/apm_cli/commands/pack.py:170"
    ],
    "text": "pack -g is a syntactic refusal"
   },
@@ -23708,20 +23708,20 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:961"
+    "src/apm_cli/commands/install.py:971"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1241",
-    "src/apm_cli/commands/install.py:1005",
-    "src/apm_cli/commands/install.py:979",
+    "src/apm_cli/commands/install.py:1251",
+    "src/apm_cli/commands/install.py:1015",
+    "src/apm_cli/commands/install.py:989",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
-    "src/apm_cli/commands/uninstall/engine.py:698",
-    "src/apm_cli/commands/uninstall/engine.py:857",
-    "src/apm_cli/commands/uninstall/engine.py:690",
+    "src/apm_cli/commands/uninstall/engine.py:701",
+    "src/apm_cli/commands/uninstall/engine.py:860",
+    "src/apm_cli/commands/uninstall/engine.py:693",
     "src/apm_cli/commands/update.py:468",
     "src/apm_cli/commands/prune.py:199",
     "src/apm_cli/integration/canvas_integrator.py:5"
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "3d1e0b6b337228fca76e6e9d8d43cf79afef02f4ba5358ac28356fa8c210c78e"
+ "sha256": "4a4b9220478ca5feefb0954f99df161c72550da5189228d19aaceb8e7d998446"
 }

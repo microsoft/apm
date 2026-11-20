@@ -105,6 +105,12 @@ _ORIGIN_ROUTES = (
 # reached, so a rebound alias fails closed on every path, not only update.
 _ORIGIN_ENTRY_POINTS = (
     (
+        "src/apm_cli/marketplace/catalog_origin.py",
+        "reverify_locked_provenance",
+        "require_locked_row_origin",
+        "resolve_marketplace_plugin",
+    ),
+    (
         "src/apm_cli/deps/apm_resolver.py",
         "_resolve_marketplace_dep",
         "require_locked_catalog_origin",

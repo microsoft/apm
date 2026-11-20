@@ -11,7 +11,6 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from apm_cli.core.auth_outcome import reports_repository_not_found
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -22,8 +21,8 @@ from apm_cli.install.helpers.ref_reuse import (
     requires_remote_ref_resolution as _requires_remote_ref_resolution,
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
-from apm_cli.install.outcome import uninstall_next_step
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
+from apm_cli.install.repository_access import not_found_next_step
 from apm_cli.install.source_helpers import download_registry_package
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
@@ -243,7 +242,6 @@ def _setup_downloader(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 3. Auth resolver + downloader
     # ------------------------------------------------------------------
-    import os as _os
 
     from apm_cli.core.auth import AuthResolver
     from apm_cli.deps import github_downloader as _ghd_mod
@@ -268,19 +266,9 @@ def _setup_downloader(ctx: InstallContext) -> None:
 
     # WS3 (#1116): attach persistent cross-run git cache unless disabled
     # via APM_NO_CACHE environment variable.
-    if not _os.environ.get("APM_NO_CACHE"):
-        from apm_cli.cache.paths import get_cache_root
+    from apm_cli.cache.git_cache import attach_persistent_git_cache
 
-        try:
-            from apm_cli.cache.git_cache import GitCache
-
-            _cache_root = get_cache_root()
-            downloader.persistent_git_cache = GitCache(
-                _cache_root,
-                refresh=ctx.refresh,
-            )
-        except (OSError, ValueError):
-            pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
+    attach_persistent_git_cache(downloader, refresh=ctx.refresh)
 
     # Perf #1433: attach the InstallLogger so the subdir download path
     # can emit verbose-only [perf] lines (subdir cache state, bare
@@ -334,13 +322,12 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     )
 
 
-def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, download_failures=()) -> None:
-    """Raise on fatal resolution errors, first reporting recorded download causes (#4199)."""
+def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=()) -> None:
+    """Raise on fatal resolution errors; show the download *failures* behind them once."""
     if not dependency_graph.resolution_errors:
         return
-    for _display, message in download_failures:
-        if ctx.logger:
-            ctx.logger.error(message)
+    for _display, failure in failures if ctx.logger else ():
+        ctx.logger.verbose_detail(f"  {failure}")
     for error in dependency_graph.resolution_errors:
         if ctx.logger and not error.startswith("Marketplace package materialization failed:"):
             ctx.logger.error(error)
@@ -747,12 +734,10 @@ def _resolve_dependencies(
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
             fail_msg = _with_preserved_install_hint(fail_msg, install_path)
-            if is_direct and reports_repository_not_found(e):
-                fail_msg += uninstall_next_step(dep_ref, getattr(ctx, "scope", None))
+            fail_msg += not_found_next_step(
+                e, dep_ref, is_direct=is_direct, scope=getattr(ctx, "scope", None)
+            )
 
-            # The deferred diagnostics summary prints the failure once, in
-            # every mode (#4199). F7 (#1116): one critical section so
-            # concurrent failures don't interleave their records.
             with callback_lock:
                 callback_failures.add(dep_key)
                 transitive_failures.append((dep_display, fail_msg))
@@ -999,5 +984,9 @@ def run(ctx: InstallContext) -> None:
     _record_update_plan_complete_dep_keys(ctx)
     _record_partial_subtree_reconciliation(ctx)
     if ctx.only_packages:
+        from apm_cli.install.package_selection import with_unlocked_local_dependencies
+
+        complete = ctx.deps_to_install
         _apply_only_filter(ctx)
+        ctx.deps_to_install = with_unlocked_local_dependencies(ctx, complete)
     _compute_intended_dep_keys(ctx)

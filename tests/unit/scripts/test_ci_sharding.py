@@ -299,3 +299,104 @@ def test_grouped_durations_match_with_or_without_the_xdist_suffix() -> None:
     assert ci_sharding.item_weights(suffixed, durations)["tests/a.py::slow@g"] == 100.0
     unsuffixed = {"tests/a.py::slow": 7.0}
     assert ci_sharding.item_weights(suffixed, unsuffixed)["tests/a.py::slow@g"] == 7.0
+
+
+def _tree(root: Path, files: dict[str, str]) -> None:
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("expression", "required"),
+    [
+        (None, ()),
+        ("windows_compat", ("windows_compat",)),
+        ("lifecycle_smoke and not lifecycle_merge_group", ("lifecycle_smoke",)),
+        ("not live and not requires_github_token", ()),
+        ("lifecycle_smoke or windows_compat", ()),
+        ("(a and b)", ()),
+    ],
+)
+def test_required_markers_only_trusts_plain_conjunctions(
+    expression: str | None, required: tuple[str, ...]
+) -> None:
+    assert ci_sharding.required_markers(expression) == required
+
+
+def test_shard_files_are_disjoint_complete_and_skip_unmarked_modules(tmp_path: Path) -> None:
+    _tree(
+        tmp_path,
+        {
+            "tests/a/test_marked.py": "import pytest\npytestmark = pytest.mark.smoke\n",
+            "tests/a/test_other.py": "def test_x(): pass\n",
+            "tests/b/test_marked_too.py": "@pytest.mark.smoke\ndef test_y(): pass\n",
+            "tests/b/helper.py": "smoke = 1\n",
+            "tests/.hidden/test_marked.py": "smoke\n",
+            "tests/c/test_g1.py": 'smoke\n@pytest.mark.xdist_group(name="home")\n',
+            "tests/c/test_g2.py": 'smoke\n@pytest.mark.xdist_group("home")\n',
+        },
+    )
+    plan = ci_sharding.shard_test_files(["tests"], "smoke and not slow", 2, {}, tmp_path)
+
+    listed = [path for shard in plan.shards for path in shard]
+    assert sorted(listed) == [
+        "tests/a/test_marked.py",
+        "tests/b/test_marked_too.py",
+        "tests/c/test_g1.py",
+        "tests/c/test_g2.py",
+    ]
+    assert all(plan.shards)
+    # Modules that share an xdist group run on one shard.
+    assert any({"tests/c/test_g1.py", "tests/c/test_g2.py"} <= set(shard) for shard in plan.shards)
+
+
+def test_heavy_module_runs_as_top_level_node_ids(tmp_path: Path) -> None:
+    heavy = "def test_a(): pass\n\nclass TestB:\n    def test_c(self): pass\n"
+    _tree(tmp_path, {"tests/test_heavy.py": heavy, "tests/test_light.py": "def test_d(): pass\n"})
+    durations = {
+        "tests/test_heavy.py::test_a[1]": 50.0,
+        "tests/test_heavy.py::TestB::test_c": 40.0,
+        "tests/test_light.py::test_d": 10.0,
+    }
+    plan = ci_sharding.shard_test_files(["tests"], None, 2, durations, tmp_path)
+
+    assert sorted(entry for shard in plan.shards for entry in shard) == [
+        "tests/test_heavy.py::TestB",
+        "tests/test_heavy.py::test_a",
+        "tests/test_light.py",
+    ]
+    assert sorted(plan.seconds) == [50.0, 50.0]
+
+
+def test_files_mode_writes_one_shard_argfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _tree(tmp_path, {"tests/test_a.py": "", "tests/test_b.py": ""})
+    monkeypatch.chdir(tmp_path)
+    shards = [
+        ci_sharding.main(
+            [
+                "files",
+                "--shard-count",
+                "2",
+                "--shard-index",
+                str(index),
+                "--out",
+                f"{index}.txt",
+                "tests",
+            ]
+        )
+        for index in (1, 2)
+    ]
+    listed = [(tmp_path / f"{index}.txt").read_text(encoding="utf-8").split() for index in (1, 2)]
+
+    assert shards == [0, 0]
+    assert sorted(listed) == [["tests/test_a.py"], ["tests/test_b.py"]]
+    assert (
+        ci_sharding.main(
+            ["files", "--shard-count", "3", "--shard-index", "1", "--out", "x", "tests"]
+        )
+        == 2
+    )

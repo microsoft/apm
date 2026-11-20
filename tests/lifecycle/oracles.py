@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Protocol
 
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.utils.content_hash import compute_file_hash
 from tests.lifecycle import receipts
 from tests.lifecycle.model.expected import exit_contract
 from tests.utils.apm_lifecycle_runner import CommandResult
@@ -385,7 +386,8 @@ def _i1_lock_deployed(
         # A record without a hash may be a directory (a deployed skill); it must exist.
         if not (path.is_file() if digest else path.exists()):
             found.append(Violation("I1", f"recorded file is missing: {relative}"))
-        elif digest and digest != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest():
+        # The lock records line-ending-normalized hashes (apm#1952), so CRLF on Windows matches.
+        elif digest and digest != compute_file_hash(path):
             found.append(Violation("I1", f"recorded hash does not match disk: {relative}"))
     for relative in sorted(after.managed_paths - set(recorded)):
         if (after.deploy_root / relative).exists():

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_dependency_selection
+from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.phases.lockfile_cache_pins import (
     sync_cache_pin_markers,
     sync_cache_pin_markers_from_disk,
@@ -316,7 +316,7 @@ class LockfileBuilder:
         #1716). See :mod:`apm_cli.install.manifest_reconcile`.
         """
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block
-        from apm_cli.install.phases.cleanup import deployment_evidence
+        from apm_cli.install.phases.cleanup import deployment_evidence, kept_prior_values
         from apm_cli.install.phases.targets import declared_target_profiles
 
         existing = self.ctx.existing_lockfile
@@ -412,6 +412,7 @@ class LockfileBuilder:
                 apply_disk_deletion=not lockfile_only,
                 user_scope=is_user_scope(getattr(self.ctx, "scope", None)),
                 completed_reintegration=completed,
+                retained_values=frozenset(kept_prior_values(self.ctx, prior_files)),
             )
             if not files and completed is None:
                 # Nothing this install governs and nothing to carry forward;
@@ -512,7 +513,9 @@ class LockfileBuilder:
         if not self.ctx.skill_subset:
             return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
-            if locked_dep.package_type == "skill_bundle":
+            if locked_dep.package_type == "skill_bundle" and not is_implicit_local(
+                locked_dep, self.ctx
+            ):
                 # Record what was deployed: the same owner the deploy used (#3760).
                 merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
                 try:

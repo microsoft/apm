@@ -102,6 +102,9 @@ class InstallContext:
     all_apm_deps: list[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: list[Any] = field(default_factory=list)  # resolve
+    # Partial installs: declared local deps added only so the lock claims them
+    # (#4198). The invocation's CLI --skill overlay never applies to them.
+    implicit_local_keys: frozenset[str] = frozenset()  # resolve
     update_plan_complete_dep_keys: set[str] = field(default_factory=set)  # resolve
     # Partial installs: the selected packages' previously locked descendants
     # that the complete graph no longer needs (dropped) or reaches elsewhere
@@ -173,7 +176,12 @@ class InstallContext:
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Managed files install kept without deployment evidence: (owner, entry) (#4360).
+    kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
+    kept_overwrite_written: list[str] = field(default_factory=list)
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Declared members integration left on disk unwritten; cleanup retains them.
+    kept_deployed_values: frozenset[str] = frozenset()
     package_types: dict[str, str] = field(default_factory=dict)
     # Package content hashes in the stream the existing lockfile records
     # (legacy for versions 1-3, framed for 4 or a new lockfile), and the framed

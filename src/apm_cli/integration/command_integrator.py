@@ -273,6 +273,17 @@ class CommandIntegrator(BaseIntegrator):
 
         return (command_name, new_post, warnings, dropped_keys)
 
+    def _render_command(self, source: Path, target: Path, format_id: str) -> str | None:
+        """Return the exact text deployment writes, for the adopt check (#4360)."""
+        try:
+            if format_id == "gemini_command":
+                return self._render_gemini_command(source)
+            _name, post, _warnings, _dropped = self._transform_prompt_to_command(source)
+            post.content, _links = self.resolve_links(post.content, source, target)
+            return frontmatter.dumps(post)
+        except yaml.YAMLError:
+            return None
+
     def integrate_command(
         self,
         source: Path,
@@ -580,7 +591,15 @@ class CommandIntegrator(BaseIntegrator):
             rel_path = portable_relpath(target_path, project_root)
 
             skip, adopted = self._check_adopt_or_skip(
-                target_path, prompt_file, rel_path, managed_files, force, diagnostics, target_paths
+                target_path,
+                prompt_file,
+                rel_path,
+                managed_files,
+                force,
+                diagnostics,
+                target_paths,
+                # Commands are transformed: adopt against the rendered text.
+                expected_content=self._render_command(prompt_file, target_path, mapping.format_id),
             )
             if skip:
                 if adopted:
@@ -723,6 +742,12 @@ class CommandIntegrator(BaseIntegrator):
 
         Ref: https://geminicli.com/docs/cli/gemini-md/
         """
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_text_lf(target, CommandIntegrator._render_gemini_command(source))
+
+    @staticmethod
+    def _render_gemini_command(source: Path) -> str:
+        """Return the Gemini CLI ``.toml`` text for one ``.prompt.md`` file."""
         import toml as _toml
 
         post = load_frontmatter(source)
@@ -737,9 +762,7 @@ class CommandIntegrator(BaseIntegrator):
         doc = {"prompt": prompt_text}
         if description:
             doc = {"description": description, "prompt": prompt_text}
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-        write_text_lf(target, _toml.dumps(doc))
+        return _toml.dumps(doc)
 
     # ------------------------------------------------------------------
     # Legacy per-target API (DEPRECATED)

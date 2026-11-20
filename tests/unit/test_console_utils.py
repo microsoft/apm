@@ -680,3 +680,37 @@ def test_ascii_ellipsis_keeps_ansi_styles_intact():
     assert ".." in out
     assert not re.search(r"\x1b\[[0-9;]*\.", out)
     assert "\x1b[32mabcdefgh\x1b[0m" in out
+
+
+class _Stream:
+    """A writable stream that reports whether it is a terminal."""
+
+    def __init__(self, tty: bool) -> None:
+        self.tty = tty
+
+    def isatty(self) -> bool:
+        return self.tty
+
+    def write(self, _text: str) -> int:
+        return 0
+
+    def flush(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize(("tty", "width"), [(False, 400), (True, 399)])
+def test_windows_console_width_full_when_piped_rich_detection_when_interactive(
+    monkeypatch, tty, width
+):
+    """Piped Windows output keeps COLUMNS; a legacy terminal keeps Rich's -1 (#4409)."""
+    import types
+
+    from rich import console as rich_console
+
+    import apm_cli.utils.console as console_mod
+
+    monkeypatch.setattr(console_mod, "os", types.SimpleNamespace(name="nt"))
+    monkeypatch.setattr(rich_console, "detect_legacy_windows", lambda: True)
+    monkeypatch.setenv("COLUMNS", "400")
+    console = console_mod.new_console(file=_Stream(tty))
+    assert console.width == width

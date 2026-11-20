@@ -26,6 +26,17 @@ def destination_tree_lines(phrase: str, paths: list[str], verbose: bool) -> list
     return [f"  |-- {phrase} -> {suffix}"]
 
 
+def log_bundle_deployed(logger: Any, summary: str, deployed: list[str], targets: Any) -> None:
+    """Report a local bundle install and name the folders it deployed into (#4192)."""
+    logger.success(summary)
+    if not deployed:
+        return
+    verbose = bool(getattr(logger, "verbose", False))
+    phrase = f"{len(deployed)} file(s) deployed"
+    for line in destination_tree_lines(phrase, destination_folders(deployed, targets), verbose):
+        logger.tree_item(line)
+
+
 def destination_folders(records: list[str], targets: Any) -> list[str]:
     """Return the primitive folders (``.github/agents/``) holding *records*, in order.
 
@@ -165,3 +176,36 @@ def skill_summary_paths(target_paths: Any, project_root: Path, targets: Any) -> 
         owner_root = next((r for r in static_roots if rel_posix.startswith(f"{r}/")), None)
         roots.add(owner_root or f"{rel.parts[0]}/skills")
     return [f"{root}/" for root in sorted(roots)]
+
+
+def log_hook_display_payloads(
+    payloads: list,
+    verbose: bool,
+    log_fn: Any,
+    logger: Any,
+) -> None:
+    """Emit per-hook-file action summaries for hook transparency.
+
+    Targets that render the same hook identically produce the same summary
+    line; each distinct line is printed once per package (#4336).
+    """
+    _printed: set[str] = set()
+
+    def _emit(line: str) -> None:
+        if line not in _printed:
+            _printed.add(line)
+            log_fn(line)
+
+    for _payload in payloads:
+        _src = _payload.get("source_hook_file", "hook file")
+        _actions = _payload.get("actions", [])
+        if _actions:
+            for _act in _actions:
+                _emit(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
+        else:
+            _emit(f"  |   Hook file integrated: {_src}")
+        if verbose and logger is not None:
+            _out_path = _payload.get("output_path", "")
+            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
+            for _jline in _payload.get("rendered_json", "").splitlines():
+                logger.verbose_detail(f"  |     {_jline}")

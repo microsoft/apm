@@ -45,6 +45,7 @@ def _write_config(project_root: Path) -> None:
 name: metadata-outcome
 description: Metadata outcome regression fixture
 version: 1.0.0
+license: MIT
 marketplace:
   owner:
     name: APM Tests
@@ -289,9 +290,10 @@ def test_pack_json_warns_and_strict_metadata_prevents_writes(
     assert payload["metadata_enrichment"]["outcomes"] == [
         {"package": "remote-tool", "status": "failed", "cause": "transport closed"}
     ]
-    # The fixture declares no license, so pack also reports that warning (#4203).
-    metadata_warnings = [w for w in payload["warnings"] if "license" not in str(w).lower()]
-    assert len(metadata_warnings) == 1, payload["warnings"]
+    assert payload["warnings"] == [
+        "Package 'remote-tool': metadata enrichment failed (transport closed). "
+        "Restore repository, network, or credential access and retry."
+    ], payload["warnings"]
     artifact = tmp_path / ".claude-plugin" / "marketplace.json"
     assert artifact.is_file()
 
@@ -300,7 +302,7 @@ def test_pack_json_warns_and_strict_metadata_prevents_writes(
     assert uncertifiable.exit_code == 4, uncertifiable.output
     uncertifiable_payload = json.loads(uncertifiable.output)
     assert uncertifiable_payload["drift"]["outputs"][0]["status"] == "uncertifiable"
-    assert uncertifiable_payload["drift"]["outputs"][0]["metadata_warnings"] == metadata_warnings
+    assert uncertifiable_payload["drift"]["outputs"][0]["metadata_warnings"] == payload["warnings"]
     assert uncertifiable_payload["errors"][0]["code"] == "marketplace_metadata_uncertifiable"
     artifact.unlink()
 
