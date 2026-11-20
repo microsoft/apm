@@ -7,16 +7,22 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import itertools
 import json
+import re
 import subprocess
 import sys
-from dataclasses import asdict
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from scripts.lifecycle_contracts import EvidenceError, command_inventory, command_path
+from tests.lifecycle.model.expected import exit_contract
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.isolated_apm_environment import DURABLE_ENVIRONMENT_ROOTS
@@ -305,3 +311,183 @@ class LifecycleEvidencePlugin:
     def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
         """Restore instrumentation after both success and failure."""
         self.patch.undo()
+
+
+# ---------------------------------------------------------------------------
+# Global output oracle (#4113): I6, I8 and I9 on every APM invocation.
+#
+# ``ApmLifecycleRunner.run`` and ``run_sequence`` pass every result of an APM
+# entry point through ``check_cli_output``. A violation fails the command
+# unless a STRICT known cell (``KNOWN_OUTPUT_CELLS``) owns it or the test is
+# itself about that violation (``expect_output_violation``).
+# ---------------------------------------------------------------------------
+
+_TRACEBACK = "Traceback (most recent call last)"
+_STATUS_PREFIXES = ("[+]", "[!]", "[x]", "[i]", "[*]", "[>]")
+_TREE_PREFIXES = ("|--", "+--", "`--", "\\--")
+_ALLOWED_CONTROL = frozenset("\n\r\t")
+
+
+@dataclass(frozen=True)
+class OutputViolation:
+    law: str
+    message: str
+
+
+@dataclass(frozen=True)
+class KnownOutputCell:
+    """A STRICT expected output failure of the product, tracked by *issue*.
+
+    Where ``applies(args, scenario_id)`` holds, a violation of *law* whose
+    message matches *message* is excused; if none occurs the cell fails,
+    because the defect is fixed and the cell must be removed.
+    """
+
+    id: str
+    law: str
+    issue: str
+    applies: Callable[[tuple[str, ...], str], bool]
+    message: str
+
+
+# Product defects the oracle observes on main; each one names its issue.
+KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = ()
+
+_EXPECTED_VIOLATIONS: ContextVar[frozenset[str]] = ContextVar(
+    "apm_expected_output_violations", default=frozenset()
+)
+
+
+class OutputOracleError(AssertionError):
+    """An APM command broke the global output contract."""
+
+
+@contextmanager
+def expect_output_violation(*laws: str, reason: str) -> Iterator[None]:
+    """Suspend *laws* for commands run inside the block.
+
+    Only for a test that is ABOUT that violation (for example a test that
+    provokes a crash to assert its rendering). Product defects belong in
+    ``KNOWN_OUTPUT_CELLS`` instead.
+    """
+    unknown = set(laws) - {"I6", "I8", "I9"}
+    if not laws or unknown or not reason.strip():
+        raise ValueError("expect_output_violation needs output laws (I6, I8, I9) and a reason")
+    token = _EXPECTED_VIOLATIONS.set(_EXPECTED_VIOLATIONS.get() | frozenset(laws))
+    try:
+        yield
+    finally:
+        _EXPECTED_VIOLATIONS.reset(token)
+
+
+def is_apm_entry_point(prefix: Sequence[str]) -> bool:
+    """True when *prefix* runs APM (``-m apm_cli.cli`` or an ``apm`` binary)."""
+    if not prefix:
+        return False
+    last = prefix[-1]
+    return last == "apm_cli.cli" or Path(last).name.lower() in {"apm", "apm.exe"}
+
+
+def _command_name(args: Sequence[str]) -> str:
+    return next((arg for arg in args if not arg.startswith("-")), "")
+
+
+def _json_mode(args: Sequence[str]) -> bool:
+    return (
+        "--json" in args
+        or "--format=json" in args
+        or any(a == "--format" and b == "json" for a, b in itertools.pairwise(args))
+    )
+
+
+def _ascii_violations(stream: str, text: str) -> list[OutputViolation]:
+    bad = sorted({hex(ord(c)) for c in text if not (" " <= c <= "~" or c in _ALLOWED_CONTROL)})
+    if not bad:
+        return []
+    return [OutputViolation("I6", f"{stream} has characters outside printable ASCII {bad[:5]}")]
+
+
+def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
+    found: list[OutputViolation] = []
+    if _TRACEBACK in text:
+        found.append(OutputViolation("I9", f"{stream} has a Python traceback"))
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    for first, second in itertools.pairwise(lines):
+        # Rules and table borders legitimately repeat; diagnostics carry words.
+        if first == second and any(c.isalnum() for c in first):
+            found.append(OutputViolation("I9", f"{stream} repeats a line: {first.strip()!r}"))
+            break
+    # A top-level status line opens a block; indented status and tree lines are
+    # compared only within their block, because per-package blocks repeat them.
+    seen: set[tuple[int, str]] = set()
+    block = 0
+    for line in lines:
+        stripped = line.strip()
+        top_level = not line[:1].isspace()
+        if top_level and stripped.startswith(_STATUS_PREFIXES):
+            block += 1
+            key = (0, stripped)
+        elif not top_level and stripped.startswith(_STATUS_PREFIXES + _TREE_PREFIXES):
+            key = (block, stripped)
+        else:
+            continue
+        if key in seen:
+            found.append(OutputViolation("I9", f"{stream} repeats a diagnostic: {stripped!r}"))
+            break
+        seen.add(key)
+    return found
+
+
+def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]:
+    """Every I6, I8 and I9 violation in one APM command result."""
+    found: list[OutputViolation] = []
+    for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
+        found.extend(_ascii_violations(stream, text))
+    if _json_mode(args) and result.returncode in (0, 1):
+        try:
+            json.loads(result.stdout)
+        except ValueError as exc:
+            found.append(OutputViolation("I6", f"JSON mode printed invalid JSON on stdout: {exc}"))
+    contract = exit_contract(_command_name(args))
+    if result.returncode not in contract:
+        found.append(
+            OutputViolation("I8", f"exit code {result.returncode} is outside {sorted(contract)}")
+        )
+    for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
+        found.extend(_noise_violations(stream, text))
+    return found
+
+
+def check_cli_output(
+    args: Sequence[str],
+    result: Any,
+    *,
+    scenario_id: str = "single-command",
+    known_cells: Sequence[KnownOutputCell] | None = None,
+) -> None:
+    """Fail on any unowned output violation of an APM command; non-APM commands pass."""
+    args = tuple(args)
+    prefix = result.command[: len(result.command) - len(args)]
+    if not is_apm_entry_point(prefix):
+        return
+    expected = _EXPECTED_VIOLATIONS.get()
+    violations = [v for v in output_violations(args, result) if v.law not in expected]
+    problems: list[str] = []
+    for cell in KNOWN_OUTPUT_CELLS if known_cells is None else known_cells:
+        if cell.law in expected or not cell.applies(args, scenario_id):
+            continue
+        owned = [v for v in violations if v.law == cell.law and re.search(cell.message, v.message)]
+        if not owned:
+            problems.append(
+                f"{cell.law}: known cell {cell.id} ({cell.issue}) did not fail; "
+                "the defect now passes, so remove the cell"
+            )
+        violations = [v for v in violations if v not in owned]
+    problems[:0] = [f"{v.law}: {v.message}" for v in violations]
+    if problems:
+        raise OutputOracleError(
+            "output oracle (#4113) failed:\n"
+            + "\n".join(problems)
+            + f"\nscenario={scenario_id!r}\ncommand={result.command!r}"
+            + f"\nreturncode={result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
