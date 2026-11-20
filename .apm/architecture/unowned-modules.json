@@ -112,7 +112,6 @@
     "src/apm_cli/core/output_mode.py",
     "src/apm_cli/core/safe_installer.py",
     "src/apm_cli/core/script_runner.py",
-    "src/apm_cli/deps/__init__.py",
     "src/apm_cli/deps/bare_cache.py",
     "src/apm_cli/deps/dependency_graph.py",
     "src/apm_cli/deps/file_provenance.py",
