@@ -1816,7 +1816,10 @@ def _cleanup_stale_mcp(
         admission=McpAdmission.admit_all(),
     )
     # Uninstall never admits a server: only previously managed servers survive.
-    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies) & managed_servers
+    # Local-bundle servers stay with their bundle, not the uninstalled package.
+    new_mcp_servers = (
+        MCPIntegrator.get_server_names(view.dependencies) | view.bundle_owned
+    ) & managed_servers
     stale_servers = managed_servers - new_mcp_servers
     from ...install.mcp.ownership import resolve_mcp_target_servers
 

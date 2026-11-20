@@ -377,9 +377,11 @@ class LockfileBuilder:
         statuses = getattr(self.ctx, "package_exec_status", None)
         if not statuses:
             return
+        allowed = getattr(self.ctx, "package_exec_allowed_types", None) or {}
         for dep_key, status in statuses.items():
             if dep_key in lockfile.dependencies and status:
                 lockfile.dependencies[dep_key].exec_status = status
+                lockfile.dependencies[dep_key].exec_allowed_types = allowed.get(dep_key, ())
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.

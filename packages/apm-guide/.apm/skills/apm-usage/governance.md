@@ -255,8 +255,9 @@ The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` pins `hooks` and `mcp` grants per item to a `sha256:<64 hex>`
 fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`. A native
 Copilot/Codex plugin, loaded intact, gets one `plugin:` pin over its whole
-root (every file plus executable bits), next to item pins for a split
-install; any byte or mode change parks it, and `.apm/` content that is not a
+root (every file's path and bytes; executable bits are left out so the pin
+holds across operating systems), next to item pins for a split install; any
+byte change parks it, and `.apm/` content that is not a
 copy of a pinned file makes it unapprovable:
 
 ```yaml

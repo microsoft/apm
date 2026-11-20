@@ -225,12 +225,14 @@ def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) 
             f"expected {candidate}; run 'apm install' to populate the cache"
         )
     if lock_dep.resolved_commit:
-        from apm_cli.install.cache_pin import CachePinError, verify_marker
+        from apm_cli.drift import locked_copy_holds_commit
 
-        try:
-            verify_marker(candidate, lock_dep.resolved_commit)
-        except CachePinError as exc:
-            raise CacheMissError(f"{exc}; run 'apm install' to refresh apm_modules cache") from exc
+        # One copy-validity owner for install and audit (#3964).
+        if not locked_copy_holds_commit(lock_dep, candidate):
+            raise CacheMissError(
+                f"{candidate} does not hold the locked commit {lock_dep.resolved_commit}; "
+                "run 'apm install' to refresh apm_modules cache"
+            )
 
 
 def _materialize_install_path(
@@ -1016,5 +1018,18 @@ def diff_scratch_against_project(
             # Replay deploys no hooks here, yet APM-owned entries remain (#3924).
             findings.append(DriftFinding(path=rel, kind="modified", package=""))
         # else: untracked governed file -- ignore (user authored).
+
+    if local_bundle_paths:
+        # A local bundle has no replay source: its locked hashes are the
+        # baseline. Plain audit and --ci read them through the one verifier
+        # content-integrity and --frozen use (req-lk-017), so both agree.
+        from apm_cli.policy.ci_checks import verify_deployed_file_hashes
+
+        drifted, _unresolved = verify_deployed_file_hashes(project_root, lockfile, targets)
+        findings.extend(
+            DriftFinding(path=item.path, kind="modified", package=item.owner)
+            for item in drifted
+            if item.path in local_bundle_paths
+        )
 
     return findings

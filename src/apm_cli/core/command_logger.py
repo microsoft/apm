@@ -256,6 +256,8 @@ class InstallLogger(CommandLogger):
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
         self._lockfile_written = False
+        # MCP servers this run removed from native config; a change on their own.
+        self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
@@ -411,6 +413,10 @@ class InstallLogger(CommandLogger):
     def record_lockfile_write(self) -> None:
         """Keep metadata-only persistence out of the unchanged summary."""
         self._lockfile_written = True
+
+    def record_mcp_removed(self, names) -> None:
+        """Record MCP servers this install removed, so the summary counts them."""
+        self._mcp_removed.update(str(name) for name in names)
 
     def nothing_to_install(
         self,
@@ -1092,6 +1098,13 @@ class InstallLogger(CommandLogger):
             file_noun = "file" if stale_cleaned == 1 else "files"
             _rich_success(
                 f"Cleaned {stale_cleaned} stale {file_noun}{timing_suffix}.",
+                symbol="sparkles",
+            )
+        elif self._mcp_removed:
+            count = len(self._mcp_removed)
+            noun = "server" if count == 1 else "servers"
+            _rich_success(
+                f"Removed {count} stale MCP {noun}{timing_suffix}.",
                 symbol="sparkles",
             )
         elif self._lockfile_written:

@@ -82,6 +82,21 @@ Gemini, OpenCode, Kiro, Windsurf and others: see the
 gets its own keys for remote transports; a harness that cannot use a
 transport (for example SSE on Codex) is skipped with a warning.
 
+### Limit a server to some harnesses
+
+Add `targets:` to an MCP entry to write it only for those harnesses:
+
+```yaml title="apm.yml"
+  mcp:
+    - name: io.github.github/github-mcp-server
+      transport: http
+      targets: [copilot, claude]
+```
+
+APM uses the list to decide where to write the server; it never copies
+`targets:` into a harness's config. An install scoped with `--target` leaves
+servers that other targets declared in place.
+
 :::caution[Breaking in 0.37]
 GitHub Copilot servers move from `.github/mcp.json` and `.vscode/mcp.json` to
 root `.mcp.json`, which Claude Code also reads, so Copilot's `tools`

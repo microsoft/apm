@@ -629,6 +629,25 @@ class TestApmManagedMcpExcludedFromPack:
         for leaked in ("Authorization", "live-token", "secret-value", "MY_TOKEN"):
             assert leaked not in raw
 
+    def test_root_manifest_server_targeted_away_from_claude_is_not_shipped(
+        self, tmp_path: Path
+    ) -> None:
+        """#2606: a server whose targets: leave out Claude never reaches the Claude plugin."""
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: p\nversion: 1.0.0\ndescription: d\n"
+            "dependencies:\n  mcp:\n"
+            "    - name: cursor-only\n      registry: false\n      transport: stdio\n"
+            "      command: a\n      targets: [cursor]\n"
+            "    - name: everywhere\n      registry: false\n      transport: stdio\n"
+            "      command: b\n",
+        )
+
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+
+        assert set(manifest["mcpServers"]) == {"everywhere"}
+
     def test_unreadable_lock_withholds_root_mcp(self, tmp_path: Path) -> None:
         apm = self._project(tmp_path, {"authored": {"command": "node"}}, "lockfile_version: [\n")
         logger = MagicMock()

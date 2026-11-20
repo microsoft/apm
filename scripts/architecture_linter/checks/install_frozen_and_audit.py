@@ -69,6 +69,7 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
 # req-lk-017: frozen install and audit content-integrity share one verifier.
 _DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
+_DRIFT_DIFF = "src/apm_cli/install/drift.py"
 _DEPLOYED_HASH_FRAGMENTS = (
     (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
     (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
@@ -78,6 +79,9 @@ _DEPLOYED_HASH_FRAGMENTS = (
         "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
     ),
     (_DEPLOYED_HASH_VERIFIER, "= resolve_audit_scope(project_root, lock)"),
+    # Plain audit's drift row reads local-bundle hashes through the same
+    # verifier, so it never disagrees with --ci (#3989).
+    (_DRIFT_DIFF, "= verify_deployed_file_hashes(project_root, lockfile, targets)"),
 )
 
 
@@ -95,8 +99,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
     audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
+    drift, drift_fail = _facts_for(provider, _DRIFT_DIFF, rule_id)
     failures = (
-        owner_fail
+        drift_fail
+        + owner_fail
         + adapter_fail
         + services_fail
         + integration_fail
@@ -218,7 +224,7 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         or not _before(acquisition, hydrated_check)
         or not _before(hydrated_check, deployment)
         or not all(
-            _present(owner if path == _FROZEN_OWNER else audit, needle)
+            _present({_FROZEN_OWNER: owner, _DRIFT_DIFF: drift}.get(path, audit), needle)
             for path, needle in _DEPLOYED_HASH_FRAGMENTS
         )
         or bool(duplicates)
@@ -798,13 +804,15 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     subset_body = _awk_body(
         ci_checks, re.compile(r"^def _check_skill_subset_consistency\("), re.compile(r"^def ")
     )
+    view_body = _awk_body(ci_checks, re.compile(r"^def audit_mcp_view\("), re.compile(r"^def "))
     if (
         not _present_re(owner, re.compile(r"^def prepare_ci_audit_replay\("))
         or "run_replay" in audit_gate_calls
         or not _body_has(config_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay_error is not None")
-        or not _body_has(config_body, "project_root / APM_MODULES_DIR")
+        or not _body_has(config_body, "audit_mcp_view(")
+        or not _body_has(view_body, "project_root / APM_MODULES_DIR")
         or not _body_has(subset_body, "project_root / APM_MODULES_DIR")
     ):
         findings.append(

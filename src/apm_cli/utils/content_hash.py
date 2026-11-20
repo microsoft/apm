@@ -122,10 +122,27 @@ def native_plugin_files(plugin_root: Path) -> list[Path]:
 
 
 def compute_native_plugin_hash(plugin_root: Path) -> str:
-    """Fingerprint the native plugin file set: path, exec bit and bytes."""
+    """Per-machine integrity hash of the native plugin file set: path, exec bit and bytes.
+
+    Compares a deployed copy with its source on the same machine. Approval
+    pins use :func:`compute_native_plugin_pin`, which leaves the exec bit out.
+    """
     if plugin_root.is_symlink():
         raise PathTraversalError(f"Native plugin integrity refuses symlink: {plugin_root}")
     return _hash_native_files(plugin_root, native_plugin_files(plugin_root))
+
+
+def compute_native_plugin_pin(plugin_root: Path) -> str:
+    """Portable approval pin of the native plugin file set: path and bytes.
+
+    The exec bit is left out: Windows derives it from the file extension
+    (``.cmd``, ``.bat``, ``.exe``) rather than the Git mode, so a pin that
+    included it would differ across operating systems and an approval
+    committed on one would park on the other.
+    """
+    if plugin_root.is_symlink():
+        raise PathTraversalError(f"Native plugin integrity refuses symlink: {plugin_root}")
+    return _hash_native_files(plugin_root, native_plugin_files(plugin_root), include_mode=False)
 
 
 def unpinned_apm_copy(plugin_root: Path) -> str | None:
@@ -162,12 +179,13 @@ def unpinned_apm_copy(plugin_root: Path) -> str | None:
     return None
 
 
-def _hash_native_files(root: Path, files: list[Path]) -> str:
+def _hash_native_files(root: Path, files: list[Path], *, include_mode: bool = True) -> str:
     hasher = hashlib.sha256()
     for relative in files:
         path = root / relative
         hasher.update(relative.as_posix().encode("utf-8") + b"\0")
-        hasher.update(b"x" if path.stat().st_mode & stat.S_IXUSR else b"-")
+        if include_mode:
+            hasher.update(b"x" if path.stat().st_mode & stat.S_IXUSR else b"-")
         hasher.update(hashlib.sha256(path.read_bytes()).digest())
     return f"sha256:{hasher.hexdigest()}"
 

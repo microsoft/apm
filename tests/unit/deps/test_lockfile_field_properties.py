@@ -179,6 +179,7 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
         st.just((CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)),
     )
     kwargs["exec_status"] = maybe(None, st.sampled_from(_ALLOWED_EXEC_STATUS))
+    kwargs["exec_allowed_types"] = maybe((), st.just(("bin", "hooks")))
     kwargs["name"] = maybe(None, st.just("consume-contract"))
     # Empty maps are omitted from to_dict(); from_dict restores {}. Include
     # both so the round trip covers omission and a non-empty vendor map.

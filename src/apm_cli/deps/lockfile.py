@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -179,7 +179,39 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
         return False
     from ..install.mcp.retired_destinations import lock_holds_untranslated_mcp_claims
 
-    return lock_holds_untranslated_mcp_claims(existing.apm_version, existing.mcp_target_servers)
+    # Only claims carried forward keep the old meaning: removing the last one,
+    # or writing new ones, hands the lock to this writer.
+    carried = {
+        runtime: set(names or ()) & set(lock.mcp_target_servers.get(runtime) or ())
+        for runtime, names in existing.mcp_target_servers.items()
+    }
+    return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
+
+
+def _same_document_on_disk(path: Path, serialized: str) -> bool:
+    """Whether *path* already holds exactly the data *serialized* would write.
+
+    Only formatting may differ; a legacy layout the writer would migrate is a
+    different document and is rewritten.
+    """
+    from ..utils.yaml_io import load_yaml_str
+
+    try:
+        on_disk = load_yaml_str(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError):
+        return False
+    return on_disk == load_yaml_str(serialized)
+
+
+def recorded_generator(data: Mapping[str, Any]) -> object:
+    """The ``apm_version`` a parsed lockfile records for the generator gate.
+
+    An explicit ``apm_version: null`` is unverifiable, unlike an absent key, so
+    both the project and the bundle reader warn on it the same way (#3963).
+    """
+    if "apm_version" in data and data["apm_version"] is None:
+        return "null"
+    return data.get("apm_version")
 
 
 def resolve_reproducible_timestamp(
@@ -437,6 +469,20 @@ def _normalize_exec_status(raw: Any) -> str | None:
     return value
 
 
+def _normalize_exec_allowed_types(raw: Any) -> tuple[str, ...]:
+    """Validate the executable types a partially gated row deployed (#3991)."""
+    if raw is None:
+        return ()
+    from apm_cli.security.executables import ALL_EXEC_TYPES
+
+    if not isinstance(raw, list) or any(item not in ALL_EXEC_TYPES for item in raw):
+        raise ValueError(
+            "lockfile exec_allowed_types must be a list of executable types: "
+            f"{', '.join(ALL_EXEC_TYPES)}"
+        )
+    return tuple(sorted(set(raw)))
+
+
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     """Return values without duplicates, preserving first-seen order."""
     return list(dict.fromkeys(values))
@@ -520,6 +566,10 @@ class LockedDependency:
     # no executable primitive; it is OMITTED from the serialized entry so a
     # never-gated package stays distinguishable from an explicitly-cleared one.
     exec_status: str | None = None
+    # Types a gated or denied package still deployed because they are approved
+    # (#3991). ``exec_status`` is the worst case, so this is the only record of
+    # a partial approval; omitted when no type was allowed.
+    exec_allowed_types: tuple[str, ...] = ()
     # Package-declared name from the dependency's own apm.yml (issue #1888).
     # SELF-ASSERTED display/inventory metadata only -- NOT an identity anchor.
     # See to_dict/from_dict and the supply-chain boundary note in the lockfile
@@ -693,6 +743,8 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
+        if self.exec_allowed_types:
+            result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
             result["replacement"] = self.replacement.to_dict()
         # Replay forward-compat unknown fields LAST so they never shadow a
@@ -778,6 +830,7 @@ class LockedDependency:
             "carried_licenses",
             "extensions",
             "exec_status",
+            "exec_allowed_types",
             "name",
             "replacement",
             # legacy migration key handled above
@@ -831,6 +884,7 @@ class LockedDependency:
             declared_license=data.get("declared_license"),
             carried_licenses=records_from_lock_data(data.get("carried_licenses")),
             exec_status=exec_status,
+            exec_allowed_types=_normalize_exec_allowed_types(data.get("exec_allowed_types")),
             name=data.get("name"),
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
@@ -1714,6 +1768,9 @@ class LockFile:
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
+        if unchanged and _same_document_on_disk(path, serialized):
+            # A proven no-op keeps the file's own bytes (comments, key style).
+            return True
         atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
         return True
 
