@@ -41,8 +41,16 @@ def log_hooks_skip(
         )
 
 
-def log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger | None) -> None:
-    """Warn about skipped canvas extensions when the package ships them."""
+def log_canvas_skip(
+    package_name: str,
+    package_info: Any,
+    logger: InstallLogger | None,
+    ctx: InstallContext | None = None,
+) -> None:
+    """Warn about skipped canvas extensions when the package ships them.
+
+    A hard-denied canvas is named as denied (#4052); approving cannot lift it.
+    """
     _install = Path(package_info.install_path)
     extensions_root = _install / ".apm" / "extensions"
     try:
@@ -55,11 +63,13 @@ def log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger 
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:
-        logger.warning(
-            f"{_pkg_label}: canvas extension(s) skipped (not approved in executables.allow). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
-            symbol="warning",
+        from apm_cli.install.exec_gate import executable_skip_reason
+        from apm_cli.security.executables import EXEC_TYPE_CANVAS
+
+        reason = executable_skip_reason(
+            ctx, package_name, _pkg_label, EXEC_TYPE_CANVAS, "canvas extension(s)"
         )
+        logger.warning(f"{_pkg_label}: {reason}", symbol="warning")
 
 
 def warn_unsupported_primitives(
