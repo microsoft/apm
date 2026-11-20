@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import (
+    DRY_RUN_PLAN_INCOMPLETE,
+    LOCKED_REFS_PINNED,
+    ORPHANED_PACKAGES,
+)
 from apm_cli.models.results import InstallDisposition
 from apm_cli.utils.console import (
     _rich_echo,
@@ -489,7 +494,7 @@ class InstallLogger(CommandLogger):
         else:
             _rich_success("All dependencies are up to date.", symbol="check")
         if lockfile_present and not update_mode:
-            _rich_info("Lockfile already satisfied -- run 'apm update' to resolve latest refs.")
+            _rich_info(f"Lockfile already satisfied -- {LOCKED_REFS_PINNED.clause()}.")
 
     # --- Download phase ---
 
@@ -704,7 +709,7 @@ class InstallLogger(CommandLogger):
         """Name undeclared packages a frozen install left in place (#3662)."""
         _rich_info(
             "Kept packages no longer in apm.yml because --frozen does not change "
-            f"apm.lock.yaml: {', '.join(dep_keys)}. Run 'apm install' to remove them.",
+            f"apm.lock.yaml: {', '.join(dep_keys)}. {ORPHANED_PACKAGES.sentence()}",
             symbol="info",
         )
 
@@ -1113,7 +1118,7 @@ class InstallLogger(CommandLogger):
                 noun = "dependency" if apm_count == 1 else "dependencies"
                 _rich_warning(
                     f"Dry run incomplete: {apm_count} locally known APM {noun}. "
-                    "Run 'apm install' without --dry-run to resolve the full plan.",
+                    f"{DRY_RUN_PLAN_INCOMPLETE.sentence()}",
                     symbol="warning",
                 )
                 return

@@ -23,6 +23,7 @@ from typing import Any, Protocol
 import yaml
 
 from ..bundle.formats import BundleFormat
+from ..core.remediation import AGENT_PLUGIN_OUTPUT_EMPTY
 from ..utils.yaml_io import load_yaml
 
 
@@ -400,8 +401,8 @@ class PluginManifestProducer:
         ):
             raise BuildError(
                 "The selected targets only request Claude plugin metadata, but Agent Plugin "
-                "output is active. Run 'apm pack --claude-plugin' for the historical Claude "
-                "layout, or add dependencies to produce an Agent Plugin bundle."
+                f"output is active. {AGENT_PLUGIN_OUTPUT_EMPTY.sentence()} Or add "
+                "dependencies to produce an Agent Plugin bundle."
             )
 
         outputs: list[Path] = []
