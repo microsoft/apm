@@ -325,6 +325,8 @@ class LifecycleEvidencePlugin:
 _TRACEBACK = "Traceback (most recent call last)"
 _STATUS_PREFIXES = ("[+]", "[!]", "[x]", "[i]", "[*]", "[>]")
 _TREE_PREFIXES = ("|--", "+--", "`--", "\\--")
+# Starts of a printed line (status, tree or box row) as opposed to a wrap continuation.
+_LINE_OPENERS = (*_STATUS_PREFIXES, "|", "+", "`", "\\")
 _ALLOWED_CONTROL = frozenset("\n\r\t")
 
 
@@ -407,11 +409,36 @@ def _ascii_violations(stream: str, text: str) -> list[OutputViolation]:
     return [OutputViolation("I6", f"{stream} has characters outside printable ASCII {bad[:5]}")]
 
 
+def _logical_lines(text: str) -> list[str]:
+    """Non-blank lines with terminal wraps undone.
+
+    The console wraps a long status or tree line at its width; the
+    continuation starts at column 0 with no status, tree or box prefix.
+    Joining it back keeps two different wrapped paths from comparing equal
+    on their shared first half ("[>] Resolving").
+    """
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        if (
+            lines
+            and not line[:1].isspace()
+            and not line.startswith(_LINE_OPENERS)
+            and lines[-1].strip().startswith(_LINE_OPENERS)
+        ):
+            lines[-1] = f"{lines[-1]} {line}"
+            continue
+        lines.append(line)
+    return lines
+
+
 def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
     found: list[OutputViolation] = []
     if _TRACEBACK in text:
         found.append(OutputViolation("I9", f"{stream} has a Python traceback"))
-    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    lines = _logical_lines(text)
     for first, second in itertools.pairwise(lines):
         # Rules and table borders legitimately repeat; diagnostics carry words.
         if first == second and any(c.isalnum() for c in first):

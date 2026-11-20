@@ -1269,6 +1269,13 @@ def _cli(args: tuple[str, ...], stdout: str = "", stderr: str = "", code: int = 
         (("install",), "[!] Skipped x\n[+] b\n[!] Skipped x\n", "", 0, "I9: stdout repeats a"),
         (("install",), "[+] p\n  |-- 1 skill\n  [i] n\n  |-- 1 skill\n", "", 0, "I9: stdout"),
         (("install",), "[i] t\n  [+] p\n  [+] q\n  [+] p\n", "", 0, "I9: stdout repeats a"),
+        (
+            ("install",),
+            "[!] Policy off. This\ndoes not\n[i] x\n[!] Policy off. This\ndoes not\n",
+            "",
+            0,
+            "I9: stdout repeats a",
+        ),
     ],
 )
 def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, code, law) -> None:
@@ -1292,6 +1299,7 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
             _APM,
         ),
         (("deps", "list"), "+------+\n|  a   |\n+------+\n+------+\n", 0, _APM),
+        (("install",), "[>] Resolving \n/tmp/work/a...\n[>] Resolving \n/tmp/work/b...\n", 0, _APM),
         (("audit", "--json"), '{"ok": true}\n', 3, ("/opt/bin/apm",)),
         (("audit", "--json"), "", 2, _APM),
         (
