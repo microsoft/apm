@@ -1,5 +1,5 @@
 {
-  "description": "test-coverage-expert activation cases. Each case is the PR's `git diff --name-status` output (tab-separated) and whether the panelist must spawn. Rule: active when a src/**/*.py path is touched, or a D / R entry has an old path under tests/.",
+  "description": "test-coverage-expert activation cases. Each case is the PR's `git diff --name-status` output (tab-separated), optional `git diff -U0` patch lines per path, and whether the panelist must spawn. Rule: assets/panel-mode.md (Core, Test cut).",
   "cases": [
     {"name": "src change with test edit", "name_status": ["M\tsrc/apm_cli/install/pipeline.py", "M\ttests/unit/install/test_pipeline.py"], "expect_active": true},
     {"name": "src-only new module", "name_status": ["A\tsrc/apm_cli/install/new_phase.py"], "expect_active": true},
@@ -8,7 +8,10 @@
     {"name": "test-only rename", "name_status": ["R100\ttests/unit/test_phase_three.py\ttests/unit/test_install_idempotent.py"], "expect_active": true},
     {"name": "test moved out of tests/", "name_status": ["R087\ttests/integration/test_helper_probe.py\tscripts/helper_probe.py"], "expect_active": true},
     {"name": "docs-only", "name_status": ["M\tdocs/src/content/docs/reference/cli-commands.md", "M\tCHANGELOG.md"], "expect_active": false},
-    {"name": "test-only edit and addition (no cut)", "name_status": ["M\ttests/unit/test_a.py", "A\ttests/unit/test_new_case.py"], "expect_active": false},
-    {"name": "file moved into tests/ (nothing cut)", "name_status": ["R100\tscripts/probe.py\ttests/unit/test_probe.py"], "expect_active": false}
+    {"name": "test-only pure additions (no cut)", "name_status": ["M\ttests/unit/test_a.py", "A\ttests/unit/test_new_case.py"], "expect_active": false, "patches": {"tests/unit/test_a.py": ["+def test_new_flag_combination():", "+    assert run(['install', '--frozen']).exit_code == 0", "+    with pytest.raises(ValueError):"]}},
+    {"name": "file moved into tests/ (nothing cut)", "name_status": ["R100\tscripts/probe.py\ttests/unit/test_probe.py"], "expect_active": false},
+    {"name": "test function removed inside a kept file (merge as M)", "name_status": ["M\ttests/unit/test_lockfile_roundtrip.py"], "patches": {"tests/unit/test_lockfile_roundtrip.py": ["-    def test_roundtrip_preserves_order(self):", "-        assert dump(load(text)) == text", "+        assert dump(load(text)) == text"]}, "expect_active": true},
+    {"name": "assertions net-reduced in a kept file", "name_status": ["M\ttests/integration/test_install_flow.py"], "patches": {"tests/integration/test_install_flow.py": ["-    assert (target / 'agent.md').exists()", "-    assert result.exit_code == 0", "+    assert result.exit_code == 0"]}, "expect_active": true},
+    {"name": "--no-policy added to a test", "name_status": ["M\ttests/e2e/test_install_e2e.py"], "patches": {"tests/e2e/test_install_e2e.py": ["-    result = run(['install'])", "+    result = run(['install', '--no-policy'])"]}, "expect_active": true}
   ]
 }

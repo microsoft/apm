@@ -43,8 +43,9 @@ module, fewer than 3 production files.
 
 ## Test-only cut
 
-Touched: `D` / `R` entries under `tests/` (tests deleted, merged,
-moved, or renamed). Zero `src/**/*.py`.
+Touched: a test cut under `tests/` (file deleted, moved, or renamed;
+test function or assertions removed from a kept file; `--no-policy`
+added). Zero `src/**/*.py`.
 
 | Mode | Spawn | Notes |
 |------|-------|-------|
@@ -52,9 +53,8 @@ moved, or renamed). Zero `src/**/*.py`.
 | lean | test-coverage-expert, apm-ceo | the test-file cut is the highest-signal surface |
 | delta | CEO + test-coverage-expert if tests changed in range | noop if head+watermark unchanged |
 
-A test-only PR that only edits test files (no `D` / `R` under
-`tests/`) does not trigger the cut rule; activation for it is
-unchanged.
+A test-only PR that only adds tests or assertions is not a cut;
+activation for it is unchanged.
 
 ## Merge-worker composition
 

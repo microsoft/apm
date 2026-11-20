@@ -69,9 +69,8 @@ Checks the test-coverage-expert activation rule (SKILL.md "Test
 Coverage Expert", `assets/panel-mode.md`) against the cases in
 `roster-cases.json` (kept outside `fixtures/`, which
 `render_eval.py` renders): `src/` changes and
-test-file cuts (deleted, merged, moved, or renamed under `tests/`)
-activate the panelist; docs-only and test-only edits without a cut do
-not.
+test cuts (`assets/panel-mode.md` "Test cut") activate the panelist;
+docs-only changes and pure test additions do not.
 
 Run:
 
