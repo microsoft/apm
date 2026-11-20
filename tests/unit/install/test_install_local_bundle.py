@@ -205,6 +205,7 @@ def _integrate_agents(
     lockfile: dict | None = None,
     force: bool = False,
     dry_run: bool = False,
+    scope=None,
 ):
     """Run the bundle deploy loop for one target with a fresh diagnostics collector."""
     from apm_cli.bundle.local_bundle import LocalBundleInfo
@@ -229,7 +230,7 @@ def _integrate_agents(
         force=force,
         dry_run=dry_run,
         diagnostics=diagnostics,
-        scope=InstallScope.PROJECT,
+        scope=scope or InstallScope.PROJECT,
     )
     return result, diagnostics
 
@@ -846,6 +847,42 @@ class TestLocalBundlePathRouting:
         ]
 
         forced, _diagnostics = _integrate_agents(bundle, project, codex, force=True)
+        assert rev.read_bytes() == rendered
+        assert forced["deployed_file_hashes"] == installed["deployed_file_hashes"]
+
+    @pytest.mark.parametrize("codex_home", [False, True], ids=["default-home", "codex-home"])
+    def test_user_scope_codex_bundle_agent_keeps_an_edit_without_force(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex_home: bool
+    ) -> None:
+        """A -g reinstall over an edited agent keeps it, and --force replaces it (#3714)."""
+        from apm_cli.core.scope import InstallScope
+
+        home = tmp_path / "home"
+        home.mkdir()
+        agents = home / ".codex/agents"
+        if codex_home:
+            agents = tmp_path / "codex-home/agents"
+            monkeypatch.setenv("CODEX_HOME", str(agents.parent))
+        else:
+            monkeypatch.delenv("CODEX_HOME", raising=False)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        codex = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        user = InstallScope.USER
+        rev = agents / "rev.toml"
+
+        installed, _diagnostics = _integrate_agents(bundle, home, codex, scope=user)
+        assert rev.as_posix() in installed["deployed_file_hashes"]
+        rendered = rev.read_bytes()
+
+        rev.write_bytes(rendered + b"# edited\n")
+        kept, diagnostics = _integrate_agents(bundle, home, codex, scope=user)
+        assert rev.read_bytes() == rendered + b"# edited\n"
+        assert kept["skipped"] == 1
+        assert rev.as_posix() not in kept["deployed_file_hashes"]
+        assert len(diagnostics.by_category()["collision"]) == 1
+
+        forced, _diagnostics = _integrate_agents(bundle, home, codex, scope=user, force=True)
         assert rev.read_bytes() == rendered
         assert forced["deployed_file_hashes"] == installed["deployed_file_hashes"]
 

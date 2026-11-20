@@ -168,23 +168,38 @@ def test_codex_bundle_agent_render_failure_writes_nothing(
 
 
 @pytest.mark.parametrize("codex_home", [False, True], ids=["default-home", "codex-home"])
-def test_codex_bundle_agent_user_scope_renders_under_codex_home(
+def test_codex_bundle_agent_user_scope_lifecycle(
     tmp_path: Path, apm_binary_path: Path, codex_home: bool
 ) -> None:
     world = _World(tmp_path, apm_binary_path)
     bundle = world.pack()
-    agents = world.isolated.home / ".codex/agents"
+    home = world.isolated.home
+    agents = home / ".codex/agents"
     if codex_home:
         agents = tmp_path / "codex-home/agents"
         world.env = world.isolated.subprocess_env(overrides={"CODEX_HOME": str(agents.parent)})
-    (world.isolated.home / ".codex").mkdir(exist_ok=True)
+    (home / ".codex").mkdir(exist_ok=True)
+    install = ("install", "-g", str(bundle), "--target", "codex", _NO_POLICY)
 
-    world.apm(world.root, "install", "-g", str(bundle), "--target", "codex", _NO_POLICY)
+    world.apm(world.root, *install)
 
     agent = agents / "rev.toml"
     assert tomllib.loads(agent.read_text(encoding="utf-8")) == _EXPECTED_TOML
-    assert compute_file_hash(agent) == _rendered_hash(bundle / "agents/rev.agent.md", agent)
+    rendered_hash = _rendered_hash(bundle / "agents/rev.agent.md", agent)
+    assert compute_file_hash(agent) == rendered_hash
     assert not (world.root / ".codex").exists()
+    # On main the -g bundle lock is $HOME/apm.lock.yaml with absolute claims.
+    lock = load_yaml(home / "apm.lock.yaml")
+    assert lock["local_deployed_file_hashes"][agent.as_posix()] == rendered_hash
+    rendered = agent.read_bytes()
+
+    # An edited destination is kept without --force and replaced with it.
+    agent.write_bytes(rendered + b"# edited\n")
+    kept = _output(world.apm(world.root, *install))
+    assert "file exists with different content" in kept, kept
+    assert agent.read_bytes() == rendered + b"# edited\n"
+    world.apm(world.root, *install, "--force")
+    assert agent.read_bytes() == rendered
 
 
 @pytest.mark.xfail(
@@ -197,14 +212,16 @@ def test_codex_bundle_agent_user_scope_renders_under_codex_home(
 def test_codex_bundle_agent_user_scope_lock_and_audit(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
+    """Only the #3989-dependent parts: $APM_HOME lock, home-relative claim, audit."""
     world = _World(tmp_path, apm_binary_path)
     bundle = world.pack()
     home = world.isolated.home
     (home / ".codex").mkdir(exist_ok=True)
     # Bundle installs never write apm.yml; a user-scope audit needs the user manifest.
     _write(world.isolated.config_root / "apm.yml", "name: user\nversion: 1.0.0\n")
-
     world.apm(world.root, "install", "-g", str(bundle), "--target", "codex", _NO_POLICY)
 
-    _assert_rendered(home / _AGENT, world.isolated.config_root / "apm.lock.yaml", _AGENT)
+    lock = load_yaml(world.isolated.config_root / "apm.lock.yaml")
+    assert _AGENT in lock["local_deployed_files"]
+    assert lock["local_deployed_file_hashes"][_AGENT] == compute_file_hash(home / _AGENT)
     world.apm(world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast")

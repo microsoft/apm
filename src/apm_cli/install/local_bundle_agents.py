@@ -50,6 +50,7 @@ def render_and_deploy_codex_agent(
     *,
     rel_path: str,
     record: str,
+    collision_roots: tuple[Path, ...],
     expected_hash: str,
     target_name: str,
     slug: str,
@@ -64,6 +65,10 @@ def render_and_deploy_codex_agent(
     before rendering. The agent is rendered once, before any adopt or
     collision decision. A dry run previews the rendered hash and writes
     nothing.
+
+    *record* is the lockfile claim (absolute at user scope). The collision
+    check takes *dest* relative to the first of *collision_roots* that
+    contains it, since the integrator resolves that key against *dest*.
 
     Returns:
         The ``sha256:<hex>`` hash of the rendered text when the agent is
@@ -121,14 +126,14 @@ def render_and_deploy_codex_agent(
             outcome = integrator._deploy_rendered_agent(
                 dest,
                 src,
-                record,
+                _collision_key(dest, collision_roots),
                 rendered,
                 managed_files=None,
                 force=force,
                 diagnostics=collector,
                 target_paths=[],
             )
-        except PathTraversalError as exc:
+        except (PathTraversalError, ValueError) as exc:
             _warn(f"Skipped unsafe bundle entry {rel_path!r}: {exc}")
             return None
         if outcome == _SKIPPED:
@@ -139,6 +144,16 @@ def render_and_deploy_codex_agent(
     finally:
         if collector is not diagnostics:
             _relay(collector, record, logger)
+
+
+def _collision_key(dest: Path, roots: tuple[Path, ...]) -> str:
+    """Return *dest* relative to the first root that contains it."""
+    from ..utils.paths import portable_relpath
+
+    for root in roots:
+        if dest.is_relative_to(root):
+            return portable_relpath(dest, root)
+    raise ValueError(f"bundle agent destination {dest} is outside its deploy roots")
 
 
 def _relay(collector: DiagnosticCollector, record: str, logger: Any) -> None:

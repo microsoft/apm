@@ -1099,6 +1099,7 @@ def integrate_local_bundle(
                     dest,
                     rel_path=_rel_norm,
                     record=record,
+                    collision_roots=(project_root, deploy_root),
                     expected_hash=expected_hash,
                     target_name=target.name,
                     slug=str(slug),
