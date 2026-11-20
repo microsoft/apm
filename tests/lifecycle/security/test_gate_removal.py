@@ -621,11 +621,9 @@ def test_gate_change_removes_on_the_next_mutating_command(
 
 # -- deny by install spec (#4189) --------------------------------------------
 #
-# The fix contract: a deny written under the install spec is canonicalized
-# on read (with a one-time notice), and ``apm policy explain`` agrees with
-# approve and deny. Strict until #4189 lands.
+# A deny written under the install spec is canonicalized on read (with a
+# one-time notice), and ``apm policy explain`` agrees with approve and deny.
 
-_DENY_SPEC_CELL = "#4189 deny by install spec and installed identity"
 _USER_HOOK = ".copilot/hooks/p-exec-session.json"
 
 
@@ -645,7 +643,11 @@ def _marketplace_exec_deployed(world) -> str:
     return spec
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_DENY_SPEC_CELL)
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#4443 deny entry under a marketplace install spec is not normalized on read",
+)
 def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_world) -> None:
     world = lifecycle_world
     spec = _marketplace_exec_deployed(world)
@@ -661,7 +663,6 @@ def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_wo
     assert f"{ORG}/p-exec" in stored and spec not in stored, stored
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_DENY_SPEC_CELL)
 def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> None:
     world = lifecycle_world
     spec = _marketplace_exec_deployed(world)
@@ -676,11 +677,6 @@ def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> N
     assert "verdict: blocked" in explained.stdout, explained.stdout
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#4245 apm approve with a marketplace install spec reports not found and exits 0",
-)
 def test_approve_by_marketplace_install_spec_approves_or_refuses(lifecycle_world) -> None:
     world = lifecycle_world
     spec = world.packages["p-exec:marketplace"].spec
