@@ -44,6 +44,22 @@ _logger = logging.getLogger(__name__)
 # -- Individual checks ---------------------------------------------
 
 
+def _read_audited_lock(lockfile_path: Path) -> tuple[Any, CheckResult | None]:
+    """Read the audited lockfile; a version this APM cannot read is a failed check."""
+    from ..deps.lockfile import LockFile, UnsupportedLockfileVersionError
+
+    try:
+        return LockFile.read(lockfile_path), None
+    except UnsupportedLockfileVersionError as exc:
+        # A lockfile from a newer APM fails the gate and names both remedies (#4233).
+        return None, CheckResult(
+            name="lockfile-exists",
+            passed=False,
+            message=str(exc),
+            remediations=exc.remediations,
+        )
+
+
 def _check_lockfile_exists(
     project_root: Path,
     manifest: APMPackage | None,
@@ -1284,12 +1300,12 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     Returns :class:`CIAuditResult` with individual check results.
     """
-    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..deps.lockfile import get_lockfile_path
     from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
     lockfile_path = get_lockfile_path(project_root)
-    lock = LockFile.read(lockfile_path)
+    lock, unreadable = _read_audited_lock(lockfile_path)
     deployment_root, user_scope, resolved_targets = resolve_audit_scope(project_root, lock)
     apm_yml_path = manifest_file(project_root)
 
@@ -1300,8 +1316,8 @@ def run_baseline_checks(
         if manifest is None:
             return result
 
-    # Check 1: Lockfile exists (manifest already parsed, pass it in)
-    result.checks.append(_check_lockfile_exists(project_root, manifest))
+    # Check 1: Lockfile exists and is readable (manifest already parsed, pass it in)
+    result.checks.append(unreadable or _check_lockfile_exists(project_root, manifest))
 
     # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:

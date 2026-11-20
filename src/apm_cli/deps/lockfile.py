@@ -243,6 +243,33 @@ class LockfileFormatError(ValueError):
 class UnsupportedLockfileVersionError(LockfileFormatError):
     """Raised when a lockfile declares a version this client cannot read."""
 
+    def __init__(self, message: str, *, version: str = "", remediations: tuple = ()) -> None:
+        super().__init__(message)
+        self.version = version
+        # The structured remedies (core.remediation) the message names, when known.
+        self.remediations = remediations
+
+
+def _unsupported_version_with_remedy(
+    exc: UnsupportedLockfileVersionError, path: Path
+) -> UnsupportedLockfileVersionError:
+    """Name both remedies for *path*: regenerate it, or upgrade APM (#4233, req-lk-004)."""
+    from ..core.remediation import (
+        LOCKFILE_VERSION_UNSUPPORTED,
+        LOCKFILE_VERSION_UPGRADE_APM,
+        either_sentence,
+    )
+    from ..core.scope import is_user_scope_root
+
+    regenerate = LOCKFILE_VERSION_UNSUPPORTED.bind(path=path.name)
+    if is_user_scope_root(path.parent):
+        regenerate = regenerate.with_command("apm lock -g")
+    upgrade = LOCKFILE_VERSION_UPGRADE_APM.bind(version=repr(exc.version))
+    remedy = either_sentence(regenerate, upgrade)
+    return UnsupportedLockfileVersionError(
+        f"{exc}. {remedy}", version=exc.version, remediations=(regenerate, upgrade)
+    )
+
 
 class LockfileConflictError(LockfileFormatError):
     """Raised when a lockfile still contains git merge conflict markers."""
@@ -352,7 +379,8 @@ def require_supported_lockfile_version(data: object) -> str:
     if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
         supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
         raise UnsupportedLockfileVersionError(
-            f"Unsupported lockfile version {version!r}; supported versions: {supported}"
+            f"Unsupported lockfile version {version!r}; supported versions: {supported}",
+            version=str(version),
         )
     return version
 
@@ -1779,9 +1807,9 @@ class LockFile:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
                     )
-                except UnsupportedLockfileVersionError:
+                except UnsupportedLockfileVersionError as exc:
                     if legacy_timestamp_present:
-                        raise
+                        raise _unsupported_version_with_remedy(exc, path) from exc
                     existing = None
                 except LockfileFormatError:
                     existing = None
@@ -1826,7 +1854,9 @@ class LockFile:
             if has_conflict_markers(text):
                 raise LockfileConflictError(path)
             lock = cls.from_yaml(text)
-        except (LockfileFormatError, UnsupportedLockfileVersionError):
+        except UnsupportedLockfileVersionError as exc:
+            raise _unsupported_version_with_remedy(exc, path) from exc
+        except LockfileFormatError:
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
             raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
