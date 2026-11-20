@@ -139,7 +139,9 @@ def test_gate_generated_sequences_keep_cross_cutting_laws(
         settings=settings(
             database=None,
             deadline=None,
-            derandomize=True,
+            # PR runs are reproducible; the nightly explores fresh examples and
+            # print_blob reports a reproducer for any failure.
+            derandomize="APM_GATE_MAX_EXAMPLES" not in os.environ,
             max_examples=int(os.environ.get("APM_GATE_MAX_EXAMPLES", "4")),
             phases=(Phase.generate, Phase.shrink),
             print_blob=True,

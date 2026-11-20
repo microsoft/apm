@@ -825,41 +825,6 @@ jobs:
           uv run pwsh scripts/windows/test-integration.ps1 -SkipBuild
         timeout-minutes: 20
 
-  # M-GATE nightly exploration (#4031). The PR lifecycle shards run the GATE
-  # state machine with 4 derandomized examples per scope; this shard explores
-  # 25 per scope through `python -m apm_cli.cli`.
-  gate-machine-nightly:
-    name: GATE State Machine (nightly, 25 examples)
-    needs: [release-plan]
-    if: needs.release-plan.outputs.full == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          enable-cache: true
-
-      - name: Install test dependencies
-        run: uv sync --frozen --extra dev
-
-      - name: Explore GATE sequences
-        env:
-          APM_GATE_MAX_EXAMPLES: "25"
-        run: |
-          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-            -n 2 --durations=10 -k sequences tests/integration/test_generated_gate_state_machine.py
-
   # Single result for every integration lane, plus the measured durations
   # the next planner run balances with (published by the nightly run).
   integration-tests:
