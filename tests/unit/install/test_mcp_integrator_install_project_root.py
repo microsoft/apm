@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -172,17 +171,13 @@ class TestRunMcpInstallApmConfigLazyLoad:
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text("name: test\nscripts: {}\n", encoding="utf-8")
 
-        with patch("apm_cli.utils.yaml_io.load_yaml", return_value={}):
-            with contextlib.suppress(Exception):
-                run_mcp_install(
-                    [dep],
-                    apm_config=None,
-                    project_root=str(tmp_path),
-                    logger=logger,
-                )
+        with patch(
+            "apm_cli.integration.mcp_integrator_install.load_yaml", return_value={}
+        ) as load_yaml:
+            run_mcp_install([dep], apm_config=None, project_root=tmp_path, logger=logger)
 
-        # If apm.yml exists, load_yaml should have been called
-        # (only asserting it was callable, not necessarily called in all paths)
+        load_yaml.assert_called_once_with(apm_yml)
+        assert apm_yml.read_text(encoding="utf-8") == "name: test\nscripts: {}\n"
 
     def test_apm_config_provided_skips_file_load(self, tmp_path) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
@@ -190,14 +185,13 @@ class TestRunMcpInstallApmConfigLazyLoad:
         dep = _make_registry_dep("server1")
         logger = MagicMock()
 
-        with patch("apm_cli.utils.yaml_io.load_yaml") as mock_load:
-            with contextlib.suppress(Exception):
-                run_mcp_install(
-                    [dep],
-                    apm_config={"scripts": {}},
-                    project_root=str(tmp_path),
-                    logger=logger,
-                )
+        with patch("apm_cli.integration.mcp_integrator_install.load_yaml") as mock_load:
+            run_mcp_install(
+                [dep],
+                apm_config={"scripts": {}},
+                project_root=tmp_path,
+                logger=logger,
+            )
 
         mock_load.assert_not_called()
 

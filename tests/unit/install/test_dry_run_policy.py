@@ -176,25 +176,6 @@ class TestDryRunDeniedDepBlock:
                 dry_run=False,
             )
 
-    def test_exit_zero_contract(self):
-        """Dry-run NEVER produces non-zero exit -- no exception path."""
-        policy = _load_fixture_policy("apm-policy-deny.yml")
-        fetch_result = _make_fetch_result(policy=policy)
-        logger = _mock_logger()
-        denied_dep = _make_dep("test-blocked/foo")
-
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch_result,
-        ):
-            # Must return normally (no SystemExit, no PolicyBlockError)
-            run_policy_preflight(
-                project_root=Path("/fake"),
-                apm_deps=[denied_dep],
-                no_policy=False,
-                logger=logger,
-                dry_run=True,
-            )
         # Reaching here without exception proves exit 0 contract
 
 

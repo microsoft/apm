@@ -339,7 +339,10 @@ class TestProjectScopeGateForCowork:
         ):
             from apm_cli.install.phases.targets import run
 
-            run(ctx)  # Should not raise
+            run(ctx)
+
+        assert ctx.targets == [cowork_target]
+        assert not (tmp_path / "cowork").exists()
 
     @pytest.mark.parametrize(
         ("selected", "expected"),
@@ -398,7 +401,10 @@ class TestProjectScopeGateForCowork:
         ):
             from apm_cli.install.phases.targets import run
 
-            run(ctx)  # Should not raise
+            run(ctx)
+
+        assert ctx.targets == [copilot]
+        assert (ctx.project_root / ".github").is_dir()
 
 
 # ---------------------------------------------------------------------------

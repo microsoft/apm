@@ -162,6 +162,10 @@ def _recorded_stamp(path: Path) -> str | None:
     return match.group(1) if match else None
 
 
+def _assert_stamp(path: Path, expected: str) -> None:
+    assert _recorded_stamp(path) == expected
+
+
 def _older_lock(tmp_path: Path, lock: LockFile) -> Path:
     path = tmp_path / "apm.lock.yaml"
     path.write_text(lock.to_yaml(), encoding="utf-8")
@@ -182,19 +186,19 @@ def test_changed_write_stamps_the_running_cli(tmp_path, stamping, with_timestamp
     lock = LockFile.read(path)
     lock.mcp_servers = ["new"]
     lock.write(path)
-    assert stamping(path) == "0.40.0"
+    _assert_stamp(path, "0.40.0")
 
 
 def test_semantic_noop_write_keeps_the_recorded_stamp(tmp_path, stamping):
     path = _older_lock(tmp_path, LockFile(apm_version="0.1.0", mcp_servers=["same"]))
     LockFile.read(path).write(path)
-    assert stamping(path) == "0.1.0"
+    _assert_stamp(path, "0.1.0")
 
 
 def test_new_lockfile_is_stamped(tmp_path, stamping):
     path = tmp_path / "apm.lock.yaml"
     LockFile().write(path)
-    assert stamping(path) == "0.40.0"
+    _assert_stamp(path, "0.40.0")
 
 
 def test_write_against_a_passed_existing_lockfile_stamps_changes(tmp_path, stamping):
@@ -203,7 +207,7 @@ def test_write_against_a_passed_existing_lockfile_stamps_changes(tmp_path, stamp
     from dataclasses import replace
 
     replace(existing, mcp_servers=["new"]).write(path, existing_lockfile=existing)
-    assert stamping(path) == "0.40.0"
+    _assert_stamp(path, "0.40.0")
 
 
 def test_untranslated_mcp_claims_keep_their_recorded_stamp(tmp_path, stamping):
@@ -219,7 +223,7 @@ def test_untranslated_mcp_claims_keep_their_recorded_stamp(tmp_path, stamping):
     lock = LockFile.read(path)
     lock.lsp_servers = ["added"]
     lock.write(path)
-    assert stamping(path) == "0.36.0"
+    _assert_stamp(path, "0.36.0")
 
 
 def test_new_mcp_claims_on_an_older_lock_are_stamped(tmp_path, stamping):
@@ -228,7 +232,7 @@ def test_new_mcp_claims_on_an_older_lock_are_stamped(tmp_path, stamping):
     lock.mcp_servers = ["foo"]
     lock.mcp_target_servers = {"copilot": ["foo"]}
     lock.write(path)
-    assert stamping(path) == "0.40.0"
+    _assert_stamp(path, "0.40.0")
 
 
 def test_null_generator_warns_on_read(tmp_path, running, monkeypatch):
@@ -237,8 +241,11 @@ def test_null_generator_warns_on_read(tmp_path, running, monkeypatch):
 
     warnings: list[str] = []
     monkeypatch.setattr(console, "_rich_warning", lambda message, **_: warnings.append(message))
-    LockFile.read(_lock(tmp_path, "apm_version: null\n"))
+    path = _lock(tmp_path, "apm_version: null\n")
+    before = path.read_bytes()
+    LockFile.read(path)
     assert len(warnings) == 1
+    assert path.read_bytes() == before
     assert "apm_version 'null' is not a valid APM version" in warnings[0]
 
 
@@ -291,7 +298,7 @@ def test_removing_the_last_untranslated_claim_stamps_the_writer(tmp_path, stampi
     lock.mcp_servers = []
     lock.mcp_target_servers = {}
     lock.write(path)
-    assert stamping(path) == "0.40.0"
+    _assert_stamp(path, "0.40.0")
 
 
 @pytest.mark.parametrize("header", ["apm_version: null\n", "apm_version: 99.0.0\n", ""])
@@ -327,7 +334,7 @@ def test_noop_write_from_a_fresh_lock_keeps_the_recorded_stamp(tmp_path, stampin
     before = path.read_bytes()
     LockFile(mcp_servers=["same"]).write(path)
     assert path.read_bytes() == before
-    assert stamping(path) == "0.1.0"
+    _assert_stamp(path, "0.1.0")
 
 
 def test_noop_write_records_an_explicit_stamp(tmp_path, stamping):
@@ -336,4 +343,4 @@ def test_noop_write_records_an_explicit_stamp(tmp_path, stamping):
     lock = LockFile.read(path)
     lock.apm_version = "0.40.0"
     lock.write(path, existing_lockfile=LockFile.read(path))
-    assert stamping(path) == "0.40.0"
+    _assert_stamp(path, "0.40.0")

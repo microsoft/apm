@@ -20,7 +20,6 @@ Covers branches not hit by existing MCP tests:
 
 from __future__ import annotations
 
-import contextlib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -190,6 +189,20 @@ def test_intellij_migration_error_is_already_rendered() -> None:
 
 # ---------------------------------------------------------------------------
 # Empty deps
+
+
+@pytest.fixture
+def registry_misses(monkeypatch):
+    """Every registry lookup misses, independent of network reachability."""
+    from apm_cli.registry.operations import MCPServerOperations
+
+    monkeypatch.setattr(
+        MCPServerOperations,
+        "validate_servers_exist",
+        lambda self, refs, *args, **kwargs: ([], list(refs)),
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -222,35 +235,38 @@ class TestRunMcpInstallScopeEnum:
         mock_integrator_cls._gate_project_scoped_runtimes.return_value = []
         return mock_integrator_cls
 
-    def test_scope_user_sets_user_scope_true(self) -> None:
+    def test_scope_user_sets_user_scope_true(self, registry_misses) -> None:
         from apm_cli.core.scope import InstallScope
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         dep = _make_registry_dep("server1")
         logger = MagicMock()
 
-        # Just verify scope=USER is accepted without TypeError.
-        with contextlib.suppress(Exception):
+        with pytest.raises(RuntimeError, match="Cannot install 1 missing server"):
             run_mcp_install(
                 [dep],
                 runtime="copilot",
                 scope=InstallScope.USER,
                 logger=logger,
             )
+        logger.error.assert_called_once()
+        assert "server1" in logger.error.call_args.args[0]
 
-    def test_scope_project_sets_user_scope_false(self) -> None:
+    def test_scope_project_sets_user_scope_false(self, registry_misses) -> None:
         from apm_cli.core.scope import InstallScope
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         dep = _make_registry_dep("server1")
         logger = MagicMock()
-        with contextlib.suppress(Exception):
+        with pytest.raises(RuntimeError, match="Cannot install 1 missing server"):
             run_mcp_install(
                 [dep],
                 runtime="copilot",
                 scope=InstallScope.PROJECT,
                 logger=logger,
             )
+        logger.error.assert_called_once()
+        assert "server1" in logger.error.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +275,7 @@ class TestRunMcpInstallScopeEnum:
 
 
 class TestRunMcpInstallSingleRuntime:
-    def test_single_runtime_targets_only_that_runtime(self) -> None:
+    def test_single_runtime_targets_only_that_runtime(self, registry_misses) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         dep = _make_registry_dep("server1")
@@ -270,7 +286,7 @@ class TestRunMcpInstallSingleRuntime:
         mock_integrator_cls._detect_runtimes.return_value = set()
         mock_integrator_cls._gate_project_scoped_runtimes.return_value = []
 
-        with contextlib.suppress(Exception):
+        with pytest.raises(RuntimeError, match="Cannot install 1 missing server"):
             run_mcp_install([dep], runtime="copilot", logger=logger)
 
         # Progress message about specific runtime should appear
@@ -322,17 +338,17 @@ class TestRunMcpInstallExclude:
         mock_integrator_cls._gate_project_scoped_runtimes.side_effect = lambda rts, **kw: rts
 
         # Provide runtime + exclude the same runtime -> empty target list
-        with contextlib.suppress(Exception):
-            run_mcp_install(
-                [dep],
-                runtime="copilot",
-                exclude="copilot",
-                logger=logger,
-            )
+        result = run_mcp_install(
+            [dep],
+            runtime="copilot",
+            exclude="copilot",
+            logger=logger,
+        )
 
-        # All installed runtimes excluded -> should warn
-        warning_calls = [str(c) for c in logger.warning.call_args_list]
-        assert any("excluded" in c.lower() for c in warning_calls) or True
+        assert result == 0
+        logger.warning.assert_called_once_with(
+            "All selected MCP runtimes excluded (--exclude copilot), skipping MCP configuration"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -377,12 +393,9 @@ class TestRunMcpInstallNoTargetRuntimes:
                 },
             ),
         ):
-            result = None
-            with contextlib.suppress(Exception):
-                result = run_mcp_install([dep], runtime="copilot", logger=logger)
+            result = run_mcp_install([dep], runtime="copilot", logger=logger)
 
-        # If we get here without crash, and result is 0 or None, test passes
-        assert result in (0, None)
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -430,14 +443,13 @@ class TestRunMcpInstallSelfDefined:
 
 
 class TestRunMcpInstallPlainStrings:
-    def test_plain_string_deps_are_registry_deps(self) -> None:
+    def test_plain_string_deps_are_registry_deps(self, registry_misses) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         logger = MagicMock()
-        # Plain string "github/server" should not crash at the split phase
-        with contextlib.suppress(Exception):
+        with pytest.raises(RuntimeError, match="Cannot install 1 missing server"):
             run_mcp_install(["github/server"], runtime="copilot", logger=logger)
-        # No assertion besides no-unexpected-crash during dep classification
+        assert "github/server" in logger.error.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
@@ -446,13 +458,12 @@ class TestRunMcpInstallPlainStrings:
 
 
 class TestRunMcpInstallStoredMcpConfigs:
-    def test_none_stored_configs_treated_as_empty(self) -> None:
+    def test_none_stored_configs_treated_as_empty(self, registry_misses) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         dep = _make_registry_dep("server1")
         logger = MagicMock()
-        # Should not raise TypeError about None
-        with contextlib.suppress(Exception):
+        with pytest.raises(RuntimeError, match="Cannot install 1 missing server"):
             run_mcp_install([dep], runtime="copilot", stored_mcp_configs=None, logger=logger)
 
 
@@ -467,18 +478,17 @@ class TestRunMcpInstallStoredMcpConfigs:
 
 
 class TestRunMcpInstallVerboseLogging:
-    def test_verbose_mode_no_crash(self) -> None:
+    def test_verbose_mode_no_crash(self, registry_misses) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         dep = _make_registry_dep("server1")
         logger = MagicMock()
         logger.verbose_detail = MagicMock()
 
-        with contextlib.suppress(Exception):
+        with pytest.raises(RuntimeError, match="Cannot install 1 missing server"):
             run_mcp_install([dep], runtime="copilot", verbose=True, logger=logger)
 
-        # verbose_detail may or may not be called depending on path taken;
-        # the test verifies no crash in verbose mode
+        logger.verbose_detail.assert_called_once_with("Validating 1 registry servers...")
 
 
 # ---------------------------------------------------------------------------
@@ -487,15 +497,13 @@ class TestRunMcpInstallVerboseLogging:
 
 
 class TestRunMcpInstallConsoleNone:
-    def test_no_console_uses_logger_progress(self) -> None:
+    def test_no_console_uses_logger_progress(self, registry_misses) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         dep = _make_registry_dep("server1")
         logger = MagicMock()
 
-        with contextlib.suppress(Exception):
+        with pytest.raises(RuntimeError, match="Cannot install 1 missing server"):
             run_mcp_install([dep], runtime="copilot", logger=logger)
 
-        # At least the initial progress/info about MCP deps should appear
-        any_log = logger.progress.call_args_list or logger.warning.call_args_list
-        assert len(any_log) >= 0  # function executed at all
+        logger.progress.assert_any_call("Targeting specific runtime: copilot")
