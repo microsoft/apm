@@ -337,8 +337,7 @@ def _catalog_authorizations(server: _CatalogServer) -> list[str | None]:
     return [seen.authorization for seen in server.seen if seen.path.endswith("marketplace.json")]
 
 
-@pytest.fixture
-def scenario(tmp_path: Path, apm_binary_path: Path) -> _Scenario:
+def _scenario(tmp_path: Path, apm_binary_path: Path) -> _Scenario:
     if shutil.which("git") is None:
         pytest.skip("git executable not available")
     return _Scenario(tmp_path, apm_binary_path)
@@ -365,8 +364,9 @@ def scenario(tmp_path: Path, apm_binary_path: Path) -> _Scenario:
     ],
 )
 def test_private_catalog_lifecycle_sends_only_the_bound_credential(
-    scenario: _Scenario, credentials: dict[str, str], expected: str
+    tmp_path: Path, apm_binary_path: Path, credentials: dict[str, str], expected: str
 ) -> None:
+    scenario = _scenario(tmp_path, apm_binary_path)
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         env = scenario.env(server, **credentials)
         url = f"{server.base}/private/marketplace.json"
@@ -417,8 +417,9 @@ def test_private_catalog_lifecycle_sends_only_the_bound_credential(
     ],
 )
 def test_denied_access_fails_with_the_variable_to_set(
-    scenario: _Scenario, credentials: dict[str, str], fragment: str
+    tmp_path: Path, apm_binary_path: Path, credentials: dict[str, str], fragment: str
 ) -> None:
+    scenario = _scenario(tmp_path, apm_binary_path)
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         env = scenario.env(server, **credentials)
         url = f"{server.base}/private/marketplace.json"
@@ -439,7 +440,10 @@ def test_denied_access_fails_with_the_variable_to_set(
 
 
 @pytest.mark.parametrize("route", ["redir-cross", "redir-out"])
-def test_out_of_binding_redirect_carries_no_credential(scenario: _Scenario, route: str) -> None:
+def test_out_of_binding_redirect_carries_no_credential(
+    tmp_path: Path, apm_binary_path: Path, route: str
+) -> None:
+    scenario = _scenario(tmp_path, apm_binary_path)
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         env = scenario.env(server, APM_MARKETPLACE_TOKEN_CORP=_TOKEN)
         url = f"{server.base}/{route}/marketplace.json"
@@ -452,7 +456,10 @@ def test_out_of_binding_redirect_carries_no_credential(scenario: _Scenario, rout
     ]
 
 
-def test_denied_refresh_keeps_the_cached_catalog_and_is_not_fresh(scenario: _Scenario) -> None:
+def test_denied_refresh_keeps_the_cached_catalog_and_is_not_fresh(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scenario = _scenario(tmp_path, apm_binary_path)
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         good = scenario.env(server, APM_MARKETPLACE_TOKEN_CORP=_TOKEN)
         url = f"{server.base}/private/marketplace.json"
@@ -474,7 +481,10 @@ def test_denied_refresh_keeps_the_cached_catalog_and_is_not_fresh(scenario: _Sce
     assert {path.name: path.read_bytes() for path in cache.iterdir()} == before
 
 
-def test_malformed_token_is_redacted_in_verbose_output(scenario: _Scenario) -> None:
+def test_malformed_token_is_redacted_in_verbose_output(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scenario = _scenario(tmp_path, apm_binary_path)
     malformed = "tok-malformed secret-0123456789"
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         env = scenario.env(server, APM_MARKETPLACE_TOKEN_CORP=malformed)
