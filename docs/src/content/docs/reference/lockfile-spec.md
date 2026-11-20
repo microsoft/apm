@@ -81,7 +81,7 @@ package resources there. Keep the directory available for as long as those
 consumers need it.
 :::
 
-For [CI workflows](../../integrations/ci-cd/), check out the committed manifest
+For [CI workflows](../../consumer/run-in-ci/), check out the committed manifest
 and lockfile, then run `apm install --frozen` to restore the locked dependency
 graph. Discard a disposable workspace only after all dependent operations,
 native agent sessions, and other consumers have finished.
@@ -329,6 +329,7 @@ on the next lockfile write. No new fields are added for this.
 | `declared_license` | string | no | The license the package *manifest declares* (`license:` in `apm.yml`, or `license` in a `plugin.json`), recorded verbatim at resolve time and syntax-validated offline against the bundled SPDX id set. An author **claim**, not a conclusion from `LICENSE` text -- APM never interprets a license file. Omitted when undeclared (absence means unknown; no sentinel is stored). Surfaced by `apm lock export`. |
 | `carried_licenses` | list | no | Licence files APM copied, byte-for-byte, into the materialized package: the nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` from the package path up to the repository root, plus a copy next to each skill directory that has none. Each item has `path` (copy, relative to the package root), `source` (original file, relative to the repository root at `resolved_commit`) and `hash` (`sha256:<hex>`, line-ending normalized like deployed-file hashes). The copies are excluded from `content_hash` and verified against `hash` instead, so lockfiles written before this field keep verifying. Omitted when nothing was carried. |
 | `extensions` | map | no | Vendor keys matching `x-[a-z][a-z0-9-]*` from the dependency's own `apm.yml`, in declaration order. Values are recorded as declared and are not interpreted. Omitted when the dependency declares none. See [req-ext-003](../../specs/openapm-v01/#req-ext-003). |
+| `native_plugin` | map | no | Present only for a Claude plugin APM deployed intact by a `--global` install that targets `claude`: `name`, `root` (`.agents/plugins/<name>`), `fingerprint` (`sha256:<hex>` over each publisher file's path, bytes and executable bit, excluding APM's root `apm.yml` and `.apm/`) and `marketplace` (`{name, path}` it was declared under). A later run whose targets exclude `claude` keeps the record while the package's `resolved_commit` and `content_hash` are unchanged. See [APM-managed Claude user plugins](../../consumer/install-plugins/#claude-code-plugins-at-user-scope). |
 
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
@@ -431,7 +432,7 @@ evidence select `"2"`, and the writer uses `"1"`.
 Removing the `replace` block and running a normal install restores that ordinary
 selection. Keeping `replace: []` retains the candidate opt-in.
 
-For the registry workflow this enables, see the [Registries guide](../../guides/registries/).
+For the registry workflow this enables, see the [Registries guide](../registries/).
 
 ## Pack section
 

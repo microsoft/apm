@@ -201,7 +201,7 @@ APM writes LSP config for Claude Code
 (`.claude/skills/apm-lsp/.claude-plugin/plugin.json`, Claude Code 2.1.157 or
 later; trust the workspace, then run `/reload-plugins`), Copilot CLI
 (`.github/lsp.json`) and OpenCode (`opencode.json`). Fields:
-[Manifest schema](../../reference/manifest-schema/#43-dependencieslsp----listlspdependency).
+[Manifest schema](../../reference/manifest-schema/#43-dependencieslsp--listlspdependency).
 
 ## Verify
 
