@@ -1403,8 +1403,9 @@ def test_output_oracle_does_not_join_a_plain_line_after_an_unwrapped_long_line()
     # Piped output is not hard-wrapped (RA-010): a line longer than the console
     # width is whole, so the plain line after it is not its continuation.
     banner = "[!] Policy off for this invocation; " + "x" * 80
-    stdout = f"{banner}\nPhase: gate\n[i] a\n{banner}\nPhase: mcp\n"
-    found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
+    result = _cli(("install",), f"{banner}\nPhase: gate\n[i] a\n{banner}\nPhase: mcp\n")
+    assert result.stdout.count(banner) == 2
+    found = [v.message for v in output_violations(("install",), result)]
     assert found == [f"stdout repeats a diagnostic: {banner!r}"]
 
 
