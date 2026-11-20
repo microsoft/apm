@@ -1015,6 +1015,7 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
     logger = MagicMock()
     ctx = SimpleNamespace(
         apm_modules_dir=apm_modules,
+        diagnostics=None,
         dry_run=False,
         installed_count=1,
         logger=logger,
