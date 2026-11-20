@@ -377,3 +377,21 @@ class TestNoBumpForPkgMetadata:
         yaml_out = lock.to_yaml()
         assert "name: foo-package" in yaml_out
         assert "lockfile_version: '1'" in yaml_out
+
+
+def test_bundle_only_lock_writes_the_current_version(tmp_path) -> None:
+    """RA-018/RA-030: a lock recording only local bundle files is current, and stays so."""
+    from apm_cli.deps.lockfile import FRAMED_CONTENT_HASH_VERSION, LockFile
+
+    lock = LockFile()
+    lock.local_deployed_files = [".agents/skills/hs/SKILL.md"]
+    lock.local_deployed_file_hashes = {".agents/skills/hs/SKILL.md": "sha256:" + "a" * 64}
+    path = tmp_path / "apm.lock.yaml"
+    lock.write(path)
+    first = path.read_bytes()
+
+    reread = LockFile.read(path)
+    assert reread is not None
+    assert reread.lockfile_version == FRAMED_CONTENT_HASH_VERSION
+    reread.write(path)
+    assert path.read_bytes() == first
