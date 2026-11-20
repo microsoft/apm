@@ -83,7 +83,7 @@ class ApmLifecycleRunner:
             scenario_id=scenario_id,
             budget_seconds=self._timeout_seconds,
         )
-        _check_output(args, result, scenario_id=scenario_id)
+        _check_output(args, result, scenario_id=scenario_id, env=env)
         return result
 
     def _run_with_timeout(
@@ -166,7 +166,7 @@ class ApmLifecycleRunner:
                 budget_seconds=self._scenario_timeout_seconds,
             )
             results.append(result)
-            _check_output(command, result, scenario_id=scenario_id)
+            _check_output(command, result, scenario_id=scenario_id, env=env)
             if result.returncode != expected_returncode:
                 raise AssertionError(
                     _unexpected_result_evidence(
@@ -178,12 +178,18 @@ class ApmLifecycleRunner:
         return tuple(results)
 
 
-def _check_output(args: Sequence[str], result: CommandResult, *, scenario_id: str) -> None:
+def _check_output(
+    args: Sequence[str],
+    result: CommandResult,
+    *,
+    scenario_id: str,
+    env: Mapping[str, str] | None = None,
+) -> None:
     """Pass every result through the global output oracle (#4113)."""
     # Imported here: lifecycle_evidence imports this module.
     from tests.utils.lifecycle_evidence import check_cli_output
 
-    check_cli_output(args, result, scenario_id=scenario_id)
+    check_cli_output(args, result, scenario_id=scenario_id, env=env)
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
