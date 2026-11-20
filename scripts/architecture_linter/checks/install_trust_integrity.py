@@ -550,7 +550,10 @@ def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ..
 _UPDATE = "src/apm_cli/commands/update.py"
 _CATALOG_ORIGIN = "src/apm_cli/marketplace/catalog_origin.py"
 _PROVENANCE_REQUIRED = {
-    _UPDATE: ("_existing_lock = _reverified_lock(LockFile.read(_lock_path)",),
+    _UPDATE: (
+        "_existing_lock, _restored_provenance = _reverified_lock(",
+        "marketplace_provenance=_restored_provenance or None,",
+    ),
     _CATALOG_ORIGIN: (
         "def reverify_locked_provenance(",
         "require_locked_row_origin(dep)",

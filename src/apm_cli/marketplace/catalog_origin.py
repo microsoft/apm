@@ -115,6 +115,11 @@ _RELEASE = re.compile(r"^\s*v?(\d+)\.(\d+)")
 _NEXT_STEP = f"Nothing was changed. {either_sentence(MARKETPLACE_ORIGIN_READD, MARKETPLACE_ORIGIN_REINSTALL)}"
 
 
+def locked_provenance(dep: LockedDependency) -> dict[str, str | None]:
+    """One locked row's provenance snapshot, in the lockfile phase's shape (#4430)."""
+    return {field: getattr(dep, field) for field in _PROVENANCE_FIELDS}
+
+
 def _predates_origin_recording(apm_version: str | None) -> bool:
     """Whether the lock's generator stamp names a release before origin recording."""
     match = _RELEASE.match(apm_version) if isinstance(apm_version, str) else None
