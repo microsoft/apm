@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Each command writes `apm.lock.yaml` at most once, and `apm compile` refuses a lockfile written by a newer APM before changing files. (closes #4086, #4255)
 - Internal: `apm install --mcp` and `apm mcp install` install and record their server through the same MCP stage as `apm install`. (#4255)
 - Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
+- Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
+- Internal: lifecycle tests share one hermetic world: nine fixture packages, local git, marketplace, MCP registry and policy services, cloned per test in milliseconds. (#4142)
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 

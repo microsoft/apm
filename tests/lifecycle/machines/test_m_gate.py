@@ -18,22 +18,27 @@ import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
 
-from tests.integration._gate_machine_kit import (
+from tests.lifecycle.machines._gate_kit import (
     COMPLETED_SPINES,
     KNOWN_CELLS,
     SCOPES,
     GateMachine,
     GateWorld,
 )
+from tests.lifecycle.oracles import ExpectedCell, Observation, Operation, check_cross_cutting
+from tests.lifecycle.snapshot import restore_tree
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
-from tests.utils.lifecycle_oracle import ExpectedCell, Observation, Operation, check_cross_cutting
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
-from tests.utils.world_snapshot import restore_tree
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I4", "P-INV-I7"),
+]
 
-OBLIGATIONS_PATH = Path(__file__).parents[1] / "quality" / "gate_cell_obligations.json"
-MUTANT_PATH = Path(__file__).parents[1] / "fixtures" / "gate_mutants" / "skip_approval_check.py"
+OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "gate_cell_obligations.json"
+MUTANT_PATH = Path(__file__).parents[2] / "fixtures" / "gate_mutants" / "skip_approval_check.py"
 
 # One step per tuple: (rule, *arguments). Shared by both scopes; project-only
 # rules (audit_ci, prune) are replaced at user scope, where `apm audit` and
@@ -43,6 +48,11 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("install", "frozen"),
     ("audit_ci", False),
     ("decide", "hook", "approve"),
+    # Refusals witness I7 for approve-deny, uninstall and update (#4133).
+    ("decide_nothing", "approve"),
+    ("decide_nothing", "deny"),
+    ("uninstall", "plugin"),
+    ("update_package", "plugin"),
     ("declare", "hook"),
     ("declare", "lsp"),
     ("declare", "plugin"),
@@ -85,6 +95,8 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("audit_ci", False),
     ("uninstall", "lsp"),
     ("declare", "plugin"),
+    ("uninstall", "plugin"),
+    ("update_package", "plugin"),
     ("prune",),
     ("uninstall", "hook"),
     ("install", "plain"),
@@ -111,10 +123,10 @@ def gate_obligations(scope: str) -> frozenset[str]:
 
 @pytest.mark.parametrize("scope", SCOPES)
 def test_gate_mandatory_spine_covers_obligations(
-    tmp_path: Path, apm_engine_command: tuple[str, ...], scope: str
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...], scope: str
 ) -> None:
     """Replay the GATE spine through the oracle and cover every obligation cell."""
-    machine = GateMachine(GateWorld.create(tmp_path / "world", apm_engine_command, scope))
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, scope))
     replay_gate_spine(machine)
     missing = gate_obligations(scope) - machine.visited
     assert not missing, f"GATE obligation cells not visited: {sorted(missing)}"
@@ -127,10 +139,10 @@ def test_gate_mandatory_spine_covers_obligations(
 
 @pytest.mark.parametrize("scope", SCOPES)
 def test_gate_generated_sequences_keep_cross_cutting_laws(
-    tmp_path: Path, apm_engine_command: tuple[str, ...], scope: str
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...], scope: str
 ) -> None:
     """Generate, shrink and check GATE sequences from one restored pristine world."""
-    world = GateWorld.create(tmp_path / "world", apm_engine_command, scope)
+    world = GateWorld.create(tmp_path / "world", lifecycle_entry_point, scope)
     pristine = tmp_path / "world-pristine"
     restore_tree(world.isolated.root, pristine)
 
@@ -167,10 +179,10 @@ def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None
     ("verdict", "surface"), [("deny", "lsp"), ("revoke", "lsp"), ("deny", "plugin")]
 )
 def test_narrowing_one_surface_keeps_another_approved_surface(
-    tmp_path: Path, apm_engine_command: tuple[str, ...], verdict: str, surface: str
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...], verdict: str, surface: str
 ) -> None:
     """Regression: narrowing one surface must not flag an approved hook under I4."""
-    machine = GateMachine(GateWorld.create(tmp_path / "world", apm_engine_command, "project"))
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
     machine.declare("hook")
     machine.install("plain")
     machine.decide("hook", "approve")
