@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
+- Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 
@@ -32,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An org policy field of the wrong type is reported as a malformed policy instead of stopping the command with an internal error. (#4140, #4151)
 - `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
 - `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
+- A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
 - `apm install --frozen` now fails like `apm audit --ci` when a denied or unapproved hook was removed but `apm.lock.yaml` still records it, naming each missing file. (closes #4043, #4054)
 
 ## [0.37.0] - 2026-11-20
