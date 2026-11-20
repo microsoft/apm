@@ -11,17 +11,47 @@ from apm_cli.utils.paths import portable_relpath
 
 
 def format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
-    """Format one target path, two paths, or a collapsed multi-target count."""
+    """Name every destination folder: inline, or one line each when verbose (#4211)."""
     deduped = list(dict.fromkeys(paths))
     if verbose and len(deduped) >= 2:
         return "", [f"  |     -> {path}" for path in deduped]
-    if not deduped:
-        return "", []
-    if len(deduped) == 1:
-        return deduped[0], []
-    if len(deduped) == 2:
-        return f"{deduped[0]}, {deduped[1]}", []
-    return f"{len(deduped)} targets", []
+    return ", ".join(deduped), []
+
+
+def destination_tree_lines(phrase: str, paths: list[str], verbose: bool) -> list[str]:
+    """Return the ``|-- <phrase> -> <folders>`` install tree lines for *paths*."""
+    suffix, expansion = format_target_collapse(paths, verbose)
+    if expansion:
+        return [f"  |-- {phrase}:", *expansion]
+    return [f"  |-- {phrase} -> {suffix}"]
+
+
+def log_bundle_deployed(logger: Any, summary: str, deployed: list[str], targets: Any) -> None:
+    """Report a local bundle install and name the folders it deployed into (#4192)."""
+    logger.success(summary)
+    if not deployed:
+        return
+    verbose = bool(getattr(logger, "verbose", False))
+    phrase = f"{len(deployed)} file(s) deployed"
+    for line in destination_tree_lines(phrase, destination_folders(deployed, targets), verbose):
+        logger.tree_item(line)
+
+
+def destination_folders(records: list[str], targets: Any) -> list[str]:
+    """Return the primitive folders (``.github/agents/``) holding *records*, in order.
+
+    A record outside every target primitive folder is named by its parent.
+    """
+    roots = [
+        f"{mapping.deploy_root or target.root_dir}/{mapping.subdir}/".replace("//", "/")
+        for target in targets
+        for mapping in (target.primitives or {}).values()
+    ]
+    folders: list[str] = []
+    for record in records:
+        owner = max((root for root in roots if record.startswith(root)), key=len, default=None)
+        folders.append(owner or f"{record.rsplit('/', 1)[0]}/")
+    return list(dict.fromkeys(folders))
 
 
 def deployed_path_entry(
@@ -146,3 +176,36 @@ def skill_summary_paths(target_paths: Any, project_root: Path, targets: Any) -> 
         owner_root = next((r for r in static_roots if rel_posix.startswith(f"{r}/")), None)
         roots.add(owner_root or f"{rel.parts[0]}/skills")
     return [f"{root}/" for root in sorted(roots)]
+
+
+def log_hook_display_payloads(
+    payloads: list,
+    verbose: bool,
+    log_fn: Any,
+    logger: Any,
+) -> None:
+    """Emit per-hook-file action summaries for hook transparency.
+
+    Targets that render the same hook identically produce the same summary
+    line; each distinct line is printed once per package (#4336).
+    """
+    _printed: set[str] = set()
+
+    def _emit(line: str) -> None:
+        if line not in _printed:
+            _printed.add(line)
+            log_fn(line)
+
+    for _payload in payloads:
+        _src = _payload.get("source_hook_file", "hook file")
+        _actions = _payload.get("actions", [])
+        if _actions:
+            for _act in _actions:
+                _emit(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
+        else:
+            _emit(f"  |   Hook file integrated: {_src}")
+        if verbose and logger is not None:
+            _out_path = _payload.get("output_path", "")
+            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
+            for _jline in _payload.get("rendered_json", "").splitlines():
+                logger.verbose_detail(f"  |     {_jline}")

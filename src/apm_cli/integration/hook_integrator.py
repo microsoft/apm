@@ -1952,6 +1952,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.install.target_filter import resolve_effective_package_targets
         from apm_cli.integration.hook_reintegration import (
             build_hook_reintegration_source_plan,
+            merged_hook_state,
         )
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
@@ -2005,6 +2006,7 @@ class HookIntegrator(BaseIntegrator):
         # Empty managed_files (not None) skips file-level deletion while
         # still triggering the merged-hook JSON wipe, scoped to the same
         # resolved `targets` the rebuild loop below uses (#2250).
+        merged_before = merged_hook_state(project_root, targets)
         stats = self.sync_integration(
             apm_package, project_root, managed_files=set(), targets=targets
         )
@@ -2026,6 +2028,7 @@ class HookIntegrator(BaseIntegrator):
                 )
                 _log.warning("Best-effort hook re-integration skipped for %s: %s", pkg_id, e)
 
+        stats["merged_hooks_changed"] = merged_hook_state(project_root, targets) != merged_before
         return stats
 
     def reconcile_dropped_targets(
