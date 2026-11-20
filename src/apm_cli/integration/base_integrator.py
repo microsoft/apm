@@ -32,12 +32,16 @@ def discover_primitives(*args: Any, **kwargs: Any) -> Any:
 
 
 def _target_root_dirs(base: Path) -> frozenset[Path]:
-    """Every target root directory (project or user layout) under *base*."""
+    """Every project-layout target root directory under *base*.
+
+    A project's target roots signal which harnesses it uses (opt-in targets
+    deploy only where their root exists), so cleanup never removes them.
+    User-scope roots APM created itself (such as ``~/.copilot``) still go
+    when their last file is retired.
+    """
     from apm_cli.integration.targets import KNOWN_TARGETS
 
-    names = {profile.root_dir for profile in KNOWN_TARGETS.values()}
-    names |= {profile.user_root_dir for profile in KNOWN_TARGETS.values() if profile.user_root_dir}
-    return frozenset((base / name).resolve() for name in names)
+    return frozenset((base / profile.root_dir).resolve() for profile in KNOWN_TARGETS.values())
 
 
 def _managed_absolute_target_root(
