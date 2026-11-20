@@ -21,12 +21,9 @@ _LOCAL = ("local-deny", "revoke-approval")
 _STALE_EXEC_STATUS = (
     "#4053 apm install --frozen accepts a lock whose exec_status is out of date after a gate change"
 )
-_DRY_RUN = (
-    "#0 apm install --dry-run does not preview that an LSP server the gate no longer "
-    "allows will be removed"
-)
+_DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
 _UNINSTALL_SIBLING = (
-    "#0 apm uninstall of another package exits 1 and reports incomplete integration "
+    "#4215 apm uninstall of another package exits 1 and reports incomplete integration "
     "cleanup after removing an LSP server the gate no longer allows"
 )
 _NO_DENY_VARIANT = "#0 needs world variant deny-lsp"

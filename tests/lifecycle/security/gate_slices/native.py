@@ -24,8 +24,7 @@ _NOT_APPROVABLE = (
     "its executables cannot be approved"
 )
 _UNINSTALL_SIBLING = (
-    "#0 apm uninstall of another package keeps a plugin MCP server deployed that the "
-    "gate no longer allows; the next apm install retires it"
+    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
 )
 _XFAIL = {
     **{
