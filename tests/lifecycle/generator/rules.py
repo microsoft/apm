@@ -314,9 +314,13 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
     LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
-    # p-exec ships only executables the gate parks, so its bundle install records
-    # nothing: update has no bundle to name (#4318 names a recorded one).
-    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
+    # p-exec ships only executables the gate parks: update names it as parked,
+    # with the approval next step (#4441).
+    LOCAL_BUNDLE_REFUSALS["update"]: (
+        0,
+        r"No APM dependencies[\s\S]*Local bundle 'p-exec':\s+hooks,\s+mcp\s+parked,"
+        r"\s+awaiting\s+approval",
+    ),
     LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
 }
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex

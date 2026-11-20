@@ -27,7 +27,7 @@ given:
 when:
 - run: apm update --yes
   exit: 0
-  message: No APM dependencies
+  message: No APM dependencies[\s\S]*Local bundle 'p-exec':\s+hooks,\s+mcp\s+parked,\s+awaiting\s+approval
   cells:
   - rule|U8|update-leaves-a-local-bundle-untouched
   unchanged:

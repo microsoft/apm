@@ -458,11 +458,36 @@ def _handle_service_only_update(
 def _explain_local_bundles(scope: Any, apm_package: Any, logger: InstallLogger) -> None:
     """Name the installed local bundles 'apm update' leaves untouched (#4318)."""
     from apm_cli.install.local_bundle_hook_trust import installed_local_bundles
-    from apm_cli.install.outcome import local_bundle_update_next_step
+    from apm_cli.install.outcome import (
+        local_bundle_parked_next_step,
+        local_bundle_update_next_step,
+    )
 
     names, file_count = installed_local_bundles(scope, apm_package)
     if names or file_count:
         logger.info(local_bundle_update_next_step(names, file_count, scope))
+    for slug, exec_types in _parked_local_bundles(scope, apm_package):
+        logger.info(local_bundle_parked_next_step(slug, exec_types, scope))
+
+
+def _parked_local_bundles(scope: Any, apm_package: Any) -> list[tuple[str, tuple[str, ...]]]:
+    """Installed local bundles whose executables the current trust still parks (#4441)."""
+    from apm_cli.core.scope import get_apm_dir, get_deploy_root, is_user_scope
+    from apm_cli.install.local_bundle_pending import pending_bundles
+    from apm_cli.security.executables import (
+        package_type_approved,
+        resolve_project_exec_allow_map,
+    )
+
+    allow = resolve_project_exec_allow_map(
+        get_deploy_root(scope), apm_package, user_scope=is_user_scope(scope), no_policy=True
+    )
+    return [
+        (bundle.slug, bundle.exec_types)
+        for bundle in pending_bundles(
+            get_apm_dir(scope), lambda key, kind: package_type_approved(allow, (key,), kind)
+        )
+    ]
 
 
 def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
