@@ -232,6 +232,24 @@ class TestCIOutputFormats:
             assert drift["level"] == "error"
             assert str(error) in drift["message"]["text"]
 
+    def test_policy_blocked_drift_replay_is_a_failed_check(self, runner, tmp_path):
+        from apm_cli.install.errors import PolicyViolationError
+
+        _setup_clean_project(tmp_path)
+        error = PolicyViolationError("no enforceable org policy (fetch_failure_default=block)")
+        with (
+            patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path),
+            patch("apm_cli.install.drift.run_replay", side_effect=error),
+        ):
+            result = runner.invoke(audit, ["--ci", "--no-policy", "-f", "json"])
+
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        drift = next(check for check in payload["checks"] if check["name"] == "drift")
+        assert drift["passed"] is False
+        assert drift["message"].startswith("drift replay blocked")
+        assert drift["details"] == [str(error)]
+
     def test_json_output_with_failures(self, runner, tmp_path):
         _setup_failing_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):

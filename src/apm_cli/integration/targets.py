@@ -798,8 +798,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # AntigravityClientAdapter), NOT settings.json.
     # Antigravity has no TOML command surface (legacy Gemini commands
     # convert to skills upstream), so there is no commands primitive.
-    # User scope: skills -> ~/.gemini/antigravity-cli/skills/; MCP ->
-    # ~/.gemini/config/mcp_config.json (handled by the adapter).
+    # User scope: skills -> ~/.gemini/config/skills/ (read by the
+    # Antigravity App, CLI and IDE); MCP -> ~/.gemini/config/mcp_config.json
+    # (handled by the adapter). Skills recorded under the retired
+    # ~/.gemini/antigravity-cli/ root are cleaned up as stale managed files.
     # Instructions/hooks are not offered at user scope because Antigravity
     # spreads them across heterogeneous ~/.gemini/ subdirs.
     # Compile family is "agents" (emits AGENTS.md, not GEMINI.md).
@@ -824,7 +826,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=True,
         detect_by_dir=False,
         user_supported="partial",
-        user_root_dir=".gemini/antigravity-cli",
+        user_root_dir=".gemini/config",
         unsupported_user_primitives=("instructions", "hooks"),
         hooks_config_display=".agents/hooks.json",
     ),

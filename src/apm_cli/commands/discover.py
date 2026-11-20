@@ -18,7 +18,10 @@ def discover_options(command: Any) -> Any:
                 "--write",
                 "write",
                 is_flag=True,
-                help="Add existing local package references to consumer apm.yml; never install.",
+                help=(
+                    "Add existing local package references to consumer apm.yml "
+                    "(implies --discover); never install."
+                ),
             ),
             click.option(
                 "--format",

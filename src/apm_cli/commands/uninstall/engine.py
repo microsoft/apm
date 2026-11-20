@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ...bundle.local_bundle import looks_like_local_bundle
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile, lockfile_parent_identity
 from ...install.orphans import build_children_index as _build_children_index  # noqa: F401
 from ...install.orphans import collect_orphan_candidates as _collect_orphan_candidates
+from ...integration.mcp_config_view import BUNDLE_MCP_OWNER_PREFIX
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
@@ -727,6 +729,33 @@ def _resolve_marketplace_packages(
     return resolved
 
 
+def _mcp_server_hint(name: str, lockfile: "LockFile | None") -> str | None:
+    """Route an MCP server name to the command that removes it (#3994).
+
+    ``apm uninstall`` selects packages; an MCP server leaves with its
+    declaration: the root manifest, the package that brings it in, or the
+    local bundle that installed it.
+    """
+    if lockfile is None or name not in lockfile.mcp_servers:
+        return None
+    owner = lockfile.mcp_config_provenance.get(name)
+    if isinstance(owner, str) and owner.startswith(BUNDLE_MCP_OWNER_PREFIX):
+        return (
+            f"'{name}' is an MCP server from a local bundle; "
+            "'apm uninstall' cannot remove local-bundle content yet (tracked in #3887)."
+        )
+    if isinstance(owner, str) and owner:
+        return (
+            f"'{name}' is an MCP server brought in by package '{owner}'. "
+            "Uninstall that package to remove it."
+        )
+    return (
+        f"'{name}' is an MCP server, not a package. Remove '{name}' under "
+        "dependencies.mcp in apm.yml, then run 'apm install' to remove it "
+        "from your harnesses."
+    )
+
+
 def _validate_uninstall_packages(
     packages: list[str],
     current_deps: list,
@@ -805,7 +834,8 @@ def _validate_uninstall_packages(
                 display_label = package
             else:
                 logger.error(
-                    f"Invalid package format: {package}. "
+                    _mcp_server_hint(package, lockfile)
+                    or f"Invalid package format: {package}. "
                     "Use 'owner/repo', 'plugin-name@marketplace', a local path, "
                     "or a key copied from 'apm deps list'."
                 )
@@ -858,6 +888,13 @@ def _validate_uninstall_packages(
                     f"{display_label} could not be mapped to one declared local dependency. "
                     "Run 'apm install' to regenerate apm.lock.yaml, or use one exact "
                     "path from apm.yml."
+                )
+            elif is_local and looks_like_local_bundle(Path(package)):
+                logger.error(
+                    f"'{Path(package).name}' is a local bundle. Bundles "
+                    "installed with 'apm install <bundle>' are not recorded in apm.yml, "
+                    "and 'apm uninstall' cannot remove local-bundle content yet "
+                    "(tracked in #3887)."
                 )
             elif is_local:
                 logger.error(
@@ -1791,6 +1828,7 @@ def _cleanup_stale_mcp(
     user_scope: bool = False,
     scope=None,
     persist: bool = True,
+    logger=None,
 ):
     """Remove MCP servers that are no longer needed after uninstall."""
     managed_servers = set(old_mcp_servers or ())
@@ -1816,7 +1854,10 @@ def _cleanup_stale_mcp(
         admission=McpAdmission.admit_all(),
     )
     # Uninstall never admits a server: only previously managed servers survive.
-    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies) & managed_servers
+    # Local-bundle servers stay with their bundle, not the uninstalled package.
+    new_mcp_servers = (
+        MCPIntegrator.get_server_names(view.dependencies) | view.bundle_owned
+    ) & managed_servers
     stale_servers = managed_servers - new_mcp_servers
     from ...install.mcp.ownership import resolve_mcp_target_servers
 
@@ -1835,6 +1876,7 @@ def _cleanup_stale_mcp(
 
     from ...install.mcp.retired_destinations import (
         heal_retired_project_mcp_destinations,
+        report_retired_mcp_heal,
         restore_pending_retired_claims,
         split_mcp_claims,
     )
@@ -1862,11 +1904,16 @@ def _cleanup_stale_mcp(
             scope=scope,
             target_servers=target_servers,
         )
-        heal_retired_project_mcp_destinations(
-            stale_retired,
-            stored_configs=lockfile.mcp_configs,
-            native_hashes=retired.hashes,
-            project_root=deploy_root,
+        # Report the heal like install does (C5d, #3967): removed servers,
+        # kept user-edited ones, and deleted files.
+        report_retired_mcp_heal(
+            heal_retired_project_mcp_destinations(
+                stale_retired,
+                stored_configs=lockfile.mcp_configs,
+                native_hashes=retired.hashes,
+                project_root=deploy_root,
+            ),
+            logger,
         )
         owned_servers = {
             server

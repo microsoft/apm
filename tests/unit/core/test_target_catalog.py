@@ -460,3 +460,27 @@ def test_deprecated_aliases_are_accepted_but_never_advertised(tmp_path) -> None:
     with pytest.raises(UnknownTargetError) as excinfo:
         _validate_canonical_v2(["bogus"])
     assert "vscode" not in str(excinfo.value)
+
+
+def test_manifest_agents_value_is_not_reported_as_a_flag(tmp_path) -> None:
+    """`target: agents` warns once, from the manifest owner, never as `--target agents`."""
+    import warnings as _warnings
+    from pathlib import Path
+
+    from apm_cli.core.target_detection import (
+        AgentsTargetDeprecationWarning,
+        agents_alias_was_detected,
+        parse_target_field,
+    )
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        parse_target_field("agents", source_path=Path(tmp_path) / "apm.yml")
+    assert not agents_alias_was_detected()
+    assert not [w for w in caught if issubclass(w.category, AgentsTargetDeprecationWarning)]
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        parse_target_field("agents")
+    assert agents_alias_was_detected()
+    assert [w for w in caught if issubclass(w.category, AgentsTargetDeprecationWarning)]

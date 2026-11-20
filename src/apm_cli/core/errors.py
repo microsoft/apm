@@ -60,13 +60,14 @@ class EmptyTargetsListError(TargetResolutionError):
 # Renderer helpers
 # ---------------------------------------------------------------------------
 
-_SIGNAL_LIST = (
-    ".claude/, CLAUDE.md, .cursor/, .cursorrules, "
-    ".github/copilot-instructions.md, .github/instructions/, "
-    ".github/agents/, .github/prompts/, .github/hooks/, "
-    ".codex/, .gemini/, GEMINI.md, "
-    ".opencode/, .windsurf/, .kiro/"
-)
+
+def _signal_list() -> str:
+    """The harness markers detection scans, derived from its one owner (C5d)."""
+    from apm_cli.core.target_detection import SIGNAL_WHITELIST
+
+    return ", ".join(
+        f"{path}/" if kind == "dir" else path for _target, kind, path in SIGNAL_WHITELIST
+    )
 
 
 def render_no_harness_error(project_root: Path | None = None) -> str:
@@ -77,7 +78,7 @@ def render_no_harness_error(project_root: Path | None = None) -> str:
     return (
         "No harness detected\n"
         "\n"
-        f"APM scanned for harness markers ({_SIGNAL_LIST})"
+        f"APM scanned for harness markers ({_signal_list()})"
         " but found none in this project.\n"
         "\n"
         "Previously APM defaulted to copilot; this is now explicit.\n"

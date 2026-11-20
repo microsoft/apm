@@ -315,13 +315,21 @@ def export_agent_plugin_bundle(
     """Export the project as an Agent Plugin bundle."""
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
-    if lockfile is None:
-        raise FileNotFoundError(
-            "apm.lock.yaml not found -- run 'apm install' first to resolve dependencies."
-        )
-
     apm_yml_path = project_root / "apm.yml"
     package = APMPackage.from_apm_yml(apm_yml_path)
+    if lockfile is None:
+        # Nothing to resolve: a fresh 'apm plugin init' scaffold packs as is,
+        # like the Claude plugin format (#3994).
+        if (
+            package.get_apm_dependencies()
+            or package.get_mcp_dependencies()
+            or package.get_lsp_dependencies()
+        ):
+            raise FileNotFoundError(
+                "apm.lock.yaml not found -- run 'apm install' first to resolve dependencies."
+            )
+        lockfile = LockFile()
+
     pkg_name = package.name
     pkg_version = package.version or "0.0.0"
 

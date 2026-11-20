@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -41,6 +41,7 @@ from ..models.dependency.replacement import (
     project_effective_reference,
 )
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
+from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,9 @@ logger = logging.getLogger(__name__)
 _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
-SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3"})
+SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3", "4"})
+# Version 4 records package content hashes in the framed stream; 1-3 in the legacy one.
+FRAMED_CONTENT_HASH_VERSION = "4"
 _REPRODUCIBLE_EPOCH = "1970-01-01T00:00:00+00:00"
 
 
@@ -179,7 +182,39 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
         return False
     from ..install.mcp.retired_destinations import lock_holds_untranslated_mcp_claims
 
-    return lock_holds_untranslated_mcp_claims(existing.apm_version, existing.mcp_target_servers)
+    # Only claims carried forward keep the old meaning: removing the last one,
+    # or writing new ones, hands the lock to this writer.
+    carried = {
+        runtime: set(names or ()) & set(lock.mcp_target_servers.get(runtime) or ())
+        for runtime, names in existing.mcp_target_servers.items()
+    }
+    return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
+
+
+def _same_document_on_disk(path: Path, serialized: str) -> bool:
+    """Whether *path* already holds exactly the data *serialized* would write.
+
+    Only formatting may differ; a legacy layout the writer would migrate is a
+    different document and is rewritten.
+    """
+    from ..utils.yaml_io import load_yaml_str
+
+    try:
+        on_disk = load_yaml_str(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError):
+        return False
+    return on_disk == load_yaml_str(serialized)
+
+
+def recorded_generator(data: Mapping[str, Any]) -> object:
+    """The ``apm_version`` a parsed lockfile records for the generator gate.
+
+    An explicit ``apm_version: null`` is unverifiable, unlike an absent key, so
+    both the project and the bundle reader warn on it the same way (#3963).
+    """
+    if "apm_version" in data and data["apm_version"] is None:
+        return "null"
+    return data.get("apm_version")
 
 
 def resolve_reproducible_timestamp(
@@ -296,6 +331,11 @@ _CONFLICT_MARKER_RE = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: |$)", re.MULTILINE)
 def has_conflict_markers(text: str) -> bool:
     """Return True when *text* contains a git merge conflict marker at line start."""
     return _CONFLICT_MARKER_RE.search(text) is not None
+
+
+def records_framed_content_hashes(existing: LockFile | None) -> bool:
+    """Stream an install records package hashes in: the existing lockfile's, framed if new."""
+    return existing is None or existing.framed_content_hashes
 
 
 def require_supported_lockfile_version(data: object) -> str:
@@ -437,6 +477,20 @@ def _normalize_exec_status(raw: Any) -> str | None:
     return value
 
 
+def _normalize_exec_allowed_types(raw: Any) -> tuple[str, ...]:
+    """Validate the executable types a partially gated row deployed (#3991)."""
+    if raw is None:
+        return ()
+    from apm_cli.security.executables import ALL_EXEC_TYPES
+
+    if not isinstance(raw, list) or any(item not in ALL_EXEC_TYPES for item in raw):
+        raise ValueError(
+            "lockfile exec_allowed_types must be a list of executable types: "
+            f"{', '.join(ALL_EXEC_TYPES)}"
+        )
+    return tuple(sorted(set(raw)))
+
+
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     """Return values without duplicates, preserving first-seen order."""
     return list(dict.fromkeys(values))
@@ -520,6 +574,10 @@ class LockedDependency:
     # no executable primitive; it is OMITTED from the serialized entry so a
     # never-gated package stays distinguishable from an explicitly-cleared one.
     exec_status: str | None = None
+    # Types a gated or denied package still deployed because they are approved
+    # (#3991). ``exec_status`` is the worst case, so this is the only record of
+    # a partial approval; omitted when no type was allowed.
+    exec_allowed_types: tuple[str, ...] = ()
     # Package-declared name from the dependency's own apm.yml (issue #1888).
     # SELF-ASSERTED display/inventory metadata only -- NOT an identity anchor.
     # See to_dict/from_dict and the supply-chain boundary note in the lockfile
@@ -530,7 +588,13 @@ class LockedDependency:
     # in declaration order. Omitted from YAML when empty so lockfiles that
     # declare no extensions stay byte-identical. Values are not interpreted.
     extensions: dict[str, Any] = field(default_factory=dict)
+    # Intact native plugin APM deployed and declared for this dependency; the
+    # only ownership evidence for native settings keys and deployed roots.
+    native_plugin: NativePluginRecord | None = None
     replacement: ReplacementBinding | None = field(default=None, repr=False)
+    # Stream ``content_hash`` was recorded in; set from the owning lockfile's
+    # version, never serialized per row (see ``FRAMED_CONTENT_HASH_VERSION``).
+    content_hash_framed: bool = field(default=True, repr=False, compare=False)
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -693,6 +757,10 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
+        if self.native_plugin is not None:
+            result["native_plugin"] = self.native_plugin.to_lock_data()
+        if self.exec_allowed_types:
+            result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
             result["replacement"] = self.replacement.to_dict()
         # Replay forward-compat unknown fields LAST so they never shadow a
@@ -778,7 +846,9 @@ class LockedDependency:
             "carried_licenses",
             "extensions",
             "exec_status",
+            "exec_allowed_types",
             "name",
+            "native_plugin",
             "replacement",
             # legacy migration key handled above
             "deployed_skills",
@@ -831,10 +901,16 @@ class LockedDependency:
             declared_license=data.get("declared_license"),
             carried_licenses=records_from_lock_data(data.get("carried_licenses")),
             exec_status=exec_status,
+            exec_allowed_types=_normalize_exec_allowed_types(data.get("exec_allowed_types")),
             name=data.get("name"),
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
         )
+        if "native_plugin" in data:
+            try:
+                locked.native_plugin = NativePluginRecord.from_lock_data(data["native_plugin"])
+            except NativePluginRecordError as exc:
+                raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
         if "replacement" in data:
             try:
                 locked.replacement = ReplacementBinding.from_dict(
@@ -1188,6 +1264,14 @@ class LockFile:
     # intent without reading unused sources.  ``None`` means no replacement
     # state; ``[]`` means explicitly empty (cleared rules).
     replacements: list[dict] | None = field(default=None, repr=False)
+    # Whether package content hashes use the framed stream (lockfile version 4).
+    framed_content_hashes: bool = field(default=True, repr=False, compare=False)
+
+    def set_content_hash_stream(self, *, framed: bool) -> None:
+        """Record which stream every package ``content_hash`` row uses."""
+        self.framed_content_hashes = framed
+        for dep in self.dependencies.values():
+            dep.content_hash_framed = framed
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -1198,6 +1282,7 @@ class LockFile:
         would emit (design section 6.1; issue #1488).
         """
         dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
+        dep.content_hash_framed = self.framed_content_hashes
         self.dependencies[dep.get_unique_key()] = dep
         if dep.deployed_files or dep.deployed_file_hashes:
             from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -1429,6 +1514,10 @@ class LockFile:
 
     def _required_lockfile_version(self) -> str:
         """Return the minimum schema version required by current lock state."""
+        if self.framed_content_hashes and any(
+            dep.content_hash for dep in self.dependencies.values()
+        ):
+            return FRAMED_CONTENT_HASH_VERSION
         if self._needs_v3():
             return "3"
         return "2" if self._needs_v2() else "1"
@@ -1581,6 +1670,7 @@ class LockFile:
             lockfile_version=data.get("lockfile_version", "1"),
             generated_at=data.get("generated_at"),
             apm_version=data.get("apm_version"),
+            framed_content_hashes=data.get("lockfile_version") == FRAMED_CONTENT_HASH_VERSION,
         )
         lock._apm_version_null = "apm_version" in data and data["apm_version"] is None
         for dep_data in data.get("dependencies", []):
@@ -1614,8 +1704,8 @@ class LockFile:
                 lock.replacements = raw_replacements
             else:
                 raise LockfileFormatError("'replacements' must be a list")
-        if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
-            raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
+        if lock._needs_v3() and data.get("lockfile_version", "1") not in {"3", "4"}:
+            raise LockfileFormatError("Replacement evidence requires lockfile_version '3' or '4'")
         if lock.replacements is not None:
             lock._rekey_port_blind_parents()
         lock._validate_replacement_evidence()
@@ -1709,11 +1799,20 @@ class LockFile:
             self.generated_at = datetime.now(UTC).isoformat()
         else:
             self.generated_at = None
-        if not unchanged and not _keeps_untranslated_mcp_stamp(self, existing):
+        if unchanged:
+            # A no-op keeps the recorded generator when this lock carries none
+            # (a freshly built one); an explicit stamp, such as the MCP phase
+            # recording that it translated pre-0.37 claims, is written.
+            if self.apm_version is None:
+                self.apm_version = existing.apm_version
+        elif not _keeps_untranslated_mcp_stamp(self, existing):
             # The generator gate's only signal: whoever changes it owns it (#3962).
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
+        if unchanged and _same_document_on_disk(path, serialized):
+            # A proven no-op keeps the file's own bytes (comments, key style).
+            return True
         atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
         return True
 

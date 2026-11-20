@@ -40,7 +40,7 @@ def test_unowned_skill_is_not_managed_drift(tmp_path: Path, managed: bool) -> No
     assert relative in json.dumps(sarif)
     text = render_drift_text(findings)
     if managed:
-        assert "Run 'apm install' to re-sync" in text
+        assert "apm install --force" in text
     else:
         assert "Rename" in text
         assert "cannot repair" in text

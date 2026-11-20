@@ -136,6 +136,14 @@ class MarketplaceFetchError(MarketplaceError):
         super().__init__(f"Failed to fetch marketplace '{name}'{detail}. {retry}")
 
 
+class MarketplaceEgressRefusedError(MarketplaceFetchError):
+    """Raised when ``PROXY_REGISTRY_ONLY`` refuses a direct catalog fetch.
+
+    A policy refusal, not a network failure: callers must not fall back to a
+    cached catalog or report it as unreachable.
+    """
+
+
 class MarketplaceFreshnessError(MarketplaceFetchError):
     """Raised when an explicit refresh cannot revalidate a marketplace catalog.
 

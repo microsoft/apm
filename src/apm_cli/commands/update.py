@@ -364,7 +364,7 @@ def _run_mcp_lsp_integration(
             pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
-        logger.error(
+        logger.refusal(
             "MCP server(s) blocked by org policy. "
             "APM packages remain installed; MCP configs were NOT written."
         )
@@ -744,7 +744,12 @@ def _run_dep_update_locked(
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)
 
-    logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
+    logger = InstallLogger(
+        verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
+    )
+    from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+    reconcile_scope_bundle_hooks(scope, apm_package, logger=logger, dry_run=dry_run)
     if _handle_service_only_update(
         apm_package=apm_package,
         scope=scope,
@@ -942,7 +947,7 @@ def _run_dep_update_locked(
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
-        _rich_error(str(e))
+        _rich_error(str(e), err=isinstance(e, PolicyViolationError))
         sys.exit(1)
     except click.UsageError:
         raise

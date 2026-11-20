@@ -100,6 +100,18 @@ class TestFindCommandBasic:
         # stderr is mixed into output in Click 8.x
         assert "[x]" in result.output
 
+    def test_lookup_errors_go_to_stderr_not_the_data_stream(self):
+        """stdout carries package names only (#3994)."""
+        lf = _make_lockfile_with_git()
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("apm.lock.yaml", "w", encoding="utf-8") as f:
+                f.write(lf.to_yaml())
+            result = runner.invoke(cli, ["find", "CLAUDE.md"])
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "compiled by 'apm compile'" in " ".join(result.stderr.split())
+
     def test_source_flag_oci_origin(self):
         lf = _make_lockfile_with_oci()
         runner = CliRunner()
@@ -184,3 +196,28 @@ class TestFindCommandBasic:
             )
         for char in result.output:
             assert ord(char) < 128 or char in "\n\r\t", f"Non-ASCII character found: {char!r}"
+
+
+def test_ported_and_default_port_packages_stay_distinct():
+    """A package on a non-default port is named by its lock key, never collapsed (#3967)."""
+    lf = LockFile()
+    for port in (None, 8443):
+        lf.add_dependency(
+            LockedDependency(
+                repo_url="acme/hooky",
+                host="github.com",
+                port=port,
+                resolved_commit="abc123",
+                depth=1,
+                deployed_files=["AGENTS.md"],
+            )
+        )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        with open("apm.lock.yaml", "w", encoding="utf-8") as f:
+            f.write(lf.to_yaml())
+        result = runner.invoke(cli, ["find", "AGENTS.md"])
+    assert result.exit_code == 0, result.output
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 2 and len(set(lines)) == 2, result.output
+    assert any(":8443/acme/hooky" in line for line in lines), result.output

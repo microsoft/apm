@@ -1,0 +1,32 @@
+---
+title: Use skills, plugins and MCP servers
+description: Give your team the same agent setup on every machine and CI run, keep it current, and see every change before it lands.
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+This journey is for a developer or tech lead in one repository. Your job: give
+the team the same agent setup everywhere and keep it current, with no
+surprises.
+
+APM records the skills, instructions, plugins and MCP servers your agents load
+in a manifest (`apm.yml`) and a lockfile (`apm.lock.yaml`). Commit both, and
+every clone and CI run installs the same files, checked against the lockfile.
+
+<LinkCard title="Give every teammate the same skills, plugins and MCP servers" description="Start here: install a package, commit the lockfile, replay it in a second clone." href="../quickstart/" />
+
+## Tasks
+
+<CardGrid>
+  <LinkCard title="Add and remove packages" description="Install from a repo, tag, subfolder or single file; remove what you no longer use." href="./install-packages/" />
+  <LinkCard title="Install from a marketplace" description="Browse a published list of plugins and install by name." href="./installing-from-marketplaces/" />
+  <LinkCard title="Install plugins" description="Lock Claude Code, GitHub Copilot and Codex plugins." href="./install-plugins/" />
+  <LinkCard title="Add MCP and LSP servers" description="Declare servers once; APM writes each agent tool's config." href="./install-mcp-servers/" />
+  <LinkCard title="Choose your harnesses" description="Pick the agent tools APM writes for." href="./choose-harnesses/" />
+  <LinkCard title="Approve hooks and MCP servers" description="Review what a package runs before it deploys." href="./approve-executables/" />
+  <LinkCard title="Update dependencies" description="Update on purpose and review the lockfile diff." href="./update-and-refresh/" />
+  <LinkCard title="Run in CI" description="Fail the build when the lockfile and the repo disagree." href="./run-in-ci/" />
+  <LinkCard title="Use private sources" description="Private GitHub, GitHub Enterprise, Azure DevOps and GitLab." href="../getting-started/authentication/" />
+</CardGrid>
+
+Ready to share your own skills with other teams? [Publish packages](../producer/).

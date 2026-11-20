@@ -421,6 +421,29 @@ class TestCleanRemovesEmptyShells:
             "Plain `apm compile` must NOT delete pre-existing AGENTS.md files."
         )
 
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_clean_reports_orphan_removal_without_clean_instruction(
+        self, project_with_stale_shell, dry_run: bool
+    ):
+        """--clean reports the orphan it removes, never 'run --clean to remove' it."""
+        tmp_path, primitives, _ = project_with_stale_shell
+        orphan = tmp_path / "stale" / "AGENTS.md"
+        orphan.parent.mkdir()
+        orphan.write_text(_apm_generated_marker_content(), encoding="utf-8")
+
+        result = AgentsCompiler(str(tmp_path))._compile_distributed(
+            CompilationConfig(target="codex", clean_orphaned=True, dry_run=dry_run),
+            primitives,
+        )
+
+        assert result.success
+        assert orphan.exists() is dry_run
+        expected = "Would clean up 1 orphaned" if dry_run else "+ Removed stale/AGENTS.md"
+        assert any(expected in warning for warning in result.warnings), result.warnings
+        assert all("apm compile --clean" not in warning for warning in result.warnings), (
+            result.warnings
+        )
+
     def test_failed_output_batch_preserves_stale_shell(self, project_with_stale_shell):
         """A failed output batch must not remove an orphan during --clean."""
         from unittest.mock import patch

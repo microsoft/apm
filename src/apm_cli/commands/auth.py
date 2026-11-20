@@ -70,7 +70,7 @@ _EPILOG = (
     "  apm auth github.com              Check, and prompt if missing\n"
     "  apm auth gitlab.com --check      Also validate against the REST API\n"
     '  eval "$(apm auth gitlab.com --export)"   Set it in the current shell\n'
-    "\b\n"
+    "\n"
     "APM reads tokens from GITHUB_APM_PAT / GITHUB_TOKEN / GH_TOKEN / the gh\n"
     "CLI, or GITLAB_APM_PAT / GITLAB_TOKEN, falling back to your git\n"
     "credential helper. Environment variables win, so exporting one is enough."

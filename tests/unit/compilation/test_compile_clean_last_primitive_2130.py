@@ -76,3 +76,59 @@ def test_clean_preserves_hand_authored_claude_md_without_duplicate_guidance(
     assert claude_md.read_text(encoding="utf-8") == "# User-authored context\n"
     assert "hand-authored file will not be deleted" in result.output
     assert "duplicate context" not in result.output
+
+
+def test_clean_gemini_leaves_no_dangling_import_or_contradictory_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--clean removing AGENTS.md also retires the APM GEMINI.md stub (#3994)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text(
+        "name: clean-gemini\nversion: 1.0.0\ntargets:\n  - gemini\n", encoding="utf-8"
+    )
+    instruction = tmp_path / ".apm" / "instructions" / "base.instructions.md"
+    instruction.parent.mkdir(parents=True)
+    instruction.write_text(
+        '---\ndescription: Base\napplyTo: "**"\n---\nKeep responses concise.\n',
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    initial = runner.invoke(cli, ["compile"])
+    assert initial.exit_code == 0, initial.output
+    assert (tmp_path / "AGENTS.md").is_file()
+    assert (tmp_path / "GEMINI.md").is_file()
+
+    instruction.unlink()
+    cleaned = runner.invoke(cli, ["compile", "--clean"])
+
+    assert cleaned.exit_code == 0, cleaned.output
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert not (tmp_path / "GEMINI.md").exists()
+    assert "run 'apm compile --clean' to remove" not in cleaned.output
+    assert "produced no output files" not in cleaned.output
+    assert "No instructions to compile" in cleaned.output
+
+
+def test_claude_native_rules_compile_reports_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native .claude/rules/ coverage is not a zero-output warning (#3994)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text(
+        "name: native-rules\nversion: 1.0.0\ntargets:\n  - claude\n", encoding="utf-8"
+    )
+    instruction = tmp_path / ".apm" / "instructions" / "base.instructions.md"
+    instruction.parent.mkdir(parents=True)
+    instruction.write_text(
+        '---\ndescription: Base\napplyTo: "**"\n---\nKeep responses concise.\n',
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    assert runner.invoke(cli, ["install"]).exit_code == 0
+    assert (tmp_path / ".claude" / "rules").is_dir()
+
+    result = runner.invoke(cli, ["compile"])
+
+    assert result.exit_code == 0, result.output
+    assert "reads .claude/rules/ directly" in " ".join(result.output.split())
+    assert "produced no output files" not in result.output

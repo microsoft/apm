@@ -222,11 +222,38 @@ class TestRenderBundleResult:
         assert not any("Plugin bundle ready" in p for p in logger.progresses)
 
     def test_live_share_line_emitted(self) -> None:
-        """The 'Share with: apm install ...' info line is always emitted."""
+        """The share line names the consumer that accepts the format (#3994)."""
         logger = _RecordingLogger()
         result = _pack_result(files=["file.md"], bundle_path="build/my-bundle")
-        _render_bundle_result(logger, result, "apm", None, False)
-        assert any("apm install" in i for i in logger.infos)
+        _render_bundle_result(logger, result, BundleFormat.CLAUDE_PLUGIN, None, False)
+        # A bare 'build/x' parses as owner/repo, so the line spells a path (#3994).
+        assert "Share with: apm install ./build/my-bundle" in logger.infos
+
+    def test_live_count_names_the_embedded_lockfile(self) -> None:
+        """Counts say the bundle also embeds apm.lock.yaml (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["a.md", "b.md"], bundle_path="build/x")
+        _render_bundle_result(logger, result, BundleFormat.CLAUDE_PLUGIN, None, False)
+        assert any("Packed 2 file(s) plus apm.lock.yaml -> build/x" in m for m in logger.successes)
+
+    def test_live_legacy_format_shares_with_unpack(self) -> None:
+        """'apm install' rejects the legacy APM layout; unpack reads it (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(logger, result, BundleFormat.APM, None, False)
+        share = next(i for i in logger.infos if i.startswith("Share with:"))
+        assert share.startswith("Share with: apm unpack ./build/my-bundle.zip (deprecated")
+        assert not share.startswith("Share with: apm install")
+
+    def test_live_agent_plugin_shares_by_declaration(self) -> None:
+        """Agent plugins install declaratively, never via 'apm install <path>' (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["plugin.json"], bundle_path="build/x")
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
+        share = next(i for i in logger.infos if i.startswith("Share"))
+        assert "under dependencies.apm" in share
+        assert "'apm install --target copilot'" in share
+        assert not share.startswith("Share with: apm install")
 
     def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
         logger = _RecordingLogger()

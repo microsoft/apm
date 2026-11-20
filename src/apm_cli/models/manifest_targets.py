@@ -104,7 +104,8 @@ def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path)
     from ..utils.console import _rich_warning
 
     user_scope = scope is InstallScope.USER
-    label = ascii(manifest_path.as_posix())[1:-1] if user_scope else "apm.yml"
+    # Resolve: `apm update -g` reads the user manifest by a relative path (C5b).
+    label = ascii(Path(manifest_path).resolve().as_posix())[1:-1] if user_scope else "apm.yml"
     for key in pending:
         _deprecated_manifest_keys_warned.add((scope.value, key))
         if key == "target":
@@ -604,6 +605,17 @@ def read_manifest_target_declaration(
     return ManifestTargetDeclaration.from_manifest(data, manifest_path)
 
 
-def manifest_target_restriction(data: Mapping[str, Any] | None) -> list[str]:
-    """Return the restricting target names of a manifest mapping (empty if none)."""
-    return ManifestTargetDeclaration.from_mapping(data).restriction() or []
+def manifest_target_restriction(
+    data: Mapping[str, Any] | None, manifest_path: Path | None = None
+) -> list[str]:
+    """Return the restricting target names of a manifest mapping (empty if none).
+
+    With *manifest_path*, the read also emits the deprecated-key warnings of
+    :meth:`ManifestTargetDeclaration.from_manifest` (once per run), so raw-YAML
+    readers such as ``apm pack`` warn like every ``APMPackage`` reader.
+    """
+    if manifest_path is not None and isinstance(data, Mapping):
+        declaration = ManifestTargetDeclaration.from_manifest(data, manifest_path)
+    else:
+        declaration = ManifestTargetDeclaration.from_mapping(data)
+    return declaration.restriction() or []
