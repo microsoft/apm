@@ -18,6 +18,7 @@ from ..utils.archive import (
 )
 from ..utils.atomic_io import write_text_lf
 from .attest import verify_attested_file
+from .credential_files import refuse_credential_files
 from .formats import BundleFormat, coerce_bundle_format
 from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
 
@@ -32,6 +33,27 @@ class PackResult:
     lockfile_enriched: bool = False
     mapped_count: int = 0
     path_mappings: dict[str, str] = field(default_factory=dict)
+
+
+def _bundle_file_paths(
+    project_root: Path, unique_files: list[str], path_mappings: dict[str, str]
+) -> list[str]:
+    """List every bundle-relative file path, expanding deployed directories."""
+    paths: list[str] = []
+    for rel_path in unique_files:
+        src = project_root / path_mappings.get(rel_path, rel_path)
+        if src.is_symlink():
+            continue
+        if not src.is_dir():
+            paths.append(rel_path)
+            continue
+        base = rel_path.rstrip("/")
+        paths.extend(
+            f"{base}/{child.relative_to(src).as_posix()}"
+            for child in sorted(src.rglob("*"))
+            if child.is_file() and not child.is_symlink()
+        )
+    return paths
 
 
 def pack_bundle(
@@ -224,6 +246,7 @@ def pack_bundle(
             f"The following deployed files are missing on disk -- "
             f"{PACK_INSTALLED_FILES_MISSING.clause()}:\n" + "\n".join(f"  - {m}" for m in missing)
         )
+    refuse_credential_files(_bundle_file_paths(project_root, unique_files, path_mappings))
 
     # Dry-run: return file list without writing anything
     if dry_run:

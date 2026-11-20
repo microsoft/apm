@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from apm_cli.core.remediation import CLAUDE_PLUGIN_BIN_UNTRUSTED
-from apm_cli.core.scope import get_apm_home, is_user_scope
+from apm_cli.core.scope import is_user_scope
 from apm_cli.deps.plugin_parser import (
     claude_native_mcp_servers,
     has_normalized_plugin_skill_sources_receipt,
@@ -315,7 +315,7 @@ def plan_native_claude_plugin(
         from apm_cli.security.trust import parked_plugin_message
 
         parked = parked_plugin_message(
-            package_name, str(verdict.reason), verdict.detail, approve_cwd=get_apm_home()
+            package_name, str(verdict.reason), verdict.detail, user_scope=True
         )
     elif ships_bin and skip_bin:
         return park(

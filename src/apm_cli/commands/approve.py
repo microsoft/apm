@@ -46,38 +46,114 @@ if TYPE_CHECKING:
     from ..security.executables import ExecutableDeclaration
 
 
-def _find_manifest(user_scope: bool = False) -> Path:
+def _find_manifest(user_scope: bool = False, global_scope: bool = False) -> Path:
     """Return the project's ``apm.yml`` path or exit.
 
+    ``-g`` reads the user-scope manifest that ``apm install -g`` wrote
+    (``$APM_HOME/apm.yml``) and the packages installed next to it (#4154).
     ``--user`` writes only the user store, so outside a project it reads the
     user-scope manifest (``APM_HOME/apm.yml``, which may not exist) and the
     packages ``apm install -g`` installed next to it (#3957).
     """
+    from ..core.scope import InstallScope, get_manifest_path
+
+    if global_scope:
+        manifest = get_manifest_path(InstallScope.USER)
+        if manifest.is_file():
+            return manifest
+        _rich_error("No user-scope apm.yml found. Install packages with 'apm install -g' first.")
+        sys.exit(1)
     manifest = manifest_file(Path.cwd())
     if manifest.is_file():
         return manifest
     if user_scope:
-        from ..core.scope import InstallScope, get_manifest_path
-
         return get_manifest_path(InstallScope.USER)
     _rich_error("No apm.yml found in the current directory.")
     sys.exit(1)
 
 
+def _install_command(manifest: Path) -> str:
+    """Return the install command that deploys *manifest*'s approvals."""
+    from ..core.scope import is_user_scope_root
+
+    return "apm install -g" if is_user_scope_root(manifest.parent) else "apm install"
+
+
+def _canonical_specs(manifest: Path, specs: Sequence[str]) -> tuple[str, ...]:
+    """Resolve every CLI spec to its store identity, or exit 1 before any write.
+
+    The dependency selector ``apm uninstall`` and ``apm audit PACKAGE`` use
+    picks the lock row; ``canonical_approval_spec`` names its store identity.
+    """
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..models.dependency.manifest_host import manifest_host_scope_for
+    from ..models.manifest_io import load_manifest
+    from ..security.executables import ApprovalSpecError, canonical_approval_spec
+    from .uninstall.engine import select_installed_lock_key
+
+    lockfile = LockFile.read(get_lockfile_path(manifest.parent))
+    resolved: list[str] = []
+    errors: list[str] = []
+    try:
+        data = load_manifest(manifest) if manifest.is_file() else None
+        with manifest_host_scope_for(data):
+            for spec in specs:
+                try:
+                    selection = select_installed_lock_key(spec, data, lockfile)
+                    key = selection.key if selection is not None else None
+                    resolved.append(canonical_approval_spec(spec, lockfile, selected_key=key))
+                except (ApprovalSpecError, ValueError) as exc:
+                    errors.append(str(exc) if str(exc).startswith(spec) else f"{spec}: {exc}")
+    except ValueError as exc:
+        errors.append(str(exc))
+    for error in errors:
+        _rich_error(error)
+    if errors:
+        sys.exit(1)
+    return tuple(resolved)
+
+
+def _installed_identities(manifest: Path) -> frozenset[str]:
+    """Store identities of every package ``apm.lock.yaml`` records for *manifest*."""
+    from ..security.executables import _readable_lockfile, canonical_approval_spec
+
+    lockfile = _readable_lockfile(manifest.parent)
+    if lockfile is None:
+        return frozenset()
+    return frozenset(
+        canonical_approval_spec(row.get_unique_key(), lockfile, selected_key=row.get_unique_key())
+        for row in lockfile.get_package_dependencies()
+    )
+
+
 def _load_store(
     manifest: Path, user_scope: bool
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
-    """Load the (allow, deny) grant maps from the selected store."""
-    from ..security.executables import load_project_executables, load_user_executables
+    """Load the (allow, deny) grant maps from the selected store.
+
+    A key written as an install spec is stored under the package identity
+    when this store is saved (#4189).
+    """
+    from ..security.executables import (
+        _readable_lockfile,
+        canonicalize_store_keys,
+        load_project_executables,
+        load_user_executables,
+    )
 
     if user_scope:
-        return load_user_executables()
-    allow, deny, used_alias = load_project_executables(manifest)
-    if used_alias:
-        from ..security.executables import warn_allow_executables_alias_once
+        allow, deny = load_user_executables()
+    else:
+        allow, deny, used_alias = load_project_executables(manifest)
+        if used_alias:
+            from ..security.executables import warn_allow_executables_alias_once
 
-        warn_allow_executables_alias_once()
-    return allow, deny
+            warn_allow_executables_alias_once()
+    lockfile = _readable_lockfile(manifest.parent)
+    return (
+        canonicalize_store_keys(allow, lockfile, store="executables.allow", drop_raw=True),
+        canonicalize_store_keys(deny, lockfile, store="executables.deny", drop_raw=True),
+    )
 
 
 def _save_store(
@@ -150,6 +226,14 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     help="Persist to your personal APM user config (lowest authority) "
     "instead of the shared project apm.yml.",
 )
+@click.option(
+    "-g",
+    "--global",
+    "global_scope",
+    is_flag=True,
+    help="Approve packages installed at user scope (apm install -g); records the "
+    "grant in the user-scope apm.yml.",
+)
 @serialized_lifecycle
 def approve_cmd(
     packages: tuple[str, ...],
@@ -158,6 +242,7 @@ def approve_cmd(
     recommended: bool,
     list_decisions: bool,
     user_scope: bool,
+    global_scope: bool,
 ) -> None:
     """Approve executable primitives (hooks, MCP, LSP, bin, canvas) for packages.
 
@@ -174,10 +259,12 @@ def approve_cmd(
         apm approve --list
 
         apm approve --user owner/repo
+
+        apm approve -g owner/repo
     """
     logger = CommandLogger("approve")
     try:
-        manifest = _find_manifest(user_scope)
+        manifest = _find_manifest(user_scope, global_scope)
 
         if list_decisions:
             _list_decisions(manifest, logger=logger)
@@ -203,6 +290,7 @@ def approve_cmd(
             )
             sys.exit(1)
 
+        packages = _canonical_specs(manifest, packages)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
     except PolicyViolationError as exc:
         _report_policy_block(exc)
@@ -219,8 +307,15 @@ def approve_cmd(
     is_flag=True,
     help="Record the deny in your personal APM user config instead of apm.yml.",
 )
+@click.option(
+    "-g",
+    "--global",
+    "global_scope",
+    is_flag=True,
+    help="Deny packages installed at user scope (apm install -g).",
+)
 @serialized_lifecycle
-def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
+def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) -> None:
     """Deny executable primitives for packages (a narrowing override).
 
     Writes a deny entry to the project ``executables.deny`` (default) or your
@@ -230,16 +325,33 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
 
         apm deny owner/repo
     """
-    manifest = _find_manifest(user_scope)
+    manifest = _find_manifest(user_scope, global_scope)
+    packages = _canonical_specs(manifest, packages)
     allow, deny = _load_store(manifest, user_scope)
 
     declarations = _scan_installed_packages(manifest)
+    installed = _installed_identities(manifest)
+    from ..security.executables import _is_content_bound_key
+
+    # A content-bound bundle key is the exact grant key apm install printed.
+    unmatched = [
+        pkg
+        for pkg in packages
+        if _find_declaration(declarations, pkg) is None
+        and pkg not in installed
+        and not _is_content_bound_key(pkg)
+    ]
+    if unmatched:
+        # Never record a deny that matches no installed package (#4189).
+        for pkg in unmatched:
+            _report_not_found(declarations, pkg, manifest)
+        sys.exit(1)
 
     changed = 0
     for pkg in packages:
         decl = _find_declaration(declarations, pkg)
         if decl is None:
-            # Allow denying a package that is not (or no longer) installed.
+            # Installed, but declares no executables yet: block any it adds.
             from ..security.executables import ALL_EXEC_TYPES
 
             deny[pkg] = dict.fromkeys(ALL_EXEC_TYPES, True)
@@ -269,7 +381,10 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
         _save_store(manifest, user_scope, allow, deny)
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
         # Deployed hooks keep firing until install retires them (#3924).
-        _rich_info(EXECUTABLES_DENIED.sentence(), symbol="info")
+        _rich_info(
+            EXECUTABLES_DENIED.with_command(_install_command(manifest)).sentence(),
+            symbol="info",
+        )
 
 
 def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
@@ -283,7 +398,7 @@ def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
     return build_exec_trust_context(policy=policy, project_data=project_data)
 
 
-def explain_decision(package: str, *, logger: CommandLogger) -> None:
+def explain_decision(package: str, *, logger: CommandLogger, global_scope: bool = False) -> None:
     """Explain the effective executable-trust decision for a package.
 
     Shows, per executable type the package declares, whether it is allowed,
@@ -296,12 +411,16 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
 
         apm policy explain owner/repo
     """
-    manifest = _find_manifest()
+    manifest = _find_manifest(global_scope=global_scope)
+    (package,) = _canonical_specs(manifest, (package,))
     ctx = _effective_trust_context(manifest, logger=logger)
 
     decl = _find_declaration(_scan_installed_packages(manifest), package)
 
     if decl is None:
+        if package not in _installed_identities(manifest):
+            _report_not_found(_scan_installed_packages(manifest), package, manifest)
+            sys.exit(1)
         _rich_warning(f"{package}: not found among installed packages with executables.")
         if not ctx.gate_enabled:
             _rich_info("The executable-trust gate is disabled for this project.", symbol="info")
@@ -327,11 +446,41 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
         if verdict.shadowed:
             _rich_echo(f"          shadowed: {', '.join(verdict.shadowed)}")
     if has_block:
+        _explain_next_step(manifest, decl, verdicts.values())
+
+
+def _explain_next_step(manifest: Path, decl: ExecutableDeclaration, verdicts) -> None:
+    """Name how a block was recorded and how to change it, by store identity (#4246)."""
+    from ..security.executables import (
+        LAYER_ORG_DENY,
+        LAYER_ORG_DENY_ALL,
+        LAYER_PROJECT_DENY,
+        LAYER_USER_DENY,
+    )
+    from ..security.trust import approve_command
+
+    identity = _identity(decl)
+    user_scope = _install_command(manifest).endswith("-g")
+    layers = {verdict.layer for verdict in verdicts if not verdict.allowed}
+    if layers & {LAYER_ORG_DENY, LAYER_ORG_DENY_ALL}:
         _rich_info(
-            f"To trust it: `apm approve {decl.package_name}` "
-            f"(or `apm approve --user {decl.package_name}` for this machine only).",
-            symbol="info",
+            "Denied by org policy; approving cannot lift it. Ask the policy owner.", symbol="info"
         )
+        return
+    for layer, store in ((LAYER_PROJECT_DENY, "apm.yml"), (LAYER_USER_DENY, "--user config")):
+        if layer in layers:
+            _rich_info(
+                f"Denied in {store} (the executables.deny entry for {identity}). To lift it, "
+                f"remove that entry, or run '{_lift_deny_hint(layer, identity, user_scope=user_scope)}'.",
+                symbol="info",
+            )
+            return
+    _rich_info(
+        f"To trust it: `{approve_command(identity, user_scope=user_scope)}` "
+        f"(or `{approve_command(identity, user_scope=user_scope, user_store=True)}` "
+        "for this machine only).",
+        symbol="info",
+    )
 
 
 def _verdicts(ctx, decl: ExecutableDeclaration):
@@ -446,7 +595,9 @@ def _find_declaration(
     return None
 
 
-def _not_found_message(declarations: Sequence[ExecutableDeclaration], pkg: str) -> str:
+def _not_found_message(
+    declarations: Sequence[ExecutableDeclaration], pkg: str, *, user_scope: bool = False
+) -> str:
     """Name the ported package a port-less name almost matched (#3967).
 
     Grants never fall back across ports, so the message points at the exact
@@ -470,7 +621,9 @@ def _not_found_message(declarations: Sequence[ExecutableDeclaration], pkg: str) 
             ported.append(decl.package_key)
     if not ported:
         return f"{pkg}: not found in installed packages"
-    keys = " or ".join(f"'apm approve {key}'" for key in sorted(ported))
+    from ..security.trust import approve_command
+
+    keys = " or ".join(f"'{approve_command(key, user_scope=user_scope)}'" for key in sorted(ported))
     return f"{pkg}: not found in installed packages; it is installed with a port, run {keys}"
 
 
@@ -563,15 +716,17 @@ def _approve_packages(
     *,
     logger: CommandLogger,
 ) -> None:
-    """Approve specific packages by name."""
+    """Approve specific packages by name; exit 1 when any name matches nothing."""
     declarations = _scan_installed_packages(manifest)
 
     selected = []
+    missing = 0
     for pkg in packages:
         decl = _find_declaration(declarations, pkg)
 
         if decl is None:
-            _rich_warning(_not_found_message(declarations, pkg))
+            missing += 1
+            _report_not_found(declarations, pkg, manifest)
             continue
 
         if not decl.has_executables:
@@ -580,6 +735,23 @@ def _approve_packages(
         selected.append(decl)
     if selected:
         _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger)
+    if missing:
+        sys.exit(1)
+
+
+def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
+    """Explain why *pkg* matched nothing and name the command that works."""
+    from ..security.trust import approve_command
+
+    base = pkg.split("#", 1)[0]
+    decl = _find_declaration(declarations, base) if base != pkg else None
+    user_scope = _install_command(manifest).endswith("-g")
+    if decl is not None:
+        command = approve_command(_identity(decl), user_scope=user_scope)
+        _rich_error(f"{pkg}: approve the installed package by identity, not a ref: {command}")
+        return
+    review = approve_command("--pending", user_scope=user_scope)
+    _rich_error(f"{_not_found_message(declarations, pkg, user_scope=user_scope)}. Review: {review}")
 
 
 def _identity(decl: ExecutableDeclaration) -> str:
@@ -780,6 +952,7 @@ def _record_and_save(
     """
     from ..security.trust import PINNED_GRANTS_MIN_APM, has_any_pins
 
+    global_install = _install_command(manifest).endswith("-g")
     had_pins = has_any_pins(allow)
     successes: list[str] = []
     recorded: list[ExecutableDeclaration] = []
@@ -798,7 +971,7 @@ def _record_and_save(
             layer = layer_denied[id(decl)]
             _rich_info(
                 f"Skipped {_identity(decl)}: denied ({layer}). "
-                f"Lift the deny: {_lift_deny_hint(layer, _identity(decl))}",
+                f"Lift the deny: {_lift_deny_hint(layer, _identity(decl), user_scope=global_install)}",
                 symbol="info",
             )
             continue
@@ -831,7 +1004,7 @@ def _record_and_save(
         for decl, layer in still_denied:
             _rich_error(
                 f"{_identity(decl)} is still denied ({layer}); the approval has no effect "
-                f"until that deny is lifted: {_lift_deny_hint(layer, _identity(decl))}"
+                f"until that deny is lifted: {_lift_deny_hint(layer, _identity(decl), user_scope=global_install)}"
             )
         still_ids = {id(decl) for decl, _layer in still_denied}
         successes = [
@@ -843,13 +1016,14 @@ def _record_and_save(
         for line in successes:
             _rich_success(line, symbol="check")
     if successes:
-        share = "" if user_scope else " Commit apm.yml to share."
+        install = _install_command(manifest)
+        share = "" if user_scope or install.endswith("-g") else " Commit apm.yml to share."
         _rich_info(
             f"Updated {_store_label(user_scope)} ({len(successes)} approved). "
-            f"{EXECUTABLES_APPROVED.sentence()}{share}",
+            f"{EXECUTABLES_APPROVED.with_command(install).sentence()}{share}",
             symbol="info",
         )
-        if not user_scope and not had_pins and has_any_pins(allow):
+        if share and not had_pins and has_any_pins(allow):
             _rich_info(
                 f"Teammates need APM {PINNED_GRANTS_MIN_APM} or later to read pinned approvals.",
                 symbol="info",
@@ -897,13 +1071,14 @@ def _still_denied(
     return blocked
 
 
-def _lift_deny_hint(layer: str, identity: str) -> str:
+def _lift_deny_hint(layer: str, identity: str, *, user_scope: bool = False) -> str:
     from ..security.executables import LAYER_PROJECT_DENY, LAYER_USER_DENY
+    from ..security.trust import approve_command
 
     if layer == LAYER_USER_DENY:
-        return f"apm approve --user {identity}"
+        return approve_command(identity, user_scope=user_scope, user_store=True)
     if layer == LAYER_PROJECT_DENY:
-        return f"apm approve {identity}"
+        return approve_command(identity, user_scope=user_scope)
     return "the org policy denies it; ask its owner to change apm-policy.yml"
 
 
@@ -992,7 +1167,11 @@ def scan_installed_executable_packages(manifest: Path) -> list:
         locked_dependency_approval,
         scan_package_executables,
     )
-    from ..security.trust import installed_content_matches_lock, native_declaration
+    from ..security.trust import (
+        approval_scan_dir,
+        installed_content_matches_lock,
+        native_declaration,
+    )
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
@@ -1020,10 +1199,11 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             ) from exc
         for locked in lockfile.get_package_dependencies():
             try:
+                installed_dir = locked.to_dependency_ref().get_install_path(apm_modules)
                 package_dir = (
-                    local_dependency_dirs[locked.get_unique_key()]
+                    approval_scan_dir(local_dependency_dirs[locked.get_unique_key()], installed_dir)
                     if locked.is_local_source
-                    else locked.to_dependency_ref().get_install_path(apm_modules)
+                    else installed_dir
                 )
             except (OSError, ValueError):
                 continue

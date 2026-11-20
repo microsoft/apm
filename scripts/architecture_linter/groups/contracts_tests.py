@@ -28,6 +28,9 @@ from scripts.architecture_linter.checks.contracts_remediation_advice import (
 )
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
+from scripts.architecture_linter.checks.install_approve_command import (
+    RULES as APPROVE_COMMAND_RULES,
+)
 
 RULES = (
     *EXISTING_RULES,
@@ -38,6 +41,7 @@ RULES = (
     *LIFECYCLE_SCRIPT_GATE_RULES,
     *REMEDIATION_RULES,
     *CONFORMANCE_COVERAGE_RULES,
+    *APPROVE_COMMAND_RULES,
     *CI_TOPOLOGY_RULES,
 )
 

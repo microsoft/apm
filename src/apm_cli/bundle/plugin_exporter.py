@@ -42,6 +42,7 @@ from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ..utils.paths import portable_relpath
 from .attest import verify_attested_file
+from .credential_files import refuse_credential_files
 from .packer import PackResult
 from .plugin_layout import PLUGIN_ROOT_DIRS, find_plugin_root_sources
 
@@ -1116,6 +1117,7 @@ def export_plugin_bundle(
             _rich_warning(msg)
 
     # 8. Build output file list (sorted for determinism)
+    refuse_credential_files(file_map)
     output_files = sorted(file_map.keys())
 
     # Add generated files to the list

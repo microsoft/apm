@@ -35,9 +35,14 @@ def log_hooks_skip(
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:
+        from apm_cli.security.trust import approve_command
+
+        approve = HOOKS_SKIPPED_UNAPPROVED.bind(package=_pkg_label).with_command(
+            approve_command(_pkg_label)
+        )
         logger.warning(
             f"{_pkg_label}: hooks skipped (not approved in executables.allow). "
-            f"{HOOKS_SKIPPED_UNAPPROVED.bind(package=_pkg_label).sentence()}",
+            f"{approve.sentence()}",
             symbol="warning",
         )
 

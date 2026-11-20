@@ -39,6 +39,10 @@ class Remediation:
     before: str | None = None
     then: str | None = None
 
+    def with_command(self, command: str) -> Remediation:
+        """Return this remediation run through *command* (e.g. its ``-g`` scope form)."""
+        return replace(self, command=command)
+
     def bind(self, **values: object) -> Remediation:
         """Return this remediation with its ``{placeholders}`` filled in."""
         text = {key: str(value) for key, value in values.items()}

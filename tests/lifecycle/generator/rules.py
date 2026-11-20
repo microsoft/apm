@@ -104,8 +104,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "bundle-install": (Ev(_INSTALL, 1251, "detect_local_bundle"),),
     "mcp-install": (Ev(_INSTALL, 972, '"--mcp"'), Ev(_INSTALL, 904, '"--target"')),
     "approve-deny": (
-        Ev(_APPROVE, 131, 'argument("packages"'),
-        Ev(_APPROVE, 214, 'argument("packages"'),
+        Ev(_APPROVE, 201, 'argument("packages"'),
+        Ev(_APPROVE, 296, 'argument("packages"'),
     ),
     "audit": (
         Ev("src/apm_cli/commands/audit.py", 1380, 'argument("package"'),
@@ -150,7 +150,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 625, '"--global"'),
     "compile": Ev(_COMPILE, 1378, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 100, '"--global"'),
-    "approve-deny": Ev(_APPROVE, 146, '"--user"'),
+    "approve-deny": Ev(_APPROVE, 216, '"--user"'),
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 171, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 85, "def prune(ctx, dry_run)"),
@@ -166,7 +166,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "the executable gate governs only executable primitives; a plain file next to a "
         "revoked executable must survive; an org policy dependency deny removes it",
         (
-            Ev(_APPROVE, 161, "hooks, MCP, LSP, bin, canvas"),
+            Ev(_APPROVE, 240, "hooks, MCP, LSP, bin, canvas"),
             Ev("src/apm_cli/policy/install_preflight.py", 220, "Install blocked by org policy"),
         ),
     ),
@@ -234,7 +234,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
-        (Ev(_APPROVE, 181, "if list_decisions:"), Ev(_APPROVE, 185, "if pending:")),
+        (Ev(_APPROVE, 262, "if list_decisions:"), Ev(_APPROVE, 266, "if pending:")),
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
