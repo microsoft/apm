@@ -67,6 +67,7 @@ _GLOBAL_AUDIT_RULES = frozenset(
         "deployment-ledger-owners",
         "drift",
         "includes-consent",
+        "local-bundle-hooks",
         "lockfile-exists",
         "no-orphaned-packages",
         "ref-consistency",

@@ -83,7 +83,7 @@ def _record_value(path: Path, project_root: Path) -> str:
 def _collect_per_file(
     project_root: Path,
     targets: Any,
-    bundle_paths: Collection[str],
+    bundle_paths: Collection[str] | Callable[[], Collection[str]],
     found: dict[str, _BundleHookState],
 ) -> None:
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
@@ -104,6 +104,10 @@ def _collect_per_file(
         # A bundle hook file the lock records without an approval record is
         # unapproved (written before the record existed, or the record is gone).
         hooks_dir = target_root / "hooks"
+        if not hooks_dir.is_dir() or not any(hooks_dir.glob("*.json")):
+            continue
+        if callable(bundle_paths):
+            bundle_paths = bundle_paths()
         for value in bundle_paths:
             path = Path(value) if Path(value).is_absolute() else Path(project_root) / value
             if path.suffix != ".json" or path.parent != hooks_dir or value in recorded:
@@ -117,7 +121,9 @@ def _collect_per_file(
 
 
 def deployed_bundle_hook_keys(
-    project_root: Path, targets: Any, bundle_paths: Collection[str] = ()
+    project_root: Path,
+    targets: Any,
+    bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
 ) -> dict[str, _BundleHookState]:
     """Return each deployed local bundle slug with its recorded keys and hook files.
 
@@ -155,7 +161,7 @@ def unadmitted_bundle_hooks(
     project_root: Path,
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]] | None],
-    bundle_paths: Collection[str] = (),
+    bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
 ) -> list[UnadmittedBundleHooks]:
     """Return deployed local-bundle hooks the current trust does not admit.
 
@@ -225,8 +231,10 @@ def retire_unadmitted_bundle_hooks(
     dry_run: bool = False,
 ) -> list[UnadmittedBundleHooks]:
     """Retire every local-bundle hook trust no longer admits."""
-    bundle_paths = _lock_bundle_paths(lock_dir)
-    unadmitted = unadmitted_bundle_hooks(project_root, targets, allow_executables, bundle_paths)
+    # The lockfile is read only when a per-file hooks directory holds files.
+    unadmitted = unadmitted_bundle_hooks(
+        project_root, targets, allow_executables, lambda: _lock_bundle_paths(lock_dir)
+    )
     if not unadmitted:
         return []
     from apm_cli.integration.hook_integrator import HookIntegrator
