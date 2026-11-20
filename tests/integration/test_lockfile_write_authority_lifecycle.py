@@ -30,7 +30,7 @@ pytestmark = [
 _needs_inotify = pytest.mark.skipif(
     not INOTIFY_AVAILABLE, reason="counting lockfile writes requires Linux inotify"
 )
-_INSTALL = ("install", "--trust-transitive-mcp", "--no-policy", "--parallel-downloads", "0")
+_INSTALL = ("install", "--trust-transitive-mcp", "--parallel-downloads", "0")
 _LOCKFILE = "apm.lock.yaml"
 _SERVER = {
     "name": "write-authority-server",
@@ -246,3 +246,54 @@ def test_failed_install_discards_its_staged_lockfile(tmp_path: Path, apm_binary_
     assert "late-server" in failed.stdout + failed.stderr, _evidence(failed)
     assert counter.writes == 0, counter.events
     assert (root / _LOCKFILE).read_bytes() == committed
+
+
+_HTTP_MCP = ("--transport", "http", "--url", "https://mcp.example.invalid/mcp")
+
+
+@_needs_inotify
+def test_every_lockfile_writer_refuses_a_newer_generator_before_changing_files(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Each writer in the closed set refuses before it mutates anything."""
+    scenario = _new_scenario(tmp_path / "refusal", apm_binary_path, ("copilot", "claude"))
+    root = scenario.project.root
+    leaf = scenario.packages.create(
+        "refusal-leaf", targets=("copilot",), mcp_dependencies=({**_SERVER, "name": "leaf-server"},)
+    )
+    scenario.packages.add_skill(leaf, "authority-skill", _SKILL)
+    for args, cwd in ((_INSTALL, root), (_INSTALL, leaf.root), (("pack", "-o", "dist"), leaf.root)):
+        prepared = scenario.runner.run(
+            args, scenario_id="refusal-prepare", cwd=cwd, env=scenario.environment
+        )
+        assert prepared.returncode == 0, _evidence(prepared)
+    (bundle,) = (leaf.root / "dist").iterdir()
+    scenario.packages.set_targets(scenario.project, ("copilot",))
+    lock_path = root / _LOCKFILE
+    lock = load_yaml(lock_path)
+    lock["apm_version"] = "99.0.0"
+    dump_yaml(lock, lock_path)
+    writers = (
+        ("install", *_INSTALL[1:]),
+        ("install", "--mcp", "refused-api", *_HTTP_MCP),
+        ("mcp", "install", "refused-alias", *_HTTP_MCP),
+        ("install", str(bundle)),
+        ("lock",),
+        ("deps", "update"),
+        ("update", "--yes"),
+        ("uninstall", "./packages/authority-dep"),
+        ("prune",),
+        ("compile",),
+    )
+    for args in writers:
+        before = _snapshot(scenario)
+        manifest = scenario.project.manifest_path.read_bytes()
+        with count_lockfile_writes(root) as counter:
+            refused = _run(scenario, args, "refusal-" + args[0])
+        assert refused.returncode != 0, _evidence(refused)
+        assert "99.0.0" in refused.stdout + refused.stderr, _evidence(refused)
+        assert counter.writes == 0, (args, counter.events)
+        after = _snapshot(scenario)
+        assert after.lockfile_bytes == before.lockfile_bytes, args
+        assert after.files == before.files, (args, _evidence(refused))
+        assert scenario.project.manifest_path.read_bytes() == manifest, args
