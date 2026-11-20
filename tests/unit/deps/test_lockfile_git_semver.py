@@ -35,7 +35,6 @@ def _make_resolution(constraint: str = "^1.2.0") -> GitSemverResolution:
 class TestLockedDependencySerialization:
     """Resolution fields round-trip through to_dict / from_dict."""
 
-    @pytest.mark.req("req-lk-008")
     def test_git_semver_dep_writes_constraint_and_resolved_tag_fields(self) -> None:
         dep_ref = _make_dep_ref()
         resolution = _make_resolution()

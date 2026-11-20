@@ -2882,7 +2882,6 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
             assert not list(modules.glob("**/apm.yml"))
 
 
-@pytest.mark.req("req-sc-001")
 def test_required_tamper_is_detected_and_repair_restores_last_good_state(
     tmp_path: Path,
     apm_binary_path: Path,

@@ -557,7 +557,6 @@ def _assert_unchanged_convergence(
     assert_unchanged(before, ArtifactSnapshot.capture(scenario.project_root))
 
 
-@pytest.mark.req("req-lk-016")
 @pytest.mark.parametrize(
     "row",
     tuple(row for row in _ROWS if row.mode == "standard"),

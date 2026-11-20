@@ -114,7 +114,6 @@ def test_hostless_entry_follows_configured_default_host(
         assert deployed.passed, (entry, deployed.message)
 
 
-@pytest.mark.req("req-pl-018")
 def test_qualified_entry_does_not_match_another_host() -> None:
     dep = DependencyReference.parse("contoso/pkg")
     lock = _lock("contoso/pkg", "github.com")

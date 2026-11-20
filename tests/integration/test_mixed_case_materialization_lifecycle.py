@@ -170,7 +170,6 @@ def _author_packages(
     return parent, child
 
 
-@pytest.mark.req("req-lk-022")
 def test_mixed_case_links_survive_install_update_audit_and_uninstall(
     tmp_path: Path,
     apm_binary_path: Path,

@@ -1133,7 +1133,6 @@ class TestUnmanagedClassification:
 class TestUnmanagedEnrichment:
     """Each flagged file carries reason + type, surfaced in details."""
 
-    @pytest.mark.req("req-pl-015")
     def test_reason_not_tracked_present(self, tmp_path):
         (tmp_path / ".github" / "agents").mkdir(parents=True)
         (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
@@ -1333,7 +1332,6 @@ class TestRunPolicyChecks:
         # Default policy = all checks pass
         assert result.passed
 
-    @pytest.mark.req("req-pl-013")
     @pytest.mark.parametrize(
         ("enabled", "source", "expected_pass"),
         (
