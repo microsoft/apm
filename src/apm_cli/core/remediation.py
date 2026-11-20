@@ -737,7 +737,286 @@ RUNTIME_MISSING = _entry(
     "runtime-missing", "apm runtime setup copilot", "install the primary runtime"
 )
 
+HIDDEN_CHARACTERS_FOUND = _entry(
+    "hidden-characters-found",
+    "apm audit --strip",
+    "remove the hidden characters",
+    before="review the file contents",
+)
+HIDDEN_CHARACTERS_PREVIEWED = _entry(
+    "hidden-characters-previewed", "apm audit --strip", "apply the previewed removals"
+)
+FROZEN_UPDATE_CONFLICT = _entry(
+    "frozen-update-conflict",
+    "apm update",
+    "refresh the locked refs",
+    then="use 'apm install --frozen' in CI",
+)
+BUNDLE_REPACK_PLUGIN = _entry(
+    "bundle-repack-plugin",
+    "apm pack --claude-plugin --archive",
+    "repack the source as a plugin-format bundle archive",
+)
+LEGACY_BUNDLE_UNPACK = _entry(
+    "legacy-bundle-unpack", "apm unpack <bundle-path>", "deploy the legacy bundle"
+)
+REGISTRY_PACKAGE_INSTALL = _entry(
+    "registry-package-install", "apm install <org/package>", "install from the registry instead"
+)
+PROJECT_MANIFEST_BOOTSTRAP = _entry(
+    "project-manifest-bootstrap", "apm install <org/repo>", "create apm.yml with that package"
+)
+
 # -- end commands/** (W1) -----------------------------------------------------
+
+# -- W3 (every other src/apm_cli module) -------------------------------------
+# -- W3 deps-compilation --
+# Advice printed by src/apm_cli/deps and src/apm_cli/compilation.
+
+ROOT_INSTRUCTIONS_HAND_AUTHORED = _entry(
+    "root-instructions-hand-authored",
+    "apm compile",
+    "regenerate it",
+    before="delete or rename it, or prepend the line '{marker}' to the top of the file",
+)
+ROOT_CONTEXT_HAND_AUTHORED = _entry(
+    "root-context-hand-authored",
+    "apm compile",
+    "regenerate it",
+    before="delete or rename the file",
+)
+NESTED_REPOSITORY_SKIPPED = _entry(
+    "nested-repository-skipped",
+    "apm compile",
+    "compile it separately",
+    before="change to {root}",
+)
+SINGLE_AGENTS_COMPILATION = _entry(
+    "single-agents-compilation",
+    "apm compile --single-agents",
+    "compile one traditional AGENTS.md file instead",
+)
+ORPHANED_AGENTS_MD = _entry(
+    "orphaned-agents-md", "apm compile --clean", "remove the orphaned AGENTS.md files"
+)
+IMMUTABLE_REQUIREMENTS_CONFLICT = _entry(
+    "immutable-requirements-conflict",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    before="align the requested refs in the root or parent manifests to the same commit",
+)
+IMMUTABLE_REQUIREMENTS_CONFLICT_FROZEN = _entry(
+    "immutable-requirements-conflict-frozen",
+    "apm install",
+    "regenerate apm.lock.yaml (--frozen never rewrites it)",
+    before="align the requested refs in the root or parent manifests to the same commit",
+)
+FROZEN_LOCKFILE_STALE = _entry(
+    "frozen-lockfile-stale",
+    "apm install",
+    "regenerate apm.lock.yaml (--frozen never rewrites it)",
+)
+PROTOCOL_FALLBACK_DISALLOWED = _entry(
+    "protocol-fallback-disallowed",
+    "apm config set allow-protocol-fallback true",
+    "allow cross-protocol fallback (not recommended)",
+)
+
+# -- end W3 deps-compilation --
+# -- W3 plugins-runtime --
+# Advice printed by adapters/, agent_plugins/, claude_plugins/, codex_plugins/,
+# copilot_plugins/ and runtime/.
+MCP_ENV_VARS_UNRESOLVED = _entry(
+    "mcp-env-vars-unresolved",
+    "apm install",
+    "write the resolved values into the MCP server configuration",
+    before="set {names} in your environment",
+)
+JETBRAINS_MCP_CONFIG_UNUSABLE = _entry(
+    "jetbrains-mcp-config-unusable",
+    "apm install --target intellij",
+    "reconcile the JetBrains Copilot MCP config",
+    before="{fix}",
+)
+MCP_CONTAINER_OPTION_UNRESOLVED = _entry(
+    "mcp-container-option-unresolved",
+    "apm install",
+    "configure the container MCP server for this target",
+    before="set the required registry runtime variables",
+)
+AGENT_PLUGIN_LEGACY_REPACK = _entry(
+    "agent-plugin-legacy-repack",
+    "apm pack --claude-plugin",
+    "produce a legacy-compatible package yourself",
+)
+AGENT_PLUGIN_BUNDLE_ROUTE = _entry(
+    "agent-plugin-bundle-route",
+    "apm install --target copilot",
+    "materialize it under apm_modules and register it natively with GitHub Copilot",
+    before="declare the plugin as a dependency in apm.yml (a local path works)",
+)
+CLAUDE_PLUGIN_BIN_UNTRUSTED = _entry(
+    "claude-plugin-bin-untrusted",
+    "apm install --global --trust-bin",
+    "trust its bin/ executables and register the plugin",
+)
+CLAUDE_PLUGIN_SOURCE_STALE = _entry(
+    "claude-plugin-source-stale",
+    "apm install --global",
+    "restore the native Claude plugin from apm.lock.yaml",
+)
+CLAUDE_PLUGIN_BINDING_MOVED = _entry(
+    "claude-plugin-binding-moved",
+    "apm install --global",
+    "register the native Claude plugins under this APM home",
+    before="remove the old entries from Claude settings and ~/.agents/plugins, "
+    "delete apm.lock.yaml",
+)
+CODEX_PLUGIN_USER_SCOPE = _entry(
+    "codex-plugin-user-scope",
+    "apm install -g --target codex",
+    "register Codex compatibility plugins at user scope",
+)
+CODEX_NATIVE_CACHE_DIFFERS = _entry(
+    "codex-native-cache-differs",
+    "apm install -g --frozen --target codex",
+    "rebuild it from the admitted source",
+    before="remove only this dependency's disposable apm_modules directory",
+)
+CODEX_PROVENANCE_UNINSTALL = _entry(
+    "codex-provenance-uninstall",
+    "apm uninstall -g {dependency}",
+    "remove the dependency whose provenance is missing",
+    before="save its pinned declaration",
+    then="{reinstall}",
+)
+CODEX_PROVENANCE_REINSTALL = _entry(
+    "codex-provenance-reinstall",
+    "apm install -g <saved-pinned-dependency> --target codex",
+    "reinstall it with recorded source provenance",
+)
+CODEX_NATIVE_REGISTRATION_UNVERIFIED = _entry(
+    "codex-native-registration-unverified",
+    "apm install -g --target codex",
+    "register the Codex plugin again from its admitted source",
+)
+COPILOT_SETTINGS_INVALID = _entry(
+    "copilot-settings-invalid",
+    "apm install",
+    "register the Agent Plugin and install the packages",
+    before="fix or delete the file",
+)
+LLM_TLS_BOOTSTRAP_MISSING = _entry(
+    "llm-tls-bootstrap-missing",
+    "apm runtime setup llm",
+    "install the OS-trust bootstrap into the llm venv",
+    before="use Python 3.10+ or set PIP_CERT to your proxy CA bundle",
+)
+# -- end W3 plugins-runtime --
+# -- W3 core-models --
+# Advice printed by core/, models/, security/, utils/, output/,
+# update_policy.py and drift.py.
+
+GITHUB_AUTH_FIRST_ENABLED = _entry(
+    "github-auth-first-enabled",
+    "apm config unset github-auth-first",
+    "restore anonymous-first auth for github.com",
+)
+CLAUDE_PLUGIN_LAYOUT = _entry(
+    "claude-plugin-layout",
+    "apm pack --claude-plugin",
+    "produce the historical Claude plugin layout",
+)
+LOCKED_REFS_SATISFIED = _entry("locked-refs-satisfied", "apm update", "resolve the latest refs")
+DRY_RUN_INCOMPLETE = _entry("dry-run-incomplete", "apm install", "resolve the full dependency plan")
+DEPLOYMENT_OWNERS_INVALID = _entry(
+    "deployment-owners-invalid",
+    "apm prune",
+    "repair the invalid deployment ownership records",
+    then="rerun 'apm audit'",
+)
+PLUGIN_MCP_OWNERSHIP_UNKNOWN = _entry(
+    "plugin-mcp-ownership-unknown",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    before="fix or delete the unreadable apm.lock.yaml",
+    then="run 'apm pack' again",
+)
+FROZEN_MARKETPLACE_UNLOCKED = _entry(
+    "frozen-marketplace-unlocked",
+    "apm install",
+    "lock the marketplace dependency",
+    then="commit apm.lock.yaml",
+)
+MARKETPLACE_CATALOG_REPINNED = _entry(
+    "marketplace-catalog-repinned",
+    "apm update {package}",
+    "move to the catalog's selection",
+)
+REGISTRY_TOKEN_IN_MANIFEST = _entry(
+    "registry-token-in-manifest",
+    "apm config set registry.{name}.token <value>",
+    "store the token outside apm.yml",
+)
+DEPENDENCY_ALIAS_INVALID = _entry(
+    "dependency-alias-invalid",
+    "apm install",
+    "install the dependency under the corrected alias",
+    before="{fix}",
+)
+PACKAGE_DIRECTORY_COLLISION = _entry(
+    "package-directory-collision",
+    "apm install",
+    "re-materialize the intended package",
+    before="{fix}",
+)
+ADO_COORDINATES_MISMATCHED = _entry(
+    "ado-coordinates-mismatched",
+    "apm install <original-ado-url>",
+    "regenerate its state from the original Azure DevOps URL",
+)
+SUBSET_PAIRINGS_INCONSISTENT = _entry(
+    "subset-pairings-inconsistent",
+    "apm install",
+    "regenerate the skill and target subset records in apm.lock.yaml",
+)
+COMPILE_DRY_RUN = _entry("compile-dry-run", "apm compile", "write the compiled files")
+HIDDEN_CHARACTERS_FLAGGED = _entry(
+    "hidden-characters-flagged", "apm audit --strip", "remove the flagged hidden characters"
+)
+HIDDEN_CHARACTERS_STRUCTURED = _entry(
+    "hidden-characters-structured",
+    "apm audit --strip",
+    "remove flagged characters from eligible regular documents",
+    before="review structured prompt fields manually",
+)
+MCP_EXECUTABLES_UNTRUSTED = _entry(
+    "mcp-executables-untrusted",
+    "apm approve {package}",
+    "trust its server executables",
+    before="run 'apm policy explain {package}' and confirm policy permits it",
+)
+EXECUTABLES_IDENTITY_UNLOCKED = _entry(
+    "executables-identity-unlocked",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    then="approve {subject}",
+)
+EXECUTABLES_PIN_MALFORMED = _entry(
+    "executables-pin-malformed", "apm approve {package}", "record a valid sha256 pin"
+)
+LOCAL_FILES_COLLIDE = _entry(
+    "local-files-collide", "apm install --force", "overwrite the unmanaged local files"
+)
+GITHUB_GITLAB_HOST_CONFLICT = _entry(
+    "github-gitlab-host-conflict",
+    "apm install <package>",
+    "resolve the shorthand against GitLab",
+    before="unset GITHUB_HOST and set GITLAB_HOST={host} for this command only",
+)
+
+# -- end W3 core-models --
+# -- end W3 -------------------------------------------------------------------
 
 
 __all__ = [

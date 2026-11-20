@@ -23,6 +23,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+from apm_cli.core.remediation import MCP_CONTAINER_OPTION_UNRESOLVED
 
 pytestmark = pytest.mark.unit
 
@@ -562,7 +563,7 @@ class TestRenderedDockerLauncher(unittest.TestCase):
         warning.assert_called_once_with(
             "Could not resolve required container run option "
             f"'workdir' for '{IMAGE}'; target configuration was not changed. "
-            "Set the required registry runtime variables and rerun 'apm install'.",
+            + MCP_CONTAINER_OPTION_UNRESOLVED.sentence(),
             symbol="warning",
         )
 

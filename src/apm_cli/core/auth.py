@@ -63,6 +63,7 @@ from apm_cli.core.host_providers import (
     git_transport_cache_key,
     git_transport_policy,
 )
+from apm_cli.core.remediation import GITHUB_AUTH_FIRST_ENABLED
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.models.dependency.host_virtual import (
     dependency_repository_owner,
@@ -644,8 +645,8 @@ class AuthResolver:
         self._emit_warning_with_detail(
             "github-auth-first is enabled: git credentials will be forwarded "
             "on the first HTTPS attempt to github.com.",
-            "To restore the default, run 'apm config unset github-auth-first', "
-            "unset APM_GITHUB_AUTH_FIRST, or omit --auth-first.",
+            "To restore the default, unset APM_GITHUB_AUTH_FIRST, omit --auth-first, "
+            f"and {GITHUB_AUTH_FIRST_ENABLED.clause()}.",
             fallback_context="auth-first",
             always_show_detail=True,
         )

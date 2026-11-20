@@ -286,6 +286,17 @@ def _status(_world: _World) -> tuple[str, ...]:
     return ("approve", "--list")
 
 
+def _hide_characters(world: _World) -> None:
+    hidden = world.consumer.root / ".github" / "instructions" / "hidden.instructions.md"
+    hidden.parent.mkdir(parents=True, exist_ok=True)
+    hidden.write_text("---\napplyTo: '**'\n---\nhello \u202e world\n", encoding="utf-8")
+
+
+def _manifest_created(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert world.consumer.manifest_path.is_file()
+
+
 TEXT_PROOFS: tuple[_TextProof, ...] = (
     _TextProof(
         "project-manifest-missing",
@@ -362,6 +373,31 @@ TEXT_PROOFS: tuple[_TextProof, ...] = (
         lambda world: ("approve", _slug(world.source)),
         1,
         _expect_ok,
+    ),
+    _TextProof(
+        "hidden-characters-found",
+        _bare_world,
+        _hide_characters,
+        lambda _world: ("audit",),
+        1,
+        _expect_ok,
+    ),
+    _TextProof(
+        "hidden-characters-previewed",
+        _bare_world,
+        _hide_characters,
+        lambda _world: ("audit", "--strip", "--dry-run"),
+        0,
+        _expect_ok,
+    ),
+    _TextProof(
+        "project-manifest-bootstrap",
+        _bare_world,
+        lambda world: (world.consumer.root / ".claude").mkdir(),
+        lambda _world: ("install",),
+        1,
+        _manifest_created,
+        values=lambda world: {"<org/repo>": _slug(world.source)},
     ),
 )
 
@@ -661,3 +697,283 @@ def test_w2_bundle_remediation_clears_the_reported_state(
 
 # -- end W2 bundle proofs --
 # -- end W2 executed proofs ---------------------------------------------------
+
+
+# -- W3 executed proofs (modules outside commands/ and the W2 areas) ----------
+# -- W3 deps-compilation proofs --
+#
+# Compilation reports a hand-authored root context file or an orphaned
+# AGENTS.md as a warning; the same text-proof loop runs the printed command.
+
+_LOCAL_INSTRUCTION = "---\napplyTo: '**'\ndescription: Local advice\n---\n# local\n"
+
+
+def _compile_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create("compile-consumer")
+    scenario.consumers.add_instruction(consumer, "local", _LOCAL_INSTRUCTION)
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _hand_author_agents_md(world: _World) -> None:
+    (world.consumer.root / "AGENTS.md").write_text("# mine\n", encoding="ascii")
+
+
+def _orphan_agents_md(world: _World) -> None:
+    from apm_cli.compilation.constants import DISTRIBUTED_AGENTS_MD_GENERATED_MARKER
+
+    orphan = world.consumer.root / "docs" / "AGENTS.md"
+    orphan.parent.mkdir()
+    orphan.write_text(f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n", encoding="ascii")
+
+
+def _agents_md_generated(world: _World, result) -> None:
+    from apm_cli.compilation.constants import DISTRIBUTED_AGENTS_MD_GENERATED_MARKER
+
+    _expect_ok(world, result)
+    text = (world.consumer.root / "AGENTS.md").read_text(encoding="utf-8")
+    assert DISTRIBUTED_AGENTS_MD_GENERATED_MARKER in text, text
+
+
+def _orphan_removed(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert not (world.consumer.root / "docs" / "AGENTS.md").exists()
+
+
+W3_DEPS_COMPILATION_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "root-context-hand-authored",
+        _compile_world,
+        _hand_author_agents_md,
+        lambda _world: ("compile",),
+        0,
+        _agents_md_generated,
+        before=_unlink("AGENTS.md"),
+    ),
+    _TextProof(
+        "orphaned-agents-md",
+        _compile_world,
+        _orphan_agents_md,
+        lambda _world: ("compile",),
+        0,
+        _orphan_removed,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "proof", W3_DEPS_COMPILATION_PROOFS, ids=lambda proof: proof.remediation_id
+)
+def test_w3_deps_compilation_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
+# -- end W3 deps-compilation proofs --
+# -- W3 plugins-runtime proofs --
+#
+# A user-owned harness config APM merges into (JetBrains Copilot MCP config,
+# Copilot plugin settings) turns unreadable; the install that reports it names
+# the manual fix and the command. Deleting the file is the fix both name.
+
+_FIXTURE_MCP = {
+    "name": "fixture-mcp",
+    "registry": False,
+    "transport": "stdio",
+    "command": "printf",
+    "args": ["fixture"],
+}
+_COPILOT_SETTINGS = ".github/copilot/settings.local.json"
+# 'intellij' is not an apm.yml targets: value; only --target selects it.
+_INTELLIJ_INSTALL_ARGS = (*_INSTALL_ARGS, "--target", "intellij")
+
+
+def _intellij_dir(scenario: _Scenario) -> Path:
+    environment = scenario.isolated.process_environment
+    return Path(environment["XDG_CONFIG_HOME"]) / "github-copilot" / "intellij"
+
+
+def _intellij_config(world: _World) -> Path:
+    return _intellij_dir(world.scenario) / "mcp.json"
+
+
+def _w3_installed_world(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    publish,
+    *,
+    install_args: tuple[str, ...] = _INSTALL_ARGS,
+    **consumer: object,
+) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = publish(scenario)
+    created = scenario.consumers.create(
+        "w3-consumer", dependencies=(source.dependency,), **consumer
+    )
+    world = _World(scenario=scenario, source=source, consumer=created)
+    _run_success(
+        scenario,
+        created,
+        install_args,
+        environment=source.environment,
+        scenario_id="remediation-w3-install",
+    )
+    return world
+
+
+def _intellij_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    world = _w3_installed_world(
+        tmp_path,
+        apm_binary_path,
+        lambda scenario: _publish(scenario, "advice-kit", instruction="advice"),
+        install_args=_INTELLIJ_INSTALL_ARGS,
+        mcp_dependencies=(_FIXTURE_MCP,),
+    )
+    assert "fixture-mcp" in _intellij_config(world).read_text(encoding="utf-8")
+    return world
+
+
+def _agent_plugin_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    from tests.integration.test_required_lifecycle_state_machine import _publish_agent_plugin
+
+    world = _w3_installed_world(
+        tmp_path,
+        apm_binary_path,
+        lambda scenario: _publish_agent_plugin(scenario, "native-kit", skill="native"),
+        targets=("copilot",),
+    )
+    assert "native-kit" in (world.consumer.root / _COPILOT_SETTINGS).read_text(encoding="utf-8")
+    return world
+
+
+def _malform_intellij_config(world: _World) -> None:
+    _intellij_config(world).write_text("{malformed\n", encoding="ascii")
+
+
+def _intellij_reconciled(world: _World, result) -> None:
+    _expect_ok(world, result)
+    servers = json.loads(_intellij_config(world).read_text(encoding="utf-8"))["servers"]
+    assert "fixture-mcp" in servers, servers
+
+
+def _copilot_registered(world: _World, result) -> None:
+    _expect_ok(world, result)
+    settings = (world.consumer.root / _COPILOT_SETTINGS).read_text(encoding="utf-8")
+    assert isinstance(json.loads(settings), dict)
+    assert "native-kit" in settings, settings
+
+
+W3_PLUGINS_RUNTIME_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "jetbrains-mcp-config-unusable",
+        _intellij_world,
+        _malform_intellij_config,
+        lambda _world: _INTELLIJ_INSTALL_ARGS,
+        1,
+        _intellij_reconciled,
+        before=lambda world: _intellij_config(world).unlink(),
+    ),
+    _TextProof(
+        "copilot-settings-invalid",
+        _agent_plugin_world,
+        lambda world: (world.consumer.root / _COPILOT_SETTINGS).write_text(
+            "{malformed\n", encoding="ascii"
+        ),
+        lambda _world: _INSTALL_ARGS,
+        1,
+        _copilot_registered,
+        before=_unlink(_COPILOT_SETTINGS),
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W3_PLUGINS_RUNTIME_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w3_plugins_runtime_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
+# -- end W3 plugins-runtime proofs --
+# -- W3 core-models proofs --
+
+_GHOST_OWNER = "removed/ghost-kit"
+
+
+def _colliding_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create(
+        "advice-consumer", dependencies=(source.dependency,), targets=("copilot",)
+    )
+    authored = consumer.root / _INSTRUCTION
+    authored.parent.mkdir(parents=True, exist_ok=True)
+    authored.write_text("USER authored instructions\n", encoding="ascii")
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _ghost_deployment_owner(world: _World) -> None:
+    from dataclasses import replace
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import DeploymentLocator, DeploymentRecord, LocatorKind
+    from apm_cli.deps.lockfile import LockFile
+
+    path = world.consumer.root / "apm.lock.yaml"
+    lockfile = LockFile.read(path)
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="copilot",
+        value=".github/instructions/ghost.instructions.md",
+        runtime=None,
+        scope="project",
+    )
+    ghost = DeploymentRecord(
+        locator=locator,
+        owners=(_GHOST_OWNER,),
+        active_owner=_GHOST_OWNER,
+        content_hash=f"sha256:{'a' * 64}",
+    )
+    records = {**ledger.records, locator.key: ghost}
+    DeploymentLedgerCodec.apply_to_lockfile(replace(ledger, records=records), lockfile)
+    lockfile.write(path)
+
+
+def _user_file_overwritten(world: _World, result) -> None:
+    _expect_ok(world, result)
+    text = (world.consumer.root / _INSTRUCTION).read_text(encoding="utf-8")
+    assert "USER authored" not in text, text
+
+
+W3_CORE_MODELS_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "local-files-collide",
+        _colliding_world,
+        lambda _world: None,
+        lambda _world: _INSTALL_ARGS,
+        0,
+        _user_file_overwritten,
+    ),
+    _TextProof(
+        "deployment-owners-invalid",
+        _installed_world,
+        _ghost_deployment_owner,
+        lambda _world: ("audit",),
+        1,
+        _expect_ok,
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W3_CORE_MODELS_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w3_core_models_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
+# -- end W3 core-models proofs --
+# -- end W3 executed proofs ---------------------------------------------------

@@ -12,6 +12,7 @@ from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..core.remediation import ORPHANED_AGENTS_MD
 from ..output.formatters import CompilationFormatter
 from ..output.models import CompilationResults
 from ..primitives.models import Instruction, PrimitiveCollection
@@ -964,7 +965,7 @@ class DistributedAgentsCompiler:
         if len(orphaned_files) == 1:
             rel_path = portable_relpath(orphaned_files[0], self.base_dir)
             warning_messages.append(
-                f"Orphaned AGENTS.md found: {rel_path} - run 'apm compile --clean' to remove"
+                f"Orphaned AGENTS.md found: {rel_path} - {ORPHANED_AGENTS_MD.clause()}"
             )
         else:
             # For multiple files, create a single multi-line warning message
@@ -978,7 +979,8 @@ class DistributedAgentsCompiler:
             # Create one cohesive warning message
             files_text = "\n".join(file_list)
             warning_messages.append(
-                f"Found {len(orphaned_files)} orphaned AGENTS.md files:\n{files_text}\n  Run 'apm compile --clean' to remove orphaned files"
+                f"Found {len(orphaned_files)} orphaned AGENTS.md files:\n{files_text}\n"
+                f"  {ORPHANED_AGENTS_MD.sentence()}"
             )
 
         return warning_messages

@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.remediation import ORPHANED_AGENTS_MD
 
 
 def test_clean_removes_claude_md_after_last_primitive_is_removed(
@@ -104,7 +105,7 @@ def test_clean_gemini_leaves_no_dangling_import_or_contradictory_hint(
     assert cleaned.exit_code == 0, cleaned.output
     assert not (tmp_path / "AGENTS.md").exists()
     assert not (tmp_path / "GEMINI.md").exists()
-    assert "run 'apm compile --clean' to remove" not in cleaned.output
+    assert ORPHANED_AGENTS_MD.option() not in cleaned.output
     assert "produced no output files" not in cleaned.output
     assert "No instructions to compile" in cleaned.output
 

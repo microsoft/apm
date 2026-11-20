@@ -21,6 +21,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from apm_cli.core.remediation import MCP_EXECUTABLES_UNTRUSTED
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_CANVAS,
@@ -766,7 +767,9 @@ class TestFilterLspFailClosed:
             "only if policy permits."
         ]
         assert "LSP server 'pyright' from 'evil/package'" in logger.verbose[0]
-        assert "if policy permits" in logger.verbose[0]
+        assert (
+            MCP_EXECUTABLES_UNTRUSTED.bind(package="evil/package").sentence() in logger.verbose[0]
+        )
 
     def test_approval_is_bound_to_declarer_not_server_name(self) -> None:
         approved = _FakeMcpDep(
