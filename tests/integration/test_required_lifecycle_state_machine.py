@@ -17,6 +17,7 @@ import tomlkit
 
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import DeploymentLedger
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
@@ -146,8 +147,17 @@ def _assert_skill_receipt(
     assert data["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
     assert data["scope"] == scope
     ledger = DeploymentLedgerCodec.from_rows(data["records"])
-    assert len(ledger.records) == len(expected)
     assert set(data["destinations"]) == set(data["bindings"]) == set(ledger.records)
+    # Other file primitives carry receipts too (#3701); check the skill members.
+    skill_roots = {path.resolve().parent.parent for path in expected.values()}
+    ledger = DeploymentLedger(
+        {
+            key: row
+            for key, row in ledger.records.items()
+            if Path(data["destinations"][key]).parent.parent in skill_roots
+        }
+    )
+    assert len(ledger.records) == len(expected)
     assert {
         row.locator.target: Path(data["destinations"][key]) for key, row in ledger.records.items()
     } == {target: path.resolve() for target, path in expected.items()}
@@ -2766,7 +2776,9 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
                     deployed_instruction,
                 }
             },
-            tree_prefixes={"project": {"apm_modules"}},
+            # The survivor rebuild rewrites the shared instruction, so its local
+            # deployment receipt is updated in the existing store (#3701).
+            tree_prefixes={"project": {"apm_modules"}, "user": {".apm/deployment-receipts"}},
         )
         assert not installed_sources[f"_local/{parent_name}"].exists()
         manifest_dependencies = (
