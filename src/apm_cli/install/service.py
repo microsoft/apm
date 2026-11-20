@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core import remediation
-from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.frozen_selection import (
     _changed_selections,
