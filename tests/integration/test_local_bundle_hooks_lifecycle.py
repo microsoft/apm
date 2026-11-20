@@ -251,3 +251,49 @@ def test_bundle_hooks_register_for_copilot_and_user_scope(
     hookless, _ = _repack(world, producer, tmp_path, "1.0.2", None)
     world.apm(world.isolated.work_root, "install", "-g", str(hookless), "--no-policy")
     assert _hook_entries(home) == {}
+
+
+def _skill_bundle(world: MarketplacePackWorld, tmp_path: Path) -> Path:
+    producer = world.isolated.work_root / "skillpkg"
+    write(
+        producer / "apm.yml",
+        "name: skillpkg\nversion: 1.0.0\ndescription: s\nlicense: MIT\n"
+        "targets: [copilot]\ndependencies:\n  apm: []\n",
+    )
+    write(producer / ".apm" / "skills" / "ss" / "SKILL.md", skill_md("ss"))
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / "skill-out"))
+    return tmp_path / "skill-out" / "skillpkg-1.0.0"
+
+
+@pytest.mark.parametrize("edited", [False, True], ids=["unedited", "edited"])
+def test_bundle_skill_migration_removes_receipted_legacy_copies(
+    tmp_path: Path, apm_binary_path: Path, edited: bool
+) -> None:
+    """#4223: a bundle install records receipts, so skill path migration proves its files.
+
+    A bundle cannot be rendered from a locked source; its receipts are the only
+    deletion evidence (req-lk-024). An unedited legacy copy is removed when the
+    converged layout is installed; an edited one keeps the user's bytes.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle = _skill_bundle(world, tmp_path)
+    consumer = world.consumer("migrate", targets=("copilot",))
+    install = ("install", str(bundle), "--target", "copilot", "--no-policy")
+    world.apm(consumer, *install, "--legacy-skill-paths")
+    legacy = consumer / ".github" / "skills" / "ss" / "SKILL.md"
+    assert legacy.is_file()
+    receipts = world.isolated.home / ".apm" / "deployment-receipts"
+    assert receipts.is_dir() and any(receipts.iterdir()), "bundle install records receipts"
+    if edited:
+        legacy.write_text("# mine\n", encoding="ascii")
+
+    world.apm(consumer, *install)
+
+    assert (consumer / ".agents" / "skills" / "ss" / "SKILL.md").is_file()
+    if edited:
+        assert legacy.read_text(encoding="ascii") == "# mine\n"
+        return
+    assert not legacy.exists()
+    local = world.lock(consumer).get("local_deployed_files") or []
+    assert not any(path.startswith(".github/skills/") for path in local), local

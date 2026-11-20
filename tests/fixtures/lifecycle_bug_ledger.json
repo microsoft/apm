@@ -591,6 +591,18 @@
       ]
     },
     {
+      "issue": 4223,
+      "fixed_in": "Unreleased",
+      "summary": "Local bundle installs record a local deployment receipt for every file they deploy, so lockfile-driven cleanup and skill path migration can prove and remove unedited bundle files; a bundle cannot be rendered from a locked source.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_skill_migration_removes_receipted_legacy_copies",
+        "tests/integration/test_agent_skills_target.py::test_auto_migration_removes_legacy_skill_paths",
+        "tests/integration/test_agent_skills_target.py::test_auto_migration_updates_lockfile_paths"
+      ]
+    },
+    {
       "issue": 4235,
       "fixed_in": "Unreleased",
       "summary": "Registry archive extraction applies one set of archive limits to every accepted format: entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries, with every entry validated before the first write.",
