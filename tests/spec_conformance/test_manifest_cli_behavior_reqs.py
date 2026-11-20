@@ -81,3 +81,57 @@ def test_install_rewrite_preserves_unknown_top_level_keys(
     assert rewritten["dependencies"]["apm"] == ["../helper"]
     assert rewritten["future-field"] == {"mode": "strict", "levels": [1, 2]}
     assert rewritten["x-acme-meta"] == "keep-me"
+
+
+# --- req-mf-021 / req-rs-013: keys reserved for v0.2 -----------------------
+
+
+@pytest.mark.req("req-mf-021")
+def test_top_level_workspaces_key_warns_reserved_and_installs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """req-mf-021: a v0.1 `workspaces:` key gets a non-blocking reserved-for-v0.2 diagnostic."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "ws", base_env=os.environ)
+    factory = LocalPackageFactory(isolated.work_root)
+    consumer = factory.create("consumer", targets=("copilot",))
+    with consumer.manifest_path.open("a", encoding="utf-8") as handle:
+        handle.write("workspaces:\n  - packages/*\n")
+
+    result = ApmLifecycleRunner((str(apm_binary_path),)).run(
+        ("install",), scenario_id="mf-021", cwd=consumer.root, env=isolated.subprocess_env()
+    )
+
+    text = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 0, text
+    assert "[!]" in text, text
+    assert "'workspaces'" in text and "reserved for OpenAPM v0.2" in text, text
+    assert text.count("reserved for OpenAPM v0.2") == 1, text
+    assert "Unknown top-level key" not in text, text
+
+
+@pytest.mark.req("req-rs-013")
+def test_conflict_resolution_nest_refuses_install_and_writes_nothing(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """req-rs-013: `conflict_resolution: nest` refuses, cites Section 7.2 (3), writes nothing."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "nest", base_env=os.environ)
+    factory = LocalPackageFactory(isolated.work_root)
+    dependency = factory.create("helper")
+    factory.add_instruction(
+        dependency, "style", "---\napplyTo: '**'\n---\n# Style\nUse short names.\n"
+    )
+    consumer = factory.create("consumer", dependencies=("../helper",), targets=("copilot",))
+    manifest = yaml.safe_load(consumer.manifest_path.read_text(encoding="utf-8"))
+    manifest["dependencies"]["conflict_resolution"] = "nest"
+    consumer.manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), "utf-8")
+    before = sorted(p.relative_to(consumer.root) for p in consumer.root.rglob("*"))
+
+    result = ApmLifecycleRunner((str(apm_binary_path),)).run(
+        ("install",), scenario_id="rs-013", cwd=consumer.root, env=isolated.subprocess_env()
+    )
+
+    text = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, text
+    assert "conflict_resolution: nest" in text and "reserved for OpenAPM v0.2" in text, text
+    assert "Section 7.2" in text and "clause (3)" in text, text
+    assert sorted(p.relative_to(consumer.root) for p in consumer.root.rglob("*")) == before

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A top-level `workspaces:` key in `apm.yml` now gets a warning that names it as reserved for OpenAPM v0.2, and `dependencies.conflict_resolution: nest` refuses the install before anything is written. (#4283)
 - A lockfile whose `apm_version` is `unknown` now moves APM-written entries out of the retired `.github/mcp.json` and reports it, like a lockfile from an earlier known version. (#4283)
 - `apm uninstall` of another package exits 0 and reconciles LSP servers when a remaining package declares only LSP servers, whether approved, ungated or denied. (#4283)
 - A package that declares only LSP servers installs from git and marketplace sources, as it already did from a local path. (#4283)

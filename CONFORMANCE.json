@@ -769,8 +769,9 @@
       "keyword": "MUST",
       "section": "4.8",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_top_level_workspaces_key_warns_reserved_and_installs",
         "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_must_not_use_in_v0_1"
       ]
     },
@@ -1645,8 +1646,9 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_conflict_resolution_nest_refuses_install_and_writes_nothing",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_fails_closed_on_ambiguous_resolution"
       ]
     },
