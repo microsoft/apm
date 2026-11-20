@@ -19,6 +19,7 @@ SPAWN_SURFACES: dict[str, frozenset[str]] = {
     ),
     "os": frozenset({"system", "popen", "fork", "forkpty", "exec*", "spawn*", "posix_spawn*"}),
     "asyncio": frozenset({"create_subprocess_exec", "create_subprocess_shell"}),
+    "asyncio.subprocess": frozenset({"create_subprocess_exec", "create_subprocess_shell"}),
     "pexpect": frozenset({"spawn", "run"}),
 }
 
@@ -53,7 +54,8 @@ def _module_promises(item: pytest.Item) -> list[str]:
     )
 
 
-def _is_spawn_attribute(module: str, attribute: str) -> bool:
+def _is_spawn_target(qualified: str) -> bool:
+    module, _sep, attribute = qualified.rpartition(".")
     for allowed in SPAWN_SURFACES.get(module, ()):
         if allowed.endswith("*") and attribute.startswith(allowed[:-1]):
             return True
@@ -62,38 +64,68 @@ def _is_spawn_attribute(module: str, attribute: str) -> bool:
     return False
 
 
+def _bind_imports(node: ast.stmt, scope: dict[str, str]) -> None:
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            if alias.asname:
+                scope[alias.asname] = alias.name
+            else:
+                root = alias.name.split(".", 1)[0]
+                scope[root] = root
+    elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+        for alias in node.names:
+            scope[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+
+
+def _qualified(func: ast.expr, scope: dict[str, str]) -> str | None:
+    parts: list[str] = []
+    while isinstance(func, ast.Attribute):
+        parts.append(func.attr)
+        func = func.value
+    if not isinstance(func, ast.Name) or func.id not in scope:
+        return None
+    return ".".join([scope[func.id], *reversed(parts)])
+
+
+def _scope_spawns(body: list[ast.stmt], outer: dict[str, str]) -> bool:
+    """Check one lexical scope; imports inside a function stay in that function."""
+    scope = dict(outer)
+    for statement in body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for node in _walk_outside_scopes(statement):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                _bind_imports(node, scope)
+    for statement in body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if _scope_spawns(statement.body, scope):
+                return True
+            nested = [*statement.decorator_list]
+            if not isinstance(statement, ast.ClassDef):
+                nested += [*statement.args.defaults, *statement.args.kw_defaults]
+            nodes = [child for item in nested if item is not None for child in ast.walk(item)]
+        else:
+            nodes = list(_walk_outside_scopes(statement))
+        for node in nodes:
+            if isinstance(node, ast.Call):
+                qualified = _qualified(node.func, scope)
+                if qualified is not None and _is_spawn_target(qualified):
+                    return True
+    return False
+
+
+def _walk_outside_scopes(node: ast.AST):
+    """Yield nodes under ``node`` without entering nested function or class bodies."""
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield from _walk_outside_scopes(child)
+
+
 def spawns_processes(source: str) -> bool:
     """Return whether module source calls a process-spawning API directly."""
-    tree = ast.parse(source)
-    module_aliases: dict[str, str] = {}
-    name_aliases: dict[str, tuple[str, str]] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                root = alias.name.split(".", 1)[0]
-                if root in SPAWN_SURFACES:
-                    module_aliases[alias.asname or root] = root
-        elif isinstance(node, ast.ImportFrom) and node.module in SPAWN_SURFACES:
-            for alias in node.names:
-                name_aliases[alias.asname or alias.name] = (node.module, alias.name)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Name)
-            and func.value.id in module_aliases
-            and _is_spawn_attribute(module_aliases[func.value.id], func.attr)
-        ):
-            return True
-        if (
-            isinstance(func, ast.Name)
-            and func.id in name_aliases
-            and _is_spawn_attribute(*name_aliases[func.id])
-        ):
-            return True
-    return False
+    return _scope_spawns(ast.parse(source).body, {})
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
