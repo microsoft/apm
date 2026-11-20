@@ -83,6 +83,25 @@ def test_apply_without_consent_has_no_writes(workspace: Path) -> None:
     assert snapshot(workspace.parent) == before
 
 
+@pytest.mark.parametrize("variable", ["APM_NON_INTERACTIVE", "CI"])
+def test_apply_without_consent_never_prompts_when_non_interactive(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """A console stdin (Windows CI) still gets the consent error, not a prompt (#4411)."""
+    import click.testing
+
+    skill(workspace)
+    monkeypatch.delenv("APM_NON_INTERACTIVE", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv(variable, "1")
+    # CliRunner swaps sys.stdin during invoke; make that stream report a console.
+    monkeypatch.setattr(click.testing._NamedTextIOWrapper, "isatty", lambda _self: True)
+    result = CliRunner().invoke(init, ["--discover", "--apply"])
+    assert result.exit_code != 0
+    assert "requires consent" in result.output
+    assert "[y/N]" not in result.output
+
+
 @pytest.mark.parametrize(
     "entry",
     [
