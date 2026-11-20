@@ -316,7 +316,7 @@ def remove_stale_deployed_files(
     Args:
         stale_paths: Workspace-relative paths flagged as stale by
             :func:`apm_cli.drift.detect_stale_files` (intra-package
-            renames/removals) or :func:`apm_cli.drift.detect_orphans`
+            renames/removals) or the orphan owner (``install/orphans.py``)
             (whole package removed from the manifest).
         project_root: Project root the deletion is scoped within.
         dep_key: Unique key of the package these paths belong to (used

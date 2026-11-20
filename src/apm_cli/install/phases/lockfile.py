@@ -246,13 +246,32 @@ class LockfileBuilder:
         manifest. Skipped for partial (``only_packages``) installs, which
         intentionally preserve unlisted entries.
         """
-        existing = self.ctx.existing_lockfile
-        if existing is None or self.ctx.only_packages:
+        if self.ctx.existing_lockfile is None or self.ctx.only_packages:
             return False
-        from apm_cli.deps.lockfile import _SELF_KEY
+        return bool(self._orphan_decision().candidate_keys)
 
-        intended = self.ctx.intended_dep_keys or set()
-        return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
+    def _orphan_decision(self):
+        """Ask the orphan owner which previous rows a full install retires."""
+        from apm_cli.install.orphans import (
+            DeploymentClaims,
+            OrphanOperation,
+            decide_orphan_removal,
+        )
+
+        return decide_orphan_removal(
+            operation=OrphanOperation.INSTALL,
+            roots=(),
+            candidate_universe=self.ctx.existing_lockfile,
+            installed_paths=None,
+            resolved_keys=None,
+            intended=self.ctx.intended_dep_keys or set(),
+            materialized=None,
+            reachability=None,
+            deployment_claims=DeploymentClaims(
+                live_files=frozenset(),
+                retained=getattr(self.ctx, "orphan_cleanup_retained", {}),
+            ),
+        )
 
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
@@ -597,13 +616,15 @@ class LockfileBuilder:
             return
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
             retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
+            decision = self._orphan_decision()
             for dep_key, dep in self.ctx.existing_lockfile.dependencies.items():
                 if dep_key not in lockfile.dependencies:
-                    if self.ctx.only_packages or dep_key in self.ctx.intended_dep_keys:
-                        # Preserve: partial install (sequential install support)
-                        # OR package still in manifest but failed to download.
+                    if dep_key in decision.rescued_keys:
+                        # Preserve: package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
-                    elif retained := retained_orphans.get(dep_key):
+                    elif dep_key in decision.retained_keys and (
+                        retained := retained_orphans.get(dep_key)
+                    ):
                         self._keep_retained_orphan(
                             lockfile, dep_key, dep, retained, self.ctx.existing_lockfile
                         )

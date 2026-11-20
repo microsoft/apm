@@ -1006,6 +1006,9 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
         logger=MagicMock(),
         package_deployed_files={"active-identity": ["shared.md"]},
         frozen=False,
+        deps_to_install=[],
+        dependency_graph=None,
+        apm_modules_dir=None,
     )
     removal = CleanupResult()
     with patch(
@@ -1471,3 +1474,37 @@ def test_dropped_cursor_target_merge_hook_state_reconciled_fail_safe(tmp_path):
         "target while its ownership record remains",
         "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
     )
+
+
+@pytest.mark.req("req-lk-020")
+def test_orphan_cleanup_preserves_paths_an_active_dependency_deploys() -> None:
+    """The one orphan owner keeps a shared path in the real run and its preview (#4011)."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.orphans import (
+        DeploymentClaims,
+        OrphanOperation,
+        decide_orphan_removal,
+    )
+
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(repo_url="owner/gone", deployed_files=["shared.md", "gone.md"])
+    )
+    lock.add_dependency(LockedDependency(repo_url="owner/kept", deployed_files=["kept.md"]))
+    for live_files in (frozenset({"shared.md"}), None):
+        if live_files is None:
+            # The offline preview reads retained rows' recorded claims.
+            lock.dependencies["owner/kept"].deployed_files.append("shared.md")
+        decision = decide_orphan_removal(
+            operation=OrphanOperation.INSTALL,
+            roots=(),
+            candidate_universe=lock,
+            installed_paths=None,
+            resolved_keys=None,
+            intended={"owner/kept"},
+            materialized=None,
+            reachability=None,
+            deployment_claims=DeploymentClaims(live_files=live_files, retained={}),
+        )
+        assert decision.removed_files["owner/gone"] == ("gone.md",)
+        assert decision.claimed_files["owner/gone"] == ("shared.md",)

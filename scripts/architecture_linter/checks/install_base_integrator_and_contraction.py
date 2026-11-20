@@ -1122,7 +1122,7 @@ def _cleanup_claim_findings(provider: FactsProvider, rule_id: str) -> list[Viola
     )
     if (
         len(owner_calls) != 1
-        or not _present(facts, "if deployed_file not in surviving_files")
+        or not _present(facts, "deployment_claims=DeploymentClaims(live_files=surviving_files")
         or not _present(facts, "other_deployed = surviving_files - set(new_deployed)")
         or not all(
             _body_has(survivor_body, snippet)
