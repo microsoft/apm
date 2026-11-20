@@ -722,12 +722,12 @@ def refusal_reason(verdict: str) -> str:
 
 def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
     """Return the two runnable remedies when uninstall lacks deletion evidence."""
-    flag = " -g" if user_scope else ""
-    reinstall = UNINSTALL_EVIDENCE_REINSTALL.bind(flag=flag)
     remove = UNINSTALL_EVIDENCE_REMOVE
+    reinstall = UNINSTALL_EVIDENCE_REINSTALL
     if user_scope:
         reinstall = reinstall.with_command("apm install -g")
         remove = remove.with_command("apm uninstall -g")
+    reinstall = reinstall.bind(uninstall=remove.command)
     return reinstall.sentence(), remove.sentence()
 
 
