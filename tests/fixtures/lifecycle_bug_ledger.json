@@ -1142,6 +1142,48 @@
       ]
     },
     {
+      "issue": 4241,
+      "fixed_in": "Unreleased",
+      "summary": "apm install printed the --no-policy warning once per phase when MCP servers were also installed",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_install_enforcement_lifecycle.py::test_no_policy_warning_prints_once_with_mcp_servers"
+      ]
+    },
+    {
+      "issue": 4243,
+      "fixed_in": "Unreleased",
+      "summary": "apm install repeated each hook summary line once per target",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_target_widen_then_narrow_reconciles_owned_state"
+      ]
+    },
+    {
+      "issue": 4249,
+      "fixed_in": "Unreleased",
+      "summary": "apm install printed the org policy status line once per phase when MCP servers were also installed",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_install_enforcement_lifecycle.py::test_policy_status_line_prints_once_with_mcp_servers"
+      ]
+    },
+    {
       "issue": 4270,
       "fixed_in": "Unreleased",
       "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",

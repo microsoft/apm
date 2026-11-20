@@ -1562,13 +1562,17 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     state_a = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
 
     scenario.consumers.set_targets(consumer, ("claude", "windsurf"))
-    _run_success(
+    widened = _run_success(
         scenario,
         consumer,
         _INSTALL_ARGS,
         environment=source.environment,
         scenario_id="target-contraction-install-a-b",
     )
+    # I9 (#4243): one hook summary line, not one per target.
+    hook_line = "|   PreToolUse: runs echo scope (pretool.json)"
+    widened_output = widened.stdout + widened.stderr
+    assert widened_output.count(hook_line) == 1, _result_evidence(widened)
     state_ab = LifecycleStateSnapshot.capture(
         consumer.root,
         targets=("claude", "windsurf"),

@@ -285,6 +285,8 @@ class InstallLogger(CommandLogger):
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
+        # Policy banners already shown; the package and MCP phases share them.
+        self._policy_banners: set[tuple[str, ...]] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -733,6 +735,8 @@ class InstallLogger(CommandLogger):
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
+        if not self._first_policy_banner("resolved", source, enforcement):
+            return
         parts = [f"Policy: {source}"]
         if chain and len(chain) > 1:
             # The leaf is already the source; show its ancestors root first.
@@ -790,6 +794,8 @@ class InstallLogger(CommandLogger):
             hint: Optional discovery diagnostic (``PolicyFetchResult.
                 discovery_hint``), shown with ``absent`` in verbose mode only.
         """
+        if not self._first_policy_banner("miss", outcome, source):
+            return
         err_text = error or "unknown"
 
         if outcome == "absent":
@@ -949,13 +955,27 @@ class InstallLogger(CommandLogger):
                     err=True,
                 )
 
+    def _first_policy_banner(self, *key: str) -> bool:
+        """Record a policy banner; False when this invocation already showed it.
+
+        The package phase and the MCP phase both route the same policy
+        outcome, so every policy banner is printed once per invocation.
+        """
+        if key in self._policy_banners:
+            return False
+        self._policy_banners.add(key)
+        return True
+
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
         active.  Always visible (never silenceable) -- matches the
-        ``--allow-insecure`` pattern.
+        ``--allow-insecure`` pattern.  Shown once per invocation even when
+        several install phases check the escape hatch.
         """
+        if not self._first_policy_banner("disabled", reason):
+            return
         _rich_warning(
             f"Policy enforcement disabled by {reason} for this invocation. "
             "This does NOT bypass apm audit --ci. "
