@@ -21,6 +21,7 @@ from apm_cli.core.scope import (
     warn_unsupported_user_scope,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.policy.discovery import PolicyFetchResult
 
 # ---------------------------------------------------------------------------
 # InstallScope enum
@@ -491,7 +492,7 @@ def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, m
     discovered: list = []
     monkeypatch.setattr(
         "apm_cli.policy.discovery.discover_policy_with_chain",
-        lambda root: discovered.append(root) or SimpleNamespace(policy=None),
+        lambda root: discovered.append(root) or PolicyFetchResult(outcome="absent"),
     )
     allow = executables.resolve_project_exec_allow_map(
         home,

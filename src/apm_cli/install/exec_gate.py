@@ -630,9 +630,10 @@ class ReplayExecAllowMap:
         if self._policy_provider is not None:
             policy = self._policy_provider()
         else:
-            from apm_cli.policy.discovery import discover_policy_with_chain
+            from apm_cli.policy.outcome_routing import resolve_trust_policy
 
-            policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
+            # The replaying command reports the policy outcome itself.
+            policy = resolve_trust_policy(self._project_root, announce=False)
         # Audit is read-only: never migrate legacy user consent here.
         # Grants come from the scope's manifest (APM_HOME/apm.yml under -g,
         # #3954); policy stays anchored at the deploy root.

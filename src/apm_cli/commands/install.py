@@ -133,6 +133,7 @@ from apm_cli.install.validation import (
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
+from apm_cli.policy.outcome_routing import discover_trust_policy
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
 from ..constants import (
@@ -1245,12 +1246,20 @@ def install(  # noqa: PLR0913
                 from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
                 _bundle_project_root = _source_root
+                # One policy discovery serves the trust map and, at project
+                # scope (same root), the bundle policy preflight.
                 _allow_execs_for_bundle = _effective_bundle_allow_map(
                     _bundle_project_root,
                     user_scope=global_,
                     no_policy=no_policy,
                     logger=logger,
                     migrate_user_legacy=not dry_run,
+                    dry_run=dry_run,
+                    policy_fetch_result=(
+                        _bundle_policy := None
+                        if no_policy
+                        else discover_trust_policy(_bundle_project_root)
+                    ),
                 )
                 _install_lb(
                     bundle_info=_bundle_info,
@@ -1266,6 +1275,7 @@ def install(  # noqa: PLR0913
                     legacy_skill_paths=legacy_skill_paths,
                     allow_executables=_allow_execs_for_bundle,
                     create_config=create_user_config,
+                    policy_fetch_result=None if global_ else _bundle_policy,
                     # Rejected-flag context for consolidated UsageError:
                     rejected_flags={
                         "--update": update,

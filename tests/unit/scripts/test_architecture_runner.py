@@ -627,6 +627,7 @@ install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
 install-deployment-bundle-compile-staging
+install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
@@ -691,8 +692,11 @@ install-deployment-skills-root-derivation
 install-deployment-source-plan
 install-deployment-target-file-contraction
 install-deployment-trust-fingerprint
+install-deployment-trust-policy-outcome
 install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
+install-deployment-unpack-executable-refusal
+install-deployment-update-content-integrity
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-authoring-source

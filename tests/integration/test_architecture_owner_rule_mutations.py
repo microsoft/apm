@@ -869,6 +869,90 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
 
 
 @pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/install/exec_gate.py",
+            "            policy = resolve_trust_policy(self._project_root, announce=False)\n",
+            "            policy = None\n",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/install/local_bundle_handler.py",
+            "        announce=False,\n        raise_blocking_errors=not dry_run,\n",
+            "        announce=False,\n        raise_blocking_errors=not dry_run,\n"
+            "        cache_only=True,\n",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/commands/uninstall/engine.py",
+            "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
+            "    from ...policy.discovery import discover_policy_with_chain\n\n"
+            "    discover_policy_with_chain(project_root)\n"
+            "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
+        ),
+        (
+            "install-deployment-bundle-user-scope-root",
+            "src/apm_cli/commands/install.py",
+            "                    user_scope=global_,\n",
+            "                    user_scope=False,\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/sources.py",
+            "                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)\n",
+            "                not ctx.update_refs\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/phases/integrate.py",
+            "        and not _locked_commit_unchanged\n",
+            "",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/phases/integrate.py",
+            "        and locked_commit_unchanged(_dep_locked_chk, _callback_sha)\n",
+            "        and _dep_locked_chk.resolved_commit == _callback_sha\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/source_helpers.py",
+            "    return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, "
+            "resolved_commit))\n",
+            "    return bool(ctx.update_refs)\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/source_helpers.py",
+            "        update_accepts_new_content(ctx, locked_dep, resolved_commit)\n        or dep_key",
+            "        ctx.update_refs\n        or dep_key",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/policy/outcome_routing.py",
+            "        fetch_result = discover_trust_policy(root)\n",
+            "        fetch_result = discover_policy_with_chain(root)\n",
+        ),
+    ],
+)
+def test_trust_and_integrity_owners_reject_bypasses(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Each trust and integrity consistency guard rejects its bypass (#4027)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+
+
+@pytest.mark.parametrize(
     ("path", "old", "new"),
     [
         (
@@ -1518,6 +1602,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-bundle-user-scope-root",
+        rule_id="install-deployment-bundle-user-scope-root",
+        path="src/apm_cli/install/local_bundle_handler.py",
+        old="    return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)\n",
+        new="    return Path.home() if user_scope else Path.cwd()\n",
+        intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
+    ),
+    MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",
         rule_id="install-deployment-cleanup-ownership-release",
         path="src/apm_cli/integration/cleanup.py",
@@ -1893,6 +1985,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The MCP view grows a second trust hasher beside the fingerprint owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-trust-policy-outcome",
+        rule_id="install-deployment-trust-policy-outcome",
+        path="src/apm_cli/security/executables.py",
+        old="    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)\n",
+        new=(
+            "    from apm_cli.policy.discovery import discover_policy_with_chain\n\n"
+            '    policy = getattr(discover_policy_with_chain(project_root), "policy", None)\n'
+        ),
+        intent="A trust reader drops the policy discovery outcome and keeps only .policy.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-reachability",
         rule_id="install-deployment-uninstall-reachability",
         path="src/apm_cli/commands/uninstall/engine.py",
@@ -1907,6 +2010,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def select_manifest_dependency(",
         new="def select_manifest_dependency_disabled(",
         intent="Dependency CLI selection loses the one manifest-selection function.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-unpack-executable-refusal",
+        rule_id="install-deployment-unpack-executable-refusal",
+        path="src/apm_cli/bundle/unpacker.py",
+        old="        _refuse_executable_content(unique_files, source_dir, bundle_path)\n",
+        new="",
+        intent="apm unpack copies executable bundle content without refusing it.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-update-content-integrity",
+        rule_id="install-deployment-update-content-integrity",
+        path="src/apm_cli/install/source_helpers.py",
+        old='    return bool(commit not in (None, "", "cached") and commit == locked_commit)\n',
+        new="    return False\n",
+        intent="apm update treats every locked commit as moved and skips the content-hash check.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",

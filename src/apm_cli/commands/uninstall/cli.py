@@ -14,6 +14,7 @@ from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile_generator import require_current_cli
 from ...hook_contract import HookContractError
+from ...install.errors import PolicyViolationError
 from ...install.locking import serialized_lifecycle
 from ...install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ...models.apm_package import APMPackage
@@ -241,6 +242,9 @@ def _sync_integrations_for_manifest(
             # 'apm install' would refuse the same package until it is migrated.
             logger.warning(str(sync_err))
             logger.warning("Migrate the package above, then run 'apm install' to resync.")
+        elif isinstance(sync_err, PolicyViolationError):
+            logger.warning(str(sync_err))
+            logger.warning("Resolve the org policy issue above, then run 'apm install' to resync.")
         else:
             logger.warning("Run 'apm install' to resync remaining integrations.")
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")

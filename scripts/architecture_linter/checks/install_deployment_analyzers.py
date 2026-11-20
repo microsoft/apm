@@ -138,6 +138,16 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
     _GUARD_SKILLS_ROOT,
     check_skills_root_derivation,
 )
+from scripts.architecture_linter.checks.install_trust_integrity import (
+    GUARD_BUNDLE_USER_SCOPE_ROOT,
+    GUARD_TRUST_POLICY_OUTCOME,
+    GUARD_UNPACK_EXECUTABLES,
+    GUARD_UPDATE_CONTENT_INTEGRITY,
+    check_bundle_user_scope_root,
+    check_trust_policy_outcome,
+    check_unpack_executable_refusal,
+    check_update_content_integrity,
+)
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
     _GUARD_ORPHAN_SELECTION,
@@ -165,6 +175,26 @@ RULES: tuple[Rule, ...] = (
         _GUARD_PACKAGE_CONTENT_HASH,
         "Package content hashing, its lockfile stream and promotion stay owned by utils/content_hash.py.",
         check_package_content_hash,
+    ),
+    _rule(
+        GUARD_TRUST_POLICY_OUTCOME,
+        "Executables-trust readers route policy outcomes through resolve_trust_policy.",
+        check_trust_policy_outcome,
+    ),
+    _rule(
+        GUARD_UPDATE_CONTENT_INTEGRITY,
+        "apm update keeps the content-hash check for an unchanged commit.",
+        check_update_content_integrity,
+    ),
+    _rule(
+        GUARD_BUNDLE_USER_SCOPE_ROOT,
+        "apm install -g <bundle> keeps its lock and grants under APM_HOME.",
+        check_bundle_user_scope_root,
+    ),
+    _rule(
+        GUARD_UNPACK_EXECUTABLES,
+        "apm unpack refuses executable content before any write.",
+        check_unpack_executable_refusal,
     ),
     _rule(
         _GUARD_SINGLE_FILE,
