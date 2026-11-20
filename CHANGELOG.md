@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 - `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
+- `apm uninstall` cleans LSP servers on the targets `apm.lock.yaml` recorded, no longer failing with "No harness detected" or moving survivors to the saved target. (closes #4059, #4068)
 
 ## [0.37.0] - 2026-11-20
 
@@ -49,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PROXY_REGISTRY_ONLY=1` also refuses unsanctioned MCP registries and marketplace catalogs the proxy cannot serve; set `MCP_REGISTRY_URL` to a proxied registry. (closes #3994, #4004)
 - Hash framing hardening: `apm install` moves `apm.lock.yaml` to `lockfile_version: "4"`, which older APM refuses; update CI to APM 0.37 before committing it. (closes #4000, #4026)
 - **Coming in 0.38:** CLI contract changes to exit codes, to which output goes to stderr, and to how an install handles a locally-authored file at a dependency's path. Details and any transition window will be in the 0.38 notes. (#3983)
+- Cleanup deletes only files a local receipt or the locked render proves APM wrote; others, like old hook `package.json` sidecars, stay named: delete them. (closes #3701, #4049)
 
 ### Added
 

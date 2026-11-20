@@ -203,6 +203,10 @@ later; trust the workspace, then run `/reload-plugins`), Copilot CLI
 (`.github/lsp.json`) and OpenCode (`opencode.json`). Fields:
 [Manifest schema](../../reference/manifest-schema/#43-dependencieslsp--listlspdependency).
 
+The lockfile records which LSP servers APM wrote and to which targets, so
+`apm uninstall` removes only those entries and keeps the remaining servers on
+the targets they were written to, even without `targets:` in `apm.yml`.
+
 ## Verify
 
 ```bash frame="terminal"

@@ -318,7 +318,18 @@ def install_local_bundle(
             lockfile_path = get_lockfile_path(_bundle_lock_root(global_))
             lockfile = LockFile.read(lockfile_path) or LockFile()
             from ..core.deployment_ledger import DeploymentLedgerCodec
+            from ..integration.cleanup import DeploymentEvidence
+            from ..utils.diagnostics import DiagnosticCollector
 
+            # Evidence for migration deletes is bound to the pre-install lock (#3701).
+            migration_diagnostics = DiagnosticCollector()
+            migration_evidence = DeploymentEvidence.collect(
+                project_root,
+                user_scope=global_,
+                lockfile=lockfile,
+                lockfile_root=lockfile_path.parent,
+                diagnostics=migration_diagnostics,
+            )
             DeploymentLedgerCodec.record_local_bundle_files(
                 lockfile,
                 deployed,
@@ -375,7 +386,10 @@ def install_local_bundle(
                                     break
                         _rich_info(COLLISION_HINT, symbol="info")
                     else:
-                        _mig_result = _exec_mig(_plans, lockfile, project_root)
+                        _mig_result = _exec_mig(
+                            _plans, lockfile, project_root, evidence=migration_evidence
+                        )
+                        migration_diagnostics.render_summary()
                         _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
                         if _total:
                             _rich_info(
