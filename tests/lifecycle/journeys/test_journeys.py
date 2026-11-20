@@ -1388,12 +1388,20 @@ def journey_witnesses() -> tuple[dict[str, str], dict[str, str]]:
     return dict(sorted(required.items())), dict(sorted(known.items()))
 
 
+# Strict Windows-only expected failures of whole journeys, each tracked by an issue.
+_WINDOWS_KNOWN = {
+    "J07": "#4417 apm outdated misses a newer annotated tag on Windows",
+}
+
+
 def _params() -> list:
     golden = {j["id"] for j in load_index()["journeys"] if j.get("golden")}
     params = []
     for path in journey_files():
         jid = load_journey(path)["id"]
         marks = [pytest.mark.lifecycle_smoke] if jid in golden else []
+        if jid in _WINDOWS_KNOWN and os.name == "nt":
+            marks.append(pytest.mark.xfail(strict=True, reason=_WINDOWS_KNOWN[jid]))
         params.append(pytest.param(path, id=jid, marks=marks))
     return params
 
