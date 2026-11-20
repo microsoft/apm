@@ -2023,9 +2023,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-update-content-integrity",
         rule_id="install-deployment-update-content-integrity",
         path="src/apm_cli/install/source_helpers.py",
-        old="        and not (resolved_commit and locked_commit and resolved_commit == locked_commit)\n",
-        new="",
-        intent="apm update skips the content-hash check even for an unchanged commit.",
+        old='    return bool(commit not in (None, "", "cached") and commit == locked_commit)\n',
+        new="    return False\n",
+        intent="apm update treats every locked commit as moved and skips the content-hash check.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
