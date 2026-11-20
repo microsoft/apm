@@ -329,6 +329,29 @@ def test_frozen_replays_pin_after_remote_head_advances(
         _assert_mcp_matches_producer(scenario)
 
 
+def test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A lock that recorded a whole plugin as skill_bundle still replays and audits (#4270)."""
+    scenario = _scenario(tmp_path, apm_binary_path)
+    lock = load_yaml(scenario.consumer / "apm.lock.yaml")
+    (entry,) = lock["dependencies"]
+    assert entry["package_type"] == "marketplace_plugin"
+    entry["package_type"] = "skill_bundle"
+    dump_yaml(lock, scenario.consumer / "apm.lock.yaml")
+    for _ in range(2):
+        scenario.freeze()
+        assert (scenario.consumer / ".agents/skills/frozen-skill/SKILL.md").read_bytes() == _SKILL
+        _assert_mcp_matches_producer(scenario)
+    audit = scenario.runner.run(
+        ("audit", "--ci", "--no-policy"),
+        scenario_id="audit-previous-plugin-type",
+        cwd=scenario.consumer,
+        env=scenario.environment,
+    )
+    assert audit.returncode == 0, audit.stdout + audit.stderr
+
+
 def _assert_mcp_matches_producer(scenario: _Scenario) -> None:
     """Compare actual native config, not merely the lockfile's intended server set."""
     relative = Path(".mcp.json")
