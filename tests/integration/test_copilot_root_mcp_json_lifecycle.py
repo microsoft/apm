@@ -372,18 +372,30 @@ def _seed_036_copilot_only(project: _Project, *, targets: list[str] | None) -> N
 def test_heal_runs_once_and_keeps_an_autodetected_project_installable(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """The heal settles in one install; .github/mcp.json stays as the copilot signal."""
+    """The heal settles in one install; .github/mcp.json stays as the copilot signal.
+
+    No targets are declared and the file is the only copilot signal, so the
+    emptied file is kept (deleting it would drop copilot, #4524) and the next
+    install still targets copilot.
+    """
     project = _Project(tmp_path, apm_binary_path)
     _seed_036_copilot_only(project, targets=None)
 
     first = _flat(project.install())
     assert "Removed APM-managed MCP server 'echo' from .github/mcp.json" in first
+    assert "Removed empty .github/mcp.json" not in first
+    assert project.read_json(".github/mcp.json") == {"mcpServers": {}}
+    _audit_clean(project)
+    project.install("--frozen")
     assert project.read_json(".github/mcp.json") == {"mcpServers": {}}
 
     for _ in range(2):
         again = _flat(project.install())
         assert "Removed APM-managed" not in again and "Kept MCP server" not in again, again
+        assert "Removed empty" not in again, again
+        assert "Configuring for Copilot CLI" in again, again
         assert "echo" in project.read_json(".mcp.json")["mcpServers"]
+        assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
 
     # A user who later writes the old shape by hand keeps it.
     legacy = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
