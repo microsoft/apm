@@ -320,7 +320,11 @@ def export_agent_plugin_bundle(
     if lockfile is None:
         # Nothing to resolve: a fresh 'apm plugin init' scaffold packs as is,
         # like the Claude plugin format (#3994).
-        if package.get_apm_dependencies() or package.get_mcp_dependencies():
+        if (
+            package.get_apm_dependencies()
+            or package.get_mcp_dependencies()
+            or package.get_lsp_dependencies()
+        ):
             raise FileNotFoundError(
                 "apm.lock.yaml not found -- run 'apm install' first to resolve dependencies."
             )

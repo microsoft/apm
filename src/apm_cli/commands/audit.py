@@ -520,14 +520,16 @@ def _preview_strip(
     return affected
 
 
-def _report_warned_checks(ci_result: "CIAuditResult") -> None:
-    """Count warn-mode violations apart from clean passes (#3994)."""
+def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
+    """Summarize a passing run; warn-mode violations are not a clean pass (#3994)."""
     warned = sum(1 for check in ci_result.checks if check.warned)
-    if warned:
-        _rich_warning(
-            f"{warned} check(s) report violations under 'enforcement: warn'; "
-            "they fail once the policy switches to block."
-        )
+    if not warned:
+        _rich_success(f"{STATUS_SYMBOLS['success']} All {total} check(s) passed")
+        return
+    _rich_warning(
+        f"{total} check(s) passed; {warned} report violations under "
+        "'enforcement: warn' and fail once the policy switches to block."
+    )
 
 
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
@@ -580,8 +582,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             console.print()
             summary = ci_result.to_json()["summary"]
             if ci_result.passed:
-                _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
-                _report_warned_checks(ci_result)
+                _report_passed(ci_result, summary["total"])
             else:
                 _rich_error(
                     f"{STATUS_SYMBOLS['error']} {summary['failed']} of "
@@ -611,8 +612,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     _rich_echo("")
     summary = ci_result.to_json()["summary"]
     if ci_result.passed:
-        _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
-        _report_warned_checks(ci_result)
+        _report_passed(ci_result, summary["total"])
     else:
         _rich_error(
             f"{STATUS_SYMBOLS['error']} {summary['failed']} of {summary['total']} check(s) failed"

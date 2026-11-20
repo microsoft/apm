@@ -637,3 +637,26 @@ def test_truncated_cells_use_ascii_ellipsis(capsys):
     out = capsys.readouterr().out
     assert "\u2026" not in out
     assert "..." in out
+
+
+def test_ascii_ellipsis_keeps_ansi_styles_intact():
+    """In a color terminal the dots never land inside an SGR escape (#3994)."""
+    import io
+    import re
+
+    from rich.table import Table
+    from rich.text import Text
+
+    from apm_cli.utils.console import new_console
+
+    buf = io.StringIO()
+    console = new_console(file=buf, width=40, force_terminal=True, color_system="standard")
+    table = Table()
+    table.add_column("Name", overflow="ellipsis", no_wrap=True, max_width=10)
+    table.add_row(Text("abcdefgh", style="green") + Text("ijklmnop", style="blue"))
+    console.print(table)
+    out = buf.getvalue()
+    assert "\u2026" not in out
+    assert ".." in out
+    assert not re.search(r"\x1b\[[0-9;]*\.", out)
+    assert "\x1b[32mabcdefgh\x1b[0m" in out

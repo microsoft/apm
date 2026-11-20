@@ -67,6 +67,15 @@ _ascii_console_classes: dict[type, type] = {}
 _ELLIPSIS_RUN = re.compile(r"([^\s|]{0,2})\u2026")
 
 
+def _ascii_ellipsis(segment: Any) -> Any:
+    """Return *segment* with U+2026 runs rewritten to dots of the same width."""
+    text = segment.text
+    if "\u2026" not in text:
+        return segment
+    dotted = _ELLIPSIS_RUN.sub(lambda m: "." * (len(m.group(1)) + 1), text)
+    return segment._replace(text=dotted)
+
+
 def _ascii_console(base: Any, **kwargs: Any) -> Any:
     """Build *base* so boxes, rules, and trees render in printable ASCII.
 
@@ -87,9 +96,8 @@ def _ascii_console(base: Any, **kwargs: Any) -> Any:
             def _render_buffer(self, buffer: Any) -> str:
                 # Rich truncates with U+2026 whatever the encoding (#3994); swap
                 # it and up to two preceding cells for dots so columns stay aligned.
-                return _ELLIPSIS_RUN.sub(
-                    lambda m: "." * (len(m.group(1)) + 1), super()._render_buffer(buffer)
-                )
+                # Rewrite segment text, before styles become ANSI escapes.
+                return super()._render_buffer(_ascii_ellipsis(segment) for segment in buffer)
 
         cls = _ascii_console_classes.setdefault(base, _AsciiConsole)
     return cls(**kwargs)

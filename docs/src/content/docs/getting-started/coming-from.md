@@ -33,7 +33,8 @@ apm install vercel-labs/agent-skills --skill deploy-to-vercel
 `--skill` installs one skill from a collection; repeat it for more, or pass `--skill '*'` to
 return to all of them. APM writes the selection to `apm.yml`, so a bare `apm install` on
 another machine installs the same subset. Without a `#` ref, APM tracks the default branch and
-warns `1 dependency unpinned`; add a tag or commit SHA. Skill lookup on
+warns `1 dependency unpinned`. The lockfile still pins the resolved commit; to
+track releases on `apm update`, add a semver range such as `#^1.0.0` (a tag like `#v1.0.0` stays put). Skill lookup on
 [skills.sh](https://skills.sh) keeps working: find there, install with APM.
 
 ## From Claude Code plugin marketplaces

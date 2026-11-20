@@ -533,6 +533,8 @@ def _install_registry_group(  # noqa: PLR0913
                             f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
                             f" [dim]({label})[/dim]"
                         )
+                        if not user_scope:
+                            _print_user_wide_configs(console, successful_runtimes)
                     configured_count += 1
                     if is_update:
                         successful_updates.add(dep)

@@ -241,8 +241,19 @@ class TestRenderBundleResult:
         logger = _RecordingLogger()
         result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
         _render_bundle_result(logger, result, BundleFormat.APM, None, False)
-        assert "Share with: apm unpack ./build/my-bundle.zip (legacy APM layout)" in logger.infos
-        assert not any("apm install" in i for i in logger.infos)
+        share = next(i for i in logger.infos if i.startswith("Share with:"))
+        assert share.startswith("Share with: apm unpack ./build/my-bundle.zip (deprecated")
+        assert not share.startswith("Share with: apm install")
+
+    def test_live_agent_plugin_shares_by_declaration(self) -> None:
+        """Agent plugins install declaratively, never via 'apm install <path>' (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["plugin.json"], bundle_path="build/x")
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
+        share = next(i for i in logger.infos if i.startswith("Share"))
+        assert "under dependencies.apm" in share
+        assert "'apm install --target copilot'" in share
+        assert not share.startswith("Share with: apm install")
 
     def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
         logger = _RecordingLogger()

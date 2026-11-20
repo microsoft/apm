@@ -680,7 +680,7 @@ class TestPolicyReasonHelpers:
         assert "acme/.github/apm-policy.yml" in msg
         assert "--no-policy" in msg
         # 'apm update' has no --no-policy flag; the env var works everywhere (#3994).
-        assert "APM_POLICY_DISABLE=1" in msg
+        assert "`APM_POLICY_DISABLE=1 apm <command>` (never export it in CI)" in msg
         assert "apm.yml" in msg
 
     def test_reason_blocked_transitive_mcp_names_declaring_dependency(self):

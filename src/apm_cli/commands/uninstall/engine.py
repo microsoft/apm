@@ -742,7 +742,7 @@ def _mcp_server_hint(name: str, lockfile: "LockFile | None") -> str | None:
     if isinstance(owner, str) and owner.startswith(BUNDLE_MCP_OWNER_PREFIX):
         return (
             f"'{name}' is an MCP server from a local bundle; "
-            "'apm uninstall' cannot remove local-bundle content yet."
+            "'apm uninstall' cannot remove local-bundle content yet (tracked in #3887)."
         )
     if isinstance(owner, str) and owner:
         return (
@@ -893,7 +893,8 @@ def _validate_uninstall_packages(
                 logger.error(
                     f"'{Path(package).name}' is a local bundle. Bundles "
                     "installed with 'apm install <bundle>' are not recorded in apm.yml, "
-                    "and 'apm uninstall' cannot remove local-bundle content yet."
+                    "and 'apm uninstall' cannot remove local-bundle content yet "
+                    "(tracked in #3887)."
                 )
             elif is_local:
                 logger.error(

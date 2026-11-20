@@ -461,6 +461,7 @@ class TestRichTableMarkupEscaping:
             patch("apm_cli.commands.audit._get_console", return_value=console),
             patch("apm_cli.commands.audit._rich_echo") as echo,
             patch("apm_cli.commands.audit._rich_warning") as warning,
+            patch("apm_cli.commands.audit._rich_success") as success,
         ):
             _render_ci_results(result)
         row = next(line for line in console.file.getvalue().splitlines() if "deny" in line)
@@ -468,6 +469,8 @@ class TestRichTableMarkupEscaping:
         echoed = " ".join(call.args[0] for call in echo.call_args_list)
         assert "github.com/acme/tools" in echoed
         assert "enforcement: warn" in warning.call_args.args[0]
+        # No green "All N passed" next to a violation (#3994).
+        success.assert_not_called()
 
     def test_strip_preview_keeps_bracketed_path(self) -> None:
         console = self._console()

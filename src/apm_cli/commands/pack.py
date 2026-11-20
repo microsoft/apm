@@ -835,11 +835,14 @@ def _render_bundle_result(
                 logger.info(f"Share with: apm install {share_arg}")
             elif fmt == BundleFormat.AGENT_PLUGIN:
                 logger.info(
-                    f"Share: consumers declare {share_arg} under dependencies in "
+                    "Share: consumers add the bundle path under dependencies.apm in their "
                     "apm.yml, then run 'apm install --target copilot'."
                 )
             else:
-                logger.info(f"Share with: apm unpack {share_arg} (legacy APM layout)")
+                logger.info(
+                    f"Share with: apm unpack {share_arg} (deprecated legacy layout; "
+                    "pack without --format apm to share with 'apm install')"
+                )
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
