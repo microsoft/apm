@@ -465,8 +465,13 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "I9",
         "#4299",
         _runs("install", "--frozen"),
-        r"Parked MCP server .*: denied",
-        output=r"^\[!\] Parked MCP server .*: denied.*^\+- MCP Servers",
+        r"Parked MCP server .*(: denied|from transitive package)",
+        # Each MCP view build (once per phase) re-emits a denied or unapproved
+        # transitive park: the same top-level notice line appears twice.
+        output=(
+            r"^(\[!\] Parked MCP server [^\n]*?(?:: denied|from transitive package)[^\n]*)$"
+            r".*^\1$"
+        ),
     ),
     KnownOutputCell(
         "install-hook-line-per-target",
