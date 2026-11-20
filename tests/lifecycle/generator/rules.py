@@ -68,13 +68,13 @@ ACCEPTS: Mapping[str, frozenset[str]] = {
 }
 ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "install": (
-        Ev(_INSTALL, 863, '"--only"'),
-        Ev(_INSTALL, 868, '"--update"'),
-        Ev(_INSTALL, 872, '"--dry-run"'),
-        Ev(_INSTALL, 874, '"--force"'),
-        Ev(_INSTALL, 879, '"--frozen"'),
-        Ev(_INSTALL, 904, '"--target"'),
-        Ev(_INSTALL, 1036, '"--no-policy"'),
+        Ev(_INSTALL, 857, '"--only"'),
+        Ev(_INSTALL, 862, '"--update"'),
+        Ev(_INSTALL, 866, '"--dry-run"'),
+        Ev(_INSTALL, 868, '"--force"'),
+        Ev(_INSTALL, 873, '"--frozen"'),
+        Ev(_INSTALL, 898, '"--target"'),
+        Ev(_INSTALL, 1030, '"--no-policy"'),
     ),
     "update": (
         Ev("src/apm_cli/commands/update.py", 464, 'argument("packages"'),
@@ -101,8 +101,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_PACK, 228, '"--dry-run"'),
         Ev(_PACK, 231, '"--force"'),
     ),
-    "bundle-install": (Ev(_INSTALL, 1251, "detect_local_bundle"),),
-    "mcp-install": (Ev(_INSTALL, 972, '"--mcp"'), Ev(_INSTALL, 904, '"--target"')),
+    "bundle-install": (Ev(_INSTALL, 1245, "detect_local_bundle"),),
+    "mcp-install": (Ev(_INSTALL, 966, '"--mcp"'), Ev(_INSTALL, 898, '"--target"')),
     "approve-deny": (
         Ev(_APPROVE, 201, 'argument("packages"'),
         Ev(_APPROVE, 296, 'argument("packages"'),
@@ -123,13 +123,13 @@ REFUSAL_EXIT: Mapping[tuple[str, ...], int] = {
     ("bundle-install", "FROZEN"): 1,
 }
 REFUSAL_EVIDENCE: Mapping[tuple[str, ...], Ev] = {
-    ("mcp-install", "FROZEN"): Ev(_INSTALL, 1205, 'reject_frozen_mutation(frozen, "--mcp")'),
-    ("bundle-install", "FROZEN"): Ev(_INSTALL, 1207, '"positional packages"'),
+    ("mcp-install", "FROZEN"): Ev(_INSTALL, 1199, 'reject_frozen_mutation(frozen, "--mcp")'),
+    ("bundle-install", "FROZEN"): Ev(_INSTALL, 1201, '"positional packages"'),
     ("mcp-install", "UPDATE"): Ev(
         "src/apm_cli/install/mcp/conflicts.py", 89, "--update does not apply to --mcp"
     ),
     # Verified on the real CLI: exit 2 at project and user scope, lock unchanged.
-    ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1212, "--frozen and --update are mutually"),
+    ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1206, "--frozen and --update are mutually"),
 }
 # Commands with a user-scope form; any other command refuses -g (U5 for pack).
 USER_SCOPE_OPS = frozenset(
@@ -145,7 +145,7 @@ USER_SCOPE_OPS = frozenset(
     }
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
-    "install": Ev(_INSTALL, 936, '"--global"'),
+    "install": Ev(_INSTALL, 930, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 487, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 625, '"--global"'),
     "compile": Ev(_COMPILE, 1388, '"--global"'),
@@ -192,7 +192,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U7": (
         "mcp-install acts on the requested server; other primitives keep no-collateral-write",
-        (Ev(_INSTALL, 972, '"--mcp"'),),
+        (Ev(_INSTALL, 966, '"--mcp"'),),
     ),
     "U8": (
         "the source decides the command: bundle-install is install of a local bundle (install "
@@ -205,9 +205,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "local bundle, which writes no manifest entry (uninstall refuses it; update and "
         "prune leave it untouched). A native plugin carries no canvas primitive",
         (
-            Ev(_INSTALL, 1251, "detect_local_bundle"),
-            Ev(_INSTALL, 1016, '"--registry"'),
-            Ev(_INSTALL, 990, '"--url"'),
+            Ev(_INSTALL, 1245, "detect_local_bundle"),
+            Ev(_INSTALL, 1010, '"--registry"'),
+            Ev(_INSTALL, 984, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 734, "is an MCP server, not a package"),
@@ -262,8 +262,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 843, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1045, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 822, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 1024, '"instructions" not in target.primitives'),
         ),
     ),
 }

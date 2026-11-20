@@ -20,6 +20,7 @@ from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
+from .deployed_paths import log_hook_display_payloads as _log_hook_display_payloads
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
@@ -71,28 +72,6 @@ class IntegratorBundle:
     # keep working. Production sites (template.py, integrate_local_content,
     # drift.py) pass a real CanvasIntegrator; when None the loop skips canvas.
     canvas: BaseIntegrator | None = None
-
-
-def _log_hook_display_payloads(
-    payloads: list,
-    verbose: bool,
-    log_fn: Any,
-    logger: Any,
-) -> None:
-    """Emit per-hook-file action summaries for hook transparency."""
-    for _payload in payloads:
-        _src = _payload.get("source_hook_file", "hook file")
-        _actions = _payload.get("actions", [])
-        if _actions:
-            for _act in _actions:
-                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
-        else:
-            log_fn(f"  |   Hook file integrated: {_src}")
-        if verbose and logger is not None:
-            _out_path = _payload.get("output_path", "")
-            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
-            for _jline in _payload.get("rendered_json", "").splitlines():
-                logger.verbose_detail(f"  |     {_jline}")
 
 
 def _label_and_deploy_dir(prim_name: str, mapping, target, deploy_dir: str) -> tuple[str, str]:

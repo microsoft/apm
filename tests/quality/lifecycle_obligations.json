@@ -23650,8 +23650,8 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:843",
-    "src/apm_cli/install/services.py:1045"
+    "src/apm_cli/install/services.py:822",
+    "src/apm_cli/install/services.py:1024"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23708,15 +23708,15 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:972"
+    "src/apm_cli/commands/install.py:966"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1251",
-    "src/apm_cli/commands/install.py:1016",
-    "src/apm_cli/commands/install.py:990",
+    "src/apm_cli/commands/install.py:1245",
+    "src/apm_cli/commands/install.py:1010",
+    "src/apm_cli/commands/install.py:984",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:734",
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "eedda02a2e9ebaa5e34e6adc0467bb7fba4a7e80a73a4bc828d42e5dcb211163"
+ "sha256": "8d4c09ac0751031d193dc96df172bb28eb8cf5001d1f704542d4a45668d40502"
 }

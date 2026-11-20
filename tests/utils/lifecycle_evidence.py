@@ -469,22 +469,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         ),
     ),
     KnownOutputCell(
-        "install-hook-line-per-target",
-        "I9",
-        "#4243",
-        _runs("install"),
-        r"repeats a (line|diagnostic): '\|   ",
-        # One hook integrated into two targets that render it the same way (Claude
-        # and Windsurf, or a hook file) is listed once per target, back to back.
-        output=(
-            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
-            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
-            # An unchanged target adopts its copy (#4184); the line still repeats.
-            r"|^  \|-- 1 hook\(s\) integrated \(1 adopted\) -> [^,\n]+, [^,\n]+\n"
-            r"  \|   Hook file integrated: "
-        ),
-    ),
-    KnownOutputCell(
         "install-registry-lookup-per-registry",
         "I9",
         "#4244",

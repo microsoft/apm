@@ -167,3 +167,21 @@ def test_log_hook_display_payloads_no_actions_fallback():
     payloads = [{"source_hook_file": "empty.json", "actions": [], "rendered_json": ""}]
     _log_hook_display_payloads(payloads, verbose=False, log_fn=emitted.append, logger=None)
     assert any("empty.json" in line for line in emitted)
+
+
+def test_log_hook_display_payloads_prints_an_identical_line_once():
+    """Targets that render one hook identically list it once per package (#4336)."""
+    from apm_cli.install.services import _log_hook_display_payloads
+
+    action = {"event": "PreToolUse", "summary": "runs echo hi"}
+    payloads = [
+        {"source_hook_file": "lint.json", "actions": [action]},
+        {"source_hook_file": "lint.json", "actions": [action]},
+        {"source_hook_file": "lint.json", "actions": [{**action, "event": "preToolUse"}]},
+    ]
+    emitted: list[str] = []
+    _log_hook_display_payloads(payloads, verbose=False, log_fn=emitted.append, logger=None)
+    assert emitted == [
+        "  |   PreToolUse: runs echo hi (lint.json)",
+        "  |   preToolUse: runs echo hi (lint.json)",
+    ]
