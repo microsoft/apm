@@ -75,6 +75,8 @@ from apm_cli.install.drift_render import (
 from apm_cli.install.drift_render import (
     render_drift_text as render_drift_text,
 )
+from apm_cli.install.errors import DirectDependencyError
+from apm_cli.install.source_helpers import locked_content_failure, locked_content_mismatch
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
@@ -210,7 +212,9 @@ def _copy_install_tree(source: Path, target: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) -> None:
+def _verify_remote_cache_candidate(
+    lock_dep: LockedDependency, candidate: Path, lockfile: LockFile | None = None
+) -> None:
     """Fail closed when a cached remote dependency is absent or unverifiable."""
     if (
         getattr(lock_dep, "source", None) not in {"local", "registry"}
@@ -235,6 +239,11 @@ def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) 
                 f"{candidate} does not hold the locked commit {lock_dep.resolved_commit}; "
                 f"{_advice.REPLAY_CACHE_STALE.clause()}"
             )
+    if locked_content_mismatch(lock_dep.get_unique_key(), lock_dep, candidate, lockfile=lockfile):
+        raise CacheMissError(
+            f"{candidate} does not hold the locked content of {lock_dep.get_unique_key()}; "
+            "run 'apm install' to refresh apm_modules cache"
+        )
 
 
 def _materialize_install_path(
@@ -318,7 +327,7 @@ def _materialize_install_path(
     live_candidate = dep_ref.get_install_path(live_root)
     if live_candidate.exists():
         try:
-            _verify_remote_cache_candidate(lock_dep, live_candidate)
+            _verify_remote_cache_candidate(lock_dep, live_candidate, lockfile)
         except CacheMissError:
             if cache_only:
                 raise
@@ -327,7 +336,7 @@ def _materialize_install_path(
                 _copy_install_tree(live_candidate, candidate)
             return candidate
     if cache_only:
-        _verify_remote_cache_candidate(lock_dep, live_candidate)
+        _verify_remote_cache_candidate(lock_dep, live_candidate, lockfile)
 
     if lock_dep.source == "registry":
         if registry_resolver is None:
@@ -348,39 +357,43 @@ def _materialize_install_path(
             registries or {},
             locked_dep=lock_dep,
         )
-        registry_resolver.download_from_lockfile(
+        package_info = registry_resolver.download_from_lockfile(
             download_ref,
             candidate,
             resolved_url=lock_dep.resolved_url,
             resolved_hash=lock_dep.resolved_hash,
             version=lock_dep.version,
         )
-        return candidate
+    else:
+        if downloader is None:
+            raise CacheMissError(f"git replay unavailable for {lock_dep.repo_url}: no downloader")
+        from apm_cli.drift import build_download_ref
 
-    if downloader is None:
-        raise CacheMissError(f"git replay unavailable for {lock_dep.repo_url}: no downloader")
-    from apm_cli.drift import build_download_ref
-
-    if declared_transports is not None:
-        dep_ref = declared_transports.apply(lock_dep, dep_ref)
-    download_ref = build_download_ref(
-        dep_ref,
-        lockfile,
-        update_refs=False,
-        ref_changed=False,
-    )
-    package_info = downloader.download_package(download_ref, candidate)
-    resolved_reference = getattr(package_info, "resolved_reference", None)
-    if (
-        lock_dep.resolved_commit
-        and resolved_reference is not None
-        and getattr(resolved_reference, "resolved_commit", None)
-        not in {None, lock_dep.resolved_commit}
-    ):
-        raise CacheMissError(
-            f"scratch replay resolved {lock_dep.repo_url} to "
-            f"{resolved_reference.resolved_commit}, expected {lock_dep.resolved_commit}"
+        if declared_transports is not None:
+            dep_ref = declared_transports.apply(lock_dep, dep_ref)
+        download_ref = build_download_ref(
+            dep_ref,
+            lockfile,
+            update_refs=False,
+            ref_changed=False,
         )
+        package_info = downloader.download_package(download_ref, candidate)
+        resolved_reference = getattr(package_info, "resolved_reference", None)
+        if (
+            lock_dep.resolved_commit
+            and resolved_reference is not None
+            and getattr(resolved_reference, "resolved_commit", None)
+            not in {None, lock_dep.resolved_commit}
+        ):
+            raise CacheMissError(
+                f"scratch replay resolved {lock_dep.repo_url} to "
+                f"{resolved_reference.resolved_commit}, expected {lock_dep.resolved_commit}"
+            )
+    key = lock_dep.get_unique_key()
+    if locked_content_mismatch(
+        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info
+    ):
+        raise DirectDependencyError(locked_content_failure(key, project_root, lock_dep, candidate))
     return candidate
 
 

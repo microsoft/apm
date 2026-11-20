@@ -387,23 +387,29 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[audit-ci]",
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[install-frozen]"
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[install-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[install-frozen]"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-015",
       "keyword": "MUST",
       "section": "5.6.4",
-      "status": "xfail",
-      "test_count": 3,
+      "status": "active",
+      "test_count": 5,
       "tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[audit-ci]",
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[install-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[install-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[install-frozen]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_tree_sha256_canonicalisation_invariant"
       ]
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[1-False]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[4-True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-bare64-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-fresh]",
@@ -416,8 +422,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 12,
+      "test_count": 14,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[1-False]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[4-True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-bare64-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-fresh]",
@@ -3105,11 +3113,11 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 87,
+      "active": 88,
       "skipped": 3,
       "text-only": 14,
       "unbound": 0,
-      "xfail": 11
+      "xfail": 10
     },
     "governance": {
       "active": 16,

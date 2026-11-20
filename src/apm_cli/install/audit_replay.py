@@ -32,6 +32,11 @@ from apm_cli.install.drift import (
     run_replay,
 )
 from apm_cli.install.plan import lockfile_satisfies_manifest, lockfile_satisfies_replacements
+from apm_cli.install.source_helpers import (
+    locked_content_mismatch,
+    locked_content_mismatch_line,
+    observed_package_hash,
+)
 from apm_cli.integration.targets import TargetProfile, resolve_audit_targets
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -159,16 +164,23 @@ def prepare_ci_audit_replay(
     )
 
 
-def _live_copies_stale(modules_dir: Path, lockfile_path: Path) -> bool:
-    """Whether any live ``apm_modules`` copy contradicts its lock row (#3964)."""
+def _live_copies_stale(modules_dir: Path, lockfile_path: Path) -> tuple[bool, tuple[str, ...]]:
+    """Whether any live ``apm_modules`` copy contradicts its lock row (#3964).
+
+    A copy is stale when the copy-validity owner says so or when its bytes fail
+    install's locked content-hash verdict (#4187). The second value names each
+    content-hash contradiction with the shared entry/expected/observed line.
+    """
     from apm_cli.drift import locked_copy_is_stale
 
     try:
         lockfile = LockFile.read(lockfile_path)
     except (LockfileFormatError, OSError):
-        return False
+        return False, ()
     if lockfile is None:
-        return False
+        return False, ()
+    stale = False
+    mismatches: list[str] = []
     for key, dep in lockfile.dependencies.items():
         if key == "." or getattr(dep, "source", None) == "local":
             continue
@@ -177,8 +189,15 @@ def _live_copies_stale(modules_dir: Path, lockfile_path: Path) -> bool:
         except (ValueError, OSError):
             continue
         if locked_copy_is_stale(dep, path):
-            return True
-    return False
+            stale = True
+        if path.is_dir() and locked_content_mismatch(key, dep, path, lockfile=lockfile):
+            stale = True
+            mismatches.append(
+                locked_content_mismatch_line(
+                    key, dep.content_hash, observed_package_hash(dep, path)
+                )
+            )
+    return stale, tuple(mismatches)
 
 
 def resolve_ci_audit_materialization(
@@ -207,8 +226,15 @@ def resolve_ci_audit_materialization(
     if not (project_root / APM_YML_FILENAME).exists() or not lockfile_path.exists():
         return CiAuditMaterialization()
     warm = (project_root / APM_MODULES_DIR).exists()
-    if warm and not _live_copies_stale(project_root / APM_MODULES_DIR, lockfile_path):
-        return CiAuditMaterialization()
+    mismatches: tuple[str, ...] = ()
+    if warm:
+        stale, mismatches = _live_copies_stale(project_root / APM_MODULES_DIR, lockfile_path)
+        if not stale:
+            return CiAuditMaterialization()
+        from apm_cli.utils.console import _rich_warning
+
+        for line in mismatches:
+            _rich_warning(f"{line} Verifying from the locked source.", symbol="warning", err=True)
     if get_workspace_deploy_root(project_root) != project_root.resolve():
         if warm:
             return CiAuditMaterialization(
@@ -239,4 +265,4 @@ def resolve_ci_audit_materialization(
             )
         )
     except CiAuditReplayError as exc:
-        return CiAuditMaterialization(error=str(exc))
+        return CiAuditMaterialization(error=" ".join((*mismatches, str(exc))))

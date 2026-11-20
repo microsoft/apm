@@ -17,7 +17,7 @@ from apm_cli.models.validation import (
     gather_detection_evidence,
     validate_legacy_marketplace_plugin,
 )
-from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.content_hash import compute_package_hash, same_package_digest
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -122,7 +122,7 @@ def matches_fresh_legacy_plugin_hash(
     cleanup_issues = staging.rollback()
     if cleanup_issues:
         raise _staging_cleanup_error(dep_key, cleanup_issues)
-    return legacy_hash == locked_dependency.content_hash
+    return same_package_digest(legacy_hash, locked_dependency.content_hash)
 
 
 def upgrade_cached_legacy_plugin(
