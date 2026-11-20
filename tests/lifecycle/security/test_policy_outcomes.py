@@ -870,7 +870,6 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
             0,
             (KNOB_BLOCK,),
             unchanged=("*",),
-            xfail="S-pending (neutral issue to follow): dry-run preview of policy outcome",
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), unchanged=("*",)),
         "cache=cold": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=True),
