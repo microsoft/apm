@@ -631,6 +631,21 @@
       ]
     },
     {
+      "issue": 4161,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall of another package exited 1 with incomplete integration cleanup when a surviving package declares only LSP servers (approved, ungated or denied), because package validation did not accept an LSP-only package as a valid survivor.",
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_uninstalling_another_package_reconciles_lsp_and_exits_zero"
+      ]
+    },
+    {
       "issue": 4171,
       "fixed_in": "Unreleased",
       "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",
@@ -1092,6 +1107,36 @@
       ]
     },
     {
+      "issue": 4214,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall of another package exited 1 with incomplete integration cleanup when a surviving package declares only LSP servers (approved, ungated or denied), because package validation did not accept an LSP-only package as a valid survivor.",
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_uninstalling_another_package_reconciles_lsp_and_exits_zero"
+      ]
+    },
+    {
+      "issue": 4215,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall of another package exited 1 with incomplete integration cleanup when a surviving package declares only LSP servers (approved, ungated or denied), because package validation did not accept an LSP-only package as a valid survivor.",
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_uninstalling_another_package_reconciles_lsp_and_exits_zero"
+      ]
+    },
+    {
       "issue": 4216,
       "fixed_in": "Unreleased",
       "summary": "Reinstalling a local bundle whose hooks current trust does not admit (revoked approval, bundle deny, org deny_all) retires the hook entries, hook files, copied scripts and lock rows it deployed earlier through the local-bundle hook trust owner, and announces it.",
@@ -1181,6 +1226,21 @@
       ],
       "regression_tests": [
         "tests/integration/test_policy_install_enforcement_lifecycle.py::test_policy_status_line_prints_once_with_mcp_servers"
+      ]
+    },
+    {
+      "issue": 4257,
+      "fixed_in": "Unreleased",
+      "summary": "An LSP-only package was accepted from a local path but refused from git or marketplace sources; package validation now counts dependencies.lsp like apm and mcp for every source kind.",
+      "failure_modes": [
+        "outcome",
+        "routing"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_lsp_only_package_installs_from_git_like_a_local_path"
       ]
     },
     {

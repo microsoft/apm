@@ -213,3 +213,96 @@ def test_unreadable_target_config_still_fails_closed(scope: _Scope) -> None:
     assert "LSP cleanup failed" in output, describe(result)
     assert _MANIFEST_ERROR not in output, describe(result)
     assert scope.lsp_config.read_bytes() == foreign
+
+
+@pytest.mark.parametrize(
+    "cell",
+    ["gate-on-approved", "lsp-only-survivor", "denied-lsp"],
+    ids=["4161-gate-on", "4214-lsp-only-survivor", "4215-denied-lsp"],
+)
+def test_uninstalling_another_package_reconciles_lsp_and_exits_zero(
+    tmp_path: Path, apm_binary_path: Path, cell: str
+) -> None:
+    """#4161, #4214, #4215: removing a skill package next to an LSP package exits 0."""
+    scene = HarnessScene.create(tmp_path / "scene", apm_binary_path, signal_dirs=())
+    try:
+        factory = LocalPackageFactory(scene.isolated.package_root)
+        skill = factory.create("skill-kit", targets=("copilot",))
+        factory.add_skill(skill, "s", "---\nname: s\ndescription: d\n---\n# s\n")
+        lsp = factory.create("lsp-kit", lsp_dependencies=(_lsp("kit-lsp"),))
+        manifest: dict = {
+            "name": "lsp-consumer",
+            "version": "1.0.0",
+            "targets": ["copilot"],
+            "dependencies": {"apm": [str(skill.root), str(lsp.root)]},
+        }
+        if cell != "lsp-only-survivor":
+            manifest["executables"] = {"allow": {}}
+        (scene.project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+        lsp_config = scene.project / ".github" / "lsp.json"
+
+        assert scene.install("copilot", user=False).returncode == 0
+        if cell != "lsp-only-survivor":
+            scene.ok("approve", str(lsp.root))
+            assert scene.install("copilot", user=False).returncode == 0
+        assert "kit-lsp" in json.loads(lsp_config.read_text(encoding="utf-8"))["lspServers"]
+        if cell == "denied-lsp":
+            scene.ok("deny", str(lsp.root))
+
+        result = scene.run("uninstall", str(skill.root))
+
+        text = flat(result.stdout + result.stderr)
+        assert result.returncode == 0, describe(result)
+        assert "cleanup is incomplete" not in text and "did not finish" not in text, text
+        assert not (scene.project / ".github" / "skills" / "s").exists()
+        assert not (scene.project / ".agents" / "skills" / "s").exists()
+        lock = yaml.safe_load((scene.project / "apm.lock.yaml").read_text(encoding="utf-8"))
+        configured = (
+            set(json.loads(lsp_config.read_text(encoding="utf-8")).get("lspServers", {}))
+            if lsp_config.exists()
+            else set()
+        )
+        if cell == "denied-lsp":
+            assert configured == set(), text
+            assert "kit-lsp" in text, text  # the retirement is announced
+            assert "kit-lsp" not in set(lock.get("lsp_servers") or []), lock
+        else:
+            assert configured == {"kit-lsp"}, text
+            assert set(lock.get("lsp_servers") or []) == {"kit-lsp"}, lock
+    finally:
+        scene.close()
+
+
+def test_lsp_only_package_installs_from_git_like_a_local_path(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4257: one acceptance rule admits an LSP-only package from every source kind."""
+    from tests.utils.local_git_repository import LocalGitRepositoryFactory
+
+    scene = HarnessScene.create(tmp_path / "scene", apm_binary_path, signal_dirs=())
+    try:
+        source = LocalPackageFactory(scene.isolated.package_root).create(
+            "lsp-kit", lsp_dependencies=(_lsp("kit-lsp"),)
+        )
+        repositories = LocalGitRepositoryFactory(scene.isolated.repository_root, env=scene.env)
+        repository = repositories.create("lsp-kit", source_tree=source.root)
+        repositories.tag(repository, "v1.0.0", repositories.commit(repository, message="1.0.0"))
+        env = repositories.url_rewrite_subprocess_env(
+            repository, "https://github.com/acme/lsp-kit.git"
+        )
+        manifest = {
+            "name": "lsp-consumer",
+            "version": "1.0.0",
+            "targets": ["copilot"],
+            "dependencies": {"apm": ["acme/lsp-kit#v1.0.0"]},
+        }
+        (scene.project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+        result = scene.run("install", "--no-policy", "--target", "copilot", env=env)
+
+        assert result.returncode == 0, describe(result)
+        lsp_config = scene.project / ".github" / "lsp.json"
+        assert set(json.loads(lsp_config.read_text(encoding="utf-8"))["lspServers"]) == {"kit-lsp"}
+        assert scene.run("audit", "--ci", "--no-policy", env=env).returncode == 0
+    finally:
+        scene.close()
