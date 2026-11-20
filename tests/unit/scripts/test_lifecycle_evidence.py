@@ -1405,6 +1405,17 @@ def test_output_oracle_does_not_join_a_plain_line_after_a_short_status_line() ->
     assert found == ["stdout repeats a diagnostic: '[!] Policy off.'"]
 
 
+def test_output_oracle_joins_the_space_led_tail_of_a_path_folded_at_full_width() -> None:
+    # A 160-character path folds into two full-width rows; the word after it
+    # wraps with the space it broke at (macOS tmp paths, #4113).
+    head, tail = "/" + "p" * 79, "/" + "q" * 79
+    stdout = (
+        f"[*] Validating 1 package...\n[+] \n{head}\n{tail}\n"
+        f"[>] Installing 1 new package...\n  [+] \n{head}\n{tail}\n (local)\n"
+    )
+    assert output_violations(("install",), _cli(("install",), stdout)) == []
+
+
 def test_output_oracle_allows_non_ascii_characters_of_the_test_own_path() -> None:
     world = Path("/tmp/iso w\u00f6rld \u00e9/work")
     echo = CommandResult((*_APM, "install"), 0, f"[*] Updated {world}/apm.yml\n", "", world)

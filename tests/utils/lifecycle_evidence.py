@@ -695,7 +695,8 @@ def _logical_lines(text: str) -> list[str]:
     The console wraps a long status or tree line at its width: the broken
     line ends with the space it broke at, or fills the width when a word is
     split, and the continuation starts at column 0 with no status, tree or
-    box prefix. Joining it back keeps two different wrapped paths from
+    box prefix (or with the one space it broke at, when the broken line
+    fills the width). Joining it back keeps two different wrapped paths from
     comparing equal on their shared first half ("[>] Resolving"); a short
     line is never joined, so plain lines such as "Phase: ..." stay apart.
     """
@@ -704,6 +705,8 @@ def _logical_lines(text: str) -> list[str]:
     for raw in text.splitlines():
         line = raw.rstrip()
         wrapped = previous_raw.endswith(" ") or len(previous_raw) >= _WRAP_WIDTH
+        if len(previous_raw) >= _WRAP_WIDTH and re.match(r" \S", line):
+            line = line[1:]
         previous_raw = raw
         if not line.strip():
             continue
