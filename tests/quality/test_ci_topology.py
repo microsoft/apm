@@ -1641,3 +1641,43 @@ def test_full_integration_opt_in_drift_fails(mutation: str) -> None:
         wait["env"]["EXPECTED_CHECKS"] = f"{head} || 'Build (Linux),{unlabeled}"
     with pytest.raises(AssertionError):
         _assert_full_integration_opt_in(integration, merge_gate)
+
+
+def _license_review_steps(workflow: WorkflowNode) -> list[WorkflowNode]:
+    job = next(iter(workflow["jobs"].values()))
+    return [
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/dependency-review-action@")
+    ]
+
+
+def _assert_license_review_retries_without_softening(workflow: WorkflowNode) -> None:
+    attempts = _license_review_steps(workflow)
+    assert len(attempts) == 3, "license policy check runs as exactly 3 attempts"
+    assert all(step["with"] == attempts[0]["with"] for step in attempts), (
+        "every attempt enforces the same license and severity policy"
+    )
+    *retries, final = attempts
+    assert all(step.get("continue-on-error") is True for step in retries)
+    assert "continue-on-error" not in final, "the last attempt must be able to fail the job"
+    for previous, step in pairwise(attempts):
+        assert f"steps.{previous['id']}.outcome == 'failure'" in str(step["if"]), (
+            "a retry runs only after the previous attempt failed"
+        )
+
+
+def test_license_review_retries_transient_failures_without_softening_policy() -> None:
+    """NOTICE Drift is aggregated by the required gate; an upstream API flake must not block it."""
+    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "notice-drift.yml")
+    _assert_license_review_retries_without_softening(workflow)
+
+    softened = deepcopy(workflow)
+    _license_review_steps(softened)[-1]["continue-on-error"] = True
+    with pytest.raises(AssertionError):
+        _assert_license_review_retries_without_softening(softened)
+
+    weakened = deepcopy(workflow)
+    _license_review_steps(weakened)[1]["with"]["fail-on-severity"] = "critical"
+    with pytest.raises(AssertionError):
+        _assert_license_review_retries_without_softening(weakened)
