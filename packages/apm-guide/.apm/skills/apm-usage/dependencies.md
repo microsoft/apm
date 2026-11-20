@@ -199,6 +199,8 @@ aliases, or marketplace dependencies.
 
 Three mutually exclusive keys select the form: `git`, `path`, or `marketplace`.
 
+An `x-` vendor-extension key (`x-[a-z][a-z0-9-]*`) in an entry is ignored and kept on rewrite; any other unknown key fails the parse.
+
 The legacy string suffix `@alias` is not supported; write `alias:` explicitly
 instead so `@` remains reserved for git usernames and version syntax.
 

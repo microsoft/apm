@@ -2694,6 +2694,36 @@
       ]
     },
     {
+      "issue": 4178,
+      "fixed_in": "Unreleased",
+      "summary": "apm approve <pkg> printed its unreachable org policy warning twice because two trust readers in one command each resolved the policy.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_miss_reported_once_lifecycle.py::test_approve_reports_unreachable_policy_once"
+      ]
+    },
+    {
+      "issue": 4180,
+      "fixed_in": "Unreleased",
+      "summary": "With policy.fetch_failure_default: block and an unreachable org policy, a blocked install also printed that it was proceeding without policy enforcement.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_miss_reported_once_lifecycle.py::test_blocked_install_does_not_claim_to_proceed_without_policy"
+      ]
+    },
+    {
       "issue": 4185,
       "fixed_in": "0.37.0",
       "summary": "apm uninstall could exit 1 after it had already changed apm.yml, the lockfile and deployed files when the remaining packages' org-policy trust refused mid-command; uninstall now also refuses out-of-project paths before any change",
@@ -3419,6 +3449,24 @@
       ]
     },
     {
+      "issue": 4251,
+      "fixed_in": "Unreleased",
+      "summary": "Vendor-extension target ids (x-<vendor>-<name>) were rejected at manifest parse; they now parse and are named as unsupported instead of deploying or being ignored.",
+      "failure_modes": [
+        "routing",
+        "observation"
+      ],
+      "properties": [
+        "routing.authorized_targets_only",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_vendor_extension_manifest_lifecycle.py::test_vendor_target_is_named_and_not_deployed",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_vendor_extension_target_identifier_is_accepted",
+        "tests/spec_conformance/test_targets_behavior_reqs.py::test_vendor_target_identifier_parses"
+      ]
+    },
+    {
       "issue": 4252,
       "fixed_in": "Unreleased",
       "summary": "registries.<name> entries handled unknown keys differently per manifest contract: a mistyped key was accepted under the OpenAPM v0.1 contract and an x- vendor key was rejected under the default contract. Both contracts now reject a mistyped key, naming it and the registry, and ignore x- keys.",
@@ -3428,6 +3476,21 @@
         "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_mistyped_key_is_rejected_naming_key_and_registry",
         "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_extension_key_is_accepted",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_registry_entry_rejects_typos_but_keeps_vendor_keys"
+      ]
+    },
+    {
+      "issue": 4253,
+      "fixed_in": "Unreleased",
+      "summary": "A policy.hash pin with a sha384: or sha512: prefix and no hash_algorithm was refused because the algorithm defaulted to sha256 instead of following the prefix.",
+      "failure_modes": [
+        "reference"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_hash_prefix_lifecycle.py::test_prefixed_policy_hash_pin_is_verified_with_its_algorithm",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix"
       ]
     },
     {
@@ -3456,6 +3519,21 @@
       ]
     },
     {
+      "issue": 4260,
+      "fixed_in": "Unreleased",
+      "summary": "An x- vendor-extension key inside an object-form dependencies.apm[] entry failed the manifest parse instead of being ignored.",
+      "failure_modes": [
+        "reference"
+      ],
+      "properties": [
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_vendor_extension_manifest_lifecycle.py::test_dependency_entry_vendor_key_is_ignored_and_preserved",
+        "tests/spec_conformance/test_ext_behavior_reqs.py::test_apm_dependency_entry_vendor_keys_are_ignored"
+      ]
+    },
+    {
       "issue": 4261,
       "fixed_in": "Unreleased",
       "summary": "Top-level x- vendor extension keys in apm.lock.yaml were dropped when a command rewrote the lockfile; every rewrite now keeps them.",
@@ -3471,6 +3549,50 @@
       ]
     },
     {
+      "issue": 4262,
+      "fixed_in": "Unreleased",
+      "summary": "apm approve with no package and no selector exited 1 instead of the usage-error exit code 2.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_refusal_stderr_lifecycle.py::test_policy_refusals_and_approve_usage_error_write_stderr",
+        "tests/unit/commands/test_approve_deny.py::TestApproveCmd::test_no_args_is_a_usage_error"
+      ]
+    },
+    {
+      "issue": 4263,
+      "fixed_in": "Unreleased",
+      "summary": "apm update <pkg> exited 0 for an undeclared package when apm.yml declared no APM dependencies, so a typo looked like a successful update.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_update_undeclared_package_refusal_lifecycle.py::test_update_refuses_an_undeclared_package"
+      ]
+    },
+    {
+      "issue": 4267,
+      "fixed_in": "Unreleased",
+      "summary": "apm install printed the blocking org policy line twice when the MCP phase re-checked the merged MCP set against the same policy.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_announced_once_lifecycle.py::test_blocking_policy_line_printed_once_when_mcp_phase_is_denied"
+      ]
+    },
+    {
       "issue": 4270,
       "fixed_in": "Unreleased",
       "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",
@@ -3480,6 +3602,60 @@
         "tests/unit/install/test_legacy_plugin_compat.py::test_cached_pass_classifies_as_the_fresh_pass",
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
+      ]
+    },
+    {
+      "issue": 4277,
+      "fixed_in": "Unreleased",
+      "summary": "A dependency chain deeper than the transitive depth cap dropped the dependency past the cap and installed an incomplete graph instead of failing.",
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_dependency_depth_cap_lifecycle.py::test_install_fails_when_the_chain_exceeds_the_depth_cap",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_exceeding_depth_cap_fails_naming_the_chain"
+      ]
+    },
+    {
+      "issue": 4278,
+      "fixed_in": "Unreleased",
+      "summary": "Registry lock replay refused a resolved_url on another registry declared in apm.yml before fetching, even when its bytes matched resolved_hash.",
+      "failure_modes": [
+        "reference",
+        "auth"
+      ],
+      "properties": [
+        "source.ref_cache_coherent",
+        "auth.credentials_isolated"
+      ],
+      "regression_tests": [
+        "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
+        "tests/unit/registry/test_resolver.py::TestDownloadFromLockfile::test_declared_mirror_may_serve_but_the_locked_hash_decides",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
+      ]
+    },
+    {
+      "issue": 4279,
+      "fixed_in": "Unreleased",
+      "summary": "Org policy discovery read only the origin remote: a project whose single remote had another name was treated as having none, and several remotes without origin were not reported.",
+      "failure_modes": [
+        "outcome",
+        "routing"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_several_remotes_without_origin_fail_closed",
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_single_non_origin_remote_is_used_for_discovery",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_single_non_origin_remote_identifies_the_project",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_several_non_origin_remotes_fail_closed_naming_candidates"
       ]
     },
     {
@@ -3494,6 +3670,21 @@
         "tests/unit/test_apm_yml_registries.py::TestRegistryUrlScheme::test_http_to_public_host_is_a_parse_error",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url"
+      ]
+    },
+    {
+      "issue": 4287,
+      "fixed_in": "Unreleased",
+      "summary": "apm audit --ci --format json printed no JSON when the install replay failed on a local dependency; the failure is now a failed drift check in the document.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_audit_ci_structured_output_lifecycle.py::test_audit_ci_structured_output_reports_a_failed_replay"
       ]
     },
     {

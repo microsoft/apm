@@ -736,7 +736,7 @@ class TestValidationFailureReasonMessages:
             # user is already in verbose mode.
             assert "run with --verbose for the full probe log" not in output
 
-    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.install.repository_access._uses_clone_root_probe", return_value=True)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_clone_root_probe_omits_probe_chain(self, mock_validate, mock_probe):
         with self._chdir_tmp():
@@ -746,8 +746,8 @@ class TestValidationFailureReasonMessages:
             assert "all probes failed" not in output
             assert "not accessible or doesn't exist" in output
 
-    @patch("apm_cli.commands.install._initial_scheme", return_value="ssh")
-    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.install.repository_access._initial_scheme", return_value="ssh")
+    @patch("apm_cli.install.repository_access._uses_clone_root_probe", return_value=True)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_ssh_probe_names_ssh_failure(
         self, mock_validate, mock_probe, mock_scheme

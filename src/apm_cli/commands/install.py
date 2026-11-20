@@ -31,7 +31,6 @@ from apm_cli.deps.lockfile_generator import (
 )
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.deps.registry.feature_gate import UserRegistryConfigDisabledError
-from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
@@ -113,7 +112,7 @@ from apm_cli.install.phases.local_content import (
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
 from apm_cli.install.pipeline_entry import install_pipeline_options, pipeline_preview
-from apm_cli.install.repository_access import inaccessible_package_reason
+from apm_cli.install.repository_access import probe_failure_reason
 
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
@@ -133,7 +132,6 @@ from apm_cli.install.validation import (
 from apm_cli.install.validation import (
     _local_path_failure_reason,
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
-    _uses_clone_root_probe,
     _validate_package_exists,
 )
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
@@ -486,36 +484,7 @@ def _resolve_package_references(
         else:
             reason = _local_path_failure_reason(dep_ref) or _ambiguous_subpath_hint(dep_ref)
             if not reason:
-                # Round-4 panel fix (devx-ux): name the four-step probe
-                # chain explicitly when the validator exhausted it
-                # (virtual subdirectory + explicit ref). Generic "not
-                # accessible" hides the failure mode for the precise
-                # case where the most diagnostics are available. A clone-root
-                # ``git ls-remote`` probe never ran that chain.
-                is_subdir_ref_chain = (
-                    dep_ref.is_virtual
-                    and dep_ref.is_virtual_subdirectory()
-                    and bool(dep_ref.reference)
-                    and not _uses_clone_root_probe(dep_ref)
-                )
-                if is_subdir_ref_chain:
-                    reason = (
-                        "all probes failed (marker-file, Contents API, "
-                        "git ls-remote, shallow-fetch) -- verify the path "
-                        "and ref exist and that your credentials have "
-                        "read access"
-                    )
-                    if not verbose:
-                        reason += " (run with --verbose for the full probe log)"
-                elif _uses_clone_root_probe(dep_ref) and _initial_scheme(dep_ref) == "ssh":
-                    reason = (
-                        "git ls-remote over SSH failed -- verify that your SSH "
-                        "key has read access to the repository"
-                    )
-                    if not verbose:
-                        reason += " (run with --verbose for the git output)"
-                else:
-                    reason = inaccessible_package_reason(dep_ref, package, auth_resolver, verbose)
+                reason = probe_failure_reason(dep_ref, package, auth_resolver, verbose, scope=scope)
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)

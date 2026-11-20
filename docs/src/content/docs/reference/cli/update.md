@@ -44,7 +44,7 @@ On a fresh clone or CI runner without local deployment receipts (for example a s
 
 | Argument | Description |
 | --- | --- |
-| `PACKAGES...` | Optional. One or more dependency names to refresh (short name like `compliance-rules`, canonical `owner/repo`, or `plugin@marketplace`). Omit to refresh everything. Unknown names exit non-zero with the available list. |
+| `PACKAGES...` | Optional. One or more dependency names to refresh (short name like `compliance-rules`, canonical `owner/repo`, or `plugin@marketplace`). Omit to refresh everything. Unknown names exit 1 with the available list, also when `apm.yml` declares no APM dependencies. |
 
 ## Options
 

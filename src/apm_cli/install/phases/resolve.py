@@ -715,7 +715,9 @@ def _resolve_dependencies(
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
             fail_msg = with_preserved_install_hint(fail_msg, install_path)
-            fail_msg += not_found_next_step(e, dep_ref, is_direct=is_direct)
+            fail_msg += not_found_next_step(
+                e, dep_ref, is_direct=is_direct, scope=getattr(ctx, "scope", None)
+            )
 
             with callback_lock:
                 callback_failures.add(dep_key)

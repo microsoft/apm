@@ -390,23 +390,6 @@ _FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runti
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
     KnownOutputCell(
-        "audit-json-replay-error-has-no-json",
-        "I6",
-        "#4287",
-        _scenario_runs("audit", "root-source-replacement"),
-        r"JSON mode printed invalid JSON",
-        output=r"\A\Z",
-    ),
-    KnownOutputCell(
-        "approve-org-policy-warning-twice",
-        "I9",
-        "#4178",
-        _runs("approve"),
-        r"\[!\] (Org policy not applied|Using stale cached org policy)",
-        # Only runs that print the same warning line twice (a single warning is correct).
-        output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
-    ),
-    KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
         "#4196",
