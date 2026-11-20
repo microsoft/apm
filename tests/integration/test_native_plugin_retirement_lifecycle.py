@@ -131,17 +131,22 @@ def test_uninstalling_another_package_retires_a_disallowed_native_plugin(
     assert not (lifecycle_world.project / ".claude" / "skills" / _SIBLING).exists()
 
 
+@pytest.mark.parametrize("update_args", (("update",), ("update", "--yes")), ids=("prompt", "yes"))
 def test_update_refuses_a_native_plugin_the_org_policy_denies(
     lifecycle_world: World,  # noqa: F811
+    update_args: tuple[str, ...],
 ) -> None:
-    """#4445: apm update exits 1 and names the denied plugin, as install does."""
+    """#4445: apm update exits 1, names the denied plugin and the policy reason."""
     _arrange(lifecycle_world)
     use_policy(lifecycle_world, "deny-native")
 
-    result = _apm(lifecycle_world, "update", "--yes")
+    result = _apm(lifecycle_world, *update_args)
 
     assert result.returncode == 1, _evidence(result)
-    assert _PLUGIN in f"{result.stdout}\n{result.stderr}", _evidence(result)
+    output = " ".join(f"{result.stdout}\n{result.stderr}".split())
+    assert _PLUGIN in output, _evidence(result)
+    assert "denied by pattern" in output, _evidence(result)
+    assert _SERVER in (lifecycle_world.project / ".mcp.json").read_text(encoding="utf-8")
 
 
 def test_update_retires_a_native_plugin_whose_definition_changed(
