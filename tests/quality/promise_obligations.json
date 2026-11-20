@@ -167,18 +167,11 @@
   "P-INV-I6|op:approve-deny": "tests/lifecycle/test_core_example.py::test_core_gate_row_keeps_every_invariant",
   "P-INV-I6|op:audit": "tests/lifecycle/test_core_example.py::test_core_gate_row_keeps_every_invariant",
   "P-INV-I6|op:install": "tests/lifecycle/test_core_example.py::test_core_gate_row_keeps_every_invariant",
-<<<<<<< HEAD
-  "P-INV-I6|op:prune": "tests/integration/test_generated_gate_state_machine.py::test_gate_mandatory_spine_covers_obligations[project]",
-  "P-INV-I6|op:uninstall": "tests/integration/test_generated_gate_state_machine.py::test_gate_mandatory_spine_covers_obligations[project]",
-  "P-INV-I6|op:update": "tests/integration/test_generated_gate_state_machine.py::test_gate_mandatory_spine_covers_obligations[project]",
-  "P-INV-I7|op:approve-deny": "tests/lifecycle/test_absorbed_rows.py::test_absorbed_row_keeps_every_invariant[absorbed_update_executables_decision]",
-  "P-INV-I7|op:audit": "tests/integration/test_generated_gate_state_machine.py::test_gate_mandatory_spine_covers_obligations[project]",
-=======
   "P-INV-I6|op:prune": "tests/lifecycle/machines/test_m_gate.py::test_gate_mandatory_spine_covers_obligations[project]",
   "P-INV-I6|op:uninstall": "tests/lifecycle/machines/test_m_gate.py::test_gate_mandatory_spine_covers_obligations[project]",
   "P-INV-I6|op:update": "tests/lifecycle/machines/test_m_gate.py::test_gate_mandatory_spine_covers_obligations[project]",
+  "P-INV-I7|op:approve-deny": "tests/lifecycle/test_absorbed_rows.py::test_absorbed_row_keeps_every_invariant[absorbed_update_executables_decision]",
   "P-INV-I7|op:audit": "tests/lifecycle/machines/test_m_gate.py::test_gate_mandatory_spine_covers_obligations[project]",
->>>>>>> origin/danielmeppiel-cautious-fortnight
   "P-INV-I7|op:install": "tests/lifecycle/test_core_example.py::test_core_gate_row_keeps_every_invariant",
   "P-INV-I7|op:uninstall": "tests/lifecycle/test_absorbed_rows.py::test_absorbed_row_keeps_every_invariant[absorbed_uninstall_lsp_only_scope]",
   "P-INV-I7|op:update": "tests/lifecycle/test_absorbed_rows.py::test_absorbed_row_keeps_every_invariant[absorbed_update_executables_decision]",

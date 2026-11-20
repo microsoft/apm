@@ -21,10 +21,7 @@ POLICY_VARIANTS = (
     "none",
     "allow",
     "deny-pkg",
-    "deny-lsp",
-    "deny-native",
     "exec-deny-all",
-    "exec-gate-on",
     "mcp-deny",
     "unreachable",
     "hash-mismatch",
@@ -33,12 +30,8 @@ POLICY_VARIANTS = (
     "deny-native",
     "exec-gate-on",
 )
-<<<<<<< HEAD
-# Policy variants that deny named packages (``policy_denied``).
-=======
 # Policy variants that deny packages by name; ``policy_denied`` names which.
 # exec-gate-on recommends a package the world never serves, so it denies nothing.
->>>>>>> origin/danielmeppiel-cautious-fortnight
 PACKAGE_DENY_POLICIES = frozenset({"deny-pkg", "deny-lsp", "deny-native"})
 # Policy variants whose effect on an install the model does not predict.
 UNPREDICTED_POLICIES = frozenset({"unreachable", "hash-mismatch", "chain-cycle"})

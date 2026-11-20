@@ -8,10 +8,17 @@ copy-on-write copy in milliseconds. ``fixtures.py`` exposes them as the
 
 from __future__ import annotations
 
+from tests.lifecycle.world import registry
 from tests.lifecycle.world.builder import build_template
 from tests.lifecycle.world.clone import clone
 from tests.lifecycle.world.contract import PackageRef, Services, World
-from tests.lifecycle.world.scopes import apm_home_outside_home, use_policy
+from tests.lifecycle.world.scopes import (
+    apm_home_outside_home,
+    login_azure,
+    use_ado_pat,
+    use_policy,
+    use_registry,
+)
 
 __all__ = [
     "PackageRef",
@@ -20,5 +27,9 @@ __all__ = [
     "apm_home_outside_home",
     "build_template",
     "clone",
+    "login_azure",
+    "registry",
+    "use_ado_pat",
     "use_policy",
+    "use_registry",
 ]
