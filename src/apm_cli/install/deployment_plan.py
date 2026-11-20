@@ -41,13 +41,17 @@ def _warn_parked_plugin(package_name, package_info, allow_executables, diagnosti
     """Name why the trust owner parked a native plugin, with the next step.
 
     A plugin that is merely not approved yet is reported by the registrar's
-    own refusal, so only changed, denied, transitive and APM-owned-path
-    parking is named here.
+    own refusal, so only changed, denied, transitive, APM-owned-path and
+    incomplete-grant parking is named here.
     """
     from .exec_gate import plugin_admission, resolve_package_key
 
     verdict = plugin_admission(package_name, package_info, allow_executables, ctx=ctx)
-    if verdict is None or verdict.allowed or verdict.reason == "unapproved-executables":
+    if (
+        verdict is None
+        or verdict.allowed
+        or (verdict.reason == "unapproved-executables" and not verdict.detail)
+    ):
         return verdict
     from apm_cli.security.executables import _strip_version
     from apm_cli.security.trust import parked_plugin_message

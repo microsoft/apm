@@ -47,6 +47,9 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
         "def package_type_verdicts(",
         "def admit_native_plugin(",
         "current = native_plugin_fingerprint(Path(plugin_root))",
+        "def agent_plugin_exec_types(",
+        "found.update(dict.fromkeys(agent_plugin_exec_types(root)))",
+        "exec_types = native_plugin_exec_types(plugin_root)",
     ),
     _EXECUTABLES: (
         "return entry.get(exec_type, False) is True",
@@ -68,9 +71,17 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
     "src/apm_cli/commands/approve.py": (
         "narrowed = record_pins(allow, identity",
         "return package_type_verdicts(",
+        "declaration = native_declaration(declaration, package_dir)",
+        "decl = native_declaration(decl, pkg_dir)",
     ),
-    "src/apm_cli/install/native_plugin_admission.py": ("native=True,",),
+    "src/apm_cli/install/native_plugin_admission.py": (
+        "native=True,",
+        "set(native_plugin_exec_types(Path(install_path)))",
+    ),
 }
+# A native plugin's executable types come from security/trust.py alone
+# (#4042): no caller derives or adds types the approve views cannot see.
+_NATIVE_TYPE_TOKENS = ("extra_types=", "native_declared_types(", "def agent_plugin_exec_types(")
 # Type-level resolvers cannot see pins; outside security/ every per-type
 # verdict comes from trust.package_type_verdicts.
 _PIN_BLIND = ("resolve_exec_decision(", "exec_status_for_declaration(")
@@ -143,10 +154,26 @@ def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
                 )
             )
     for path in _python_paths(provider, _SRC):
-        if path in _ITEM_PRODUCERS:
+        if path == _TRUST:
             continue
         facts, failures = _facts_for(provider, path, GUARD_ITEM_ADMISSION)
         if failures:
+            continue
+        native = [
+            token
+            for token in _NATIVE_TYPE_TOKENS
+            if any(token in line and not line.lstrip().startswith("#") for line in _lines(facts))
+        ]
+        if native:
+            findings.append(
+                _summary(
+                    GUARD_ITEM_ADMISSION,
+                    path,
+                    "Native plugin executable types come from security/trust.py "
+                    "(native_plugin_exec_types); remove " + ", ".join(native),
+                )
+            )
+        if path in _ITEM_PRODUCERS:
             continue
         found = [token for token in _ITEM_TOKENS if _present(facts, token)]
         if not path.startswith(_SECURITY):
