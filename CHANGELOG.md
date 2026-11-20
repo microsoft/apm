@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
-- User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4087)
+- User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4151)
 
 ## [0.37.0] - 2026-11-20
 
