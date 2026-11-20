@@ -126,7 +126,10 @@ pytestmark = [pytest.mark.<behavioral>, pytest.mark.promise("<catalog id>")]
   (`P-OWN-*`, `P-INV-*`, `P-LAW-*`, `P-DOC-*`); spec-conformance modules use
   their OpenAPM `req-*` ids. Add a missing promise to the catalog in the
   same pull request.
-- Local check before push:
+- Local check before push: `uv run --extra dev python -m tests.quality.taxonomy --changed`
+  checks only the test modules you changed (committed, staged, unstaged or
+  untracked, against the merge base with `origin/main`) in well under 5
+  seconds. The full gate is
   `uv run --extra dev pytest -p no:cacheprovider -q tests/quality/test_test_taxonomy.py`.
   A failure for a missing marker or promise prints the exact line to add, for
   example `Suggested: pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-...")]`:
