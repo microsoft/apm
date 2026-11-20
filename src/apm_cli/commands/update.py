@@ -464,7 +464,10 @@ def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
     for row in restored:
         logger.info(f"Restored marketplace provenance for {row} from its catalog.")
     if restored and not dry_run:
-        lockfile.write(lock_path)
+        from apm_cli.deps.lockfile_write_authority import provisional_lockfile_writes
+
+        with provisional_lockfile_writes():
+            lockfile.write(lock_path)
     return lockfile
 
 

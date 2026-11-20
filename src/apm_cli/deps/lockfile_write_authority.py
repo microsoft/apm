@@ -88,6 +88,9 @@ class _WriteScope:
     writer: LockfileWriter
     pending: dict[Path, str | _Removed] = field(default_factory=dict)
     after_commit: list[Callable[[], None]] = field(default_factory=list)
+    # False while only provisional corrections are staged: a failure then
+    # commits nothing, because the command has not changed state yet.
+    changed_state: bool = False
 
 
 @dataclass
@@ -97,6 +100,7 @@ class _Writer:
 
 
 _active_writer: ContextVar[_Writer | None] = ContextVar("apm_lockfile_writer", default=None)
+_provisional: ContextVar[bool] = ContextVar("apm_lockfile_provisional", default=False)
 
 
 def _key(path: Path) -> Path:
@@ -112,6 +116,8 @@ def _scope(*, open_: bool = False) -> _WriteScope | None:
         return None
     if active.scope is None and open_:
         active.scope = _WriteScope(active.writer)
+    if open_ and not _provisional.get():
+        active.scope.changed_state = True
     return active.scope
 
 
@@ -167,7 +173,7 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
     try:
         yield
     except BaseException as error:
-        if active.scope is not None and _commits(error):
+        if active.scope is not None and active.scope.changed_state and _commits(error):
             _commit(active.scope)
         raise
     else:
@@ -291,6 +297,22 @@ def restore_lockfile_bytes(path: Path, data: bytes) -> None:
     if scope is not None:
         scope.pending.pop(_key(path), None)
     atomic_write_text(path, data.decode("utf-8"), normalize_line_endings=False)
+
+
+@contextmanager
+def provisional_lockfile_writes() -> Iterator[None]:
+    """Stage a lockfile correction that commits only with the command's own result.
+
+    A correction staged here (for example restored marketplace provenance)
+    reaches disk when the command completes, or with the state change of a
+    command that later fails; a command that fails before changing state
+    leaves the lockfile byte-identical.
+    """
+    token = _provisional.set(True)
+    try:
+        yield
+    finally:
+        _provisional.reset(token)
 
 
 @contextmanager
