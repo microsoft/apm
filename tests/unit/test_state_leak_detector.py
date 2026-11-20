@@ -177,3 +177,22 @@ def test_detector_wraps_every_other_function_autouse_fixture(
         and defs[-1].scope == "function"
     ]
     assert function_scoped[0] == "_apm_state_leak_detector"
+
+
+def test_session_check_names_mock_bound_module_globals() -> None:
+    """A module first imported under a patch keeps the mock; the check names it."""
+    import types
+    from unittest.mock import MagicMock
+
+    leaked = types.ModuleType("apm_cli.fake_leaked")
+    leaked.is_github_hostname = MagicMock(return_value=False)
+    clean = types.ModuleType("apm_cli.fake_clean")
+    clean.is_github_hostname = len
+    outside = types.ModuleType("other_pkg")
+    outside.helper = MagicMock()
+
+    found = state_leaks.mock_bound_module_globals(
+        {"apm_cli.fake_leaked": leaked, "apm_cli.fake_clean": clean, "other_pkg": outside}
+    )
+
+    assert found == ["apm_cli.fake_leaked.is_github_hostname"]

@@ -330,3 +330,40 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             _LIFECYCLE_SMOKE_MARKER
         ):
             item.add_marker(_LIFECYCLE_SMOKE_MARKER)
+
+
+_MOCK_GLOBALS_KEY = "apm_mock_bound_module_globals"
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail the run when an ``apm_cli`` module global is left as a mock.
+
+    xdist workers hand their findings to the controller, which reports them.
+    """
+    from tests.utils import state_leaks
+
+    config = session.config
+    found = set(state_leaks.mock_bound_module_globals())
+    if hasattr(config, "workeroutput"):
+        config.workeroutput[_MOCK_GLOBALS_KEY] = sorted(found)
+        return
+    found |= getattr(config, "_apm_worker_mock_globals", set())
+    if found:
+        reporter = config.pluginmanager.get_plugin("terminalreporter")
+        lines = [
+            "[x] apm_cli module globals left as unittest.mock objects "
+            "(a patch was captured by a module first imported inside it):",
+            *(f"    {name}" for name in sorted(found)),
+        ]
+        if reporter is not None:
+            reporter.write_line("\n".join(lines), red=True)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error) -> None:
+    """Collect an xdist worker's mock-bound module globals on the controller."""
+    found = getattr(node, "workeroutput", {}).get(_MOCK_GLOBALS_KEY, [])
+    collected = getattr(node.config, "_apm_worker_mock_globals", set())
+    collected.update(found)
+    node.config._apm_worker_mock_globals = collected
