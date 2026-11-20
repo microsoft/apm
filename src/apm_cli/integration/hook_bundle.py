@@ -5,7 +5,7 @@ import logging
 import shutil
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
@@ -23,7 +23,6 @@ class HookBundleCopyResult:
 
     scripts_copied: int = 0
     files_adopted: int = 0
-    written: list[Path] = field(default_factory=list)
 
 
 def _hook_source_root(
@@ -218,10 +217,10 @@ def copy_deployed_hook_bundle(
             continue
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, target_file)
+        integrator.note_rendered_write(target_file)
         if target_rel in command_target_rels:
             result.scripts_copied += 1
         target_paths.append(target_file)
-        result.written.append(target_file)
 
     if exclude_json_files:
         return result
@@ -246,7 +245,7 @@ def copy_deployed_hook_bundle(
             continue
         target_file.parent.mkdir(parents=True, exist_ok=True)
         target_file.write_text(content, encoding="utf-8")
+        integrator.note_rendered_write(target_file)
         target_paths.append(target_file)
-        result.written.append(target_file)
 
     return result

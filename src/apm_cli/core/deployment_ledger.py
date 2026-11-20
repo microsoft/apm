@@ -490,23 +490,29 @@ class DeploymentMaterializationSession:
 
 
 def record_rendered_writes(
-    skill_integrator: Any, int_result: Any, *, target: TargetProfile, package_info: Any
+    skill_integrator: Any,
+    integrator: Any,
+    *,
+    targets: Sequence[TargetProfile],
+    package_info: Any,
 ) -> None:
-    """Record one integrator call's final-rendered writes as local receipts (#3701).
+    """Record the final-rendered writes one integrator call reported as receipts (#3701).
 
-    The skill integrator holds the installation-bound session for the whole
+    Always drains *integrator* so writes never leak into a later package. The
+    skill integrator holds the installation-bound session for the whole
     integrate phase; outside it (drift replay, dry runs) nothing is recorded.
-    Adopted and skipped files are never in ``rendered_writes``.
+    Integrators report only real writes, never adopted or skipped files.
     """
     from apm_cli.utils.content_hash import compute_file_hash
 
-    session = getattr(skill_integrator, "materialization_session", None)
-    written = getattr(int_result, "rendered_writes", None)
+    take = getattr(integrator, "take_rendered_writes", None)
+    written = take() if callable(take) else None
+    session = getattr(skill_integrator, "_materialization_session", None)
     if not isinstance(session, DeploymentMaterializationSession) or not isinstance(written, list):
         return
     session.record(
         {path: compute_file_hash(path) for path in written},
-        [target],
+        targets,
         DeploymentMaterializationSession.receipt_owner(package_info),
     )
 

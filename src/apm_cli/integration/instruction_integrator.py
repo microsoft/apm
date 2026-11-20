@@ -411,7 +411,6 @@ class InstructionIntegrator(BaseIntegrator):
         files_skipped = 0
         files_adopted = 0
         target_paths: list[Path] = []
-        rendered_writes: list[Path] = []
         total_links_resolved = 0
         plan_key = self._plan_key(
             package_path,
@@ -477,10 +476,10 @@ class InstructionIntegrator(BaseIntegrator):
                 continue
 
             write_text_lf(target_path, new_content)
+            self.note_rendered_write(target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
-            rendered_writes.append(target_path)
             if breadcrumbs:
                 _rich_echo(f"  [*] rewritten: {rel_path}", color="dim")
 
@@ -491,7 +490,6 @@ class InstructionIntegrator(BaseIntegrator):
             target_paths=target_paths,
             links_resolved=total_links_resolved,
             files_adopted=files_adopted,
-            rendered_writes=rendered_writes,
         )
 
     def sync_for_target(

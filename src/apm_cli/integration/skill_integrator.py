@@ -437,11 +437,6 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
-    @property
-    def materialization_session(self) -> "DeploymentMaterializationSession | None":
-        """Return the live installation-bound receipt session, if one is bound."""
-        return self._materialization_session
-
     def _skill_member_skipped(self, _path: Path) -> None:
         self._skill_can_complete = False
 
@@ -1860,11 +1855,9 @@ class SkillIntegrator(BaseIntegrator):
 
             skill_base = project_root / target.skills_rel_root / skill_name
             rel_prefix = f"{target.skills_rel_root}/{skill_name}"
-            deployed.extend(
-                self._deploy_bin_files(bin_dir, skill_base, rel_prefix, force, logger, target)
-            )
+            deployed.extend(self._deploy_bin_files(bin_dir, skill_base, rel_prefix, force, logger))
             manifest = self._deploy_plugin_manifest(
-                package_info.install_path, skill_base, rel_prefix, force, logger, target
+                package_info.install_path, skill_base, rel_prefix, force, logger
             )
             if manifest is not None:
                 deployed.append(manifest)
@@ -1888,7 +1881,6 @@ class SkillIntegrator(BaseIntegrator):
         rel_prefix: str,
         force: bool,
         logger,
-        target: TargetProfile,
     ) -> list[Path]:
         """Copy bin/ executables into ``skill_base/bin`` (chmod +x on POSIX)."""
         from apm_cli.utils.path_security import ensure_path_within
@@ -1911,7 +1903,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 rel_label=f"{rel_prefix}/bin/{src_file.name}",
             ):
-                self._record_plugin_write(dest_file, target)
+                self.note_rendered_write(dest_file)
             deployed.append(dest_file)
         return deployed
 
@@ -1922,7 +1914,6 @@ class SkillIntegrator(BaseIntegrator):
         rel_prefix: str,
         force: bool,
         logger,
-        target: TargetProfile,
     ) -> Path | None:
         """Copy ``.claude-plugin/plugin.json`` next to the deployed bin/."""
         plugin_manifest = package_path / ".claude-plugin" / "plugin.json"
@@ -1938,18 +1929,8 @@ class SkillIntegrator(BaseIntegrator):
             logger=logger,
             rel_label=f"{rel_prefix}/.claude-plugin/plugin.json",
         ):
-            self._record_plugin_write(dest_manifest, target)
+            self.note_rendered_write(dest_manifest)
         return dest_manifest
-
-    def _record_plugin_write(self, path: Path, target: TargetProfile) -> None:
-        """Record one copied plugin file as a local deployment receipt."""
-        session = self._materialization_session
-        owner = self._skill_current_owner
-        if session is None or owner is None:
-            return
-        from apm_cli.utils.content_hash import compute_file_hash
-
-        session.record({path: compute_file_hash(path)}, [target], owner)
 
     @staticmethod
     def _copy_plugin_file(

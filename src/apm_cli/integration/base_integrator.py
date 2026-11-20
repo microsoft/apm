@@ -112,10 +112,6 @@ class IntegrationResult:
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
 
-    # Final-rendered files this call actually wrote (never adopted or skipped
-    # ones). The install service records them as local deployment receipts.
-    rendered_writes: list[Path] = field(default_factory=list)
-
     # Hook transparency: per-file display metadata populated by HookIntegrator.
     # Each entry is a dict with keys: target_label, output_path, source_hook_file,
     # actions (list of {event, summary}), rendered_json.
@@ -186,6 +182,18 @@ class BaseIntegrator:
 
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
+
+    def note_rendered_write(self, path: Path) -> None:
+        """Report one final-rendered file write, never an adopted or skipped file (#3701).
+
+        The install service drains these through ``take_rendered_writes`` after
+        each integrator call and records them as local deployment receipts.
+        """
+        self.__dict__.setdefault("_rendered_writes", []).append(path)
+
+    def take_rendered_writes(self) -> list[Path]:
+        """Return and forget the writes reported since the previous drain."""
+        return self.__dict__.pop("_rendered_writes", [])
 
     @staticmethod
     def filter_authorized_files(files: list[Path], source_plan=None) -> list[Path]:

@@ -518,18 +518,23 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["trust_canvas"] = True
                 _call_kwargs["is_first_party"] = is_first_party
                 _call_kwargs["package_name"] = package_name
-            _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target,
-                package_info,
-                project_root,
-                **_call_kwargs,
-            )
+            # Writes reported outside this call (direct callers) belong to no package here.
+            record_rendered_writes(None, _integrator, targets=(), package_info=package_info)
+            try:
+                _int_result = getattr(_integrator, _entry.integrate_method)(
+                    _target,
+                    package_info,
+                    project_root,
+                    **_call_kwargs,
+                )
+            finally:
+                # Files written before a failure are APM's bytes too.
+                record_rendered_writes(
+                    integrators.skill, _integrator, targets=[_target], package_info=package_info
+                )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
-            record_rendered_writes(
-                integrators.skill, _int_result, target=_target, package_info=package_info
-            )
             _adopted_attr = getattr(_int_result, "files_adopted", 0)
             # Coerce defensively: subclasses (e.g. HookIntegrationResult)
             # always set this, but tests use MagicMock results which
@@ -629,6 +634,9 @@ def integrate_package_primitives(  # noqa: PLR0913
         bin_skip_reason_override=_bin_skip_reason_override,
         trust_bin=trust_bin,
         source_plan=source_plan,
+    )
+    record_rendered_writes(
+        integrators.skill, integrators.skill, targets=projection_targets, package_info=package_info
     )
     _skill_target_paths = _skill_summary_paths(
         skill_result.target_paths, project_root, targets

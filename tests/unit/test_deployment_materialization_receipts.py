@@ -877,3 +877,30 @@ def test_native_receipt_with_drifted_device_number_is_rebound(
     assert rebound.baseline(path, [TARGET]) == compute_file_hash(path)
     rebound.flush()
     assert json.loads(rebound.state_path.read_text(encoding="utf-8"))["root_identity"] == actual
+
+
+def test_non_skill_write_records_receipt_under_target_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every file primitive's final write is receipted, not only skills (#3701)."""
+    root, _path, lock = _fixture(tmp_path, monkeypatch)
+    rule = root / ".claude/rules/style.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("rendered rule\n", encoding="utf-8")
+    session = _session(root, lock)
+    session.record({rule: compute_file_hash(rule)}, [TARGET], "pkg")
+    session.flush()
+    state = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert rule.resolve().as_posix() in state["destinations"].values()
+    assert _session(root, lock).has_receipt(rule)
+
+
+def test_write_outside_every_target_root_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _path, lock = _fixture(tmp_path, monkeypatch)
+    stray = root / "notes/stray.md"
+    stray.parent.mkdir(parents=True)
+    stray.write_text("user\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Cannot record unverified materialization"):
+        _session(root, lock).record({stray: compute_file_hash(stray)}, [TARGET], "pkg")
