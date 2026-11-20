@@ -953,6 +953,128 @@ def test_unpack_fails_closed_when_policy_is_unavailable_under_block(
     assert tree_snapshot(target) == before
 
 
+_STRAY = ".github/agents/a.md"
+_MAPPED = ".github/skills/pkg-a-skill/SKILL.md"
+
+
+@pytest.mark.parametrize("pack_target", ["bogus", "claude", None])
+def test_unpack_refuses_files_its_target_policy_cannot_place(
+    tmp_path: Path, apm_binary_path: Path, pack_target: str | None
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy({**_POLICY, "compilation": {"target": {"allow": ["claude"]}}})
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        write(bundle / _STRAY, "# stray\n")
+        lock = load_yaml(bundle / "apm.lock.yaml")
+        lock["dependencies"][0]["deployed_files"].append(_STRAY)
+        if pack_target is None:
+            del lock["pack"]["target"]
+        else:
+            lock["pack"]["target"] = pack_target
+        dump_yaml(lock, bundle / "apm.lock.yaml")
+        target = _unpack_target(world)
+        before = tree_snapshot(target)
+
+        result = run_step(
+            runner, _unpack(bundle, target), cwd=target, env=env, step="placed", expected=1
+        )
+
+    text = _ascii_output(result)
+    assert "[x]" in text, text
+    assert "Unpacked" not in text, text
+    assert tree_snapshot(target) == before, text
+
+
+def _write_lockfile_case(project: Path, case: str) -> None:
+    lock = project / "apm.lock.yaml"
+    if case == "malformed":
+        lock.write_text("lockfile_version: '1'\ndependencies: [\n", encoding="utf-8")
+    elif case == "newer":
+        lock.write_text(
+            "lockfile_version: '1'\napm_version: 999.0.0\ndependencies: []\n", encoding="utf-8"
+        )
+    else:
+        real = project / "real.lock.yaml"
+        real.write_text("lockfile_version: '1'\ndependencies: []\n", encoding="utf-8")
+        lock.symlink_to(real.name)
+
+
+@pytest.mark.parametrize("case", ["malformed", "symlink", "newer"])
+def test_unpack_refuses_an_unwritable_project_lockfile_before_writing(
+    tmp_path: Path, apm_binary_path: Path, case: str
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy(_POLICY)
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        project = _unpack_target(world)
+        _write_lockfile_case(project, case)
+        before = tree_snapshot(project)
+
+        result = run_step(
+            runner, _unpack(bundle, project), cwd=project, env=env, step=case, expected=1
+        )
+
+    text = _ascii_output(result)
+    assert "[x]" in text, text
+    assert "Unpacked" not in text, text
+    assert tree_snapshot(project) == before, text
+    assert not (project / _SKILL).exists()
+
+
+def test_unpack_verifies_cross_target_mapped_files_under_require_hashes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg = world.publish_package("pkg-a")
+    world.publish_policy({**_POLICY, "security": {"integrity": {"require_hashes": True}}})
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        producer = world.consumer(
+            "producer", dependencies=[f"{pkg.slug}#v1.0.0"], targets=("claude",)
+        )
+        (producer / ".claude").mkdir()
+        run_step(runner, ("install", "--no-policy"), cwd=producer, env=env, step="producer")
+        assert (producer / _SKILL).is_file()
+        out = tmp_path / "out"
+        run_step(
+            runner,
+            ("pack", "--format", "apm", "--target", "copilot", "-o", str(out)),
+            cwd=producer,
+            env=env,
+            step="pack-copilot",
+        )
+        bundle = next(out.iterdir())
+        assert (bundle / _MAPPED).is_file()
+
+        # The remapped file carries its locked hash and deploys.
+        mapped = _unpack_target(world, "mapped")
+        run_step(runner, _unpack(bundle, mapped), cwd=mapped, env=env, step="mapped")
+        assert (mapped / _MAPPED).read_bytes() == (bundle / _MAPPED).read_bytes()
+
+        # Altered bytes at the remapped path are refused.
+        (bundle / _MAPPED).write_text("# altered\n", encoding="utf-8")
+        altered = _unpack_target(world, "altered")
+        before = tree_snapshot(altered)
+        result = run_step(
+            runner, _unpack(bundle, altered), cwd=altered, env=env, step="altered", expected=1
+        )
+
+    assert f"Hash mismatch: {_MAPPED}" in " ".join(output(result).split()), output(result)
+    assert tree_snapshot(altered) == before
+
+
 def _plain_dir(world: PolicyScopeWorld, name: str, *, project: bool) -> Path:
     """A non-git output directory, optionally an APM project root."""
     root = world.isolated.work_root / name

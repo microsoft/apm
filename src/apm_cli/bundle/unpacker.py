@@ -284,7 +284,13 @@ def unpack_bundle(
         output_dir = Path(output_dir)
         destinations = _validated_unpack_destinations(unique_files, source_dir, output_dir)
         skipped = 0
-        copied: list[str] = []
+        written_paths: list[Path] = []
+
+        def _copy_file(src_file: str, dst_file: str) -> str:
+            result = shutil.copy2(src_file, dst_file, follow_symlinks=False)
+            written_paths.append(Path(dst_file))
+            return result
+
         for rel_path, dest in destinations:
             src = source_dir / rel_path
             if has_symlink_component(source_dir, src):
@@ -297,16 +303,24 @@ def unpack_bundle(
             if src.is_dir():
                 from ..security.gate import ignore_non_content
 
-                shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_non_content)
+                shutil.copytree(
+                    src,
+                    dest,
+                    dirs_exist_ok=True,
+                    ignore=ignore_non_content,
+                    copy_function=_copy_file,
+                )
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dest, follow_symlinks=False)
-            copied.append(rel_path)
-        written = [
-            rel
-            for rel in _bundle_file_paths(copied, source_dir)
-            if (output_dir / rel).is_file() and not (output_dir / rel).is_symlink()
-        ]
+                _copy_file(str(src), str(dest))
+        # Only files this unpack copied; skipped and pre-existing files stay unclaimed.
+        written = list(
+            dict.fromkeys(
+                path.relative_to(output_dir).as_posix()
+                for path in written_paths
+                if path.is_file() and not path.is_symlink()
+            )
+        )
 
         return UnpackResult(
             extracted_dir=bundle_path,

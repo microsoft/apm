@@ -430,7 +430,9 @@ _BUNDLE_ENTRY_POINTS: dict[tuple[str, str], tuple[str, ...]] = {
 # and the unpack record through the shared local-bundle lockfile owner.
 _ADMISSION_ROUTES: dict[str, tuple[str, ...]] = {
     "admit_bundle": ("run_policy_preflight", "require_hashes_enabled"),
-    "admit": ("admit_bundle",),
+    "admit": ("prepare_unpack_record", "admit_bundle", "_bundle_target_decision"),
+    "prepare_unpack_record": ("ensure_lockfile_writable",),
+    "_bundle_target_decision": ("pack_target_prefixes",),
     "record_unpacked_files": ("DeploymentLedgerCodec.record_local_bundle_files",),
 }
 

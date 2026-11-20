@@ -433,6 +433,86 @@ class TestUnpackAdmission:
         assert seen[0].lockfile.get_package_dependencies()[0].repo_url == "owner/repo"
 
 
+class TestUnpackWrittenFiles:
+    """Only files this unpack copied are reported for the lockfile record."""
+
+    def test_skipped_non_content_files_are_not_claimed(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, [".github/skills/s/"])
+        skill = bundle / ".github/skills/s"
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+        (skill / "__pycache__").mkdir()
+        (skill / "__pycache__" / "m.cpython-312.pyc").write_bytes(b"bundle")
+        output = tmp_path / "target"
+        existing = output / ".github/skills/s/__pycache__/m.cpython-312.pyc"
+        existing.parent.mkdir(parents=True)
+        existing.write_bytes(b"user")
+
+        result = unpack_bundle(bundle, output)
+
+        assert result.written_files == [".github/skills/s/SKILL.md"]
+        assert existing.read_bytes() == b"user"
+
+
+class TestApmBundleAdmission:
+    """``apm unpack`` admission evaluates the bundle against the output project's policy."""
+
+    @staticmethod
+    def _registry_candidate(tmp_path, registry_url):
+        from apm_cli.bundle.unpacker import UnpackCandidate
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="acme/widget",
+                source="registry",
+                version="1.0.0",
+                resolved_url=f"{registry_url}/v1/packages/acme/widget/versions/1.0.0/download",
+                resolved_hash="sha256:" + "0" * 64,
+            )
+        )
+        return UnpackCandidate(
+            source_dir=tmp_path, lockfile=lockfile, files=[], pack_meta={"target": "claude"}
+        )
+
+    def test_registry_dependency_keeps_its_configured_registry_name(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from apm_cli.install.bundle_admission import apm_bundle_admission
+        from apm_cli.policy.discovery import PolicyFetchResult
+        from apm_cli.policy.schema import ApmPolicy, RegistrySourcePolicy
+
+        url = "https://registry.example.com/apm"
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            f"name: project\nversion: 1.0.0\nregistries:\n  corp:\n    url: {url}\n"
+            "  default: corp\n",
+            encoding="utf-8",
+        )
+        policy = ApmPolicy(
+            enforcement="block",
+            registry_source=RegistrySourcePolicy(require=("corp",), allow_non_registry=False),
+        )
+        monkeypatch.setattr(
+            "apm_cli.policy.install_preflight.discover_policy_with_chain",
+            lambda root: PolicyFetchResult(
+                policy=policy, source="org:acme/.github", outcome="found"
+            ),
+        )
+        monkeypatch.setattr(
+            "apm_cli.deps.registry.feature_gate.require_package_registry_enabled",
+            lambda *a, **k: None,
+        )
+
+        admit = apm_bundle_admission(project, MagicMock(), dry_run=False)
+        admit(self._registry_candidate(tmp_path, url))
+
+        from apm_cli.install.errors import PolicyViolationError
+
+        with pytest.raises(PolicyViolationError):
+            admit(self._registry_candidate(tmp_path, "https://other.example.com/apm"))
+
+
 class TestApmBundleIntegrity:
     """``--format apm`` bundles are checked against their per-file lock hashes."""
 

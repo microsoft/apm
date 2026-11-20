@@ -567,6 +567,9 @@
       "regression_tests": [
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_applies_org_dependency_policy",
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_applies_org_target_policy",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_files_its_target_policy_cannot_place",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_an_unwritable_project_lockfile_before_writing",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_verifies_cross_target_mapped_files_under_require_hashes",
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_reports_warn_policy_violations_and_deploys",
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_altered_bytes_when_policy_requires_hashes",
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_fails_closed_when_policy_is_unavailable_under_block",

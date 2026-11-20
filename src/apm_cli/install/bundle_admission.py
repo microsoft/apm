@@ -41,6 +41,7 @@ def admit_bundle(
     logger: Any,
     dry_run: bool,
     fetch_result: Any = None,
+    registries: dict[str, str] | None = None,
 ) -> ApmPolicy | None:
     """Admit a bundle for deployment, or raise before anything is written.
 
@@ -62,6 +63,7 @@ def admit_bundle(
         effective_target=target_decision.canonical_targets,
         effective_target_source=target_decision.source,
         fetch_result=fetch_result,
+        registries=registries,
     )
     policy = policy_fetch.policy if policy_fetch is not None else None
     integrity_check(require_hashes_enabled(policy.security.integrity if policy else None))
@@ -79,34 +81,101 @@ def apm_bundle_admission(
     """
 
     def admit(candidate: UnpackCandidate) -> None:
-        from ..bundle.local_bundle import _extract_pack_targets
-        from ..core.target_detection import EffectiveTargetDecision
+        from ..deps.registry.auth import dependency_ref_with_registry_name_from_lockfile
 
-        source = "bundle pack target"
-        decision = EffectiveTargetDecision(
-            _extract_pack_targets({"pack": candidate.pack_meta}) or None, source
-        )
-        try:
-            decision.canonical_targets  # noqa: B018 -- validate the projection
-        except KeyError:
-            # A target this APM version does not know deploys nowhere it manages.
-            decision = EffectiveTargetDecision(None, source)
+        prepare_unpack_record(output_dir)
+        registries = _project_registries(output_dir)
         admit_bundle(
             policy_root=output_dir,
             apm_deps=(
-                dep.to_dependency_ref() for dep in candidate.lockfile.get_package_dependencies()
+                dependency_ref_with_registry_name_from_lockfile(
+                    dep.to_dependency_ref(), registries or {}, locked_dep=dep
+                )
+                for dep in candidate.lockfile.get_package_dependencies()
             ),
             mcp_deps=(),
-            target_decision=decision,
+            target_decision=_bundle_target_decision(candidate),
             integrity_check=apm_bundle_integrity(
                 candidate.source_dir, candidate.lockfile, candidate.files, logger
             ),
             no_policy=False,
             logger=logger,
             dry_run=dry_run,
+            registries=registries,
         )
 
     return admit
+
+
+def _bundle_target_decision(candidate: UnpackCandidate) -> EffectiveTargetDecision:
+    """The targets a ``--format apm`` bundle deploys to, for target policy.
+
+    A bundle with no recorded pack target is evaluated as deploying to every
+    target. A pack target this APM version does not know, or a bundle file
+    outside its pack target's paths, is refused: the files would land where
+    target policy cannot evaluate them.
+    """
+    from ..bundle.local_bundle import _extract_pack_targets
+    from ..bundle.lockfile_enrichment import pack_target_prefixes
+    from ..core.target_detection import EffectiveTargetDecision
+
+    targets = _extract_pack_targets({"pack": candidate.pack_meta})
+    if not targets:
+        return EffectiveTargetDecision("all", "bundle files (no pack target recorded)")
+    decision = EffectiveTargetDecision(targets, "bundle pack target")
+    try:
+        decision.canonical_targets  # noqa: B018 -- validate the projection
+    except KeyError as exc:
+        raise ValueError(
+            f"Bundle pack target '{','.join(targets)}' is not a target this APM version "
+            "supports. Repack the bundle with a supported '--target' and retry."
+        ) from exc
+    prefixes = pack_target_prefixes(targets)
+    outside = [rel for rel in candidate.files if not rel.startswith(prefixes)]
+    if outside:
+        raise ValueError(
+            f"Bundle files are outside its pack target '{','.join(targets)}':\n"
+            + "\n".join(f"  - {rel}" for rel in outside)
+            + "\nRepack the bundle with 'apm pack --format apm' and retry."
+        )
+    return decision
+
+
+def _project_registries(output_dir: Path) -> dict[str, str] | None:
+    """The ``registries:`` map of the project at *output_dir*, if any."""
+    from ..constants import APM_YML_FILENAME
+    from ..models.apm_package import APMPackage
+
+    manifest = output_dir / APM_YML_FILENAME
+    if not manifest.is_file():
+        return None
+    try:
+        package = APMPackage.from_apm_yml(manifest)
+    except ValueError:
+        # Unreadable: a registry policy then reports the registry as unconfigured.
+        return None
+    return getattr(package, "registries", None) or None
+
+
+def prepare_unpack_record(output_dir: Path) -> None:
+    """Refuse, before any file is written, a lockfile the unpack record cannot update."""
+    root = unpack_record_root(output_dir)
+    if root is None:
+        return
+    from ..deps.lockfile import (
+        LockFile,
+        LockfileRefusal,
+        ensure_lockfile_writable,
+        get_lockfile_path,
+    )
+
+    lockfile_path = get_lockfile_path(root)
+    try:
+        ensure_lockfile_writable(lockfile_path)
+        if lockfile_path.exists():
+            LockFile.read(lockfile_path)
+    except LockfileRefusal as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def unpack_record_root(output_dir: Path) -> Path | None:
