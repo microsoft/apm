@@ -304,7 +304,7 @@ def http_token_allowed(scheme: str, host: str | None) -> bool:
 def _warn_http_token_withheld(url: str) -> None:
     """Say once per process that the proxy token is not sent over http."""
     message = (
-        f"PROXY_REGISTRY_TOKEN is not sent to {redact_url_userinfo(url)}: the URL uses "
+        f"PROXY_REGISTRY_TOKEN is not sent to {redact_url_userinfo(url)!r}: the URL uses "
         "http:// and the host is not loopback or a private network address. Use "
         "https://, or set PROXY_REGISTRY_ALLOW_HTTP=1 to authorize sending it over http."
     )

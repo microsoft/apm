@@ -9,6 +9,7 @@ Tests cover:
 
 import io
 import os
+import re
 import shutil
 import tempfile
 import zipfile
@@ -1874,7 +1875,12 @@ class TestRegistryConfig:
         assert cfg.token is None
         assert "Authorization" not in cfg.headers_for("http", "art.example.com")
         assert len(printed) == 1, printed
-        assert "http://art.example.com/artifactory/github" in printed[0]
+        named = urlparse(re.search(r"'(http://[^']+)'", printed[0]).group(1))
+        assert (named.scheme, named.hostname, named.path) == (
+            "http",
+            "art.example.com",
+            "/artifactory/github",
+        )
         assert "PROXY_REGISTRY_ALLOW_HTTP=1" in printed[0]
         assert "secret" not in printed[0]
 

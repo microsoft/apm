@@ -10,7 +10,9 @@ recording proxy, so each origin's headers are observed directly.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -68,7 +70,12 @@ def test_public_http_proxy_gets_no_token_and_the_cli_says_why(
     output = result.stdout + result.stderr
     assert reached, output
     assert receiving == set(), output
-    assert f"http://{PUBLIC_HOST}/artifactory/github" in output, output
+    named = urlparse(re.search(r"'(http://[^']+)'", output).group(1))
+    assert (named.scheme, named.hostname, named.path) == (
+        "http",
+        PUBLIC_HOST,
+        "/artifactory/github",
+    )
     assert "PROXY_REGISTRY_ALLOW_HTTP=1" in output, output
     assert SECRET not in output
 
