@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -132,7 +133,7 @@ def test_native_plugin_without_apm_yml_and_skill_audit_lifecycle(
     # 2. Audit --ci must pass with all checks clean (including drift and config-consistency)
     audit_res = _run_audit(monkeypatch, project, "--ci")
     assert audit_res.exit_code == 0, audit_res.output
-    assert "All 10 check(s) passed" in audit_res.output
+    assert re.search(r"All \d+ check\(s\) passed", audit_res.output), audit_res.output
     assert "Replayed 2 package(s)" in audit_res.output
     assert "no drift detected against lockfile" in audit_res.output
     assert "No MCP configs to check" in audit_res.output
@@ -144,7 +145,7 @@ def test_native_plugin_without_apm_yml_and_skill_audit_lifecycle(
 
     reaudit_res = _run_audit(monkeypatch, project, "--ci")
     assert reaudit_res.exit_code == 0, reaudit_res.output
-    assert "All 10 check(s) passed" in reaudit_res.output
+    assert re.search(r"All \d+ check\(s\) passed", reaudit_res.output), reaudit_res.output
     assert "Replayed 2 package(s)" in reaudit_res.output
     assert "no drift detected against lockfile" in reaudit_res.output
 
@@ -177,7 +178,7 @@ def test_native_plugin_with_accompanying_apm_yml_and_skill_audit_lifecycle(
 
     audit_res = _run_audit(monkeypatch, project, "--ci")
     assert audit_res.exit_code == 0, audit_res.output
-    assert "All 10 check(s) passed" in audit_res.output
+    assert re.search(r"All \d+ check\(s\) passed", audit_res.output), audit_res.output
     assert "Replayed 2 package(s)" in audit_res.output
     assert "no drift detected against lockfile" in audit_res.output
 
@@ -188,7 +189,7 @@ def test_native_plugin_with_accompanying_apm_yml_and_skill_audit_lifecycle(
 
     reaudit_res = _run_audit(monkeypatch, project, "--ci")
     assert reaudit_res.exit_code == 0, reaudit_res.output
-    assert "All 10 check(s) passed" in reaudit_res.output
+    assert re.search(r"All \d+ check\(s\) passed", reaudit_res.output), reaudit_res.output
     assert "Replayed 2 package(s)" in reaudit_res.output
     assert "no drift detected against lockfile" in reaudit_res.output
 

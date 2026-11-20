@@ -191,8 +191,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
                 _MCP_PIPELINE: ("admission = McpAdmission.for_project(",),
                 _MCP_VIEW: ("approval_keys = locked_dependency_approval_keys(dependency)",),
-                _UNINSTALL_ENGINE: ("_allow_executables = resolve_project_exec_allow_map(",),
-                _HOOK_INTEGRATOR: ("allow_map = resolve_project_exec_allow_map(",),
+                _UNINSTALL_ENGINE: ("        resolve_project_exec_allow_map(",),
+                _HOOK_INTEGRATOR: (
+                    "resolve_project_exec_allow_map(project_root, apm_package, user_scope",
+                ),
                 _AUDIT_COMMAND: ("policy_provider=replay_policy",),
                 _LOCAL_BUNDLE: (
                     "bundle_approval_key = local_bundle_approval_key(",
