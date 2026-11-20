@@ -65,6 +65,16 @@ class TestLineLint:
     def test_separator_lines_are_not_duplicates(self) -> None:
         assert capture.lint_lines("-" * 40 + "\n" + "-" * 40 + "\n", "", 0) == []
 
+    def test_wrapped_tails_of_distinct_warnings_are_not_duplicates(self) -> None:
+        tail = "allowed-tools, argument-hint, description, input, model."
+        out = (
+            "[!] Claude command review: frontmatter keys not supported and were dropped: mode, supported keys are\n"
+            f"{tail}\n"
+            "[!] Claude command refactor: frontmatter keys not supported and were dropped: mode, supported keys are\n"
+            f"{tail}\n"
+        )
+        assert [issue["rule"] for issue in capture.lint_lines(out, "", 0)] == []
+
     def test_help_screens_skip_the_duplicate_check(self) -> None:
         out = "  --ssh   Prefer SSH transport for git\n  --ssh   Prefer SSH transport for git\n"
         assert capture.lint_lines(out, "", 0, help_output=True) == []
@@ -84,6 +94,14 @@ class TestHints:
         )
         values = [hint["value"] for hint in capture.extract_hints(text, None)]
         assert values == ["apm compile", "apm install ./build/project-1.0.0"]
+
+    def test_extracts_next_step_hints_from_panel_rows(self) -> None:
+        text = (
+            "| * Create a plugin:        apm plugin init                               |\n"
+            "| * Pack as Agent Plugins:  apm pack --format agent-plugin                |\n"
+        )
+        values = [hint["value"] for hint in capture.extract_hints(text, None)]
+        assert values == ["apm plugin init", "apm pack --format agent-plugin"]
 
     def test_joins_hard_wrapped_hints(self) -> None:
         first = "[!] Kept 1 local edit in .github/instructions/kit.instructions.md; run"
