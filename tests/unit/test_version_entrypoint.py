@@ -1,5 +1,6 @@
 """The lightweight entrypoint must not reinterpret ordinary CLI arguments."""
 
+import os
 import sys
 from unittest.mock import patch
 
@@ -71,7 +72,10 @@ def test_shared_callback_is_the_existing_cli_callback() -> None:
 def test_argument_placement_preserves_click_behavior(
     args: list[str], exit_code: int, message: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # main() sets PYTHONIOENCODING for child processes on Windows; that is
+    # process state, so restore it for the next test on the worker.
     with (
+        patch.dict(os.environ),
         patch.object(sys, "argv", ["apm", *args]),
         patch("apm_cli.cli._check_and_notify_updates"),
         pytest.raises(SystemExit) as exit_info,
