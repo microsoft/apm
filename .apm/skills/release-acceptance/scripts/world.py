@@ -133,7 +133,9 @@ def main(argv: list[str] | None = None) -> int:
         for key in world["unset"]:
             print(f"unset {key}")
         for prefix in world["unset_prefixes"]:
-            print(f"for v in $(env | sed -n 's/^\\({prefix}[^=]*\\)=.*/\\1/p'); do unset \"$v\"; done")
+            print(
+                f"for v in $(env | sed -n 's/^\\({prefix}[^=]*\\)=.*/\\1/p'); do unset \"$v\"; done"
+            )
         for key, value in world["env"].items():
             print(f"export {key}={shlex.quote(value)}")
     else:

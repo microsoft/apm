@@ -160,7 +160,9 @@ def extract_hints(text: str, docs_root: Path | None) -> list[dict]:
             seen.add(url)
             hint = {"kind": "docs-url", "value": url, "line": stripped[:200]}
             if docs_root is not None:
-                hint["resolves"] = docs_url_resolves(docs_root, match.group(1) or "", match.group(2))
+                hint["resolves"] = docs_url_resolves(
+                    docs_root, match.group(1) or "", match.group(2)
+                )
             hints.append(hint)
     return hints
 

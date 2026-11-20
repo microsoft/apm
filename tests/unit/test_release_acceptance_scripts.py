@@ -88,12 +88,16 @@ class TestHints:
     def test_joins_hard_wrapped_hints(self) -> None:
         first = "[!] Kept 1 local edit in .github/instructions/kit.instructions.md; run"
         text = f"{first.ljust(72)}\n'apm install --force' to overwrite it.\n"
-        assert [hint["value"] for hint in capture.extract_hints(text, None)] == ["apm install --force"]
+        assert [hint["value"] for hint in capture.extract_hints(text, None)] == [
+            "apm install --force"
+        ]
 
     def test_resolves_the_bare_docs_root(self, tmp_path: Path) -> None:
         (tmp_path / "index.mdx").write_text("# APM\n", encoding="utf-8")
         hints = capture.extract_hints("Docs: https://microsoft.github.io/apm\n", tmp_path)
-        assert [(hint["value"], hint["resolves"]) for hint in hints] == [("https://microsoft.github.io/apm", True)]
+        assert [(hint["value"], hint["resolves"]) for hint in hints] == [
+            ("https://microsoft.github.io/apm", True)
+        ]
 
     def test_resolves_docs_urls_and_anchors(self, tmp_path: Path) -> None:
         page = tmp_path / "consumer" / "installing-from-marketplaces.md"
@@ -211,7 +215,7 @@ class TestLedger:
         with pytest.raises(findings.LedgerError, match=message):
             findings.add({"sha": None, "findings": []}, [_finding(**override)])
 
-    def test_gate_is_no_go_while_a_blocker_is_open_or_verified(self) -> None:
+    def test_gate_waits_for_verification_then_blocks_on_a_confirmed_blocker(self) -> None:
         ledger = {"sha": None, "findings": []}
         findings.add(
             ledger,
@@ -222,9 +226,16 @@ class TestLedger:
         )
         row = findings.gate_row(ledger, "abc1234")
         assert (row["verdict"], row["open_blockers"], row["unverified_blockers"]) == (
+            "PENDING-VERIFICATION",
+            [],
+            ["RA-001"],
+        )
+        findings.verify(ledger, [{"id": "RA-001", "verdict": "CONFIRMED"}])
+        row = findings.gate_row(ledger, "abc1234")
+        assert (row["verdict"], row["open_blockers"], row["unverified_blockers"]) == (
             "NO-GO",
             ["RA-001"],
-            ["RA-001"],
+            [],
         )
         ledger["findings"][0]["status"] = "false-positive"
         assert findings.gate_row(ledger, "abc1234")["verdict"] == "GO"
@@ -286,13 +297,25 @@ class TestWorld:
             "LANG": "C.UTF-8",
         }
         env = world.scrub_env(host, built)
-        assert not {"GITHUB_TOKEN", "GIT_ASKPASS", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_AUTHOR_NAME"} & set(env)
-        assert (env["GIT_CONFIG_COUNT"], env["LANG"], env["HOME"]) == ("0", "C.UTF-8", built["env"]["HOME"])
+        assert not {
+            "GITHUB_TOKEN",
+            "GIT_ASKPASS",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+            "GIT_AUTHOR_NAME",
+        } & set(env)
+        assert (env["GIT_CONFIG_COUNT"], env["LANG"], env["HOME"]) == (
+            "0",
+            "C.UTF-8",
+            built["env"]["HOME"],
+        )
         gitconfig = Path(built["env"]["GIT_CONFIG_GLOBAL"]).read_text(encoding="ascii")
         assert "gpgsign = false" in gitconfig
         assert "insteadOf = https://git.example.invalid/" in gitconfig
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="symlink creation needs privileges on Windows"
+    )
     def test_world_puts_the_candidate_binary_first_on_path(self, tmp_path: Path) -> None:
         binary = tmp_path / "apm-candidate"
         binary.write_text("#!/bin/sh\n", encoding="ascii")

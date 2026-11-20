@@ -116,10 +116,18 @@ def gate_row(ledger: dict, sha: str) -> dict:
     but at least one blocker still awaits P4. Known issues never count.
     """
     confirmed_open = {"verified", "still-open", "changed"}
-    blockers = [f["id"] for f in ledger["findings"] if f["severity"] == "blocker" and f["status"] in confirmed_open]
-    unverified = [f["id"] for f in ledger["findings"] if f["severity"] == "blocker" and f["status"] == "open"]
+    blockers = [
+        f["id"]
+        for f in ledger["findings"]
+        if f["severity"] == "blocker" and f["status"] in confirmed_open
+    ]
+    unverified = [
+        f["id"] for f in ledger["findings"] if f["severity"] == "blocker" and f["status"] == "open"
+    ]
     without_test = [
-        f["id"] for f in ledger["findings"] if f["status"] in confirmed_open and not f.get("lifecycle_test")
+        f["id"]
+        for f in ledger["findings"]
+        if f["status"] in confirmed_open and not f.get("lifecycle_test")
     ]
     counts = {sev: 0 for sev in SEVERITIES}
     for finding in ledger["findings"]:
@@ -154,9 +162,11 @@ def verify(ledger: dict, verdicts: list[dict]) -> dict:
         if verdict not in VERIFY_VERDICTS:
             raise LedgerError(f"verify verdict must be one of {VERIFY_VERDICTS}")
         finding = by_id[fid]
-        finding["status"] = {"CONFIRMED": "verified", "FALSE-POSITIVE": "false-positive", "CHANGED": "changed"}[
-            verdict
-        ]
+        finding["status"] = {
+            "CONFIRMED": "verified",
+            "FALSE-POSITIVE": "false-positive",
+            "CHANGED": "changed",
+        }[verdict]
         severity = item.get("severity")
         if severity:
             if severity not in SEVERITIES:
@@ -165,8 +175,17 @@ def verify(ledger: dict, verdicts: list[dict]) -> dict:
         for key in ("pre_existing", "owner_file", "promise"):
             if key in item:
                 finding[key] = item[key]
-        finding.setdefault("history", []).append({"phase": "P4", "verdict": verdict, "rationale": item.get("rationale", "")})
-        applied.append({"id": fid, "verdict": verdict, "status": finding["status"], "severity": finding["severity"]})
+        finding.setdefault("history", []).append(
+            {"phase": "P4", "verdict": verdict, "rationale": item.get("rationale", "")}
+        )
+        applied.append(
+            {
+                "id": fid,
+                "verdict": verdict,
+                "status": finding["status"],
+                "severity": finding["severity"],
+            }
+        )
     return {"applied": applied}
 
 
