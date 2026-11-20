@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from ..utils.credential_rendering import redact_url_userinfo
 from .dependency import (
     DependencyReference,
     GitReferenceType,
@@ -244,7 +245,8 @@ def _parse_registries_block(
         url = url.strip()
         if not url.startswith(("https://", "http://")):
             raise ValueError(
-                f"Registry {name!r} URL must start with https:// or http:// (got {url!r})"
+                f"Registry {name!r} URL must start with https:// or http:// "
+                f"(got {redact_url_userinfo(url)!r})"
             )
         # Reject any unknown keys to catch typos early.
         unknown = set(body.keys()) - {"url"}
