@@ -54,6 +54,11 @@ KNOWN_LARGE_MODULES = {
     # Root-only hook replay (#3600), native Claude cache verification (#3290)
     # and local bundle hash drift through the deployed-hash verifier (#3989).
     "drift.py": 1041,
+    # Deletion evidence (#3701) threads one required evidence argument through
+    # every reconciliation deleter and skill path migration. Decomposition
+    # tracked as follow-up.
+    "pipeline.py": 1005,
+    "manifest_reconcile.py": 1010,
 }
 
 

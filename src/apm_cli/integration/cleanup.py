@@ -342,7 +342,8 @@ def _is_skill_directory_entry(rel_path: str) -> bool:
     """
     from apm_cli.integration.targets import skills_root_prefixes
 
-    normalized = rel_path.replace("\\", "/")
+    # Legacy ``deployed_skills`` migrations record directories with a trailing slash.
+    normalized = rel_path.replace("\\", "/").rstrip("/")
     parent, _, name = normalized.rpartition("/")
     if not name:
         return False
