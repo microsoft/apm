@@ -327,3 +327,62 @@ def test_tar_special_file_is_refused(tmp_path):
     data = _build_tar_with(add_fifo)
     with pytest.raises(UnsafeTarballError, match="special file"):
         extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+
+
+def test_tar_size_cap_applies_before_reading_past_an_oversized_member(tmp_path, monkeypatch):
+    monkeypatch.setattr("apm_cli.utils.archive._MAX_UNCOMPRESSED_BYTES", 1024)
+    data = _build_tar([("big.bin", b"x" * 4096), ("../after.txt", b"x")])
+    with pytest.raises(UnsafeTarballError, match="size limit"):
+        extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
+
+def _build_zip_entries(entries: list[tuple[str, bytes, int]]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w") as zf:
+        for name, content, mode in entries:
+            info = zipfile.ZipInfo(name)
+            if mode:
+                info.external_attr = mode << 16
+            zf.writestr(info, content)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [("dir/", b"", 0o040755), ("DIR/", b"", 0o040755)],
+        [("a", b"file", 0), ("a/", b"", 0o040755)],
+        [("a", b"file", 0), ("a/b.txt", b"x", 0)],
+        [("a/b.txt", b"x", 0), ("a", b"file", 0)],
+    ],
+    ids=["dir-case-folded", "file-then-dir", "file-then-child", "child-then-file"],
+)
+def test_conflicting_entries_are_refused_before_any_write(entries, tmp_path):
+    data = _build_zip_entries(entries)
+    with pytest.raises(UnsafeTarballError, match=r"duplicate|conflicting"):
+        extract_zip(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
+
+
+def test_tar_directory_duplicate_is_refused(tmp_path):
+    def add_dirs(tar):
+        for name in ("pkg", "PKG"):
+            ti = tarfile.TarInfo(name=name)
+            ti.type = tarfile.DIRTYPE
+            tar.addfile(ti)
+
+    data = _build_tar_with(add_dirs)
+    with pytest.raises(UnsafeTarballError, match="duplicate"):
+        extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+
+
+@pytest.mark.parametrize(
+    "mode", [0o010644, 0o140644, 0o020644, 0o060644], ids=["fifo", "socket", "char", "block"]
+)
+def test_zip_special_file_modes_are_refused(mode, tmp_path):
+    data = _build_zip_entries([("apm.yml", b"name: x\n", 0), ("odd", b"x", mode)])
+    with pytest.raises(UnsafeTarballError, match="special file"):
+        extract_zip(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
+    assert not (tmp_path / "out" / "odd").exists()
+    assert not (tmp_path / "out" / "apm.yml").exists()

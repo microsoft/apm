@@ -138,12 +138,36 @@ def _member_key(member_name: str) -> str:
     return "/".join(parts).casefold()
 
 
-def _claim_member(seen: set[str], member_name: str, *, error_type: type[_ErrorT]) -> None:
-    """Record *member_name* as written, refusing a second entry for the same path."""
-    key = _member_key(member_name)
-    if key in seen:
-        _raise(error_type, f"Refusing to extract duplicate entry: {member_name}")
-    seen.add(key)
+class _MemberClaims:
+    """Path claims for one archive, checked before the first write.
+
+    Refuses a second entry for the same path (exact or case-folded), and a
+    file whose path is also used as a directory, in either order.
+    """
+
+    def __init__(self) -> None:
+        self._files: set[str] = set()
+        self._dirs: set[str] = set()
+        self._parents: set[str] = set()
+
+    def claim(self, member_name: str, *, is_dir: bool, error_type: type[_ErrorT]) -> None:
+        key = _member_key(member_name)
+        if key in self._files or key in self._dirs:
+            _raise(error_type, f"Refusing to extract duplicate entry: {member_name}")
+        if not is_dir and key in self._parents:
+            _raise(error_type, f"Refusing to extract conflicting entry: {member_name}")
+        parts = key.split("/")
+        for depth in range(1, len(parts)):
+            parent = "/".join(parts[:depth])
+            if parent in self._files:
+                _raise(error_type, f"Refusing to extract conflicting entry: {member_name}")
+            self._parents.add(parent)
+        (self._dirs if is_dir else self._files).add(key)
+
+
+_ZIP_FILE_TYPE_MASK = 0xF000
+_ZIP_SYMLINK = 0xA000
+_ZIP_ALLOWED_FILE_TYPES = frozenset({0, 0x4000, 0x8000})
 
 
 def _archive_member_target(
@@ -256,9 +280,12 @@ def safe_extract_tar(
     """
     entry_limit = MAX_ZIP_ENTRIES if max_entries is None else max_entries
     size_limit = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
-    seen: set[str] = set()
+    claims = _MemberClaims()
+    declared_total = 0
     dirs: list[Path] = []
     plan: list[tuple[Path, str, Callable[[], IO[bytes] | None], int]] = []
+    # Advancing a compressed tar to the next header decompresses the current
+    # member's data, so the declared sizes are capped before each advance.
     for count, member in enumerate(tar, start=1):
         if count > entry_limit:
             _raise(error_type, f"Archive has more than {entry_limit} entries (limit {entry_limit})")
@@ -266,13 +293,19 @@ def safe_extract_tar(
             _raise(error_type, f"Symlinks and hard links are not supported: {member.name!r}")
         if not (member.isdir() or member.isreg()):
             _raise(error_type, f"Refusing to extract special file: {member.name!r}")
+        declared_total += max(member.size, 0)
+        if declared_total > size_limit:
+            _raise(
+                error_type,
+                f"Archive uncompressed size exceeds size limit: {size_limit // (1024 * 1024)} MB",
+            )
         target = _archive_member_target(member.name, dest_root, error_type=error_type)
         if target is None:
             continue
+        claims.claim(member.name, is_dir=member.isdir(), error_type=error_type)
         if member.isdir():
             dirs.append(target)
             continue
-        _claim_member(seen, member.name, error_type=error_type)
         plan.append((target, member.name, lambda m=member: tar.extractfile(m), member.mode))
     dest_root.mkdir(parents=True, exist_ok=True)
     for directory in dirs:
@@ -303,13 +336,16 @@ def safe_extract_zip(
     if len(members) > max_entries:
         _raise(error_type, f"ZIP archive has {len(members)} entries (limit {max_entries})")
 
-    seen: set[str] = set()
+    claims = _MemberClaims()
     dirs: list[Path] = []
     plan: list[tuple[Path, str, Callable[[], IO[bytes] | None], int]] = []
     for info in members:
         unix_mode = (info.external_attr >> 16) & 0xFFFF
-        if unix_mode and (unix_mode & 0xF000) == 0xA000:
+        file_type = unix_mode & _ZIP_FILE_TYPE_MASK
+        if file_type == _ZIP_SYMLINK:
             _raise(error_type, f"Refusing to extract symlink: {info.filename}")
+        if file_type not in _ZIP_ALLOWED_FILE_TYPES:
+            _raise(error_type, f"Refusing to extract special file: {info.filename!r}")
         member_name = info.filename
         if member_name_transform is not None:
             member_name = member_name_transform(member_name)
@@ -318,10 +354,10 @@ def safe_extract_zip(
         target = _archive_member_target(member_name, dest_root, error_type=error_type)
         if target is None:
             continue
+        claims.claim(member_name, is_dir=info.is_dir(), error_type=error_type)
         if info.is_dir():
             dirs.append(target)
             continue
-        _claim_member(seen, member_name, error_type=error_type)
         plan.append((target, member_name, lambda i=info: zf.open(i, "r"), unix_mode))
     dest_root.mkdir(parents=True, exist_ok=True)
     for directory in dirs:
