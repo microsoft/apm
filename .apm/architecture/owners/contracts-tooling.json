@@ -17,8 +17,8 @@
     },
     {
       "id": "dependency-identity-materialization",
-      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; host-bound exact policy require identity (required_package_policy_hosts), resolved once by policy/matcher.py DependencyPolicyIndex.find for the manifest and, via the matched dependency's unique key, the lockfile; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation",
-      "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison) + install/phases/lockfile.py (including empty-graph root intent persistence)",
+      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; host-bound exact policy require identity (required_package_policy_hosts), resolved once by policy/matcher.py DependencyPolicyIndex.find for the manifest and, via the matched dependency's unique key, the lockfile; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation; the anchor a relative local_path resolves against (the declaring package at every scope; a root-declared relative path at user scope is refused)",
+      "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison) + install/phases/lockfile.py (including empty-graph root intent persistence) + deps/path_anchoring.py local_dep_base_dir (local_path anchor: it decides which directory a relative dependency path names, so it is the local half of materialization identity)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
         "src/apm_cli/models/dependency/materialization.py",
@@ -33,9 +33,10 @@
         "src/apm_cli/install/helpers/plan_inputs.py",
         "src/apm_cli/install/presentation/resolution.py",
         "src/apm_cli/install/helpers/no_work.py",
-        "src/apm_cli/install/plan.py"
+        "src/apm_cli/install/plan.py",
+        "src/apm_cli/deps/path_anchoring.py"
       ],
-      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity", "contracts-tooling-source-replacements"]
+      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-local-path-anchor", "contracts-tooling-policy-identity", "contracts-tooling-source-replacements"]
     },
     {
       "id": "native-lifecycle-evidence",
