@@ -1979,7 +1979,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/install/drift.py",
         old=(
             "    if locked_content_mismatch(\n"
-            "        dep_key, lock_dep, candidate, lockfile=lockfile, package_info=package_info\n"
+            "        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info\n"
             "    ):\n"
         ),
         new="    if False:\n",

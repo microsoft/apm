@@ -357,39 +357,38 @@ def _materialize_install_path(
             registries or {},
             locked_dep=lock_dep,
         )
-        registry_resolver.download_from_lockfile(
+        package_info = registry_resolver.download_from_lockfile(
             download_ref,
             candidate,
             resolved_url=lock_dep.resolved_url,
             resolved_hash=lock_dep.resolved_hash,
             version=lock_dep.version,
         )
-        return candidate
+    else:
+        if downloader is None:
+            raise CacheMissError(f"git replay unavailable for {lock_dep.repo_url}: no downloader")
+        from apm_cli.drift import build_download_ref
 
-    if downloader is None:
-        raise CacheMissError(f"git replay unavailable for {lock_dep.repo_url}: no downloader")
-    from apm_cli.drift import build_download_ref
-
-    if declared_transports is not None:
-        dep_ref = declared_transports.apply(lock_dep, dep_ref)
-    download_ref = build_download_ref(
-        dep_ref,
-        lockfile,
-        update_refs=False,
-        ref_changed=False,
-    )
-    package_info = downloader.download_package(download_ref, candidate)
-    resolved_reference = getattr(package_info, "resolved_reference", None)
-    if (
-        lock_dep.resolved_commit
-        and resolved_reference is not None
-        and getattr(resolved_reference, "resolved_commit", None)
-        not in {None, lock_dep.resolved_commit}
-    ):
-        raise CacheMissError(
-            f"scratch replay resolved {lock_dep.repo_url} to "
-            f"{resolved_reference.resolved_commit}, expected {lock_dep.resolved_commit}"
+        if declared_transports is not None:
+            dep_ref = declared_transports.apply(lock_dep, dep_ref)
+        download_ref = build_download_ref(
+            dep_ref,
+            lockfile,
+            update_refs=False,
+            ref_changed=False,
         )
+        package_info = downloader.download_package(download_ref, candidate)
+        resolved_reference = getattr(package_info, "resolved_reference", None)
+        if (
+            lock_dep.resolved_commit
+            and resolved_reference is not None
+            and getattr(resolved_reference, "resolved_commit", None)
+            not in {None, lock_dep.resolved_commit}
+        ):
+            raise CacheMissError(
+                f"scratch replay resolved {lock_dep.repo_url} to "
+                f"{resolved_reference.resolved_commit}, expected {lock_dep.resolved_commit}"
+            )
     key = lock_dep.get_unique_key()
     if locked_content_mismatch(
         key, lock_dep, candidate, lockfile=lockfile, package_info=package_info

@@ -647,7 +647,8 @@
       "failure_modes": ["observation", "outcome"],
       "properties": ["outcome.status_matches_state", "source.ref_cache_coherent", "transaction.failed_command_preserves_state"],
       "regression_tests": [
-        "tests/integration/test_locked_package_hash_parity_lifecycle.py::test_audit_ci_and_frozen_install_agree_on_locked_content_hash"
+        "tests/integration/test_locked_package_hash_parity_lifecycle.py::test_audit_ci_and_frozen_install_agree_on_locked_content_hash",
+        "tests/integration/test_registry_locked_content_hash_parity_lifecycle.py::test_audit_ci_and_frozen_install_agree_on_registry_content_hash"
       ]
     },
     {
