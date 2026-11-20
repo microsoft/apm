@@ -1204,6 +1204,60 @@ def _check_local_bundle_hooks(
     )
 
 
+def _check_hook_approval_pins(
+    project_root: Path,
+    deployment_root: Path,
+    lock: LockFile,
+    manifest: APMPackage,
+    *,
+    user_scope: bool,
+    no_policy: bool,
+    prepared_replay: PreparedCiAuditReplay | None,
+) -> CheckResult:
+    """Fail when a locked hook file's pinned approval no longer admits it (#4188).
+
+    Routes through the owner ``apm install --frozen`` uses, so both commands
+    reach one verdict with one remediation.
+    """
+    from ..constants import APM_MODULES_DIR
+    from ..install.errors import PolicyViolationError
+    from ..install.exec_gate import locked_hook_pin_mismatches
+    from ..security.executables import resolve_project_exec_allow_map
+
+    modules_root = (
+        prepared_replay.modules_root
+        if prepared_replay is not None
+        else project_root / APM_MODULES_DIR
+    )
+
+    def trust_ctx() -> Any:
+        # Resolved only when a locked package deploys hook files.
+        allow = resolve_project_exec_allow_map(
+            deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
+        )
+        return getattr(allow, "trust_context", None)
+
+    try:
+        mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
+    except PolicyViolationError as exc:
+        return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
+    if not mismatches:
+        return CheckResult(
+            name="hook-approval-pins",
+            passed=True,
+            message="Deployed hooks match their approval pins",
+        )
+    return CheckResult(
+        name="hook-approval-pins",
+        passed=False,
+        message=(
+            f"{len(mismatches)} hook file(s) recorded in apm.lock.yaml are no longer "
+            "admitted by their approval"
+        ),
+        details=[mismatch.describe() for mismatch in mismatches],
+    )
+
+
 def run_baseline_checks(
     project_root: Path,
     *,
@@ -1347,16 +1401,31 @@ def run_baseline_checks(
         return result
 
     # Check 8: Content integrity; 8b: local-bundle hooks still admitted (#4027)
-    if _run(
-        _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
-    ) or _run(
-        _check_local_bundle_hooks(
-            deployment_root,
-            lock,
-            manifest,
-            resolved_targets,
-            user_scope=user_scope,
-            no_policy=no_policy,
+    if (
+        _run(
+            _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+        )
+        or _run(
+            _check_local_bundle_hooks(
+                deployment_root,
+                lock,
+                manifest,
+                resolved_targets,
+                user_scope=user_scope,
+                no_policy=no_policy,
+            )
+        )
+        or _run(
+            # 8c: locked hooks still admitted by their approval pins (#4188)
+            _check_hook_approval_pins(
+                project_root,
+                deployment_root,
+                lock,
+                manifest,
+                user_scope=user_scope,
+                no_policy=no_policy,
+                prepared_replay=prepared_replay,
+            )
         )
     ):
         return result
