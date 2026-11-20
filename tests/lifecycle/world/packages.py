@@ -32,7 +32,7 @@ PACKAGE_NAMES = (
 )
 # The packages whose source is a git repository on the world's local HTTPS server
 # (also listed in the world marketplace).
-GIT_PUBLISHED = ("p-skill", "p-exec", "p-native-claude-bin")
+GIT_PUBLISHED = ("p-skill", "p-exec", "p-lsp", "p-native-claude", "p-native-claude-bin")
 MCP_SERVER = "p-exec-mcp"
 LSP_SERVER = "p-lsp-server"
 # A command that must never run: a deployed MCP or LSP entry is configuration only.
