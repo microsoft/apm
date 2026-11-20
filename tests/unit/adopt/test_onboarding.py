@@ -400,6 +400,9 @@ def test_interactive_consent_is_explicit(
 
     skill(workspace)
     before = snapshot(workspace.parent)
+    # An interactive console: CI and APM_NON_INTERACTIVE forbid a prompt (#4411).
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("APM_NON_INTERACTIVE", raising=False)
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
     confirmations = []
 
