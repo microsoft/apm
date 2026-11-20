@@ -1024,6 +1024,20 @@
       ]
     },
     {
+      "issue": 4243,
+      "fixed_in": "Unreleased",
+      "summary": "apm install repeated each hook summary line once per target",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_target_widen_then_narrow_reconciles_owned_state"
+      ]
+    },
+    {
       "issue": 4249,
       "fixed_in": "Unreleased",
       "summary": "apm install printed the org policy status line once per phase when MCP servers were also installed",
