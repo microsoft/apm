@@ -605,6 +605,22 @@ def test_native_plugin_with_only_a_root_mcp_json_is_approvable(
     assert _registered(chain)
 
 
+def test_native_plugin_with_only_a_root_mcp_json_is_pending_without_a_lockfile(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """With no apm.lock.yaml, approve still detects the Agent Plugin it must list."""
+    chain = _mcp_only_chain(tmp_path, apm_binary_path, {})
+    chain.ok("install", "--no-policy")
+    assert not _registered(chain)
+    (chain.project / "apm.lock.yaml").unlink()
+
+    pending = _text(chain.ok("approve", "--pending"))
+    assert "[not approved]" in pending, pending
+    assert "mcp" in pending and "bin" in pending, pending
+    listing = _text(chain.ok("approve", "--list"))
+    assert "mcp[x:" in listing and "bin[x:" in listing, listing
+
+
 def test_native_plugin_mcp_grant_alone_parks_and_names_the_missing_bin(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
