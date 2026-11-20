@@ -3,7 +3,9 @@
 The session hook in tests/integration/conftest.py writes the cells a run
 visited to ``build/gate-cells/visited-<worker>.json`` (or
 ``$APM_GATE_CELLS_DIR``). For every scope whose mandatory GATE spine completed
-in that run, the visited cells must cover that scope's obligations.
+in that run, the visited cells must cover that scope's obligations. With
+``APM_GATE_CELLS_REQUIRED=1`` (the CI job that merges every lifecycle shard's
+artifact) both scopes must have reported.
 """
 
 from __future__ import annotations
@@ -98,6 +100,9 @@ def test_known_failing_cells_are_neutral_and_tracked() -> None:
 
 def test_visited_cells_cover_the_obligations_of_every_completed_spine() -> None:
     cells, spines = _visited()
+    if os.environ.get("APM_GATE_CELLS_REQUIRED") == "1":
+        # CI merges every lifecycle shard's visited set: both spines must report.
+        assert spines == set(SCOPES), f"GATE spines reported: {sorted(spines)}"
     obligations = set(_obligations())
     for scope in spines:
         wanted = {cell for cell in obligations if cell.endswith(f"|{scope}")}
