@@ -16,9 +16,10 @@ from ..core.scope import InstallScope
 from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
 from ..deps.reachability import retained_lock_keys
 from ..install.locking import serialized_lifecycle_unless
+from ..install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
-from ..models.apm_package import APMPackage
+from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
 from ._helpers import (
@@ -268,6 +269,9 @@ def prune(ctx, dry_run):
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
+        compile_inputs = snapshot_compile_inputs(
+            project_root, package_target_selection(apm_package), apm_modules_dir
+        )
         for org_repo_name in orphaned_packages:
             path_parts = org_repo_name.split("/")
             pkg_path = apm_modules_dir.joinpath(*path_parts)
@@ -421,6 +425,8 @@ def prune(ctx, dry_run):
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
                     "stale -- run 'apm install' to rebuild hook configuration."
                 )
+
+        hint_compile_after_removal(compile_inputs, apm_modules_dir, logger)
 
         if failed_count:
             logger.error(
