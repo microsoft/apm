@@ -328,7 +328,6 @@
     "tests/integration/test_frozen_stale_exec_status_lifecycle.py",
     "tests/integration/test_frozen_undeclared_package_retention_lifecycle.py",
     "tests/integration/test_gemini_integration.py",
-    "tests/integration/test_generated_lifecycle_state_machine.py",
     "tests/integration/test_generic_git_url_install.py",
     "tests/integration/test_generic_https_credential_env_e2e.py",
     "tests/integration/test_ghe_marketplace_install_e2e.py",

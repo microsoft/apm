@@ -3,7 +3,8 @@ name: GATE State Machine Nightly
 # M-GATE nightly exploration (#4031, #4095). The PR lifecycle shards run the
 # GATE state machine through `python -m apm_cli.cli` with 4 derandomized
 # examples per scope; this workflow builds the packaged binary and explores 25
-# fresh examples per scope through it (APM_LIFECYCLE_DRIVER=binary). A failure opens
+# fresh examples per scope through it (APM_LIFECYCLE_DRIVER=binary). The M-SPINE
+# machine (#4098) explores 25 fresh examples per variant in the same job. A failure opens
 # (or updates) one tracking issue; the next green run closes it. Hypothesis
 # prints a @reproduce_failure blob for every falsifying example.
 
@@ -58,6 +59,17 @@ jobs:
           export APM_BINARY_PATH="$PWD/dist/apm-linux-x86_64/apm"
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 2 --durations=10 -k sequences tests/lifecycle/machines/test_m_gate.py
+
+      # M-SPINE (#4098): same binary, 25 fresh examples per variant.
+      - name: Explore SPINE sequences
+        if: ${{ !cancelled() }}
+        env:
+          APM_SPINE_MAX_EXAMPLES: "25"
+          APM_LIFECYCLE_DRIVER: binary
+        run: |
+          export APM_BINARY_PATH="$PWD/dist/apm-linux-x86_64/apm"
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 2 --durations=10 -k sequences tests/lifecycle/machines/test_m_spine.py
 
   signal:
     name: GATE Nightly Signal

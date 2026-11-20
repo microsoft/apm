@@ -1,28 +1,30 @@
-"""Bounded model-based lifecycle checks against the installed APM CLI."""
+"""M-SPINE: the install, audit and repair reference-model machine (#4040, #4098).
+
+Moved from ``tests/integration/test_generated_lifecycle_state_machine.py``
+onto the lifecycle family core. Every APM command, including those the
+shared scenario helpers run, goes through ``tests/lifecycle/driver.py``
+(engine on PR, binary on the nightly) and then ``check_cross_cutting``,
+so each step keeps I1-I9 and emits receipts. The per-rule snapshot oracles
+and the reference-model invariant are unchanged.
+
+Variants: ``project``, ``global-canonical`` and ``global-aliased``
+(``HOME`` reached through a symlink). The mandatory spine replays once per
+world; generated examples restore that post-spine world (#4040).
+"""
 
 from __future__ import annotations
 
-import ast
-import inspect
-import itertools
+import dataclasses
 import json
+import re
 import shutil
-import textwrap
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
-from uuid import UUID
 
-import pytest
 import yaml
-from hypothesis import HealthCheck, Phase, settings
-from hypothesis.stateful import (
-    RuleBasedStateMachine,
-    invariant,
-    precondition,
-    rule,
-    run_state_machine_as_test,
-)
+from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 
 from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.scope import InstallScope
@@ -45,6 +47,14 @@ from tests.integration.test_required_lifecycle_state_machine import (
     _Scenario,
     _skill,
 )
+from tests.lifecycle import driver
+from tests.lifecycle.oracles import (
+    ExpectedCell,
+    Observation,
+    Operation,
+    check_cross_cutting,
+    operation_for,
+)
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import (
     ArtifactSnapshotSet,
@@ -55,15 +65,6 @@ from tests.utils.artifact_snapshot import (
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_package import LocalPackage
 from tests.utils.world_snapshot import restore_tree
-
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.e2e,
-    pytest.mark.lifecycle_smoke,
-    pytest.mark.lifecycle_merge_group,
-    pytest.mark.requires_apm_binary,
-    pytest.mark.requires_e2e_mode,
-]
 
 _SKILL_NAME = "model-skill"
 _PACKAGE_NAME = "model-kit"
@@ -103,7 +104,7 @@ _INSTALL_EXACT_PATHS = {
     "user": _USER_WRITE_PATHS,
 }
 _INSTALL_TREE_PREFIXES = {"project": frozenset({"apm_modules"})}
-_LEDGER_PATH = Path(__file__).parents[1] / "fixtures" / "lifecycle_bug_ledger.json"
+_LEDGER_PATH = Path(__file__).parents[2] / "fixtures" / "lifecycle_bug_ledger.json"
 _TRANSITION_PROPERTIES = {
     "audit_clean": frozenset({"filesystem.open_world_observation", "outcome.status_matches_state"}),
     "audit_tampered": frozenset(
@@ -146,6 +147,8 @@ _TRANSITION_PROPERTIES = {
     "legacy_update": frozenset({"source.ref_cache_coherent"}),
 }
 _VARIANTS = ("project", "global-canonical", "global-aliased")
+# Run-level expected cell: a preserved user edit of a managed file (see expected_cells).
+USER_EDIT_CELL = "spine-user-edit-preserved"
 
 
 def _phase_one_properties() -> frozenset[str]:
@@ -154,6 +157,62 @@ def _phase_one_properties() -> frozenset[str]:
 
 
 _PHASE_ONE_PROPERTIES = _phase_one_properties()
+
+
+# Commands that never change durable state in this machine (I5 read-only).
+_READ_ONLY_COMMANDS = frozenset(
+    {
+        "audit",
+        "outdated",
+        "view",
+        "info",
+        "targets",
+        "find",
+        "deps list",
+        "deps tree",
+        "deps why",
+        "deps info",
+        "lock export",
+        "cache info",
+    }
+)
+_GROUPED_COMMANDS = frozenset({"deps", "lock", "cache"})
+# Commands that reconcile the deployed set with the declarations (I4 in this machine).
+_RECONCILING_COMMANDS = frozenset({"install", "update", "uninstall", "prune"})
+
+
+@dataclass(frozen=True)
+class _At:
+    """The driver world for one command: its cwd and environment."""
+
+    project: Path
+    env: dict[str, str]
+
+
+class _DriverRunner:
+    """``scenario.runner`` of the shared helpers, routed through the family driver.
+
+    While a machine is bound, every command (including the ones the shared
+    ``tests/integration`` helpers run) is observed and checked by
+    ``check_cross_cutting``.
+    """
+
+    def __init__(self, entry_point: Sequence[str]) -> None:
+        self.entry_point = tuple(entry_point)
+        self.machine: _LifecycleReferenceModel | None = None
+
+    def run(
+        self,
+        args: Sequence[str],
+        *,
+        scenario_id: str = "single-command",
+        cwd: Path,
+        env: Mapping[str, str],
+    ) -> CommandResult:
+        del scenario_id
+        if self.machine is not None:
+            return self.machine.checked_run(tuple(args), cwd=cwd, env=env)
+        return driver.run(_At(cwd, dict(env)), tuple(args), entry_point=self.entry_point)
 
 
 @dataclass(frozen=True)
@@ -170,8 +229,19 @@ class _ModelFixture:
     external_roots: tuple[LifecycleStateRoot, ...] = ()
 
     @classmethod
-    def create(cls, root: Path, apm_binary_path: Path, variant: str = "project") -> _ModelFixture:
-        scenario = _new_scenario(root, apm_binary_path)
+    def create(
+        cls, root: Path, entry_point: Sequence[str], variant: str = "project"
+    ) -> _ModelFixture:
+        fixture = cls._build(root, entry_point, variant)
+        # Hermetic world: no update check (it would write ~/.cache/apm and try the network).
+        fixture.environment["APM_E2E_TESTS"] = "1"
+        return fixture
+
+    @classmethod
+    def _build(cls, root: Path, entry_point: Sequence[str], variant: str) -> _ModelFixture:
+        scenario = dataclasses.replace(
+            _new_scenario(root, Path(entry_point[0])), runner=_DriverRunner(entry_point)
+        )
         published = _publish(scenario, _PACKAGE_NAME, skill=_SKILL_NAME)
         if variant != "project":
             commit_a = _publish_revision(scenario, published, "a")
@@ -306,6 +376,10 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         self.installed_revision = "a"
         self.published_commit = fixture.source.commit.sha
         self.installed_commit = fixture.source.commit.sha
+        self.converged = False
+        self.expected_seen: set[str] = set()
+        self._command = ""
+        fixture.scenario.runner.machine = self
 
     @property
     def scenario(self) -> _Scenario:
@@ -319,6 +393,95 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
     def skill_path(self) -> Path:
         return self.fixture.skill_path
 
+    # -- family oracle -------------------------------------------------------
+
+    @property
+    def scope(self) -> str:
+        return "user" if self.fixture.global_scope else "project"
+
+    @property
+    def deploy_root(self) -> Path:
+        if self.fixture.global_scope:
+            return self.fixture.external_roots[0].path
+        return self.project.root
+
+    def _managed_skill(self) -> bool:
+        """The deployed skill carries APM content (user bytes are not managed)."""
+        return self.skill_path.is_file() and self.skill_path.read_bytes().startswith(_SKILL_BYTES)
+
+    def observe(self) -> Observation:
+        managed = self._managed_skill()
+        return Observation(
+            state=self._state(),
+            artifacts=self._capture(),
+            deployed=frozenset({"skill"}) if managed else frozenset(),
+            deploy_root=self.deploy_root,
+            lock=LockFile.read(self.project.root / "apm.lock.yaml"),
+            managed_paths=frozenset({self._skill_record()}) if managed else frozenset(),
+        )
+
+    def _skill_record(self) -> str:
+        """How the lock names the skill: project-relative, or absolute for --global."""
+        if self.fixture.global_scope:
+            return self.skill_path.as_posix()
+        return self.skill_path.relative_to(self.deploy_root).as_posix()
+
+    def allowed_surfaces(self) -> frozenset[str]:
+        """I4: a command that reconciles declarations must retire an undeclared skill.
+
+        ``compile`` or ``lock`` never retire packages, so they keep it allowed.
+        """
+        reconciles = self._command in _RECONCILING_COMMANDS
+        return frozenset({"skill"}) if self.declared or not reconciles else frozenset()
+
+    def converged_before(self) -> bool:
+        return self.converged
+
+    def expected_cells(self, op, before, after, result) -> Mapping[str, tuple[ExpectedCell, ...]]:
+        """I1 cannot hold while a user edit of the managed skill is preserved.
+
+        By design the lock keeps the deployed hash (``audit --ci`` then reports
+        the drift; ``audit_tampered`` asserts it), so only the edited file's
+        hash mismatch is excused, and only while the edit is on disk.
+        """
+        del op, before, result
+        if not self.skill_path.is_file() or self._managed_skill():
+            return {}
+        del after
+        relative = re.escape(self._skill_record())
+        return {
+            "I1": (
+                ExpectedCell(
+                    USER_EDIT_CELL, f"^recorded hash does not match disk: {relative}$", False
+                ),
+            )
+        }
+
+    def record_expected(self, cell_id: str) -> None:
+        self.expected_seen.add(cell_id)
+
+    def _operation(self, args: tuple[str, ...]) -> Operation:
+        op = operation_for(args, scope=self.scope)
+        key = " ".join(args[:2]) if args[0] in _GROUPED_COMMANDS else args[0]
+        if key in _READ_ONLY_COMMANDS or "DRYRUN" in op.modifiers:
+            return dataclasses.replace(op, read_only=True)
+        if self.fixture.global_scope:
+            # A --global command never writes the directory it runs in.
+            return dataclasses.replace(op, forbidden={"project": ("*",)})
+        user_paths = tuple(sorted(self.fixture.exact_paths["user"]))
+        return dataclasses.replace(op, forbidden={"user": ("*",)}, allowed={"user": user_paths})
+
+    def checked_run(
+        self, args: tuple[str, ...], *, cwd: Path, env: Mapping[str, str]
+    ) -> CommandResult:
+        """Run one command through the driver and check I1-I9 around it."""
+        self._command = args[0]
+        before = self.observe()
+        result = driver.run(_At(cwd, dict(env)), args, entry_point=self.scenario.runner.entry_point)
+        check_cross_cutting(before, self.observe(), result, self, self._operation(args))
+        self.converged = False
+        return result
+
     def _run(
         self,
         args: tuple[str, ...],
@@ -326,7 +489,10 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         expected_returncode: int = 0,
         *,
         command_cwd: Path | None = None,
+        converged: bool = False,
     ) -> CommandResult:
+        # I2 applies only where the model knows the step repeats a converged state.
+        self.converged = converged
         result = self.scenario.runner.run(
             args,
             cwd=command_cwd or self.fixture.invoke_cwd,
@@ -424,7 +590,7 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
                 and record.locator.value.endswith(f"/{_SKILL_NAME}/SKILL.md")
                 for record in state.deployment_records
             )
-        self._run(self.fixture.install_args, "reinstall")
+        self._run(self.fixture.install_args, "reinstall", converged=True)
         assert_snapshot_set_unchanged(before, self._capture())
         if not self.clean:
             assert self.skill_path.read_bytes() == _TAMPER_BYTES
@@ -635,7 +801,12 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
-    @precondition(lambda self: self.fixture.global_scope and self.materialized and self.clean)
+    @precondition(
+        # Rehydration reinstalls the declared set, so the package must stay declared.
+        lambda self: (
+            self.fixture.global_scope and self.declared and self.materialized and self.clean
+        )
+    )
     def clean_sources(self) -> None:
         before, state = self._capture(), self._state()
         self._run(
@@ -659,7 +830,12 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
-    @precondition(lambda self: self.fixture.global_scope and self.materialized and self.clean)
+    @precondition(
+        # deps update resolves the declared set.
+        lambda self: (
+            self.fixture.global_scope and self.declared and self.materialized and self.clean
+        )
+    )
     def legacy_update(self) -> None:
         before = self._capture()
         self._run(("deps", "update", "--global", "--parallel-downloads", "0"), "legacy-update")
@@ -694,7 +870,7 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
     @precondition(lambda self: self.fixture.global_scope and self.materialized)
     def compile(self) -> None:
         before = self._capture()
-        self._run(("compile", "--global"), "compile")
+        self._run(("compile", "--global"), "compile", converged=True)
         target_root = self.fixture.external_roots[0].path
         native = target_root / "rules" / "revision.md"
         assert native.read_text(encoding="ascii") == f"# revision-{self.installed_revision}\n"
@@ -732,7 +908,7 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
     )
     def frozen_replay(self) -> None:
         before, state = self._capture(), self._state()
-        self._run((*self.fixture.install_args, "--frozen"), "frozen-replay")
+        self._run((*self.fixture.install_args, "--frozen"), "frozen-replay", converged=True)
         _assert_same_state(state, self._state())
         assert_snapshot_set_unchanged(before, self._capture())
 
@@ -795,7 +971,12 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         )
 
     @rule()
-    @precondition(lambda self: self.fixture.global_scope and self.materialized and self.clean)
+    @precondition(
+        # apm uninstall selects the package by its manifest entry.
+        lambda self: (
+            self.fixture.global_scope and self.declared and self.materialized and self.clean
+        )
+    )
     def uninstall(self) -> None:
         before = self._capture()
         self._run(("uninstall", "--global", self.fixture.source.remote_url), "uninstall")
@@ -905,10 +1086,10 @@ class _SpineWorld:
 
     @classmethod
     def replay(
-        cls, root: Path, apm_binary_path: Path, variant: str
+        cls, root: Path, entry_point: Sequence[str], variant: str
     ) -> tuple[_SpineWorld, _LifecycleReferenceModel]:
-        model = _LifecycleReferenceModel(_ModelFixture.create(root, apm_binary_path, variant))
-        _mandatory_replay(model)
+        model = _LifecycleReferenceModel(_ModelFixture.create(root, entry_point, variant))
+        mandatory_replay(model)
         pristine = root.parent / f"{root.name}-pristine"
         shutil.copytree(model.scenario.isolated.root, pristine, symlinks=True)
         reference = tuple((name, getattr(model, name)) for name in _REFERENCE_FIELDS)
@@ -922,101 +1103,7 @@ class _SpineWorld:
         return model
 
 
-@pytest.mark.parametrize("variant", _VARIANTS)
-def test_generated_lifecycle_sequences_preserve_reference_model(
-    tmp_path: Path,
-    apm_binary_path: Path,
-    variant: str,
-) -> None:
-    """Generate and shrink guarded transition sequences over a real CLI.
-
-    The mandatory spine replays once per world, inside the first generated
-    model; every later example restores that post-spine world instead of
-    replaying the spine again.
-    """
-    world: _SpineWorld | None = None
-
-    def factory() -> _LifecycleReferenceModel:
-        nonlocal world
-        if world is None:
-            world, model = _SpineWorld.replay(tmp_path / "world", apm_binary_path, variant)
-            return model
-        return world.restore()
-
-    run_state_machine_as_test(
-        factory,
-        settings=settings(
-            database=None,
-            deadline=None,
-            derandomize=True,
-            max_examples=6 if variant == "project" else 3,
-            phases=(Phase.generate, Phase.shrink),
-            print_blob=True,
-            stateful_step_count=8,
-            suppress_health_check=(HealthCheck.too_slow,),
-        ),
-    )
-
-
-@pytest.mark.parametrize("variant", _VARIANTS)
-def test_generated_lifecycle_mandatory_replay(
-    tmp_path: Path, apm_binary_path: Path, variant: str
-) -> None:
-    """Exercise the model's guarded commands without relying on random selection."""
-    model = _LifecycleReferenceModel(
-        _ModelFixture.create(tmp_path / "mandatory", apm_binary_path, variant)
-    )
-    _mandatory_replay(model)
-
-
-@pytest.mark.parametrize(
-    ("extra_write", "variant"),
-    [
-        *itertools.product(("identity-sibling", "wrong-root"), _VARIANTS),
-        ("receipt-sibling", "project"),
-    ],
-)
-def test_generated_identity_write_scope_is_exact(
-    tmp_path: Path, apm_binary_path: Path, variant: str, extra_write: str
-) -> None:
-    """Admit local evidence, but reject sibling files and cross-scope writes."""
-    model = _LifecycleReferenceModel(
-        _ModelFixture.create(tmp_path / "identity-scope", apm_binary_path, variant)
-    )
-    model.install()
-    home = model.scenario.isolated.home
-    project = model.fixture.invoke_cwd
-    identity_root = home if model.fixture.global_scope else project
-    identity = identity_root / ".apm-local/installation"
-    assert identity.is_file() and not identity.is_symlink()
-    identity_bytes = identity.read_bytes()
-    assert identity_bytes == (UUID(hex=identity_bytes.decode("ascii").strip()).hex + "\n").encode(
-        "ascii"
-    )
-    ignore = identity.parent / ".gitignore"
-    assert ignore.is_file() and not ignore.is_symlink()
-    assert ignore.read_bytes() == b"*\n"
-
-    before = model._capture()
-    if extra_write == "identity-sibling":
-        unexpected = identity.parent / "unrelated.txt"
-    elif extra_write == "receipt-sibling":
-        unexpected = home / ".apm/deployment-receipts/unrelated.json"
-    else:
-        wrong_root = project if model.fixture.global_scope else home
-        unexpected = wrong_root / ".apm-local/installation"
-    unexpected.parent.mkdir(parents=True, exist_ok=True)
-    unexpected.write_bytes(identity_bytes)
-    with pytest.raises(AssertionError, match="outside its declared write set"):
-        assert_snapshot_changes_within(
-            before,
-            model._capture(),
-            exact_paths=model.fixture.exact_paths,
-            tree_prefixes=model.fixture.tree_prefixes,
-        )
-
-
-def _mandatory_replay(model: _LifecycleReferenceModel) -> None:
+def mandatory_replay(model: _LifecycleReferenceModel) -> None:
     operations = [
         model.dry_run,
         model.install,
@@ -1084,28 +1171,3 @@ def _mandatory_replay(model: _LifecycleReferenceModel) -> None:
         assert all(condition(model) for condition in transition.preconditions)
         operation()
         model.durable_state_matches_reference_model()
-
-
-def test_generated_transition_catalog_covers_phase_one_properties() -> None:
-    """Require every generated transition to invoke a filesystem oracle."""
-    rules = {
-        name: value
-        for name, value in vars(_LifecycleReferenceModel).items()
-        if getattr(value, "hypothesis_stateful_rule", None) is not None
-    }
-
-    assert set(_TRANSITION_PROPERTIES) == set(rules)
-    assert set().union(*_TRANSITION_PROPERTIES.values()) == set(_PHASE_ONE_PROPERTIES)
-    oracle_calls = {
-        "assert_only_snapshot_paths_changed",
-        "assert_snapshot_changes_within",
-        "assert_snapshot_set_unchanged",
-    }
-    for rule_name, function in rules.items():
-        tree = ast.parse(textwrap.dedent(inspect.getsource(inspect.unwrap(function))))
-        called_names = {
-            node.func.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        }
-        assert called_names & oracle_calls, f"{rule_name} does not invoke a filesystem oracle"

@@ -90,7 +90,7 @@ def _sample() -> tuple[dict[str, Any], dict[str, Any]]:
 def test_immutable_witnesses_and_current_inventory() -> None:
     """Pin obligations independently of both implementation constants and ledger rows."""
     required = "tests/integration/test_required_lifecycle_state_machine.py::"
-    generated = "tests/integration/test_generated_lifecycle_state_machine.py::"
+    generated = "tests/lifecycle/machines/test_m_spine.py::"
     expected = {
         required + "test_required_global_audit_rule_matrix_for_external_roots[False]",
         required + "test_required_global_audit_rule_matrix_for_external_roots[True]",
