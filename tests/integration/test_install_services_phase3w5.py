@@ -109,7 +109,8 @@ def make_skill_result(
         skill_created=skill_created,
         skill_updated=False,
         skill_skipped=False,
-        skill_path=None,
+        # A created skill without promoted sub-skills is a root skill.
+        skill_path=Path("SKILL.md") if skill_created and not sub_skills_promoted else None,
         references_copied=0,
         sub_skills_promoted=sub_skills_promoted,
         bin_deployed=bin_deployed,

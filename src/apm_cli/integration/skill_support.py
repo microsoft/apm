@@ -107,3 +107,13 @@ class SkillIntegrationResult:
     def __post_init__(self) -> None:
         if self.target_paths is None:
             self.target_paths = []
+
+
+def skills_integrated(result: SkillIntegrationResult) -> int:
+    """Skills one package integrated: its root skill (if new) plus promoted skills.
+
+    A ``skills/`` bundle has no root skill; ``skill_created`` then only says
+    that one of its promoted skills was new (#4089).
+    """
+    root_skill = 1 if result.skill_created and result.skill_path is not None else 0
+    return root_skill + result.sub_skills_promoted
