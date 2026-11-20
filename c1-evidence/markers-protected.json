@@ -1,0 +1,13 @@
+{
+  "partition": "markers for tests root and protected suites",
+  "steps_done": [],
+  "folds": {},
+  "decisions": [
+    "Step 3 only: classification markers; no moves, deletions or rewrites.",
+    "Marker chosen by the strongest boundary any test in the module crosses: e2e if it runs the apm CLI in a subprocess, component if it reads/writes real files (incl. hermetic HOME logs/config, committed fixtures) or uses CliRunner, else unit.",
+    "Unit-vs-component checked with a sys.addaudithook probe of file opens/mkdir/spawn during test calls.",
+    "Removed stale '# noqa: F401' on 'import pytest' where the new pytestmark makes the import used (RUF100).",
+    "Root batch: tests/test_lockfile.py::TestLockFile::test_write_parses_legacy_lockfile_once and two tests/test_gitlab_git_transport.py sparse-checkout tests fail identically on the base commit (pre-existing, sandbox env)."
+  ],
+  "counts_left": {"same_body_groups": 13, "unclassified_modules": 70, "placement_offenders": 0, "weak_tests": 526}
+}

@@ -17,6 +17,8 @@ from apm_cli.deps.lockfile import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize("name", ["", 42])
 def test_malformed_mcp_omission_keys_rejected(name: str | int) -> None:

@@ -23,6 +23,8 @@ from src.apm_cli.models.apm_package import (
     validate_apm_package,
 )
 
+pytestmark = pytest.mark.component
+
 
 class TestDependencyReference:
     """Test DependencyReference parsing and functionality."""

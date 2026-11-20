@@ -9,6 +9,8 @@ import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
 
+pytestmark = pytest.mark.unit
+
 
 class TestSanitizeCredentialPath:
     """Direct coverage of the security-critical credential-path sanitizer.
