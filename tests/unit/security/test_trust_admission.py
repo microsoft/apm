@@ -302,6 +302,64 @@ def test_row16_pinned_hook_file_parks_when_its_script_changes(tmp_path: Path) ->
     }
 
 
+def test_pinned_hook_package_is_admissible_only_while_a_hook_file_matches(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "pkg"
+    hook = _hook_package(package)
+    info = SimpleNamespace(install_path=str(package))
+    pins = {PKG: {"hooks": {".apm/hooks/lint.json": hook_file_fingerprint(package, hook)}}}
+    assert trust.hooks_package_admissible(materialize_exec_map(_ctx(pins)), (PKG,), info)
+
+    unmatched = {PKG: {"hooks": {".apm/hooks/lint.json": "sha256:" + "0" * 64}}}
+    assert not trust.hooks_package_admissible(materialize_exec_map(_ctx(unmatched)), (PKG,), info)
+    denied = materialize_exec_map(_ctx(pins, deny={PKG: {"hooks": True}}))
+    assert not trust.hooks_package_admissible(denied, (PKG,), info)
+
+
+@pytest.mark.parametrize(
+    ("recorded_status", "recorded_allowed", "reported"),
+    [
+        ("deployed", (), True),
+        (None, (), True),
+        ("gated_pending_approval", ("mcp",), False),
+        ("gated_pending_approval", ("hooks",), True),
+        ("denied", (), False),
+    ],
+)
+def test_recorded_hook_pin_mismatch_follows_what_the_lock_deployed(
+    tmp_path: Path, recorded_status, recorded_allowed, reported
+) -> None:
+    package = tmp_path / "pkg"
+    _hook_package(package)
+    ctx = _ctx({PKG: {"hooks": {".apm/hooks/lint.json": "sha256:" + "0" * 64}}})
+    mismatches = trust.recorded_hook_pin_mismatches(
+        ctx,
+        (PKG,),
+        package,
+        package=PKG,
+        recorded_status=recorded_status,
+        recorded_allowed=recorded_allowed,
+    )
+    expected = [trust.HookPinMismatch(PKG, ".apm/hooks/lint.json", "definition-changed")]
+    assert mismatches == (expected if reported else [])
+
+
+def test_recorded_hook_pin_mismatch_leaves_matches_and_denies_to_their_owners(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "pkg"
+    hook = _hook_package(package)
+    pins = {PKG: {"hooks": {".apm/hooks/lint.json": hook_file_fingerprint(package, hook)}}}
+    for ctx in (_ctx(pins), _ctx(pins, deny={PKG: {"hooks": True}})):
+        assert (
+            trust.recorded_hook_pin_mismatches(
+                ctx, (PKG,), package, package=PKG, recorded_status="deployed"
+            )
+            == []
+        )
+
+
 def test_row15_legacy_hook_grant_keeps_package_level_decision(tmp_path: Path) -> None:
     package = tmp_path / "pkg"
     _hook_package(package)

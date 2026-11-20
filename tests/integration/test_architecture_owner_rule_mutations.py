@@ -1929,6 +1929,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="InstallService stops owning the frozen-install mutation preflight.",
     ),
     MutationCase(
+        guard_id="install-deployment-hook-pin-frozen-audit-parity",
+        rule_id="install-deployment-hook-pin-frozen-audit-parity",
+        path="src/apm_cli/install/service.py",
+        old="mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)",
+        new="mismatches = []",
+        intent="install --frozen stops verifying locked hook pins while audit --ci still does.",
+    ),
+    MutationCase(
         guard_id="install-deployment-immutable-requirements",
         rule_id="install-deployment-immutable-requirements",
         path="src/apm_cli/deps/apm_resolver.py",

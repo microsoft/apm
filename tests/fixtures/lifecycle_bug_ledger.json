@@ -666,6 +666,24 @@
       ]
     },
     {
+      "issue": 4188,
+      "fixed_in": "Unreleased",
+      "summary": "install --frozen and audit --ci disagreed on executable approval pins, and a hook whose pin no longer matched kept its config entries after install.",
+      "failure_modes": [
+        "cleanup",
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_hook_approval_pin_parity_lifecycle.py::test_frozen_and_audit_refuse_alike_when_a_hook_pin_does_not_match",
+        "tests/integration/test_hook_approval_pin_parity_lifecycle.py::test_install_retires_a_hook_whose_pin_no_longer_matches"
+      ]
+    },
+    {
       "issue": 4235,
       "fixed_in": "Unreleased",
       "summary": "Registry archive extraction applies one set of archive limits to every accepted format: entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries, with every entry validated before the first write.",
@@ -681,6 +699,18 @@
         "tests/unit/registry/test_extractor.py::test_zip_special_file_modes_are_refused",
         "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
         "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
+      ]
+    },
+    {
+      "issue": 4270,
+      "fixed_in": "Unreleased",
+      "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",
+      "failure_modes": ["cache", "outcome"],
+      "properties": ["source.ref_cache_coherent", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/install/test_legacy_plugin_compat.py::test_cached_pass_classifies_as_the_fresh_pass",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
+        "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
     }
   ],
