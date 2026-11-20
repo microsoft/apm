@@ -162,6 +162,23 @@ class DeploymentEvidence:
         for claim in unproven:
             self._rendered_roots(claim)
 
+    def refusals(self, claims: Iterable[str]) -> list[tuple[str, str]]:
+        """Return ``(claim, verdict)`` for each claimed file deletion would keep.
+
+        Lets a command refuse before it changes anything when a file it would
+        delete has no deployment evidence (#3701). Missing files, directories
+        and final symlinks are skipped; their own rules apply.
+        """
+        refused: list[tuple[str, str]] = []
+        for claim in dict.fromkeys(claims):
+            physical = self._physical(claim)
+            if physical is None or physical.is_symlink() or not physical.is_file():
+                continue
+            verdict = self.verdict(claim, physical)
+            if verdict != AUTHORIZED:
+                refused.append((claim, verdict))
+        return refused
+
     def _physical(self, claim: str) -> Path | None:
         from .copilot_cowork_paths import (
             COWORK_URI_SCHEME,
@@ -559,6 +576,29 @@ def _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
             ),
             package=dep_key,
         )
+
+
+_REFUSAL_REASONS = {
+    UNPROVEN: "no local deployment receipt or render of the locked package version",
+    EDITED: "edited since APM deployed it",
+    UNREADABLE: "its content could not be read to verify it",
+}
+
+
+def refusal_reason(verdict: str) -> str:
+    """Name why deployment evidence does not authorize deleting a file."""
+    return _REFUSAL_REASONS.get(verdict, _REFUSAL_REASONS[UNPROVEN])
+
+
+def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
+    """Return the two runnable remedies when uninstall lacks deletion evidence."""
+    flag = " -g" if user_scope else ""
+    return (
+        f"Run 'apm install{flag}' once with access to the package source, which "
+        f"re-establishes deployment evidence, then rerun 'apm uninstall{flag}'.",
+        "If the source is unreachable, or a listed file holds your edits, move "
+        f"each listed file aside or delete it, then rerun 'apm uninstall{flag}'.",
+    )
 
 
 def _keep_without_evidence(

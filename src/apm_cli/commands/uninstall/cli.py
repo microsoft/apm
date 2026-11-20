@@ -397,6 +397,51 @@ def _uninstall_deletion_evidence(
     return evidence
 
 
+def _refuse_uninstall_without_evidence(
+    evidence,
+    lockfile,
+    cleanup_keys: set[str],
+    preserved_values,
+    staged_refreshes,
+    modules_dir,
+    logger: CommandLogger,
+    *,
+    user_scope: bool,
+) -> None:
+    """Refuse before any change when a file uninstall would delete lacks evidence.
+
+    A lockfile hash alone never authorizes deleting a deployed file
+    (req-lk-024, #3701). Checked before package sources, apm.yml or
+    apm.lock.yaml change, so a refusal leaves all of them as they were.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
+
+    if not lockfile or not cleanup_keys:
+        return
+    selected, _hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
+    survivors, _hashes = _collect_deployed_cleanup_state(
+        lockfile,
+        DeploymentLedgerCodec.valid_owner_keys(lockfile, excluded_dependency_keys=cleanup_keys),
+    )
+    candidates = selected - survivors - builtins.set(lockfile.local_deployed_files)
+    candidates -= builtins.set(preserved_values or ())
+    refused = evidence.refusals(sorted(candidates))
+    if not refused:
+        return
+    _cleanup_staged_local_refreshes(staged_refreshes, modules_dir)
+    logger.render_summary()
+    logger.error(
+        "Uninstall refused: deleting these tracked files needs deployment evidence that "
+        "APM wrote them. apm.yml, apm.lock.yaml and all files are unchanged."
+    )
+    for claim, verdict in refused:
+        logger.error(f"  - {claim}: {refusal_reason(verdict)}")
+    for remedy in uninstall_evidence_remedies(user_scope=user_scope):
+        logger.error(remedy)
+    sys.exit(1)
+
+
 def _report_package_removal_failure(
     logger: CommandLogger,
     error: OSError | PathTraversalError | LocalSurvivorRefreshError | CodexNativeError,
@@ -825,6 +870,16 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             lockfile_path,
             deploy_root,
             removed_keys | builtins.set(projected_orphans) | profile_keys,
+            logger,
+            user_scope=scope is InstallScope.USER,
+        )
+        _refuse_uninstall_without_evidence(
+            deletion_evidence,
+            lockfile,
+            removed_keys | builtins.set(projected_orphans) | profile_keys,
+            profile_survivors,
+            staged_local_refreshes,
+            modules_dir,
             logger,
             user_scope=scope is InstallScope.USER,
         )

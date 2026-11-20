@@ -64,7 +64,7 @@ def test_unhashed_lock_claims_never_delete_user_files(tmp_path, apm_binary_path)
     removed = kit.run("uninstall", "test/kit", cwd=clone)
     refusal = output(removed)
     assert removed.returncode != 0, refusal
-    assert "could not remove tracked target files" in refusal, refusal
+    assert "Uninstall refused" in refusal, refusal
     assert _USER_INSTRUCTION in refusal, refusal
     _assert_user_files_kept(clone)
     assert "test/kit" in str(load_yaml(clone / "apm.yml")["dependencies"]["apm"])
