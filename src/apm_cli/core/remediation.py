@@ -181,8 +181,8 @@ RESTORE_EDITED_SKILL = _entry(
     then="commit the result",
 )
 # A managed file install kept because it may hold local edits (#4360, #4504).
+# Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
-KEPT_FILE_OVERWRITE = _entry("kept-file-overwrite", "apm install --force", "overwrite it")
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
     "apm install --force",
@@ -535,14 +535,14 @@ LOCKFILE_UNREADABLE = _entry(
     "lockfile-unreadable",
     "apm install",
     "regenerate apm.lock.yaml",
-    before="delete or fix {path}",
+    before="move {lockfile} aside",
 )
 # A lockfile written by a newer APM: regenerate it, or upgrade APM (req-lk-004).
 LOCKFILE_VERSION_UNSUPPORTED = _entry(
     "lockfile-version-unsupported",
     "apm lock",
     "regenerate it from apm.yml at a supported version",
-    before="move {path} aside",
+    before="move {lockfile} aside",
 )
 LOCKFILE_VERSION_UPGRADE_APM = _entry(
     "lockfile-version-upgrade-apm",
@@ -944,7 +944,7 @@ CLAUDE_PLUGIN_BINDING_MOVED = _entry(
     "apm install --global",
     "register the native Claude plugins under this APM home",
     before="remove the old entries from Claude settings and ~/.agents/plugins, "
-    "delete apm.lock.yaml",
+    "move apm.lock.yaml aside",
 )
 CODEX_PLUGIN_USER_SCOPE = _entry(
     "codex-plugin-user-scope",
@@ -1016,7 +1016,7 @@ PLUGIN_MCP_OWNERSHIP_UNKNOWN = _entry(
     "plugin-mcp-ownership-unknown",
     "apm install",
     "regenerate apm.lock.yaml",
-    before="fix or delete the unreadable apm.lock.yaml",
+    before="move the unreadable apm.lock.yaml aside",
     then="run 'apm pack' again",
 )
 FROZEN_MARKETPLACE_UNLOCKED = _entry(
@@ -1447,23 +1447,18 @@ SKILL_PATH_MIGRATION_LEGACY = _entry(
     "apm install --legacy-skill-paths",
     "keep per-client skill paths",
 )
+# Integrity refusals only restore: never a lock edit or a whole-lock move-aside.
 CONTENT_HASH_CACHE_CLEAN = _entry(
     "content-hash-cache-clean",
-    "apm cache clean",
+    "apm cache clean --yes",
     "discard the cached package copies",
     then="retry",
 )
-CONTENT_HASH_REPIN = _entry(
-    "content-hash-repin",
+LOCKFILE_RESTORE = _entry(
+    "lockfile-restore",
     "apm install",
-    "re-pin the dependency to the new content",
-    before="remove the '{dep_key}' entry from {lockfile}",
-)
-CONTENT_HASH_REPIN_GLOBAL = _entry(
-    "content-hash-repin-global",
-    "apm install -g",
-    "re-pin the dependency to the new content",
-    before="remove the '{dep_key}' entry from {lockfile}",
+    "verify the dependencies against the restored lockfile",
+    before="restore {lockfile} from version control (for example 'git checkout -- {lockfile}')",
 )
 MATERIALIZED_MANIFEST_INVALID = _entry(
     "materialized-manifest-invalid",

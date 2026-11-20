@@ -492,6 +492,23 @@ def _check_no_orphans(
     )
 
 
+def replay_failure_check(
+    name: str, error: str, *, owner: str | None = None, label: str = "replay failed"
+) -> CheckResult:
+    """Report one failed install replay once: in full under *owner*, else a pointer.
+
+    The replay error is a single finding; every check that needed the replay
+    fails closed, but only the owning check carries its text (RA-005).
+    """
+    if owner is not None and owner != name:
+        return CheckResult(
+            name=name,
+            passed=False,
+            message=f"not verified: the install replay failed (reported under {owner})",
+        )
+    return CheckResult(name=name, passed=False, message=f"{label}; see details", details=[error])
+
+
 def _check_skill_subset_consistency(
     manifest: APMPackage,
     lock: LockFile,
@@ -499,6 +516,7 @@ def _check_skill_subset_consistency(
     *,
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
+    replay_error_owner: str | None = None,
 ) -> CheckResult:
     """Verify locked selections match what the declared graph merges to.
 
@@ -512,11 +530,8 @@ def _check_skill_subset_consistency(
     from ..deps.reachability import declared_node_selections
 
     if prepared_replay_error is not None:
-        return CheckResult(
-            name="skill-subset-consistency",
-            passed=False,
-            message=f"replay failed: {prepared_replay_error}",
-            details=[prepared_replay_error],
+        return replay_failure_check(
+            "skill-subset-consistency", prepared_replay_error, owner=replay_error_owner
         )
     modules_root = (
         prepared_replay.modules_root
@@ -679,15 +694,15 @@ def _check_config_consistency(
     *,
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
+    replay_error_owner: str | None = None,
     no_policy: bool = False,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
     if prepared_replay_error is not None:
-        return CheckResult(
-            name="config-consistency",
-            passed=False,
-            message=f"replay failed: {prepared_replay_error}",
-            details=[prepared_replay_error],
+        return replay_failure_check(
+            "config-consistency",
+            prepared_replay_error,
+            owner=replay_error_owner or "skill-subset-consistency",
         )
     view, admission = audit_mcp_view(
         manifest,
@@ -1467,6 +1482,7 @@ def run_baseline_checks(
     ci_mode: bool = False,
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
+    replay_error_owner: str | None = None,
     no_policy: bool = False,
     policy_provider: Callable[[], Any] | None = None,
 ) -> CIAuditResult:
@@ -1477,6 +1493,8 @@ def run_baseline_checks(
     When *ci_mode* is ``True``, a missing ``apm.yml`` is always a hard
     ``manifest-missing`` failure, so a CI gate never passes without auditing
     anything; otherwise it is an advisory warning only when APM artifacts exist.
+    *replay_error_owner* names the later check that reports *prepared_replay_error*
+    in full (``drift``); without it the first check that needs the replay does.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..constants import APM_MODULES_DIR
@@ -1591,6 +1609,7 @@ def run_baseline_checks(
             project_root,
             prepared_replay=prepared_replay,
             prepared_replay_error=prepared_replay_error,
+            replay_error_owner=replay_error_owner,
         )
     ):
         return result
@@ -1603,6 +1622,7 @@ def run_baseline_checks(
             lock,
             prepared_replay=prepared_replay,
             prepared_replay_error=prepared_replay_error,
+            replay_error_owner=replay_error_owner,
             no_policy=no_policy,
         )
     ) or _run(

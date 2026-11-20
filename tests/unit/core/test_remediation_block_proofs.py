@@ -81,3 +81,70 @@ def test_block_remediation_resolves_and_names_its_state(block: str, remediation_
     rendered = entry.bind(**{name: "sample" for name in re.findall(r"\{([a-z_]+)\}", repr(entry))})
     assert rendered.sentence().startswith(("Run '", rendered.sentence()[:1]))
     assert f"'{rendered.command}' to {rendered.fixes_promise}" in rendered.sentence()
+
+
+# A lock reference in a manual step: the lockfile name, its placeholder or a lock entry.
+_LOCK = r"(?:apm\.lock\.yaml|\{lockfile\}|\blockfile\b|\block entry\b)"
+# Rule B (RA-004): no remedy hand-edits the lock, in any clause of a manual step.
+_LOCK_EDIT = re.compile(rf"\b(?:remove|delete|edit|fix|drop|change)\b[^,;]*{_LOCK}", re.I)
+_LOCK_MOVE_ASIDE = re.compile(rf"\bmove\b[^,;]*{_LOCK}[^,;]*\baside\b", re.I)
+# Whole-lock quarantine only where the trigger makes the lock unusable; never
+# for an integrity refusal (content hash, require_hashes, hash pins, provenance).
+_MOVE_ASIDE_ALLOWED = frozenset(
+    {
+        "claude-plugin-binding-moved",
+        "lockfile-unreadable",
+        "lockfile-version-unsupported",
+        "plugin-mcp-ownership-unknown",
+    }
+)
+
+
+@pytest.mark.parametrize("remediation_id", sorted(catalog()))
+def test_no_remediation_hand_edits_the_lockfile(remediation_id: str) -> None:
+    entry = catalog()[remediation_id]
+    for step in (entry.before, entry.then):
+        if not step:
+            continue
+        assert not _LOCK_EDIT.search(step), (remediation_id, step)
+        if _LOCK_MOVE_ASIDE.search(step):
+            assert remediation_id in _MOVE_ASIDE_ALLOWED, (remediation_id, step)
+
+
+def test_lock_move_aside_allowlist_is_live() -> None:
+    moved = {
+        remediation_id
+        for remediation_id, entry in catalog().items()
+        if any(_LOCK_MOVE_ASIDE.search(step or "") for step in (entry.before, entry.then))
+    }
+    assert moved == _MOVE_ASIDE_ALLOWED
+
+
+# RA-008: 'apm install --force' also deploys despite critical security findings,
+# so no remedy may offer --force. These entries predate the rule; each awaits a
+# steward ruling and the set may only shrink.
+_FORCE_PENDING_RULING = frozenset(
+    {
+        "drift-restore-edited-force",
+        "install-audit-force",
+        "local-file-unmanaged",
+        "local-files-collide",
+        "lockfile-state-unreconciled",
+        "marketplace-config-duplicate",
+        "staged-bundle-drift",
+        "unpack-critical-findings",
+    }
+)
+
+
+def _remedy_text(entry) -> str:
+    return " ".join(filter(None, (entry.command, entry.fixes_promise, entry.before, entry.then)))
+
+
+def test_no_remediation_offers_force() -> None:
+    forced = {
+        remediation_id
+        for remediation_id, entry in catalog().items()
+        if "--force" in _remedy_text(entry)
+    }
+    assert forced == _FORCE_PENDING_RULING
