@@ -367,8 +367,7 @@
     },
     "src/apm_cli/install/local_bundle_handler.py": {
       "install_local_bundle": [
-        "PLR0913",
-        "PLR0915"
+        "PLR0913"
       ]
     },
     "src/apm_cli/install/lsp/integration.py": {
