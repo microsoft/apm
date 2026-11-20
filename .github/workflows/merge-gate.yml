@@ -124,6 +124,9 @@ jobs:
           #                   four ci-integration.yml checks
           # tests/quality/test_ci_topology.py keeps this in sync with the
           # jobs that actually run on merge_group.
+          # "Test Architecture Ratchets" is required in every context: it runs
+          # tests/quality (including the merge-time topology guards in
+          # test_ci_topology.py), so a red ratchet must block the merge.
           # A PR labeled `full-integration` also runs ci-integration.yml at
           # PR time, so its four checks are required then too; unlabeled
           # PRs never wait for them.
@@ -150,7 +153,7 @@ jobs:
           # gate the class of Windows-only regressions fixed in
           # microsoft/apm#2233 rather than surfacing only after landing
           # on main.
-          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || contains(github.event.pull_request.labels.*.name, 'full-integration') && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux)' }}
+          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Test Architecture Ratchets,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || contains(github.event.pull_request.labels.*.name, 'full-integration') && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Test Architecture Ratchets,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Test Architecture Ratchets' }}
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
           # planned Integration shards (timeout 25m) -> fan-in, with
           # Release Validation (timeout 20m) in parallel. Expected

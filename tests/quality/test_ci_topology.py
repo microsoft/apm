@@ -373,7 +373,9 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
     wait_step = workflow_step(gate, "Wait for all required checks")
     expected_checks = wait_step["env"]["EXPECTED_CHECKS"]
     assert isinstance(expected_checks, str)
-    assert RATCHET_CHECK not in expected_checks
+    contexts = _expected_checks(merge_gate)
+    for context, names in contexts.items():
+        assert RATCHET_CHECK in names, f"{RATCHET_CHECK} must gate {context}"
     for required_check in REQUIRED_SHARD_CHECKS:
         assert required_check in expected_checks
 
@@ -398,7 +400,7 @@ def repository_inventory(
     return _ratchet_test_inventory(repository_python_inventory)
 
 
-def test_test_architecture_ratchets_remain_non_required(
+def test_test_architecture_ratchets_are_required_in_every_context(
     repository_inventory: dict[str, str],
 ) -> None:
     _assert_topology(REPO_ROOT, repository_inventory)
@@ -1634,17 +1636,22 @@ def _workflow_events(workflow: WorkflowNode) -> frozenset[str]:
 
 
 def _runs_on_merge_group(job: WorkflowNode) -> bool:
-    """A job-level condition that pins another event excludes merge_group.
+    """Only conditions known to let the job run on merge_group count.
 
-    `github.event_name != 'pull_request' || ...` keeps merge_group;
-    `github.event_name == 'workflow_dispatch'` or `!= 'merge_group'` drops it.
+    No condition, `always()`, the `full-integration` label gate, or
+    `always() && (<label gate>)`. Anything else (`${{ false }}`,
+    `github.event_name == 'workflow_dispatch'`, an unknown expression) is not
+    a merge_group producer, because a skipped check would still pass the gate.
     """
-    condition = str(job.get("if", ""))
-    pinned = set(re.findall(r"github\.event_name == '([a-z_]+)'", condition))
-    excluded = set(re.findall(r"github\.event_name != '([a-z_]+)'", condition))
-    if pinned and MERGE_GROUP_EVENT not in pinned:
-        return False
-    return MERGE_GROUP_EVENT not in excluded
+    condition = str(job.get("if", "")).strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    return condition in {
+        "",
+        "always()",
+        FULL_INTEGRATION_GATE,
+        f"always() && ({FULL_INTEGRATION_GATE})",
+    }
 
 
 def _check_names(job_id: str, job: WorkflowNode) -> tuple[str, ...]:
@@ -1884,6 +1891,18 @@ def test_merge_group_check_skipped_by_a_job_condition_fails(
 ) -> None:
     job = workflow_job(mutable_workflows["ci-integration.yml"], "release-validation")
     job["if"] = "github.event_name == 'workflow_dispatch'"
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+@pytest.mark.parametrize("condition", ["${{ false }}", "false", "github.repository == 'x/y'"])
+def test_merge_group_check_from_an_always_false_producer_fails(
+    mutable_workflows: dict[str, WorkflowNode], condition: str
+) -> None:
+    workflow_job(mutable_workflows["ci-integration.yml"], "release-validation")["if"] = condition
 
     with pytest.raises(AssertionError, match="no merge_group job produces"):
         _assert_merge_group_checks_are_produced(

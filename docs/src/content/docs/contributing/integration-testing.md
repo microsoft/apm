@@ -455,9 +455,10 @@ Architecture ratchet contracts and the real architecture-scaling test run in
 separate Linux jobs, each with the same five-minute setup-to-cleanup limit.
 Their test selections, scaling threshold and environment opt-ins are unchanged.
 The `Test Architecture Ratchets` aggregate succeeds only when both jobs succeed;
-failure, cancellation, skipping or a missing result fails it. This remains a
-diagnostic check outside `merge-gate.yml`'s `EXPECTED_CHECKS`, not a new required
-merge gate. A passing test summary does not override a cancelled job.
+failure, cancellation, skipping or a missing result fails it. `merge-gate.yml`
+requires it at PR time and on `merge_group`, because it runs the `tests/quality`
+guards, including the merge-time topology checks. A passing test summary does
+not override a cancelled job.
 
 The required Windows compatibility gate selects `windows_compat` tests within
 `tests/unit` and `tests/integration`, with `APM_E2E_TESTS=1` for marked real-CLI
