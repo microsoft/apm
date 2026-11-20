@@ -101,6 +101,8 @@ class ApmLifecycleRunner:
             command,
             cwd=cwd,
             env=dict(env),
+            # No terminal: a prompt must not wait on (or read) the runner's console.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
