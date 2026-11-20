@@ -197,8 +197,50 @@ def test_stale_entries_are_info_and_update_prunes_them(tmp_path: Path) -> None:
     ) in stale.stdout
     assert "duplicate_names tests/test_gone.py::TestGone::test_value" in stale.stdout
     assert updated.returncode == 0
-    assert "[+] updated test-duplicate baseline: removed 2 stale entries" in updated.stdout
+    assert (
+        "[+] updated test-duplicate baseline: removed 2 stale and re-keyed 0 moved entries"
+        in updated.stdout
+    )
     assert json.loads(baseline.read_text(encoding="utf-8")) == _payload(bodies=PAIR)
+
+
+def test_moved_baselined_duplicate_is_rekeyed_not_new(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    named = "class TestX:\n    def test_value(self):\n        assert 1 == 1\n"
+    _write(root, "test_a.py", named)
+    _write(root, "integration/test_b.py", named)
+    _track_tests(root)
+    baseline = root / "baseline.json"
+    _write_baseline(
+        baseline,
+        _payload(
+            bodies={
+                "tests/test_a.py": ["TestX::test_value"],
+                "tests/test_b.py": ["TestX::test_value"],
+            },
+            names={
+                "tests/test_a.py": ["TestX::test_value"],
+                "tests/test_b.py": ["TestX::test_value"],
+            },
+        ),
+    )
+
+    moved = _run(root, baseline)
+    updated = _run(root, baseline, "--update-baseline")
+
+    assert moved.returncode == 0, moved.stderr
+    assert (
+        "[i] moved test-duplicate baseline entry: duplicate_bodies tests/test_b.py::TestX::"
+        "test_value -> duplicate_bodies tests/integration/test_b.py::TestX::test_value"
+    ) in moved.stdout
+    assert updated.returncode == 0
+    rekeyed = {
+        "tests/integration/test_b.py": ["TestX::test_value"],
+        "tests/test_a.py": ["TestX::test_value"],
+    }
+    assert json.loads(baseline.read_text(encoding="utf-8")) == _payload(
+        bodies=rekeyed, names=rekeyed
+    )
 
 
 @pytest.mark.parametrize(

@@ -256,8 +256,9 @@ with one entry per line; entries may only be removed.
 pytestmark = [pytest.mark.unit, pytest.mark.promise("owner:accepted-target-vocabulary")]
 ```
 
-Prune stale duplicate entries with `--update-baseline`; prune stale taxonomy
-entries by deleting their lines.
+Moving a listed test or module to another directory under the same name keeps
+its allowance and is reported as moved. Prune stale or moved duplicate entries
+with `--update-baseline`; edit stale or moved taxonomy entries by hand.
 
 ### Anti-patterns (will land as `recommended` findings on review)
 

@@ -14,6 +14,7 @@ import argparse
 import ast
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 from ratchet_baseline import (
@@ -39,7 +40,8 @@ ALGORITHM_DOC = (
     "tests whose body equals the body of at least one other test; "
     "duplicate_names maps file -> class-qualified tests whose Class::name "
     "also exists in another file. A test outside these lists that becomes a "
-    "duplicate fails; entries may only be removed."
+    "duplicate fails, except a baselined test moved to another file under the "
+    "same name; entries may only be removed or re-keyed by such a move."
 )
 UPDATE_COMMAND = "uv run --frozen python scripts/check_exact_test_duplicates.py --update-baseline"
 _REQUIRED_KEYS = {
@@ -130,40 +132,82 @@ def _path(nodeid: str) -> str:
     return nodeid.split("::", 1)[0]
 
 
+@dataclass(frozen=True)
+class Comparison:
+    """Outcome of one baseline comparison."""
+
+    growth: list[str]
+    stale: list[str]
+    moved: dict[str, str]
+    keep: dict[str, set[str]]
+
+
+def _qualname(nodeid: str) -> str:
+    return nodeid.split("::", 1)[1]
+
+
+def _match_moves(new: set[str], stale: set[str]) -> dict[str, str]:
+    """Pair new entries with stale entries of the same test name in another file."""
+    pool: dict[str, list[str]] = defaultdict(list)
+    for nodeid in sorted(stale):
+        pool[_qualname(nodeid)].append(nodeid)
+    moves: dict[str, str] = {}
+    for nodeid in sorted(new):
+        candidates = pool.get(_qualname(nodeid))
+        if candidates:
+            moves[nodeid] = candidates.pop(0)
+    return moves
+
+
 def compare(
     bodies: dict[str, list[str]],
     names: dict[str, list[str]],
     allowed_bodies: set[str],
     allowed_names: set[str],
-) -> tuple[list[str], list[str]]:
-    """Return new-duplicate failures and stale baseline entries."""
+) -> Comparison:
+    """Return new duplicates, stale entries and moved (re-keyed) entries.
+
+    A test that leaves a baselined file and reappears under the same name in
+    another file is a move, not a new duplicate.
+    """
     growth: list[str] = []
-    for digest, ids in bodies.items():
-        new = [nodeid for nodeid in ids if nodeid not in allowed_bodies]
-        twins = [nodeid for nodeid in ids if nodeid not in new] or ids
-        for nodeid in new:
-            others = _summarize([other for other in twins if other != nodeid])
-            growth.append(
-                f"{_path(nodeid)}: test {nodeid.split('::', 1)[1]} duplicates the body "
-                f"({ALGORITHM} {digest}) of {others}. Fix: delete the copy, or "
-                "parametrize/differentiate it so it asserts a distinct contract; "
-                "do not add it to the baseline."
-            )
-    for qualname, ids in names.items():
-        for nodeid in ids:
-            if nodeid in allowed_names:
-                continue
-            others = _summarize(
-                sorted({_path(other) for other in ids if _path(other) != _path(nodeid)})
-            )
-            growth.append(
-                f"{_path(nodeid)}: test {qualname} reuses a Class::name already defined "
-                f"in {others}. Fix: rename the class or test after the distinct contract "
-                "it checks, or delete the copy; do not add it to the baseline."
-            )
-    stale = [f"duplicate_bodies {nodeid}" for nodeid in sorted(allowed_bodies - _members(bodies))]
-    stale += [f"duplicate_names {nodeid}" for nodeid in sorted(allowed_names - _members(names))]
-    return growth, stale
+    stale: list[str] = []
+    moved: dict[str, str] = {}
+    keep: dict[str, set[str]] = {}
+    for key, groups, allowed in (
+        ("duplicate_bodies", bodies, allowed_bodies),
+        ("duplicate_names", names, allowed_names),
+    ):
+        observed = _members(groups)
+        moves = _match_moves(observed - allowed, allowed - observed)
+        moved.update({f"{key} {new}": f"{key} {old}" for new, old in moves.items()})
+        stale += [f"{key} {nodeid}" for nodeid in sorted(allowed - observed - set(moves.values()))]
+        keep[key] = (allowed & observed) | set(moves)
+        accepted = allowed | set(moves)
+        for group, ids in groups.items():
+            twins = [nodeid for nodeid in ids if nodeid in accepted] or ids
+            for nodeid in ids:
+                if nodeid in accepted:
+                    continue
+                if key == "duplicate_bodies":
+                    others = _summarize([other for other in twins if other != nodeid])
+                    growth.append(
+                        f"{_path(nodeid)}: test {_qualname(nodeid)} duplicates the body "
+                        f"({ALGORITHM} {group}) of {others}. Fix: delete the copy, or "
+                        "parametrize/differentiate it so it asserts a distinct contract; "
+                        "do not add it to the baseline."
+                    )
+                else:
+                    others = _summarize(
+                        sorted({_path(other) for other in ids if _path(other) != _path(nodeid)})
+                    )
+                    growth.append(
+                        f"{_path(nodeid)}: test {group} reuses a Class::name already defined "
+                        f"in {others}. Fix: rename the class or test after the distinct "
+                        "contract it checks, or delete the copy; do not add it to the "
+                        "baseline."
+                    )
+    return Comparison(growth=growth, stale=stale, moved=moved, keep=keep)
 
 
 def _validate(payload: dict[str, object]) -> tuple[set[str], set[str]]:
@@ -225,9 +269,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     bodies = duplicate_bodies(digests)
     names = duplicate_names(qualnames)
-    growth, stale = compare(bodies, names, allowed_bodies, allowed_names)
-    if growth:
-        for diagnostic in growth:
+    result = compare(bodies, names, allowed_bodies, allowed_names)
+    if result.growth:
+        for diagnostic in result.growth:
             print(f"[x] {diagnostic}", file=sys.stderr)
         if args.update_baseline:
             print(
@@ -236,12 +280,13 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         return 1
-    if stale and args.update_baseline:
+    changes = len(result.stale) + len(result.moved)
+    if changes and args.update_baseline:
         updated: dict[str, object] = {
             "algorithm": ALGORITHM,
             "algorithm_doc": ALGORITHM_DOC,
-            "duplicate_bodies": baseline_layout(allowed_bodies & _members(bodies)),
-            "duplicate_names": baseline_layout(allowed_names & _members(names)),
+            "duplicate_bodies": baseline_layout(result.keep["duplicate_bodies"]),
+            "duplicate_names": baseline_layout(result.keep["duplicate_names"]),
             "schema_version": SCHEMA_VERSION,
             "scope": SCOPE,
         }
@@ -253,14 +298,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[x] {error}", file=sys.stderr)
             return 2
         print(
-            f"[+] updated test-duplicate baseline: removed {len(stale)} stale entr"
-            f"{'y' if len(stale) == 1 else 'ies'}"
+            f"[+] updated test-duplicate baseline: removed {len(result.stale)} stale and "
+            f"re-keyed {len(result.moved)} moved entr{'y' if changes == 1 else 'ies'}"
         )
-    elif stale:
-        for entry in stale:
+    elif changes:
+        for entry in result.stale:
             print(f"[i] stale test-duplicate baseline entry (no longer duplicated): {entry}")
+        for new, old in sorted(result.moved.items()):
+            print(f"[i] moved test-duplicate baseline entry: {old} -> {new}")
         print(
-            f"[i] {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'}; "
+            f"[i] {changes} stale or moved entr{'y' if changes == 1 else 'ies'}; "
             f"optional cleanup: {UPDATE_COMMAND}"
         )
     elif args.update_baseline:

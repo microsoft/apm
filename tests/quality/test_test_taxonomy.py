@@ -322,13 +322,38 @@ def _load_promise_catalog(path: Path) -> frozenset[str]:
     return frozenset(promises)
 
 
+def _moves(entries: frozenset[str], collected: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    """Map collected unlisted modules to missing entries with the same file name."""
+    missing: dict[str, list[str]] = {}
+    for entry in sorted(entries - set(collected)):
+        missing.setdefault(Path(entry).name, []).append(entry)
+    moves: dict[str, str] = {}
+    for module in sorted(set(collected) - entries):
+        candidates = missing.get(Path(module).name)
+        if candidates:
+            moves[module] = candidates.pop(0)
+    return moves
+
+
 def _taxonomy_ratchet_findings(
     inventory: TaxonomyInventory,
     baseline: dict[str, frozenset[str]],
     catalog: frozenset[str],
 ) -> tuple[list[str], list[str]]:
-    """Return (new violations, stale baseline entries) for the no-growth ratchets."""
+    """Return (new violations, stale baseline entries) for the no-growth ratchets.
+
+    A module moved to another directory under the same file name keeps the
+    allowances of its now-missing baseline entry.
+    """
     failures: list[str] = []
+    moves = {key: _moves(entries, inventory.modules) for key, entries in baseline.items()}
+    stale = [
+        f"{key} {old} moved to {new}; replace the entry"
+        for key in BASELINE_LISTS
+        for new, old in sorted(moves[key].items())
+    ]
+    original = baseline
+    baseline = {key: entries | set(moves[key]) for key, entries in baseline.items()}
     unclassified: set[str] = set()
     misplaced: set[str] = set()
     catalog_name = PROMISE_CATALOG.relative_to(REPO_ROOT).as_posix()
@@ -374,10 +399,10 @@ def _taxonomy_ratchet_findings(
         "promise_exempt_modules": set(inventory.modules),
         "unclassified_modules": unclassified,
     }
-    stale = [
+    stale += [
         f"{key} {module}"
         for key in BASELINE_LISTS
-        for module in sorted(baseline[key] - observed[key])
+        for module in sorted(original[key] - observed[key] - set(moves[key].values()))
     ]
     return failures, stale
 
@@ -422,6 +447,7 @@ markers =
 """
 _SEEDED_MODULES = {
     "tests/unit/test_legacy.py": "def test_legacy():\n    assert True\n",
+    "tests/integration/test_moved.py": "def test_moved():\n    assert True\n",
     "tests/unit/test_new_unclassified.py": (
         'import pytest\n\npytestmark = pytest.mark.promise("owner:seed")\n\n'
         "def test_value():\n    assert True\n"
@@ -463,9 +489,11 @@ def seeded_findings(
     inventory = _collect_inventory(root, root / "inventory.json")
     baseline = {
         "misplaced_modules": frozenset({"tests/unit/test_removed_spawn.py"}),
-        "promise_exempt_modules": frozenset({"tests/unit/test_legacy.py"}),
+        "promise_exempt_modules": frozenset(
+            {"tests/unit/test_legacy.py", "tests/unit/test_moved.py"}
+        ),
         "unclassified_modules": frozenset(
-            {"tests/unit/test_legacy.py", "tests/unit/test_removed.py"}
+            {"tests/unit/test_legacy.py", "tests/unit/test_moved.py", "tests/unit/test_removed.py"}
         ),
     }
     return _taxonomy_ratchet_findings(inventory, baseline, frozenset({"owner:seed"}))
@@ -520,14 +548,19 @@ def test_tm009_unknown_promise_id_fails(
     ]
 
 
-def test_tm010_legacy_compliant_and_removed_entries_do_not_fail(
+def test_tm010_legacy_moved_compliant_and_removed_entries_do_not_fail(
     seeded_findings: tuple[list[str], list[str]],
 ) -> None:
     failures, stale = seeded_findings
     assert _failures_for(seeded_findings, "tests/unit/test_legacy.py") == []
     assert _failures_for(seeded_findings, "tests/unit/test_new_compliant.py") == []
+    assert _failures_for(seeded_findings, "tests/integration/test_moved.py") == []
     assert len(failures) == 5
     assert stale == [
+        "promise_exempt_modules tests/unit/test_moved.py moved to "
+        "tests/integration/test_moved.py; replace the entry",
+        "unclassified_modules tests/unit/test_moved.py moved to "
+        "tests/integration/test_moved.py; replace the entry",
         "misplaced_modules tests/unit/test_removed_spawn.py",
         "unclassified_modules tests/unit/test_removed.py",
     ]
