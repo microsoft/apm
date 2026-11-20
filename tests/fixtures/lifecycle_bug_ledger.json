@@ -2511,6 +2511,20 @@
       ]
     },
     {
+      "issue": 4318,
+      "fixed_in": "Unreleased",
+      "summary": "apm update with an installed local bundle said there were no APM dependencies to update without naming the bundle or how to update it.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/lifecycle/replay/test_covering_replay.py::test_covering_row"
+      ]
+    },
+    {
       "issue": 4323,
       "fixed_in": "Unreleased",
       "summary": "apm pack refuses, in every bundle format and under --dry-run, to pack a file whose name matches the credential-file patterns (.env, .env.*, *.pem, *.key, id_rsa, id_ed25519), naming each path and writing no bundle.",

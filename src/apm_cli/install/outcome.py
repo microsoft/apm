@@ -200,3 +200,19 @@ def raise_direct_dependency_failure(ctx: InstallContext) -> NoReturn:
     raise DirectDependencyError(
         "One or more direct dependencies failed validation. Run with --verbose for details."
     )
+
+
+def local_bundle_update_next_step(names, file_count: int, scope) -> str:
+    """Explain why 'apm update' leaves local bundles untouched and how to update one (#4318)."""
+    from apm_cli.core.scope import is_user_scope
+
+    if names:
+        noun = "Local bundle" if len(names) == 1 else "Local bundles"
+        subject = f"{noun} {', '.join(names)}"
+    else:
+        subject = f"Local bundle content ({file_count} file(s))"
+    flag = "-g " if is_user_scope(scope) else ""
+    return (
+        f"{subject} not updated: 'apm update' refreshes apm.yml dependencies only. "
+        f"To update a bundle, run 'apm install {flag}<newer-bundle-file>'."
+    )
