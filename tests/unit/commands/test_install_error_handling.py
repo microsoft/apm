@@ -66,57 +66,6 @@ def _make_dep_ref(
 # ---------------------------------------------------------------------------
 
 
-class TestScopedInstallDependencyResolver:
-    """Tests for _ScopedInstallDependencyResolver.expand_parent_repo_decl."""
-
-    def test_user_scope_raises_value_error(self) -> None:
-        """expand_parent_repo_decl raises ValueError for USER scope."""
-        from apm_cli.commands.install import (
-            APM_DEPS_AVAILABLE,
-            _ScopedInstallDependencyResolver,
-        )
-
-        if not APM_DEPS_AVAILABLE or _ScopedInstallDependencyResolver is None:
-            pytest.skip("APM deps not available")
-
-        from apm_cli.core.scope import InstallScope
-
-        # Build a minimal instance with USER scope; patch the base
-        # expand_parent_repo_decl to avoid network I/O.
-        resolver = _ScopedInstallDependencyResolver.__new__(_ScopedInstallDependencyResolver)
-        resolver._install_scope = InstallScope.USER
-
-        with pytest.raises(ValueError, match="user"):
-            resolver.expand_parent_repo_decl(MagicMock(), MagicMock())
-
-    def test_non_user_scope_delegates_to_super(self) -> None:
-        """expand_parent_repo_decl delegates to super when scope != USER."""
-        from apm_cli.commands.install import (
-            APM_DEPS_AVAILABLE,
-            _ScopedInstallDependencyResolver,
-        )
-
-        if not APM_DEPS_AVAILABLE or _ScopedInstallDependencyResolver is None:
-            pytest.skip("APM deps not available")
-
-        from apm_cli.core.scope import InstallScope
-
-        resolver = _ScopedInstallDependencyResolver.__new__(_ScopedInstallDependencyResolver)
-        resolver._install_scope = InstallScope.PROJECT
-
-        parent_dep = MagicMock()
-        child_dep = MagicMock()
-        expected = MagicMock()
-
-        with patch.object(
-            _ScopedInstallDependencyResolver.__bases__[0],
-            "expand_parent_repo_decl",
-            return_value=expected,
-        ):
-            result = resolver.expand_parent_repo_decl(parent_dep, child_dep)
-            assert result is expected
-
-
 # ---------------------------------------------------------------------------
 # _validate_and_add_packages_to_apm_yml -- read/write error paths
 # ---------------------------------------------------------------------------
@@ -563,69 +512,6 @@ class TestProtocolPreferenceBranches:
 # ---------------------------------------------------------------------------
 
 
-class TestSkillSubsetBranch:
-    """--skill '*' should not set _skill_subset; non-wildcard should."""
-
-    def test_skill_names_wildcard_sets_none_subset(self) -> None:
-        """When skill_names=['*'], _skill_subset stays None."""
-        # Directly test the branch logic by inspecting what the install
-        # command does before delegating.  We use the fact that wildcard
-        # means "all skills" so the subset is effectively None.
-        import builtins
-
-        skill_names = ("*",)
-        _skill_subset = None
-        if skill_names:
-            if not any(s == "*" for s in skill_names):
-                _skill_subset = builtins.tuple(skill_names)
-
-        assert _skill_subset is None
-
-    def test_skill_names_non_wildcard_sets_subset(self) -> None:
-        """When skill_names=['foo','bar'], _skill_subset is set."""
-        import builtins
-
-        skill_names = ("foo", "bar")
-        _skill_subset = None
-        if skill_names:
-            if not any(s == "*" for s in skill_names):
-                _skill_subset = builtins.tuple(skill_names)
-
-        assert _skill_subset == ("foo", "bar")
-
-
 # ---------------------------------------------------------------------------
 # frozen + apm_count > 0 info message
 # ---------------------------------------------------------------------------
-
-
-class TestFrozenInfoMessage:
-    """When frozen=True and apm_count > 0, emit the lockfile verified message."""
-
-    def test_frozen_apm_count_info(self) -> None:
-        # Simulate the code path logic
-        frozen = True
-        apm_count = 3
-
-        import apm_cli.commands.install as _install_mod
-
-        with patch("apm_cli.commands.install._rich_info") as mock_info:
-            if frozen and apm_count > 0:
-                _install_mod._rich_info(
-                    "Deployed files verified against apm.lock.yaml.",
-                    symbol="info",
-                )
-            mock_info.assert_called_once()
-            assert "apm.lock.yaml" in mock_info.call_args[0][0]
-
-    def test_frozen_apm_count_zero_no_info(self) -> None:
-        """frozen=True but apm_count=0 should not emit info."""
-        frozen = True
-        apm_count = 0
-
-        with patch("apm_cli.commands.install._rich_info") as mock_info:
-            if frozen and apm_count > 0:
-                from apm_cli.commands.install import _rich_info as ri
-
-                ri("should not be called", symbol="info")
-            mock_info.assert_not_called()

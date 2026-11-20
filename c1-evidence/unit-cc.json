@@ -9,20 +9,20 @@
  ],
  "folds": {
   "tests/unit/commands/test_pack_phase3.py::TestPackCmdFlags::test_help_text_includes_all_key_flags": "tests/unit/commands/test_pack_cli_surface.py::TestPackCmdFlags::test_help_text_includes_all_key_flags",
-  "tests/unit/commands/test_pack_phase3.py::TestRenderBundleResult::test_live_share_line_emitted": "tests/unit/commands/test_pack_cli_surface.py::TestRenderBundleResult::test_live_share_line_emitted",
+  "tests/unit/commands/test_pack_phase3.py::TestRenderBundleResult::test_live_share_line_emitted": "tests/unit/commands/test_pack.py::TestRenderBundleResult::test_live_share_line_emitted",
   "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCleanupOrphanedFiles::test_all_hand_authored_reports_zero_removed": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCleanupOrphanedFiles::test_all_hand_authored_reports_zero_removed",
   "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCleanupOrphanedFiles::test_hand_authored_not_deleted": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCleanupOrphanedFiles::test_hand_authored_file_skipped_silently",
   "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCompilationResult::test_defaults": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCompilationResult::test_defaults",
   "tests/unit/compilation/test_distributed_compiler_phase3.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned",
-  "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_local_flag_returns_local": "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_local_source_returns_local",
-  "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_lockfile_source_local_returns_local": "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_local_source_returns_local",
-  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_no_double_dash_returns_full_argv_empty_command": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
-  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_splits_correctly": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
-  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_at_end_gives_empty_command": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
-  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_at_start_gives_empty_clean": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
-  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_empty_argv_returns_empty": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
-  "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_empty_deps_returns_empty_set": "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_no_parseable_deps_returns_empty_set",
-  "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_unknown_type_is_skipped": "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_no_parseable_deps_returns_empty_set",
+  "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_local_flag_returns_local": "tests/unit/commands/test_deps_cli_helpers.py::TestDepsListSourceLabel::test_local_source_returns_local",
+  "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_lockfile_source_local_returns_local": "tests/unit/commands/test_deps_cli_helpers.py::TestDepsListSourceLabel::test_local_source_returns_local",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_no_double_dash_returns_full_argv_empty_command": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_splits_correctly": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_at_end_gives_empty_command": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_at_start_gives_empty_clean": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_empty_argv_returns_empty": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_empty_deps_returns_empty_set": "tests/unit/commands/test_install_resolve_refs.py::TestCheckPackageConflicts::test_no_parseable_deps_returns_empty_set",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_unknown_type_is_skipped": "tests/unit/commands/test_install_resolve_refs.py::TestCheckPackageConflicts::test_no_parseable_deps_returns_empty_set",
   "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_empty_dict_returns_false": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
   "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_info_only_returns_false": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
   "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_warning_returns_true": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
@@ -45,12 +45,13 @@
   "step3 side effect: AQ003 only judges component/e2e modules, so lane-marking 76 modules component surfaced about 1190 AQ003 findings (baseline allowed 72 in scope); most are pure-logic or mock-only tests sharing a module with tmp_path/CliRunner tests. assertion_quality_baseline.json is not edited here (protected); it needs a remeasure at integration",
   "step5: fix only where an honest observable exists: exit codes of CliRunner invocations, files kept/removed on disk, captured stdout; pure return-value and mock-only tests are left (they need a module split into a unit module, which would add new modules needing promise ids)",
   "nodeset base: origin/danielmeppiel-refactored-happiness moved forward during the run (shared refs); mapping is checked against this branch's merge-base 49bcb1c50, which has no differences in scope",
-  "step5 lane split: pure-logic classes moved into the module that becomes unit-marked and filesystem/CliRunner classes into the component sibling, verbatim (nodes map as moved): watcher TestWatchMode -> commands/compile/test_watch_mode_coverage.py (test_watcher_events now unit); pack helper-render classes -> test_pack.py (now unit), pack CLI/gate tests -> test_pack_cli_surface.py"
+  "step5 lane split: pure-logic classes moved into the module that becomes unit-marked and filesystem/CliRunner classes into the component sibling, verbatim (nodes map as moved): watcher TestWatchMode -> commands/compile/test_watch_mode_coverage.py (test_watcher_events now unit); pack helper-render classes -> test_pack.py (now unit), pack CLI/gate tests -> test_pack_cli_surface.py",
+  "step5 lane split: install pure helper classes -> test_install_resolve_refs.py (now unit), its GitLab persistence class -> test_install_context_and_resolution.py; deps pure helper classes -> test_deps_cli_helpers.py (now unit), its _resolve_scope_deps filesystem classes -> test_deps_cli_cli_surface.py"
  ],
  "counts_left": {
   "same_body_groups": 0,
   "unclassified_modules": 3,
   "placement_offenders": 0,
-  "weak_tests": 1086
+  "weak_tests": 1027
  }
 }
