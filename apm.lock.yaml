@@ -3226,7 +3226,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:42ee2a5aa3bd0a81e4c54e1900d96f4fb5118597367cd34b4ac34a8d0adffa5c
+  content_hash: sha256:eff0adddaba18a07be2ecb50fbc02003d7446e3633dc2c82659b2eba2328dd83
 - kind: project-relative
   target: copilot
   value: .github/instructions/python.instructions.md
@@ -3244,7 +3244,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:5e4f18ed58b3cfed3d771c3ed76b5c849a364fc52c01cb9e94423b16b09d27c3
+  content_hash: sha256:f325135f84889029f00e253b2274811f102bbeca97a36ba29de76a9442c56a04
 local_deployed_files:
 - .agents/skills/apm-lifecycle-tests
 - .agents/skills/apm-lifecycle-tests/SKILL.md
@@ -3727,6 +3727,6 @@ local_deployed_file_hashes:
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
-  .github/instructions/linting.instructions.md: sha256:42ee2a5aa3bd0a81e4c54e1900d96f4fb5118597367cd34b4ac34a8d0adffa5c
+  .github/instructions/linting.instructions.md: sha256:eff0adddaba18a07be2ecb50fbc02003d7446e3633dc2c82659b2eba2328dd83
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:5e4f18ed58b3cfed3d771c3ed76b5c849a364fc52c01cb9e94423b16b09d27c3
+  .github/instructions/tests.instructions.md: sha256:f325135f84889029f00e253b2274811f102bbeca97a36ba29de76a9442c56a04

@@ -57,8 +57,13 @@ Always merge `main` locally before running the mirror.
        scripts/lint_architecture_boundaries.py scripts/architecture_linter/ \
     && bash scripts/lint-auth-signals.sh \
     && uv run --extra dev python scripts/check_complexity_ratchet.py \
-       --base-ref origin/main
+       --base-ref origin/main \
+    && uv run --extra dev python -m tests.quality.taxonomy --changed
   ```
+  The last step is the fast local form of the test-module taxonomy gate
+  (tm006): it reads only the test modules changed against the merge base
+  with `origin/main` (AST only, well under 5 seconds) and prints the same
+  failure, with the `pytestmark` line to add.
   (The YAML, file-length, and `relative_to` guards are pure-grep one-liners
   from `ci.yml`; run them directly if you have touched those surfaces.)
 
