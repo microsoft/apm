@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import shutil
 import statistics
 import subprocess
@@ -229,21 +230,51 @@ def test_each_world_starts_with_an_empty_egress_log(lifecycle_world: World) -> N
 # -- packages at project and user scope --------------------------------------
 
 
+# The Codex native plugin's post-approval install at user scope runs the real
+# Codex CLI; without a new enough one on PATH the cell cannot pass once #4154
+# flips it, so it is skipped and names the missing binary.
+_CODEX_MIN_VERSION = (0, 163, 0)
+
+
+def _codex_cli_skip_reason() -> str | None:
+    codex = shutil.which("codex")
+    if codex is None:
+        return "needs the Codex CLI (codex) >= 0.163.0 on PATH; none found"
+    try:
+        probe = subprocess.run(
+            [codex, "--version"], capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"needs the Codex CLI (codex) >= 0.163.0 on PATH; {codex} --version failed: {exc}"
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", probe.stdout + probe.stderr)
+    found = tuple(int(part) for part in match.groups()) if match else None
+    if found is None or found < _CODEX_MIN_VERSION:
+        shown = ".".join(map(str, found)) if found else "an unknown version"
+        return f"needs the Codex CLI (codex) >= 0.163.0 on PATH; {codex} is {shown}"
+    return None
+
+
+_CODEX_SKIP = _codex_cli_skip_reason()
+
+
+def _cell_marks(package: str, scope: str) -> list[pytest.MarkDecorator]:
+    marks: list[pytest.MarkDecorator] = []
+    if (package, scope) == ("p-native-codex", "user") and _CODEX_SKIP:
+        marks.append(pytest.mark.skip(reason=_CODEX_SKIP))
+    if (package, scope) in _KNOWN:
+        marks.append(
+            pytest.mark.xfail(
+                strict=True, reason=f"tracking {_KNOWN[(package, scope)]}", raises=AssertionError
+            )
+        )
+    return marks
+
+
 _CELLS = [
     pytest.param(
         package,
         scope,
-        marks=(
-            [
-                pytest.mark.xfail(
-                    strict=True,
-                    reason=f"tracking {_KNOWN[(package, scope)]}",
-                    raises=AssertionError,
-                )
-            ]
-            if (package, scope) in _KNOWN
-            else []
-        ),
+        marks=_cell_marks(package, scope),
         id=f"{package}-{scope}",
     )
     for package in PACKAGE_NAMES
