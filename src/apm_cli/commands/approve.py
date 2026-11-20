@@ -307,7 +307,13 @@ def explain_decision(package: str, *, logger: CommandLogger) -> None:
         return
 
     if not ctx.gate_enabled:
-        _rich_info(f"{decl.package_key}: gate disabled -- all executables deploy.", symbol="info")
+        # The executables gate is one layer; org policy can still block the package (#3994).
+        _rich_info(
+            f"{decl.package_key}: executable-trust gate disabled -- its executables "
+            "need no approval. Org policy can still block the package; "
+            "'apm audit --ci' reports org-policy violations.",
+            symbol="info",
+        )
         return
 
     _rich_echo(f"{decl.package_key}: {decl.summary_line()}")
@@ -362,7 +368,8 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
 
     if not ctx.gate_enabled:
         _rich_info(
-            "Executable-trust gate disabled -- all executables deploy. "
+            "Executable-trust gate disabled -- executables need no approval "
+            "(org policy still applies). "
             "Add an `executables:` block to apm.yml to enable it.",
             symbol="info",
         )

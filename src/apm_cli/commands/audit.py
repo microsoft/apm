@@ -34,6 +34,7 @@ from ..utils.console import (
     _rich_echo,
     _rich_error,
     _rich_success,
+    _rich_warning,
 )
 from ..utils.diagnostics import printable_ascii_text
 
@@ -519,6 +520,16 @@ def _preview_strip(
     return affected
 
 
+def _report_warned_checks(ci_result: "CIAuditResult") -> None:
+    """Count warn-mode violations apart from clean passes (#3994)."""
+    warned = sum(1 for check in ci_result.checks if check.warned)
+    if warned:
+        _rich_warning(
+            f"{warned} check(s) report violations under 'enforcement: warn'; "
+            "they fail once the policy switches to block."
+        )
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -543,7 +554,9 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             for check in ci_result.checks:
                 # Text, not markup: Rich would parse "[x]" as a tag (#3845).
                 status = (
-                    Text(STATUS_SYMBOLS["check"], style="green")
+                    Text(STATUS_SYMBOLS["warning"], style="yellow")
+                    if check.warned
+                    else Text(STATUS_SYMBOLS["check"], style="green")
                     if check.passed
                     else Text(STATUS_SYMBOLS["cross"], style="red")
                 )
@@ -552,13 +565,13 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             console.print()
             console.print(table)
 
-            # Show details for failed checks
-            for check in ci_result.failed_checks:
-                if check.details:
+            # Show details for failed and warned checks
+            for check in ci_result.checks:
+                if check.details and (check.warned or not check.passed):
                     console.print()
                     _rich_echo(
                         f"  {check.name} details:",
-                        color="red",
+                        color="yellow" if check.warned else "red",
                         bold=True,
                     )
                     for detail in check.details:
@@ -568,6 +581,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             summary = ci_result.to_json()["summary"]
             if ci_result.passed:
                 _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
+                _report_warned_checks(ci_result)
             else:
                 _rich_error(
                     f"{STATUS_SYMBOLS['error']} {summary['failed']} of "
@@ -587,8 +601,10 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     for check in ci_result.checks:
         symbol = STATUS_SYMBOLS["check"] if check.passed else STATUS_SYMBOLS["cross"]
         color = "green" if check.passed else "red"
+        if check.warned:
+            symbol, color = STATUS_SYMBOLS["warning"], "yellow"
         _rich_echo(printable_ascii_text(f"  {symbol} {check.name}: {check.message}"), color=color)
-        if not check.passed and check.details:
+        if (check.warned or not check.passed) and check.details:
             for detail in check.details:
                 _rich_echo(f"      - {printable_ascii_text(detail)}", color="dim")
 
@@ -596,6 +612,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     summary = ci_result.to_json()["summary"]
     if ci_result.passed:
         _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
+        _report_warned_checks(ci_result)
     else:
         _rich_error(
             f"{STATUS_SYMBOLS['error']} {summary['failed']} of {summary['total']} check(s) failed"
@@ -794,6 +811,7 @@ def _audit_ci_gate(
                             message=check.message
                             + (" (enforcement: warn)" if not check.passed else ""),
                             details=check.details,
+                            warned=not check.passed,
                         )
                     )
 

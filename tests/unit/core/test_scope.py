@@ -376,29 +376,14 @@ class TestScopeWarnings:
         assert "copilot" not in unsupported
         assert "claude" not in unsupported
 
-    def test_warn_message_includes_partial_targets(self):
-        msg = warn_unsupported_user_scope()
-        assert msg  # non-empty because there are partially supported targets
-        # All four targets now support user scope
-        assert "cursor" in msg
-        assert "opencode" in msg
-        assert "copilot" in msg
-        # Claude and Cursor are fully supported
-        assert "claude" in msg
-        assert "fully supported" in msg.lower()
-        # Copilot, opencode (and others) remain partially supported
-        assert "partially supported" in msg.lower()
-
-    def test_warn_message_includes_unsupported_primitives(self):
-        msg = warn_unsupported_user_scope()
-        # Copilot now supports instructions at user scope (#650); not in warning.
-        assert "copilot (instructions)" not in msg
-        # Cursor now supports instructions at user scope; not in warning.
-        assert "cursor (instructions)" not in msg
-        # OpenCode excludes hooks
-        assert "opencode (hooks)" in msg
-        # Windsurf excludes instructions
+    def test_warning_names_only_selected_targets(self):
+        """A Claude-only global install is not warned about other targets (#3994)."""
+        assert warn_unsupported_user_scope(["claude"]) == ""
+        msg = warn_unsupported_user_scope(["claude", "windsurf", "opencode"])
         assert "windsurf (instructions)" in msg
+        assert "opencode (hooks)" in msg
+        assert "claude" not in msg
+        assert "antigravity" not in msg
 
 
 # ---------------------------------------------------------------------------

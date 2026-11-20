@@ -137,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack --json` reports the built bundle, `apm outdated` wraps long package names instead of clipping them, and `apm init` lists the `apm config set target` default in its target precedence comment. (closes #3994, #4004)
 - A project install for Windsurf names the user-wide `~/.codeium/windsurf/mcp_config.json` it changes, MCP output uses product names (`OpenCode`, `VS Code`), compile names the `.agents/skills/` directory Cursor, Gemini and OpenCode deploy to, and URLs are never split across lines. (closes #3994, #4004)
 - `apm compile` never leaves a `GEMINI.md` importing a missing `AGENTS.md`, `--clean` no longer tells you to run `--clean`, and a project with no instructions gets `No instructions to compile` instead of a target warning. (closes #3994, #4004)
+- `apm uninstall <server>` names how to remove an MCP server, `apm install -g` warns only about primitives its selected targets skip, warn-mode `apm audit --ci` names the dependencies it would block, and `apm policy explain` no longer says a disabled executables gate means a package deploys. (closes #3994, #4004)
 
 ### Security
 

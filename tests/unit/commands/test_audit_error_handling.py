@@ -440,6 +440,35 @@ class TestRichTableMarkupEscaping:
         assert "[x]" in failed_row
         assert "[+]" in passed_row
 
+    def test_warn_mode_check_names_its_subjects(self) -> None:
+        """Warn-mode CI names the denied dependency the team must fix (#3994)."""
+        from apm_cli.commands.audit import _render_ci_results
+        from apm_cli.policy.models import CheckResult, CIAuditResult
+
+        console = self._console()
+        result = CIAuditResult(
+            checks=[
+                CheckResult(
+                    name="dependency-denylist",
+                    passed=True,
+                    message="1 dependency(ies) match deny list (enforcement: warn)",
+                    details=["github.com/acme/tools"],
+                    warned=True,
+                ),
+            ]
+        )
+        with (
+            patch("apm_cli.commands.audit._get_console", return_value=console),
+            patch("apm_cli.commands.audit._rich_echo") as echo,
+            patch("apm_cli.commands.audit._rich_warning") as warning,
+        ):
+            _render_ci_results(result)
+        row = next(line for line in console.file.getvalue().splitlines() if "deny" in line)
+        assert "[!]" in row
+        echoed = " ".join(call.args[0] for call in echo.call_args_list)
+        assert "github.com/acme/tools" in echoed
+        assert "enforcement: warn" in warning.call_args.args[0]
+
     def test_strip_preview_keeps_bracketed_path(self) -> None:
         console = self._console()
         findings = {".github/prompts/[x]note.md": [_make_finding("critical")]}

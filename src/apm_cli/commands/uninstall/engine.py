@@ -14,6 +14,7 @@ from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile, lockfile_parent_identity
 from ...install.orphans import build_children_index as _build_children_index  # noqa: F401
 from ...install.orphans import collect_orphan_candidates as _collect_orphan_candidates
+from ...integration.mcp_config_view import BUNDLE_MCP_OWNER_PREFIX
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
@@ -728,6 +729,33 @@ def _resolve_marketplace_packages(
     return resolved
 
 
+def _mcp_server_hint(name: str, lockfile: "LockFile | None") -> str | None:
+    """Route an MCP server name to the command that removes it (#3994).
+
+    ``apm uninstall`` selects packages; an MCP server leaves with its
+    declaration: the root manifest, the package that brings it in, or the
+    local bundle that installed it.
+    """
+    if lockfile is None or name not in lockfile.mcp_servers:
+        return None
+    owner = lockfile.mcp_config_provenance.get(name)
+    if isinstance(owner, str) and owner.startswith(BUNDLE_MCP_OWNER_PREFIX):
+        return (
+            f"'{name}' is an MCP server from a local bundle; "
+            "'apm uninstall' cannot remove local-bundle content yet."
+        )
+    if isinstance(owner, str) and owner:
+        return (
+            f"'{name}' is an MCP server brought in by package '{owner}'. "
+            "Uninstall that package to remove it."
+        )
+    return (
+        f"'{name}' is an MCP server, not a package. Remove '{name}' under "
+        "dependencies.mcp in apm.yml, then run 'apm install' to remove it "
+        "from your harnesses."
+    )
+
+
 def _validate_uninstall_packages(
     packages: list[str],
     current_deps: list,
@@ -806,7 +834,8 @@ def _validate_uninstall_packages(
                 display_label = package
             else:
                 logger.error(
-                    f"Invalid package format: {package}. "
+                    _mcp_server_hint(package, lockfile)
+                    or f"Invalid package format: {package}. "
                     "Use 'owner/repo', 'plugin-name@marketplace', a local path, "
                     "or a key copied from 'apm deps list'."
                 )

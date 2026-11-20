@@ -1418,7 +1418,6 @@ def install(  # noqa: PLR0913
             get_apm_dir,
             get_manifest_path,
             get_modules_dir,
-            warn_unsupported_user_scope,
         )
 
         if scope is InstallScope.USER:
@@ -1426,7 +1425,6 @@ def install(  # noqa: PLR0913
                 dry_run=dry_run,
                 logger=logger,
                 ensure_user_dirs=ensure_user_dirs,
-                warn_unsupported_user_scope=warn_unsupported_user_scope,
             )
 
         # Scope-aware paths
