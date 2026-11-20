@@ -126,6 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` no longer prints a bare `CI environment detected` line for each registry MCP server. (closes #4320, #4412)
 - A partly successful `apm install` of marketplace plugins records ref pins only for the plugins it installs. (closes #4322, #4419)
 - The repository not-found diagnostic names every credential source tried, in order, never their values. (#4322, #4419)
+- `apm install --frozen` that refuses because it deployed files `apm.lock.yaml` does not record now removes those files again, so the project matches the lockfile. (#4309, #4394)
 
 ## [0.37.0] - 2026-11-20
 

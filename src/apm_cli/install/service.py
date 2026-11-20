@@ -777,7 +777,8 @@ class InstallService:
           hidden-Unicode scan (#2379).  Deliberately one-directional:
           claims a narrower install would *drop* (``--target`` filter,
           ``--only``, a removed dependency) do not fail.  Equivalence ignores
-          ``generated_at`` and ``apm_version`` (Section 5.5).
+          ``generated_at`` and ``apm_version`` (Section 5.5).  The refusal
+          first removes the unrecorded files this install wrote (#4309).
         * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
           entry is re-verified against the on-disk bytes through the same
           verifier ``apm audit`` uses, so ``install --frozen`` and
@@ -785,8 +786,8 @@ class InstallService:
           install kept and an APM upgrade that renders a locked file
           differently (#3654).
 
-        Native target files are outside the install transaction, so files
-        already deployed stay on disk; only the lockfile write is withheld.
+        Native target files are outside the install transaction, so recorded
+        files already deployed stay on disk; only the lockfile write is withheld.
         """
         from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.deps.lockfile import LockFile
@@ -827,13 +828,11 @@ class InstallService:
                 ),
             )
         if unclaimed:
-            raise FrozenInstallError(
-                "--frozen: apm.lock.yaml does not record everything this install deploys.",
-                reasons=[
-                    f"  - {path} is deployed by this install but not recorded in apm.lock.yaml"
-                    for path in _outermost(unclaimed)
-                ],
-                tip=_FROZEN_REPAIR_TIP,
+            # I7 (#4309): withdraw what this install deployed, then refuse.
+            from apm_cli.install.frozen_withdrawal import refuse_unrecorded_deployments
+
+            raise refuse_unrecorded_deployments(
+                withheld, unclaimed, committed, lockfile_path.parent
             )
 
         InstallService._enforce_frozen_deployed_hashes(request, committed, deployed=True)
