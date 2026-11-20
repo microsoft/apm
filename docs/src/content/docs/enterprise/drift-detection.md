@@ -81,7 +81,7 @@ apm audit --ci
   [i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
 ```
 
-Plain `apm install` keeps a hand-edited file and warns, so restore it the way the hint says. For files a local bundle deployed, delete them and reinstall that bundle with `apm install <bundle-path>`. `apm audit --ci` exits 1 on drift. Plain `apm audit` reports the same drift and exits 0,
+Plain `apm install` keeps a hand-edited file and warns, so restore it the way the hint says. When the package brings new content for that file (an upgrade), the kept edit blocks the upgrade and install exits 1: move the file aside and rerun. For files a local bundle deployed, delete them and reinstall that bundle with `apm install <bundle-path>`. `apm audit --ci` exits 1 on drift. Plain `apm audit` reports the same drift and exits 0,
 unless the org policy sets `security.audit.fail_on_drift: true`. `apm install --frozen`
 also fails, before writing anything, when a deployed file differs from its locked hash.
 

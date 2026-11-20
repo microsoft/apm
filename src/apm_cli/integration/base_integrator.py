@@ -204,14 +204,22 @@ def untrusted_baseline_message(
     )
 
 
-def unproven_overwrite_message(entry: str, *, user_scope: bool) -> str:
-    """Refuse to replace a managed file that APM cannot prove it deployed (#4360)."""
+def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str:
+    """Name a managed file install kept, and the runnable way past it.
+
+    *proven_edit* means the file differs from the bytes APM recorded deploying;
+    otherwise no receipt or locked render proves APM wrote it (#4360).
+    """
     install = "apm install -g" if user_scope else "apm install"
+    reason = (
+        "it was modified since APM deployed it"
+        if proven_edit
+        else "it differs from what APM renders and there is no local deployment "
+        "receipt or locked render proving APM wrote it, so it may hold local edits"
+    )
     return (
-        f"Kept {entry}: it differs from what APM renders and there is no local "
-        "deployment receipt or locked render proving APM wrote it, so it may hold "
-        f"local edits. Move it aside, then run '{install}' to restore it; or run "
-        f"'{install} --force' to overwrite it."
+        f"Kept {entry}: {reason}. Move it aside, then run '{install}' to restore it; "
+        f"or run '{install} --force' to overwrite it."
     )
 
 
@@ -458,17 +466,19 @@ class BaseIntegrator:
                         or (expected is not None and compute_file_hash(target_file) != expected)
                     )
                 ):
+                    # A kept edit blocks the requested state only when the
+                    # package brings new bytes for the file (an upgrade).
+                    blocking = expected is None or compute_file_hash(source_file) != expected
                     if expected is None:
                         message = self.untrusted_member_message(
                             entry, path_entry(destination), destination
                         )
                     else:
-                        message = (
-                            f"Skipped {entry}: modified since deployment. "
-                            "Preserve your changes before reinstalling with --force."
+                        message = kept_edit_message(
+                            entry, user_scope=self.install_user_scope(), proven_edit=True
                         )
                     if diagnostics is not None:
-                        if expected is None:
+                        if blocking:
                             diagnostics.error(message, package=package)
                         else:
                             diagnostics.warn(message)
@@ -743,7 +753,9 @@ class BaseIntegrator:
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
             return True, False
-        message = unproven_overwrite_message(rel_path, user_scope=bool(gate and gate.user_scope))
+        message = kept_edit_message(
+            rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=False
+        )
         if diagnostics is not None:
             diagnostics.error(message, package=gate.owner if gate else "")
         else:

@@ -49,7 +49,7 @@ def test_user_edit_equal_to_old_version_remains_protected(
         assert "- .claude/skills/demo/SKILL.md: expected sha256:" in output
     else:
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "modified since deployment" in result.stdout
+        assert "it was modified since APM deployed it" in output
     assert scenario.deployed_skill.read_bytes() == old
     assert receipt.read_bytes() == proof
 

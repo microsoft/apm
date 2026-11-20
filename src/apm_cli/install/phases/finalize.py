@@ -358,12 +358,12 @@ def _report_kept_overwrites(ctx: InstallContext) -> None:
     if not ctx.kept_overwrites:
         return
     from apm_cli.core.scope import InstallScope
-    from apm_cli.integration.base_integrator import unproven_overwrite_message
+    from apm_cli.integration.base_integrator import kept_edit_message
 
     user_scope = ctx.scope is InstallScope.USER
     for owner, entry in ctx.kept_overwrites:
         ctx.diagnostics.error(
-            unproven_overwrite_message(entry, user_scope=user_scope), package=owner
+            kept_edit_message(entry, user_scope=user_scope, proven_edit=False), package=owner
         )
     if ctx.logger is not None:
         ctx.logger.kept_overwrites(len(ctx.kept_overwrites), ctx.kept_overwrite_written)
