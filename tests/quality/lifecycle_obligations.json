@@ -23719,9 +23719,9 @@
     "src/apm_cli/commands/install.py:971",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
-    "src/apm_cli/commands/uninstall/engine.py:698",
-    "src/apm_cli/commands/uninstall/engine.py:857",
-    "src/apm_cli/commands/uninstall/engine.py:690",
+    "src/apm_cli/commands/uninstall/engine.py:701",
+    "src/apm_cli/commands/uninstall/engine.py:860",
+    "src/apm_cli/commands/uninstall/engine.py:693",
     "src/apm_cli/commands/update.py:452",
     "src/apm_cli/commands/prune.py:199",
     "src/apm_cli/integration/canvas_integrator.py:5"
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "49c3807a188d4715ef5e80a6043eaf421618f02dbfff9b5c10015c9210881f73"
+ "sha256": "1ad485650147565f0b59e68dcaea9349ecf34251f2dc9427802d1cca1f5dbf0f"
 }
