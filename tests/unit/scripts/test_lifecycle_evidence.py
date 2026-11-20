@@ -1292,6 +1292,27 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
         check_cli_output(args, _cli(args, stdout, stderr, code))
 
 
+_LOG_TWICE = (
+    "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"
+    "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"
+)
+
+
+def test_logging_records_repeat_freely_on_a_verbose_run(monkeypatch) -> None:
+    """A run that asked for diagnostics may repeat Python logging records on stderr."""
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    args = ("install", "--verbose")
+    check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE))
+
+
+def test_logging_records_still_fail_i9_on_a_default_run(monkeypatch) -> None:
+    """Without --verbose or APM_DEBUG the same repeated record is user-visible noise."""
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    args = ("install",)
+    with pytest.raises(OutputOracleError, match=r"I9: stderr repeats a line: 'DEBUG apm_cli"):
+        check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE))
+
+
 @pytest.mark.parametrize(
     ("args", "stdout", "code", "prefix"),
     [

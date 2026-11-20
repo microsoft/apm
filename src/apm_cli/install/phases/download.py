@@ -170,6 +170,9 @@ def _report_cache_mismatch(ctx: InstallContext, dep_key: str, locked_dep, path) 
         )
         + " Re-downloading from the locked source."
     )
+    reported = getattr(ctx, "cache_mismatch_reported", None)
+    if isinstance(reported, set):
+        reported.add(dep_key)
     if ctx.diagnostics is not None:
         ctx.diagnostics.warn(message, package=dep_key)
     logger = getattr(ctx, "logger", None)

@@ -285,17 +285,19 @@ def _resolve_download_strategy(
                 observed_package_hash,
             )
 
-            _hash_msg = (
-                locked_content_mismatch_line(
-                    dep_ref.get_unique_key(),
-                    _dep_locked_chk.content_hash,
-                    observed_package_hash(_dep_locked_chk, install_path),
+            # The download phase owns this notice; report here only when it did not (#4351).
+            if dep_ref.get_unique_key() not in getattr(ctx, "cache_mismatch_reported", ()):
+                _hash_msg = (
+                    locked_content_mismatch_line(
+                        dep_ref.get_unique_key(),
+                        _dep_locked_chk.content_hash,
+                        observed_package_hash(_dep_locked_chk, install_path),
+                    )
+                    + " Re-downloading from the locked source."
                 )
-                + " Re-downloading from the locked source."
-            )
-            diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
-            if logger:
-                logger.progress(_hash_msg)
+                diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
+                if logger:
+                    logger.progress(_hash_msg)
             stage_existing_copy(ctx, install_path)
             skip_download = False
 
