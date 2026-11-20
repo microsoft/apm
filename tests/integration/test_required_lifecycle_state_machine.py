@@ -2187,6 +2187,59 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
         assert_unchanged(before_rejection, ArtifactSnapshot.capture(consumer.root))
 
 
+@pytest.mark.parametrize("carried_cache", ["intact", "edited"])
+def test_required_partial_install_promotes_carried_rows_only_from_verified_bytes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    carried_cache: str,
+) -> None:
+    """Hash framing hardening: a partial install re-hashes untouched rows from verified bytes."""
+    scenario = _new_scenario(tmp_path / f"partial-promotion-{carried_cache}", apm_binary_path)
+    first = _publish(scenario, "framing-first", skill="framing-first")
+    second = _publish(scenario, "framing-second", skill="framing-second")
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        ((first.repository, first.remote_url), (second.repository, second.remote_url))
+    )
+    consumer = scenario.consumers.create(
+        "partial-promotion-consumer",
+        dependencies=(first.dependency, second.dependency),
+        targets=("claude",),
+    )
+    _run_success(
+        scenario, consumer, _INSTALL_ARGS, environment=environment, scenario_id="partial-seed"
+    )
+    lock_path = consumer.root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    assert lock_document["lockfile_version"] == "4"
+    caches = {
+        name: consumer.root / "apm_modules" / name for name in ("framing-first", "framing-second")
+    }
+    lock_document["lockfile_version"] = "1"
+    for row in lock_document["dependencies"]:
+        row["content_hash"] = compute_package_hash(caches[row["alias"]], framed=False)
+    dump_yaml(lock_document, lock_path)
+    carried_skill = next(caches["framing-second"].rglob("SKILL.md"))
+    if carried_cache == "edited":
+        carried_skill.write_text("edited after install\n", encoding="utf-8")
+    before = lock_path.read_bytes()
+
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, first.remote_url),
+        environment=environment,
+        scenario_id=f"partial-install-{carried_cache}",
+    )
+
+    if carried_cache == "edited":
+        assert lock_path.read_bytes() == before
+        return
+    rows = {row["alias"]: row for row in load_yaml(lock_path)["dependencies"]}
+    assert load_yaml(lock_path)["lockfile_version"] == "4"
+    assert rows["framing-second"]["content_hash"] == compute_package_hash(caches["framing-second"])
+    assert rows["framing-first"]["content_hash"] == compute_package_hash(caches["framing-first"])
+
+
 def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     tmp_path: Path,
     apm_binary_path: Path,

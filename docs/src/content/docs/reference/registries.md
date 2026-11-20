@@ -275,7 +275,7 @@ There is no one-time migration prompt. Existing Git shorthand deps begin routing
 
 ## 4. What gets recorded in the lockfile
 
-Registry-sourced dependencies add four fields to their lockfile entry: `source: registry`, `version`, `resolved_url`, and `resolved_hash` (sha256 of the archive bytes). The lockfile is promoted to `lockfile_version: "2"` when any dep is registry-sourced OR carries git-source semver resolution fields (`constraint`, `resolved_tag`, or `resolved_at` -- issue #1488). Root replacement rules promote it to `lockfile_version: "3"`. Projects that use none of these features keep `lockfile_version: "1"`, even on a newer client.
+Registry-sourced dependencies add four fields to their lockfile entry: `source: registry`, `version`, `resolved_url`, and `resolved_hash` (sha256 of the archive bytes). The lockfile is promoted to `lockfile_version: "2"` when any dep is registry-sourced OR carries git-source semver resolution fields (`constraint`, `resolved_tag`, or `resolved_at` -- issue #1488). Root replacement rules promote it to `lockfile_version: "3"`. From APM 0.37, a lockfile whose packages record a `content_hash` uses `lockfile_version: "4"` (hash framing hardening); see the [Lockfile spec](../../reference/lockfile-spec/#version-bumping).
 
 ```yaml
 dependencies:

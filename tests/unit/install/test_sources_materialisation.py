@@ -314,7 +314,7 @@ class TestLocalDependencySourceAcquire:
 
         assert result is not None
         assert ctx.package_hashes["owner/pkg"] == "deadbeef"
-        hash_package.assert_called_once_with(install_path)
+        hash_package.assert_called_once_with(install_path, exclude=(), legacy=False)
 
     def test_logger_download_complete_called_on_success(self, tmp_path: Path) -> None:
         """logger.download_complete should be called on the happy path."""

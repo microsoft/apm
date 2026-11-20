@@ -1638,6 +1638,33 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A local source records its package hash outside the canonical recorder.",
     ),
     MutationCase(
+        guard_id="install-deployment-package-content-hash",
+        rule_id="install-deployment-package-content-hash",
+        path="src/apm_cli/install/phases/resolve.py",
+        old="compute_package_hash(candidate_path, framed=True)",
+        new="compute_package_hash(candidate_path)",
+        intent="A package hash call leaves its stream to the owner default.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-package-content-hash",
+        rule_id="install-deployment-package-content-hash",
+        path="src/apm_cli/install/source_helpers.py",
+        old='framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))\n    ctx',
+        new=(
+            'existing = getattr(ctx, "existing_lockfile", None)\n'
+            "    framed = existing is None or existing.framed_content_hashes\n    ctx"
+        ),
+        intent="The recorder re-derives the recording stream outside its lockfile owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-package-content-hash",
+        rule_id="install-deployment-package-content-hash",
+        path="src/apm_cli/install/phases/content_hash_stream.py",
+        old="elif recorded_framed and dep.content_hash_framed:",
+        new="elif dep.content_hash_framed:",
+        intent="Promotion trusts an in-memory framed flag on a row from a version 1-3 lock.",
+    ),
+    MutationCase(
         guard_id="install-deployment-locked-copy-validity",
         rule_id="install-deployment-locked-copy-validity",
         path="src/apm_cli/install/phases/integrate.py",

@@ -104,7 +104,7 @@ def test_plan_inputs_hash_staged_local_replacement_before_canonical_plan(
     ):
         plan = build_resolved_update_plan(context, lock)
 
-    hashing.assert_called_once_with(staged)
+    hashing.assert_called_once_with(staged, exclude=(), legacy=False)
     planning.assert_called_once_with(
         lock,
         context.deps_to_install,
