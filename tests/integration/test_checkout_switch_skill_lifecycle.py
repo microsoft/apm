@@ -415,6 +415,13 @@ def test_branch_switch_then_source_edit_never_deletes_skill_members(
     assert _REFUSAL not in output and "Cleaned" not in output, output
     # The genuine edit in another skill survives the advised recovery.
     assert other.read_bytes() == other_bytes
+    # The recovery converges: a further install changes nothing.
+    converged = _tree(world.project, ".agents")
+    lock_converged = (world.project / "apm.lock.yaml").read_bytes()
+    again = world.apm("install")
+    assert again.returncode == 0, _output(again)
+    assert _tree(world.project, ".agents") == converged
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock_converged
     assert (world.project / _X / "SKILL.md").read_text(encoding="ascii") == edited
     assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == (
         "reference a, version A\n"
@@ -662,7 +669,7 @@ def test_user_scope_discarded_deploy_then_source_edit_installs(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="#4230 residual: multi-hash receipt history, 0.38 (step 5 fails closed today)",
+    reason="#4428: multi-hash receipt history (step 5 of #4230 fails closed today)",
 )
 def test_source_edit_after_branch_round_trip_installs_without_recovery(
     tmp_path: Path, apm_binary_path: Path
