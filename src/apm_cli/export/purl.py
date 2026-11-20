@@ -17,9 +17,10 @@ SBOM output -- a token must never leak through provenance metadata.
 
 from __future__ import annotations
 
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote
 
 from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.utils.credential_rendering import redact_url_userinfo
 
 # host_type values that have a dedicated purl type. Anything else falls back to
 # ``generic`` -- honest about identity rather than asserting a forge we can't
@@ -95,19 +96,7 @@ def scrub_url(url: str) -> str:
     path, and fragment are preserved verbatim. Returns the URL unchanged when it
     carries neither userinfo nor a query string.
     """
-    if not url:
-        return url
-    parts = urlsplit(url)
-    has_userinfo = "@" in parts.netloc
-    if not has_userinfo and not parts.query:
-        return url
-    if has_userinfo:
-        netloc = parts.hostname or ""
-        if parts.port is not None:
-            netloc = f"{netloc}:{parts.port}"
-    else:
-        netloc = parts.netloc
-    return urlunsplit((parts.scheme, netloc, parts.path, "", parts.fragment))
+    return redact_url_userinfo(url, drop_query=True)
 
 
 def _is_oci(dep: LockedDependency) -> bool:

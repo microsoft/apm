@@ -11,6 +11,7 @@ import click
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..install.locking import serialized_lifecycle
+from ..utils.credential_rendering import render_config_value
 from ..version import get_version
 from . import self_update as self_update_command
 from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
@@ -132,6 +133,11 @@ def _reject_unknown_key(logger: CommandLogger, key: str, *, unset: bool = False)
     sys.exit(1)
 
 
+def _echo_setting(key: str, value: object, *, indent: str = "") -> None:
+    """Print one ``key: value`` line; the value renders through the owner."""
+    click.echo(f"{indent}{key}: {render_config_value(key, value)}")
+
+
 def _show_all_user_config(logger: CommandLogger) -> None:
     """Print all user-settable configuration keys with effective values."""
     from ..config import (
@@ -147,18 +153,20 @@ def _show_all_user_config(logger: CommandLogger) -> None:
 
     logger.progress("APM Configuration:")
     temp_dir = get_temp_dir()
-    click.echo(
-        f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
+    _echo_setting(
+        "temp-dir",
+        temp_dir if temp_dir is not None else "Not set (using system default)",
+        indent="  ",
     )
     install_target = get_install_target()
     if install_target is not None:
-        click.echo(f"  target: {_render_target_value(install_target)}")
+        _echo_setting("target", _render_target_value(install_target), indent="  ")
     self_update_channel = get_self_update_channel()
     if self_update_channel != "stable":
-        click.echo(f"  self-update.channel: {self_update_channel}")
+        _echo_setting("self-update.channel", self_update_channel, indent="  ")
     self_update_install_dir = get_self_update_install_dir()
     if self_update_install_dir is not None:
-        click.echo(f"  self-update.install-dir: {self_update_install_dir}")
+        _echo_setting("self-update.install-dir", self_update_install_dir, indent="  ")
     # Only show transport keys when non-default to reduce noise.
     if get_allow_protocol_fallback():
         click.echo("  allow-protocol-fallback: true")
@@ -173,27 +181,41 @@ def _show_all_user_config(logger: CommandLogger) -> None:
         from ..config import get_audit_on_install, get_scanner_options
         from ..security.external.registry import SUPPORTED_SCANNERS
 
-        click.echo(f"  audit-on-install: {get_audit_on_install()}")
+        _echo_setting("audit-on-install", get_audit_on_install(), indent="  ")
         for scanner in SUPPORTED_SCANNERS:
             llm, args = get_scanner_options(scanner)
             if llm is not None:
-                click.echo(f"  external.{scanner}.llm: {str(llm).lower()}")
+                _echo_setting(f"external.{scanner}.llm", str(llm).lower(), indent="  ")
             if args is not None:
-                click.echo(f"  external.{scanner}.args: {' '.join(args)}")
+                _echo_setting(f"external.{scanner}.args", " ".join(args), indent="  ")
 
     if is_enabled("copilot_cowork"):
         from ..config import get_copilot_cowork_skills_dir
 
         csd = get_copilot_cowork_skills_dir()
-        click.echo(
-            f"  copilot-cowork-skills-dir: "
-            f"{csd if csd is not None else 'Not set (using auto-detection)'}"
+        _echo_setting(
+            "copilot-cowork-skills-dir",
+            csd if csd is not None else "Not set (using auto-detection)",
+            indent="  ",
         )
 
     mcp_url = get_mcp_registry_url()
-    click.echo(
-        f"  mcp-registry-url: {mcp_url if mcp_url is not None else 'Not set (using default https://api.mcp.github.com)'}"
+    _echo_setting(
+        "mcp-registry-url",
+        mcp_url if mcp_url is not None else "Not set (using default https://api.mcp.github.com)",
+        indent="  ",
     )
+
+    if is_enabled("registries"):
+        from ..config import list_registry_configs
+
+        for reg_name, body in sorted(list_registry_configs().items()):
+            if "url" in body:
+                _echo_setting(f"registry.{reg_name}.url", body["url"], indent="  ")
+            if "token" in body:
+                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")
+            if body.get("default") is True:
+                _echo_setting(f"registry.{reg_name}.default", True, indent="  ")
 
 
 def _require_external_scanners(logger, key: str) -> None:
@@ -338,17 +360,19 @@ def config(ctx):
             if Path(APM_YML_FILENAME).exists():
                 apm_config = _load_apm_config()
                 click.echo(f"\n{HIGHLIGHT}Project (apm.yml):{RESET}")
-                click.echo(f"  Name: {apm_config.get('name', 'Unknown')}")
-                click.echo(f"  Version: {apm_config.get('version', 'Unknown')}")
-                click.echo(f"  Entrypoint: {apm_config.get('entrypoint', 'None')}")
-                click.echo(
-                    f"  MCP Dependencies: {len(apm_config.get('dependencies', {}).get('mcp', []))}"
+                _echo_setting("Name", apm_config.get("name", "Unknown"), indent="  ")
+                _echo_setting("Version", apm_config.get("version", "Unknown"), indent="  ")
+                _echo_setting("Entrypoint", apm_config.get("entrypoint", "None"), indent="  ")
+                _echo_setting(
+                    "MCP Dependencies",
+                    len(apm_config.get("dependencies", {}).get("mcp", [])),
+                    indent="  ",
                 )
             else:
                 logger.progress("Not in an APM project directory")
 
             click.echo(f"\n{HIGHLIGHT}Global:{RESET}")
-            click.echo(f"  APM CLI Version: {get_version()}")
+            _echo_setting("APM CLI Version", get_version(), indent="  ")
 
             from ..config import get_allow_protocol_fallback as _get_apf_fb
             from ..config import get_github_auth_first as _get_gaf_fb
@@ -359,17 +383,17 @@ def config(ctx):
 
             _temp_dir_fb = _get_temp_dir_fb()
             if _temp_dir_fb:
-                click.echo(f"  Temp Directory: {_temp_dir_fb}")
+                _echo_setting("Temp Directory", _temp_dir_fb, indent="  ")
             _self_update_channel_fb = _get_self_update_channel_fb()
             if _self_update_channel_fb != "stable":
-                click.echo(f"  self-update.channel: {_self_update_channel_fb}")
+                _echo_setting("self-update.channel", _self_update_channel_fb, indent="  ")
             _self_update_install_dir_fb = _get_self_update_install_dir_fb()
             if _self_update_install_dir_fb:
-                click.echo(f"  self-update.install-dir: {_self_update_install_dir_fb}")
+                _echo_setting("self-update.install-dir", _self_update_install_dir_fb, indent="  ")
 
-            click.echo(f"  allow-protocol-fallback: {str(_get_apf_fb()).lower()}")
-            click.echo(f"  prefer-ssh: {str(_get_prefer_ssh_fb()).lower()}")
-            click.echo(f"  github-auth-first: {str(_get_gaf_fb()).lower()}")
+            _echo_setting("allow-protocol-fallback", str(_get_apf_fb()).lower(), indent="  ")
+            _echo_setting("prefer-ssh", str(_get_prefer_ssh_fb()).lower(), indent="  ")
+            _echo_setting("github-auth-first", str(_get_gaf_fb()).lower(), indent="  ")
 
             from ..core.experimental import is_enabled as _is_enabled_fb
 
@@ -377,9 +401,10 @@ def config(ctx):
                 from ..config import get_copilot_cowork_skills_dir as _get_csd_fb
 
                 _csd_fb = _get_csd_fb()
-                click.echo(
-                    f"  Cowork Skills Dir: "
-                    f"{_csd_fb if _csd_fb else 'Not set (using auto-detection)'}"
+                _echo_setting(
+                    "Cowork Skills Dir",
+                    _csd_fb if _csd_fb else "Not set (using auto-detection)",
+                    indent="  ",
                 )
 
 
@@ -544,7 +569,10 @@ def set(key, value):  # noqa: F811
         try:
             set_mcp_registry_url(value)
             configured_url = get_mcp_registry_url()
-            logger.success(f"MCP registry URL set to: {configured_url}")
+            logger.success(
+                "MCP registry URL set to: "
+                f"{render_config_value('mcp-registry-url', configured_url)}"
+            )
             if configured_url and configured_url.startswith("http://"):
                 logger.warning(
                     "This endpoint uses plaintext HTTP; registry traffic is not encrypted. "
@@ -638,16 +666,10 @@ def get(key):
             reg_name, field = registry_match.group(1), registry_match.group(2)
             from ..config import get_registry_config, is_registry_default
 
-            cfg = get_registry_config(reg_name)
             if field == "default":
-                val = is_registry_default(reg_name)
-                click.echo(f"{key}: {'true' if val else 'false'}")
+                _echo_setting(key, is_registry_default(reg_name))
                 return
-            val = (cfg or {}).get(field)
-            if val is None:
-                click.echo(f"{key}: Not set")
-            else:
-                click.echo(f"{key}: {val}")
+            _echo_setting(key, (get_registry_config(reg_name) or {}).get(field))
             return
 
         if key == "copilot-cowork-skills-dir":
@@ -657,7 +679,7 @@ def get(key):
             if value is None:
                 click.echo("copilot-cowork-skills-dir: Not set (using auto-detection)")
             else:
-                click.echo(f"copilot-cowork-skills-dir: {value}")
+                _echo_setting("copilot-cowork-skills-dir", value)
             return
 
         if key == "temp-dir":
@@ -665,7 +687,7 @@ def get(key):
             if value is None:
                 click.echo("temp-dir: Not set (using system default)")
             else:
-                click.echo(f"temp-dir: {value}")
+                _echo_setting("temp-dir", value)
             return
 
         if key == "target":
@@ -675,13 +697,13 @@ def get(key):
             if value is None:
                 click.echo("target: Not set (using auto-detection)")
             else:
-                click.echo(f"target: {_render_target_value(value)}")
+                _echo_setting("target", _render_target_value(value))
             return
 
         if key == "self-update.channel":
             from ..config import get_self_update_channel
 
-            click.echo(f"self-update.channel: {get_self_update_channel()}")
+            _echo_setting("self-update.channel", get_self_update_channel())
             return
 
         if key == "self-update.install-dir":
@@ -697,7 +719,7 @@ def get(key):
                         "(preserving the detected Unix installation)"
                     )
             else:
-                click.echo(f"self-update.install-dir: {value}")
+                _echo_setting("self-update.install-dir", value)
             return
 
         if key == "mcp-registry-url":
@@ -707,13 +729,13 @@ def get(key):
             if value is None:
                 click.echo("mcp-registry-url: Not set (using default https://api.mcp.github.com)")
             else:
-                click.echo(f"mcp-registry-url: {value}")
+                _echo_setting("mcp-registry-url", value)
             return
 
         if key == "audit-on-install":
             from ..config import get_audit_on_install
 
-            click.echo(f"audit-on-install: {get_audit_on_install()}")
+            _echo_setting("audit-on-install", get_audit_on_install())
             return
 
         external_match = _EXTERNAL_SCANNER_KEY_RE.match(key)
@@ -728,11 +750,11 @@ def get(key):
                 if llm is None:
                     click.echo(f"{key}: Not set")
                 else:
-                    click.echo(f"{key}: {str(llm).lower()}")
+                    _echo_setting(key, str(llm).lower())
             elif args is None:
                 click.echo(f"{key}: Not set")
             else:
-                click.echo(f"{key}: {' '.join(args)}")
+                _echo_setting(key, " ".join(args))
             return
 
         getter = getters.get(key)
@@ -741,9 +763,9 @@ def get(key):
         value = getter()
         # Render booleans as lowercase true/false (npm convention).
         if isinstance(value, bool):
-            click.echo(f"{key}: {str(value).lower()}")
+            _echo_setting(key, str(value).lower())
         else:
-            click.echo(f"{key}: {value}")
+            _echo_setting(key, value)
         if key in _DEPRECATED_CONFIG_KEYS:
             logger.warning(_DEPRECATED_CONFIG_KEYS[key])
     else:
