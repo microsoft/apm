@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
+- Internal: unit tests no longer inherit console routing, config or environment left by an earlier test on the same worker; a per-test leak detector fails the test that leaks. (#4226)
 - `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
 - `apm uninstall` cleans LSP servers on the targets `apm.lock.yaml` recorded, no longer failing with "No harness detected" or moving survivors to the saved target. (closes #4059, #4068)
 
