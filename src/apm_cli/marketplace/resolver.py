@@ -1290,14 +1290,15 @@ def resolve_marketplace_plugin(
             canonical = f"{base}#{resolved_override}"
 
     # ---- Ref immutability check (advisory) ----
-    # Record the plugin -> ref mapping (scoped by version) and warn if
+    # Stage the plugin -> ref mapping (scoped by version) and warn if
     # it changed since the last install (potential ref-swap attack).
+    # The install transaction writes staged pins only on commit.
     # Using the plugin's declared version field ensures legitimate
     # version bumps never trigger false-positive warnings.
     current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
     plugin_version = plugin.version or ""
     if current_ref:
-        from .version_pins import check_ref_pin, record_ref_pin
+        from .version_pins import check_ref_pin, stage_ref_pin
 
         previous_ref = check_ref_pin(
             marketplace_name,
@@ -1310,7 +1311,7 @@ def resolve_marketplace_plugin(
                 f"Plugin {plugin_name}@{marketplace_name} ref changed: was '{previous_ref}', now '{current_ref}'. "
                 "This may indicate a ref swap attack."
             )
-        record_ref_pin(
+        stage_ref_pin(
             marketplace_name,
             plugin_name,
             current_ref,
