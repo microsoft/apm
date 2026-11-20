@@ -822,3 +822,4 @@ def test_gemini_command_adopts_its_rendered_toml(tmp_path: Path) -> None:
 
     assert result.files_adopted == 1
     assert result.files_integrated == 0
+    assert target.read_text(encoding="utf-8") == CommandIntegrator._render_gemini_command(source)
