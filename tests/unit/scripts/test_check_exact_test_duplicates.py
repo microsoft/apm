@@ -42,11 +42,11 @@ def _payload(
     names: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
-        "algorithm": "ast-body-v1",
+        "algorithm": "ast-body-v2",
         "algorithm_description": ALGORITHM_DESCRIPTION,
         "body_duplicate_groups": bodies or [],
         "name_collision_groups": names or [],
-        "schema_version": 2,
+        "schema_version": 3,
         "scope": ["tests/**/test_*.py", "tests/**/*_test.py"],
     }
 
@@ -99,7 +99,7 @@ def test_seeded_duplicate_body_fails_naming_tests_and_fix(tmp_path: Path) -> Non
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "duplicate test body ast-body-v1:" in result.stderr
+    assert "duplicate test body ast-body-v2:" in result.stderr
     assert "  - tests/test_a.py::test_value (new)" in result.stderr
     assert "  - tests/test_b.py::test_copy (new)" in result.stderr
     assert "test_other" not in result.stderr
@@ -162,17 +162,19 @@ def test_distinct_tests_pass(tmp_path: Path, other: bytes) -> None:
     assert "0 allowed body duplicate group(s)" in result.stdout
 
 
-def test_same_class_test_name_across_files_fails(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": CLASS_A, "unit/test_b.py": CLASS_B})
+def test_same_class_test_name_in_one_directory_fails(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"test_a.py": CLASS_A, "test_b.py": CLASS_B})
     baseline = root / "baseline.json"
     _write_baseline(baseline)
 
     result = _run(root, baseline)
 
     assert result.returncode == 1
-    assert "test name TestThing::test_value is defined in more than one file" in result.stderr
+    assert (
+        "test name tests/::TestThing::test_value is defined in more than one file of one directory"
+    ) in result.stderr
     assert "  - tests/test_a.py (new)" in result.stderr
-    assert "  - tests/unit/test_b.py (new)" in result.stderr
+    assert "  - tests/test_b.py (new)" in result.stderr
     assert "Fix: rename the new class or test" in result.stderr
 
 
@@ -185,7 +187,12 @@ def test_baselined_groups_pass_and_report_counts(tmp_path: Path) -> None:
     _write_baseline(
         baseline,
         [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]],
-        [{"name": "TestThing::test_value", "paths": ["tests/test_c.py", "tests/test_d.py"]}],
+        [
+            {
+                "name": "tests/::TestThing::test_value",
+                "paths": ["tests/test_c.py", "tests/test_d.py"],
+            }
+        ],
     )
 
     result = _run(root, baseline)
@@ -259,7 +266,12 @@ def test_reduction_requires_baseline_tightening(tmp_path: Path) -> None:
     _write_baseline(
         baseline,
         [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]],
-        [{"name": "TestThing::test_value", "paths": ["tests/test_c.py", "tests/test_d.py"]}],
+        [
+            {
+                "name": "tests/::TestThing::test_value",
+                "paths": ["tests/test_c.py", "tests/test_d.py"],
+            }
+        ],
     )
 
     stale = _run(root, baseline)
@@ -267,7 +279,7 @@ def test_reduction_requires_baseline_tightening(tmp_path: Path) -> None:
 
     assert stale.returncode == 1
     assert "body duplicate group reduced:" in stale.stderr
-    assert "name collision group TestThing::test_value reduced" in stale.stderr
+    assert "name collision group tests/::TestThing::test_value reduced" in stale.stderr
     assert (
         "uv run --frozen python scripts/check_exact_test_duplicates.py --update-baseline"
     ) in stale.stderr
@@ -283,9 +295,14 @@ def test_reduction_requires_baseline_tightening(tmp_path: Path) -> None:
     [
         lambda payload: payload.update(body_duplicate_groups=[["b::t", "a::t"]]),
         lambda payload: payload.update(body_duplicate_groups=[["a::t", "b::t"], ["a::t", "c::t"]]),
-        lambda payload: payload.update(name_collision_groups=[{"name": "T::t", "paths": ["a"]}]),
+        lambda payload: payload.update(
+            name_collision_groups=[{"name": "a/::T::t", "paths": ["a/x"]}]
+        ),
+        lambda payload: payload.update(
+            name_collision_groups=[{"name": "a/::T::t", "paths": ["a/x", "b/y"]}]
+        ),
         lambda payload: payload.update(algorithm_description="anything"),
-        lambda payload: payload.update(algorithm="sha256-bytes-v1", schema_version=1),
+        lambda payload: payload.update(algorithm="ast-body-v1", schema_version=2),
     ],
 )
 def test_malformed_baseline_fails_closed(tmp_path: Path, mutate: object) -> None:
@@ -401,3 +418,123 @@ def test_provisional_baseline_requires_explicit_allow(tmp_path: Path) -> None:
     assert provisional.stderr == ""
     assert finalized.returncode == 0
     assert finalized.stderr == ""
+
+
+def test_same_class_test_name_in_other_directories_passes(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"test_a.py": CLASS_A, "unit/test_b.py": CLASS_B})
+    baseline = root / "baseline.json"
+    _write_baseline(baseline)
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            b"class TestCopilot:\n    target = 'copilot'\n\n"
+            b"    def test_value(self):\n        assert self.target\n",
+            b"class TestClaude:\n    target = 'claude'\n\n"
+            b"    def test_value(self):\n        assert self.target\n",
+        ),
+        (
+            b"TARGET = 'copilot'\n\ndef test_value():\n    assert TARGET\n",
+            b"TARGET = 'claude'\n\ndef test_value():\n    assert TARGET\n",
+        ),
+    ],
+    ids=["class-level-target", "module-level-constant"],
+)
+def test_context_assignments_distinguish_identical_bodies(
+    tmp_path: Path, first: bytes, second: bytes
+) -> None:
+    root = _repo(tmp_path, {"test_a.py": first, "test_b.py": second})
+    baseline = root / "baseline.json"
+    _write_baseline(baseline)
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_renamed_locals_are_still_duplicates(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        {
+            "test_a.py": b"def test_value(tmp_path):\n    total = [n for n in range(3)]\n"
+            b"    for item in total:\n        assert item >= 0\n",
+            "test_b.py": b"def test_other(tmp_path):\n    values = [k for k in range(3)]\n"
+            b"    for entry in values:\n        assert entry >= 0\n",
+        },
+    )
+    baseline = root / "baseline.json"
+    _write_baseline(baseline)
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 1
+    assert "tests/test_b.py::test_other (new)" in result.stderr
+
+
+def test_pure_move_of_baselined_group_needs_only_tightening(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"test_c.py": BODY, "test_d.py": BODY})
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
+
+    moved = _run(root, baseline)
+    updated = _run(root, baseline, "--update-baseline")
+
+    assert moved.returncode == 1
+    assert "is new or grew" not in moved.stderr
+    assert "body duplicate group moved or removed:" in moved.stderr
+    assert updated.returncode == 0, updated.stderr
+    assert json.loads(baseline.read_text(encoding="utf-8")) == _payload(
+        [["tests/test_c.py::test_value", "tests/test_d.py::test_value"]]
+    )
+
+
+def test_move_that_grows_the_group_fails_with_hint(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"test_c.py": BODY, "test_d.py": BODY, "test_e.py": BODY})
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 1
+    assert "is new or grew" in result.stderr
+    assert "If you only moved or renamed baselined copies" in result.stderr
+
+
+def test_baseline_growth_against_merge_base_fails(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"test_a.py": BODY, "test_b.py": BODY})
+    baseline = root / "baseline.json"
+    base = root / "base.json"
+    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
+    _write_baseline(base)
+
+    result = _run(root, baseline, "--base-baseline", str(base))
+
+    assert result.returncode == 1
+    assert "baseline grew relative to the merge-base" in result.stderr
+    assert "may only shrink" in result.stderr
+
+
+def test_baseline_shrink_or_algorithm_change_against_merge_base_passes(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path, {"test_a.py": BODY, "test_b.py": BODY})
+    group = [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]]
+    baseline = root / "baseline.json"
+    base = root / "base.json"
+    _write_baseline(baseline, group)
+    _write_baseline(base, [*group, ["tests/test_x.py::test_x", "tests/test_y.py::test_y"]])
+    old = root / "old.json"
+    old.write_text(json.dumps({"algorithm": "sha256-bytes-v1"}), encoding="utf-8")
+
+    shrunk = _run(root, baseline, "--base-baseline", str(base))
+    reseeded = _run(root, baseline, "--base-baseline", str(old))
+
+    assert shrunk.returncode == 0, shrunk.stderr
+    assert reseeded.returncode == 0, reseeded.stderr
+    assert "monotonicity starts from this baseline" in reseeded.stdout

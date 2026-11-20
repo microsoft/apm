@@ -282,8 +282,9 @@ def _assert_ci_test_targets(
 def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
     """Keep each execution's source, environment, selection and deadline."""
     job = workflow_job(ci, job_id)
+    contracts = job_id == RATCHET_CONTRACT_JOB
     assert job["runs-on"] == "ubuntu-24.04"
-    assert job["timeout-minutes"] == 5
+    assert job["timeout-minutes"] == (10 if contracts else 5)
     assert job["permissions"] == {"contents": "read"}
     assert job.get("env", {}) == {}
     assert all(key not in job for key in ("if", "needs", "continue-on-error", "strategy"))
@@ -291,7 +292,9 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
     assert len(steps) == 5
     assert all("if" not in step and "continue-on-error" not in step for step in steps)
     assert steps[0]["uses"].startswith("actions/checkout@")
-    assert steps[0].get("with", {}) == {}, "execute the current checked-out source"
+    assert steps[0].get("with", {}) == ({"fetch-depth": 0} if contracts else {}), (
+        "execute the current checked-out source; contracts need the merge-base"
+    )
     assert steps[1]["uses"].startswith("actions/setup-python@")
     assert steps[1]["with"] == {"python-version": "${{ env.PYTHON_VERSION }}"}
     assert ci["env"]["PYTHON_VERSION"] == "3.12"
@@ -407,7 +410,7 @@ def test_provisional_ci_opt_in_is_draft_guarded() -> None:
 
 
 def test_ratchet_executions_are_separate_and_bounded() -> None:
-    """Both original workloads retain independent five-minute execution caps."""
+    """Both workloads keep independent caps: ten minutes for contracts, five for scaling."""
     _assert_ratchet_split(load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml"))
 
 

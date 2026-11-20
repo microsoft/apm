@@ -180,6 +180,81 @@ def catalog_source_ids(root: Path) -> dict[str, frozenset[str]]:
     return {"architecture-owner": frozenset(owner_ids), "spec": spec_ids}
 
 
+CATALOG_DESCRIPTION = (
+    "Promise ids that test modules may name in pytest.mark.promise. Seeded from "
+    "the OpenAPM v0.1 requirement anchors (source 'spec', <a id=\"req-...\"> in "
+    "docs/src/content/docs/specs/openapm-v0.1.md) and the registered architecture "
+    "owner ids (source 'architecture-owner', .apm/architecture/owners). Every id "
+    "must still exist in its source. Add a new id here when its spec requirement "
+    "or owner is registered."
+)
+
+
+def catalog_payload(sources: dict[str, frozenset[str]]) -> dict[str, object]:
+    """Return the canonical promise catalog for every current source id."""
+    return {
+        "description": CATALOG_DESCRIPTION,
+        "promises": sorted(
+            (
+                {"id": promise, "source": source}
+                for source, ids in sources.items()
+                for promise in ids
+            ),
+            key=lambda entry: entry["id"],
+        ),
+        "schema_version": 1,
+    }
+
+
+class MergeBaseUnavailable(RuntimeError):
+    """Raised when the merge-base needed for a monotonicity check is missing."""
+
+
+def merge_base_text(root: Path, relative: Path) -> str | None:
+    """Return `relative` at the merge-base with the base branch, None if absent there.
+
+    The base ref is ``APM_RATCHET_BASE_REF`` or ``origin/main``. Only the base
+    copy of the file is read, so the check stays independent of history shape.
+    """
+    base_ref = os.environ.get("APM_RATCHET_BASE_REF", "origin/main")
+    merge_base = subprocess.run(
+        ["git", "-C", str(root), "merge-base", base_ref, "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if merge_base.returncode != 0:
+        raise MergeBaseUnavailable(
+            f"cannot find the merge-base of {base_ref} and HEAD "
+            f"({merge_base.stderr.strip() or 'shallow or missing history'}); "
+            "fetch full history (for example `git fetch --unshallow origin main`) "
+            "or set APM_RATCHET_BASE_REF"
+        )
+    shown = subprocess.run(
+        ["git", "-C", str(root), "show", f"{merge_base.stdout.strip()}:{relative.as_posix()}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def baseline_growth(base: RatchetBaseline | None, current: RatchetBaseline) -> list[str]:
+    """Return entries `current` added relative to the merge-base baseline."""
+    if base is None:
+        return []
+    added = [
+        (field, sorted(getattr(current, field) - getattr(base, field)))
+        for field in ("legacy_modules", "unclassified_modules")
+    ]
+    return [
+        f"{BASELINE.as_posix()}: {field} grew relative to the merge-base: {paths}. "
+        "Fix: remove the added entries and classify, place or link the modules instead."
+        for field, paths in added
+        if paths
+    ]
+
+
 def catalog_problems(payload: object, sources: dict[str, frozenset[str]]) -> list[str]:
     """Return integrity problems for the promise catalog payload."""
     if not isinstance(payload, dict) or set(payload) != {

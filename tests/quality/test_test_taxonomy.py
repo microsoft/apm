@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -9,13 +10,17 @@ import pytest
 from tests.quality.taxonomy_ratchets import (
     CATALOG,
     UPDATE_COMMAND,
+    MergeBaseUnavailable,
     RatchetBaseline,
     TaxonomyInventory,
+    baseline_growth,
+    catalog_payload,
     catalog_problems,
     catalog_source_ids,
     collect_inventory,
     load_catalog_ids,
     load_ratchet_baseline,
+    merge_base_text,
     placement_violations,
     promise_violations,
     stale_entries,
@@ -458,3 +463,69 @@ def test_tm010_dangling_catalog_id_fails() -> None:
 
 def test_tm010_promise_marker_is_registered() -> None:
     assert "promise" in _declared_markers()
+
+
+def test_tm010_promise_catalog_matches_its_builder() -> None:
+    payload = json.loads((REPO_ROOT / CATALOG).read_text(encoding="utf-8"))
+
+    assert payload == catalog_payload(catalog_source_ids(REPO_ROOT))
+
+
+def test_tm011_hand_added_baseline_entries_fail() -> None:
+    base = RatchetBaseline(
+        legacy_modules=frozenset({NEW_MODULE}), unclassified_modules=frozenset({NEW_MODULE})
+    )
+    grown = RatchetBaseline(
+        legacy_modules=frozenset({NEW_MODULE, NEW_INTEGRATION_MODULE}),
+        unclassified_modules=frozenset({NEW_MODULE, NEW_INTEGRATION_MODULE}),
+    )
+
+    problems = baseline_growth(base, grown)
+
+    assert len(problems) == 2
+    assert (
+        f"legacy_modules grew relative to the merge-base: ['{NEW_INTEGRATION_MODULE}']"
+        in (problems[0])
+    )
+    assert baseline_growth(grown, base) == []
+    assert baseline_growth(None, grown) == []
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=ratchet",
+            "-c",
+            "user.email=ratchet@example.invalid",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_tm011_merge_base_copy_is_read_from_the_base_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    relative = Path("tests") / "quality" / "baseline.json"
+    _write_module(tmp_path, relative.as_posix(), "base\n")
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    _git(tmp_path, "checkout", "-q", "-b", "feature")
+    _write_module(tmp_path, relative.as_posix(), "feature\n")
+    _git(tmp_path, "commit", "-q", "-am", "feature")
+    monkeypatch.setenv("APM_RATCHET_BASE_REF", "main")
+
+    assert merge_base_text(tmp_path, relative) == "base\n"
+    assert merge_base_text(tmp_path, Path("missing.json")) is None
+    monkeypatch.setenv("APM_RATCHET_BASE_REF", "no-such-ref")
+    with pytest.raises(MergeBaseUnavailable, match="cannot find the merge-base"):
+        merge_base_text(tmp_path, relative)

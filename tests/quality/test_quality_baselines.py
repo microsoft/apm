@@ -11,6 +11,16 @@ import pytest
 
 from scripts.test_file_inventory import is_test_module_path
 from tests.quality.repository_python_inventory import PythonModuleFacts
+from tests.quality.taxonomy_ratchets import (
+    BASELINE as TAXONOMY_BASELINE,
+)
+from tests.quality.taxonomy_ratchets import (
+    MergeBaseUnavailable,
+    baseline_growth,
+    load_ratchet_baseline,
+    merge_base_text,
+    parse_baseline,
+)
 
 RATCHET_TEST_SCOPE = "repository"
 
@@ -127,11 +137,11 @@ def test_duplicate_checker_reports_new_tracked_module_count(
     baseline.write_text(
         json.dumps(
             {
-                "algorithm": "ast-body-v1",
+                "algorithm": "ast-body-v2",
                 "algorithm_description": ALGORITHM_DESCRIPTION,
                 "body_duplicate_groups": [],
                 "name_collision_groups": [],
-                "schema_version": 2,
+                "schema_version": 3,
                 "scope": [
                     "tests/**/test_*.py",
                     "tests/**/*_test.py",
@@ -210,3 +220,33 @@ def test_provisional_mode_implication(
             provisional=provisional,
             env_value=env_value,
         )
+
+
+def _merge_base_copy(relative: Path) -> str | None:
+    """Return the merge-base copy of a baseline; fail in CI, skip locally if unknown."""
+    try:
+        return merge_base_text(REPO_ROOT, relative)
+    except MergeBaseUnavailable as error:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            pytest.fail(f"baseline monotonicity cannot run in CI: {error}")
+        pytest.skip(f"baseline monotonicity not checked locally: {error}")
+
+
+def test_quality_baselines_only_shrink_against_merge_base(tmp_path: Path) -> None:
+    """Hand edits that add baseline debt fail even though shape stays valid."""
+    duplicate_relative = Path("tests") / "quality" / "exact_test_duplicates.json"
+    duplicate_base = _merge_base_copy(duplicate_relative)
+    taxonomy_base = _merge_base_copy(TAXONOMY_BASELINE)
+
+    command = [sys.executable, str(REPO_ROOT / "scripts" / "check_exact_test_duplicates.py")]
+    if "provisional" in json.loads((REPO_ROOT / duplicate_relative).read_text(encoding="utf-8")):
+        command.append("--allow-provisional")
+    if duplicate_base is not None:
+        base_file = tmp_path / "base.json"
+        base_file.write_text(duplicate_base, encoding="utf-8")
+        command.extend(["--base-baseline", str(base_file)])
+    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    base = None if taxonomy_base is None else parse_baseline(json.loads(taxonomy_base))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert baseline_growth(base, load_ratchet_baseline(REPO_ROOT)) == []
