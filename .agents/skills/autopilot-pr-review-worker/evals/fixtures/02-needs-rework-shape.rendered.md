@@ -28,7 +28,7 @@ Everything else (validate_url duplication, error-message helpfulness, doc drift,
 | Supply Chain Security | 1 | 1 | 0 | Path-traversal regression: new code joins user-controlled segments without validate_path_segments. |
 | OSS Growth Hacker | 0 | 0 | 0 | No README/CHANGELOG impact; nothing to amplify or warn about externally. |
 | Doc Writer | 0 | 1 | 0 | Drift: behavior change but docs/src/content/docs/reference/dependencies.md still describes the pre-refactor flow. |
-| Test Coverage | 1 | 1 | 0 | Path-traversal regression has no regression-trap test; the malicious-name case is the test that would have caught this slip. |
+| Test Coverage | 1 | 2 | 0 | Path-traversal regression has no regression-trap test; the malicious-name case is the test that would have caught this slip. |
 
 > B = blocking-severity findings, R = recommended, N = nits.
 > Counts are signal strength, not gates. The maintainer ships.
@@ -132,6 +132,11 @@ PR touches only deps/resolver.py and deps/downloader.py refactor; no AuthResolve
   *Suggested:* Add an integration test that installs a real (test-fixture) dependency and asserts the file ends up in the expected location after going through both Resolver and Downloader.
   *Proof (test MISSING at):* `tests/integration/test_install_pipeline.py::test_install_pipeline_resolver_to_downloader_e2e` -- proves: The new Resolver -> Downloader boundary actually delivers files to disk for a real apm.yml. [portability-by-manifest,devx]
   `result = install(manifest_path, scope=USER); assert (target_dir / 'expected.md').exists()`
+- **[recommended]** Install pipeline change has no lifecycle-state-machine evidence that a rerun leaves deployed files and the lockfile unchanged at `tests/integration/test_required_lifecycle_state_machine.py`
+  The resolver/downloader split changes what install writes to disk. Idempotent rerun (I2) and lock == deployed (I1) are durable-state promises; only a real-CLI run with before/after snapshots proves them. Probe: grep'd tests/integration/test_required_lifecycle_state_machine.py for the new resolver path, no match.
+  *Suggested:* Extend an existing lifecycle test with a parametrize case: install, snapshot, install again, assert snapshot equality (see the apm-lifecycle-tests skill).
+  *Proof (test MISSING at):* `tests/integration/test_required_lifecycle_state_machine.py::test_install_rerun_is_idempotent_after_resolver_split` -- proves: Running apm install twice leaves deployed files and the lockfile byte-identical. [portability-by-manifest,devx]
+  `before = LifecycleStateSnapshot.capture(env); runner.install(); assert LifecycleStateSnapshot.capture(env) == before`
 
 </details>
 
