@@ -5,9 +5,12 @@ bin/ deploys only for a marketplace Claude plugin at user scope
 
 - user-scope marketplace rows replay p-native-claude-bin on claude and see
   ``~/.agents/plugins/p-native-claude-bin/bin/p-native-claude-bin`` go;
-- every other path never deploys bin/: those rows replay p-exec on copilot
-  and pin that its bin/ stays absent in both the project and HOME across
-  the removing step, while the step names the gate decision.
+- every other path never deploys bin/ (definition rule U-BIN, steward
+  ruling; the T-5 generator lists those cells under ``excluded`` and pins the
+  predicate). One witness row per path shape (project install, user-scope
+  install, dry-run, bundle install, unpack) replays p-exec on copilot and
+  pins that its bin/ stays absent in the project and HOME across the
+  removing step, while the step names the gate decision.
 """
 
 from __future__ import annotations
@@ -20,10 +23,6 @@ _NEVER = {
     "project": (".agents/plugins/p-exec/bin/p-exec",),
     "home": (".agents/plugins/p-exec/bin/p-exec",),
 }
-_NEVER_DEPLOYS = (
-    "bin/ never deploys on this path (install/exec_gate.py plugin_bin_deployable; "
-    "bundle/unpacker.py refuses executables): steward ruling pending"
-)
 _ALL = (
     "local-deny",
     "org-deny",
@@ -31,42 +30,26 @@ _ALL = (
     "policy-dep-deny",
     "revoke-approval",
 )
-_LOCAL = ("local-deny", "revoke-approval")
 _DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
-_UNINSTALL_SIBLING = (
-    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
-)
-_UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
 _BUNDLE = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _BIN_UNLOCKED = (
     "#4225 the user lockfile does not record the bin/ files a marketplace plugin deployed"
 )
 _XFAIL = {
-    **{
-        f"G|dry-run|{change}|bin": _DRY_RUN
-        for change in ("local-deny", "org-deny", "revoke-approval")
-    },
-    **{f"G|uninstall-prune-rebuild|{change}|bin": _UNINSTALL_SIBLING for change in _ALL},
-    "G|update|policy-dep-deny|bin": _UPDATE_DEP_DENY,
-    **{
-        f"G|bundle-install|{change}|bin": _BUNDLE
-        for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
-    },
+    "G|dry-run|local-deny|bin": _DRY_RUN,
+    "G|bundle-install|local-deny|bin": _BUNDLE,
     **{f"G|marketplace-install|{change}|bin": _BIN_UNLOCKED for change in _ALL},
 }
 
-# G path -> changes with an absence-only row (p-exec never deploys bin/ there)
+# U-BIN witness rows: one absence row per path shape where bin/ never deploys
+# (install/exec_gate.py plugin_bin_deployable; bundle/unpacker.py refuses
+# executables). The other absence cells are definition cells of U-BIN.
 _ABSENT = {
-    "install": _ALL,
-    "frozen": _ALL,
-    "update": _ALL,
-    "uninstall-prune-rebuild": _ALL,
-    "audit-ci": _ALL,
-    "dry-run": ("local-deny", "org-deny", "revoke-approval"),
-    "install-g": _LOCAL,
-    "frozen-g": _LOCAL,
-    "bundle-install": ("local-deny", "org-deny", "org-enables-gate", "revoke-approval"),
-    "unpack": _ALL,
+    "install": ("local-deny",),
+    "install-g": ("local-deny",),
+    "dry-run": ("local-deny",),
+    "bundle-install": ("local-deny",),
+    "unpack": ("local-deny",),
 }
 # G path -> changes with a real-deploy row (p-native-claude-bin, user scope, claude)
 _REAL = {"marketplace-install": _ALL}
@@ -80,7 +63,6 @@ def _absent_row(path: str, change: str) -> GateRow:
         unchanged=_NEVER,
         package="p-exec",
         target="copilot",
-        definition_pending=_NEVER_DEPLOYS,
         xfail=_XFAIL.get(row_id, ""),
     )
 
