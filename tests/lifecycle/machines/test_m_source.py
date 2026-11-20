@@ -272,11 +272,6 @@ def _pins_written(before: Observation, after: Observation) -> bool:
     return _PINS in difference.added | difference.changed
 
 
-def _dry_run_pins(machine, op, before, after, result) -> bool:
-    del machine
-    return result is not None and "DRYRUN" in op.modifiers and _pins_written(before, after)
-
-
 def _gated_rows(observation: Observation) -> bool:
     lock = observation.lock
     return lock is not None and any(
@@ -305,13 +300,6 @@ KNOWN_CELLS = (
         r"^failed uninstall (changed (the manifest|the lockfile|deployed surfaces|durable files: .*)"
         r"|exited 1 without announcing why)$",
         _lsp_survivor,
-    ),
-    KnownCell(
-        "dry-run-writes-ref-pin",
-        "I5",
-        "#4212",
-        r"wrote home:\['\.apm/cache/marketplace/version-pins\.json'\]$",
-        _dry_run_pins,
     ),
 )
 

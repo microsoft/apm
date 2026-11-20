@@ -2589,8 +2589,8 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref",
-        "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_honors_shorthand_fragment_ref",
-        "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_keeps_hash_in_local_paths"
+        "tests/unit/marketplace/test_registration_source.py::test_registration_source_honors_shorthand_fragment_ref",
+        "tests/unit/marketplace/test_registration_source.py::test_registration_source_keeps_hash_in_local_paths"
       ]
     },
     {
