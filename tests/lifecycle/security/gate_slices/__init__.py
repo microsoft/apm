@@ -37,6 +37,9 @@ class GateRow:
     # World package and target that replace the slice's for this row.
     package: str | None = None
     target: str | None = None
+    # Non-empty: the gated surface never deploys on this path, so the row checks
+    # its facts without earning a receipt until the steward rules (the reason).
+    definition_pending: str = ""
 
     @property
     def parts(self) -> tuple[str, str, str]:
