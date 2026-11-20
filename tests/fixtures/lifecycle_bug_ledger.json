@@ -547,7 +547,7 @@
     {
       "issue": 4153,
       "fixed_in": "Unreleased",
-      "summary": "A user-scope install refused every relative local_path, including one declared by a dependency, and dropped that transitive dependency without a diagnostic while exiting 0; an unresolvable transitive local dependency also exited 0 at project scope.",
+      "summary": "A relative local_path declared by a dependency anchors on the declaring package at every scope, so its transitive closure installs at user scope as at project scope; an unresolvable transitive local dependency fails the install with exit 1.",
       "failure_modes": [
         "outcome",
         "reference"
@@ -563,7 +563,7 @@
     {
       "issue": 4166,
       "fixed_in": "Unreleased",
-      "summary": "apm update compared the resolver's default-branch name with the absent ref the lockfile records for a dependency declared without a ref, so every update reported 1 updated and re-integrated an unchanged commit.",
+      "summary": "apm update compares the ref the lockfile records, so a dependency declared without a ref reports nothing updated and writes no bytes until its default branch moves.",
       "failure_modes": [
         "idempotency",
         "outcome"
