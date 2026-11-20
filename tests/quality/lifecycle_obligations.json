@@ -2,7 +2,7 @@
  "counts": {
   "baseline_by_lane": {
    "T-1": 254,
-   "T-2": 529,
+   "T-2": 496,
    "T-3": 243,
    "T-6a": 201,
    "T-6b": 141,
@@ -11,27 +11,27 @@
    "T-7b": 63
   },
   "exception_pairs": 94,
-  "mapped": 404,
+  "mapped": 427,
   "mapped_by_rule": {
-   "E3": 134,
+   "E3": 131,
    "U1": 84,
    "U10": 44,
    "U2": 78,
    "U5": 5,
-   "U8": 59
+   "U8": 85
   },
-  "must_cover": 73,
+  "must_cover": 76,
   "obligations": {
    "T1": 387,
    "T2": 12,
-   "T3": 401,
+   "T3": 375,
    "T4": 80,
-   "T5": 60,
-   "pair": 1531,
+   "T5": 57,
+   "pair": 1527,
    "refusal": 43,
-   "rule": 7
+   "rule": 10
   },
-  "obligations_total": 2521,
+  "obligations_total": 2491,
   "raw_candidates": {
    "T1": 504,
    "T2": 12,
@@ -40,18 +40,18 @@
    "T5": 120,
    "pair": 1684
   },
-  "removed": 381,
+  "removed": 391,
   "removed_by_rule": {
    "U-BIN": 1,
    "U3": 5,
    "U6": 90,
-   "U8": 285
+   "U8": 295
   },
-  "row_steps": 200,
-  "rows": 16,
+  "row_steps": 204,
+  "rows": 17,
   "status": {
-   "baseline": 1501,
-   "required": 1020
+   "baseline": 1468,
+   "required": 1023
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -1436,12 +1436,6 @@
     "U8"
    ]
   },
-  "T3|OP=marketplace|SRC=native-plugin|PRIM=canvas": {
-   "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
-   "rules": [
-    "U8"
-   ]
-  },
   "T3|OP=marketplace|SRC=native-plugin|PRIM=hook": {
    "maps_to": "rule|U8|marketplace-add-refuses-a-source-without-catalog",
    "rules": [
@@ -1520,10 +1514,46 @@
     "E3"
    ]
   },
-  "T3|OP=prune|SRC=local-bundle|PRIM=other-file": {
-   "maps_to": "T3|OP=prune|SRC=local-bundle|PRIM=skill",
+  "T3|OP=prune|SRC=local-bundle|PRIM=bin": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
    "rules": [
-    "E3"
+    "U8"
+   ]
+  },
+  "T3|OP=prune|SRC=local-bundle|PRIM=canvas": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=prune|SRC=local-bundle|PRIM=hook": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=prune|SRC=local-bundle|PRIM=lsp": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=prune|SRC=local-bundle|PRIM=mcp": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=prune|SRC=local-bundle|PRIM=other-file": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=prune|SRC=local-bundle|PRIM=skill": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
    ]
   },
   "T3|OP=prune|SRC=local-path|PRIM=other-file": {
@@ -1574,10 +1604,46 @@
     "U8"
    ]
   },
-  "T3|OP=uninstall|SRC=local-bundle|PRIM=other-file": {
-   "maps_to": "T3|OP=uninstall|SRC=local-bundle|PRIM=skill",
+  "T3|OP=uninstall|SRC=local-bundle|PRIM=bin": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
    "rules": [
-    "E3"
+    "U8"
+   ]
+  },
+  "T3|OP=uninstall|SRC=local-bundle|PRIM=canvas": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=uninstall|SRC=local-bundle|PRIM=hook": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=uninstall|SRC=local-bundle|PRIM=lsp": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=uninstall|SRC=local-bundle|PRIM=mcp": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=uninstall|SRC=local-bundle|PRIM=other-file": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=uninstall|SRC=local-bundle|PRIM=skill": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
    ]
   },
   "T3|OP=uninstall|SRC=local-path|PRIM=other-file": {
@@ -1628,10 +1694,46 @@
     "E3"
    ]
   },
-  "T3|OP=update|SRC=local-bundle|PRIM=other-file": {
-   "maps_to": "T3|OP=update|SRC=local-bundle|PRIM=skill",
+  "T3|OP=update|SRC=local-bundle|PRIM=bin": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
    "rules": [
-    "E3"
+    "U8"
+   ]
+  },
+  "T3|OP=update|SRC=local-bundle|PRIM=canvas": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=update|SRC=local-bundle|PRIM=hook": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=update|SRC=local-bundle|PRIM=lsp": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=update|SRC=local-bundle|PRIM=mcp": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=update|SRC=local-bundle|PRIM=other-file": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T3|OP=update|SRC=local-bundle|PRIM=skill": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
    ]
   },
   "T3|OP=update|SRC=local-path|PRIM=other-file": {
@@ -1952,14 +2054,32 @@
     "U1"
    ]
   },
+  "T5|OP=prune|SRC=local-bundle|DRYRUN=on": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
   "T5|OP=uninstall|SRC=inline-mcp|DRYRUN=on": {
    "maps_to": "rule|U8|uninstall-refuses-an-inline-mcp-name",
    "rules": [
     "U8"
    ]
   },
+  "T5|OP=uninstall|SRC=local-bundle|DRYRUN=on": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
   "T5|OP=uninstall|SRC=mcp-registry|DRYRUN=on": {
    "maps_to": "rule|U8|uninstall-refuses-a-registry-mcp-name",
+   "rules": [
+    "U8"
+   ]
+  },
+  "T5|OP=update|SRC=local-bundle|DRYRUN=on": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
    "rules": [
     "U8"
    ]
@@ -2288,6 +2408,12 @@
     "U1"
    ]
   },
+  "pair|OP=prune|SRC=local-bundle": {
+   "maps_to": "rule|U8|prune-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
+   ]
+  },
   "pair|OP=prune|UPDATE=on": {
    "maps_to": "refusal|OP=prune|UPDATE=on",
    "rules": [
@@ -2324,6 +2450,12 @@
     "U8"
    ]
   },
+  "pair|OP=uninstall|SRC=local-bundle": {
+   "maps_to": "rule|U8|uninstall-refuses-a-local-bundle",
+   "rules": [
+    "U8"
+   ]
+  },
   "pair|OP=uninstall|SRC=mcp-registry": {
    "maps_to": "rule|U8|uninstall-refuses-a-registry-mcp-name",
    "rules": [
@@ -2352,6 +2484,12 @@
    "maps_to": "pair|OP=update|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "pair|OP=update|SRC=local-bundle": {
+   "maps_to": "rule|U8|update-leaves-a-local-bundle-untouched",
+   "rules": [
+    "U8"
    ]
   },
   "pair|OP=update|UPDATE=on": {
@@ -6096,13 +6234,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=approve-deny|SRC=native-plugin|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
    "issue": "#4096",
@@ -6456,13 +6587,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=audit|SRC=native-plugin|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=audit|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
    "issue": "#4096",
@@ -6782,13 +6906,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=compile|SRC=native-plugin|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=compile|SRC=native-plugin|PRIM=other-file": {
    "family": "T3",
    "issue": "#4096",
@@ -7098,13 +7215,6 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=install|SRC=native-plugin|PRIM=canvas": {
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
@@ -7504,13 +7614,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=lock|SRC=native-plugin|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=lock|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
    "issue": "#4096",
@@ -7796,48 +7899,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T3|OP=prune|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=prune|SRC=local-bundle|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=prune|SRC=local-bundle|PRIM=hook": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=prune|SRC=local-bundle|PRIM=lsp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=prune|SRC=local-bundle|PRIM=mcp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=prune|SRC=local-bundle|PRIM=skill": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=prune|SRC=local-path|PRIM=bin": {
    "family": "T3",
    "issue": "#4099",
@@ -8046,13 +8107,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=prune|SRC=native-plugin|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=prune|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
    "issue": "#4096",
@@ -8184,48 +8238,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
-  },
-  "T3|OP=uninstall|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=uninstall|SRC=local-bundle|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=uninstall|SRC=local-bundle|PRIM=hook": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=uninstall|SRC=local-bundle|PRIM=lsp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=uninstall|SRC=local-bundle|PRIM=mcp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=uninstall|SRC=local-bundle|PRIM=skill": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=local-path|PRIM=bin": {
    "family": "T3",
@@ -8427,13 +8439,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T3|OP=uninstall|SRC=native-plugin|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
    "issue": "#4096",
@@ -8576,48 +8581,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T3|OP=update|SRC=local-bundle|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=update|SRC=local-bundle|PRIM=canvas": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=update|SRC=local-bundle|PRIM=hook": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=update|SRC=local-bundle|PRIM=lsp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=update|SRC=local-bundle|PRIM=mcp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=update|SRC=local-bundle|PRIM=skill": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T3|OP=update|SRC=local-path|PRIM=bin": {
    "family": "T3",
@@ -8821,13 +8784,6 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=bin": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=update|SRC=native-plugin|PRIM=canvas": {
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
@@ -9870,13 +9826,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "T5|OP=prune|SRC=local-bundle|DRYRUN=on": {
-   "family": "T5",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T5|OP=prune|SRC=local-path|DRYRUN=on": {
    "family": "T5",
    "issue": "#4099",
@@ -9952,13 +9901,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
-  "T5|OP=uninstall|SRC=local-bundle|DRYRUN=on": {
-   "family": "T5",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T5|OP=uninstall|SRC=local-path|DRYRUN=on": {
    "family": "T5",
    "issue": "#4099",
@@ -10033,13 +9975,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "T5|OP=update|SRC=local-bundle|DRYRUN=on": {
-   "family": "T5",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "T5|OP=update|SRC=local-path|DRYRUN=on": {
    "family": "T5",
@@ -15765,13 +15700,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|OP=prune|SRC=local-bundle": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|OP=prune|SRC=local-path": {
    "family": "pair",
    "issue": "#4099",
@@ -16177,13 +16105,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
-  },
-  "pair|OP=uninstall|SRC=local-bundle": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "pair|OP=uninstall|SRC=local-path": {
    "family": "pair",
@@ -16598,13 +16519,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "pair|OP=update|SRC=local-bundle": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "pair|OP=update|SRC=local-path": {
    "family": "pair",
@@ -21012,13 +20926,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=native-plugin|PRIM=canvas": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|SRC=native-plugin|PRIM=hook": {
    "family": "pair",
    "issue": "#4096",
@@ -22415,6 +22322,32 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
   },
+  "rule|U8|prune-leaves-a-local-bundle-untouched": {
+   "exit": 0,
+   "family": "rule",
+   "issue": "#4099",
+   "lane": "T-5",
+   "must_cover": true,
+   "rules": [
+    "U8"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-17-local-bundle-refusals]"
+  },
+  "rule|U8|uninstall-refuses-a-local-bundle": {
+   "exit": 1,
+   "family": "rule",
+   "issue": "#4099",
+   "lane": "T-5",
+   "must_cover": true,
+   "rules": [
+    "U8"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-17-local-bundle-refusals]"
+  },
   "rule|U8|uninstall-refuses-a-registry-mcp-name": {
    "exit": 1,
    "family": "rule",
@@ -22440,6 +22373,19 @@
    "status": "required",
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
+  },
+  "rule|U8|update-leaves-a-local-bundle-untouched": {
+   "exit": 0,
+   "family": "rule",
+   "issue": "#4099",
+   "lane": "T-5",
+   "must_cover": true,
+   "rules": [
+    "U8"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-17-local-bundle-refusals]"
   },
   "rule|U9|approve-list-read-only": {
    "family": "rule",
@@ -22529,6 +22475,9 @@
   "T3|OP=approve-deny|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=approve-deny|SRC=native-plugin|PRIM=canvas": [
+   "U8"
+  ],
   "T3|OP=audit|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -22563,6 +22512,9 @@
    "U8"
   ],
   "T3|OP=audit|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=audit|SRC=native-plugin|PRIM=canvas": [
    "U8"
   ],
   "T3|OP=bundle-install|SRC=git|PRIM=bin": [
@@ -22790,6 +22742,9 @@
   "T3|OP=compile|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=compile|SRC=native-plugin|PRIM=canvas": [
+   "U8"
+  ],
   "T3|OP=install|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -22824,6 +22779,9 @@
    "U8"
   ],
   "T3|OP=install|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=install|SRC=native-plugin|PRIM=canvas": [
    "U8"
   ],
   "T3|OP=lock|SRC=inline-mcp|PRIM=bin": [
@@ -22862,6 +22820,9 @@
   "T3|OP=lock|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=lock|SRC=native-plugin|PRIM=canvas": [
+   "U8"
+  ],
   "T3|OP=marketplace|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -22896,6 +22857,9 @@
    "U8"
   ],
   "T3|OP=marketplace|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=marketplace|SRC=native-plugin|PRIM=canvas": [
    "U8"
   ],
   "T3|OP=mcp-install|SRC=git|PRIM=bin": [
@@ -23348,6 +23312,9 @@
   "T3|OP=prune|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=prune|SRC=native-plugin|PRIM=canvas": [
+   "U8"
+  ],
   "T3|OP=uninstall|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -23384,6 +23351,9 @@
   "T3|OP=uninstall|SRC=mcp-registry|PRIM=skill": [
    "U8"
   ],
+  "T3|OP=uninstall|SRC=native-plugin|PRIM=canvas": [
+   "U8"
+  ],
   "T3|OP=update|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -23418,6 +23388,9 @@
    "U8"
   ],
   "T3|OP=update|SRC=mcp-registry|PRIM=skill": [
+   "U8"
+  ],
+  "T3|OP=update|SRC=native-plugin|PRIM=canvas": [
    "U8"
   ],
   "T5|OP=bundle-install|SRC=git|DRYRUN=on": [
@@ -23635,6 +23608,9 @@
   ],
   "pair|SRC=mcp-registry|PRIM=skill": [
    "U8"
+  ],
+  "pair|SRC=native-plugin|PRIM=canvas": [
+   "U8"
   ]
  },
  "rows": {
@@ -23653,7 +23629,8 @@
   "generated_cover-13-refusals.yaml": "6eb1941cb910d494c90ae4dbd1f8ba6730df87fe8ba702ee992e5ba073cc9d77",
   "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
   "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
-  "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473"
+  "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
+  "generated_cover-17-local-bundle-refusals.yaml": "1ab5035a669a1ebe463eb541d3b6da7e78b01cb98ec924a591a9033f4038208a"
  },
  "rules": {
   "E1": {
@@ -23741,9 +23718,13 @@
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:698",
-    "src/apm_cli/commands/uninstall/engine.py:857"
+    "src/apm_cli/commands/uninstall/engine.py:857",
+    "src/apm_cli/commands/uninstall/engine.py:690",
+    "src/apm_cli/commands/update.py:452",
+    "src/apm_cli/commands/prune.py:199",
+    "src/apm_cli/integration/canvas_integrator.py:5"
    ],
-   "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, and uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server)"
+   "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
   },
   "U9": {
    "evidence": [
@@ -23754,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "54118c0e88d941ac4fccb2bd0210a7b66f9357b20e3c9706edb9063849802f61"
+ "sha256": "40d0c7860a534183fe4e7b93e75ea0a1942a97ddfa0c2ec395d61cfea38f2d1d"
 }

@@ -28,6 +28,7 @@ from tests.lifecycle.generator.factors import (
     row_targets,
 )
 from tests.lifecycle.generator.rules import (
+    LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
     RULE_CELL_REFUSALS,
     UNINSTALL_MCP_REFUSALS,
@@ -484,6 +485,7 @@ def cover(obligations: Mapping[str, Entry]) -> list[Row]:
         covered |= new
     rows += refusal_rows(obligations, len(rows) + 1)
     rows.append(source_refusal_row(obligations, len(rows) + 1))
+    rows.append(local_bundle_row(len(rows) + 1))
     return rows
 
 
@@ -599,4 +601,23 @@ def source_refusal_row(obligations: Mapping[str, Entry], index: int) -> Row:
         {},
         steps,
         {"OP": "uninstall", "SRC": "mcp-registry"},
+    )
+
+
+def local_bundle_row(index: int) -> Row:
+    """Install the local bundle p-exec, then the commands that cannot act on it (U8)."""
+    steps = [
+        _cmd("install", "install", "p-exec", names=("p-exec",), essential=True),
+        _refusal("apm update --yes", "update", LOCAL_BUNDLE_REFUSALS["update"]),
+        _refusal("apm prune", "prune", LOCAL_BUNDLE_REFUSALS["prune"]),
+        _refusal("apm uninstall p-exec", "uninstall", LOCAL_BUNDLE_REFUSALS["uninstall"]),
+    ]
+    return Row(
+        f"cover-{index:02d}-local-bundle-refusals",
+        "refusal",
+        ("p-exec",),
+        row_targets()[0],
+        {"p-exec": "bundle"},
+        steps,
+        {"OP": "uninstall", "SRC": "local-bundle"},
     )

@@ -30,6 +30,7 @@ from tests.lifecycle.generator.factors import (
 from tests.lifecycle.generator.rules import (
     ACCEPTS_EVIDENCE,
     EVIDENCE_WINDOW,
+    LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
     REFUSAL_EVIDENCE,
     RULE_CELL_REFUSALS,
@@ -394,6 +395,8 @@ def _u8(cell) -> str | None:
         return "install --mcp from a package source"  # install.py:971 --url, 997 --registry
     if src in _MCP_SERVER_SOURCES and prim not in (None, "mcp"):
         return "an MCP server source for a non-MCP primitive"
+    if src == "native-plugin" and prim == "canvas":
+        return "a native plugin carries no canvas"  # canvas_integrator.py:5 .apm/extensions/
     return None
 
 
@@ -409,6 +412,8 @@ def _u8_mapping(cell) -> str | None:
         return "marketplace add of a source without a catalog"  # registration.py:45
     if op == "uninstall" and src in _MCP_SERVER_SOURCES:
         return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:698, 857
+    if src == "local-bundle" and op in ("uninstall", "update", "prune"):
+        return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:452, prune.py:199
     return None
 
 
@@ -462,8 +467,9 @@ def test_u8_removals_split_by_the_source_each_command_takes() -> None:
         "bundle-install from a non-bundle source": 81,
         "install --mcp from a package source": 72,
         "an MCP server source for a non-MCP primitive": 132,
+        "a native plugin carries no canvas": 10,
     }
-    assert sum(clauses.values()) == 285
+    assert sum(clauses.values()) == 295
 
 
 def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
@@ -482,11 +488,16 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
             assert entry["maps_to"] in (target, data["mapped"].get(target, {}).get("maps_to")), key
         elif cell["OP"] == "marketplace":
             assert entry["maps_to"] == MARKETPLACE_ADD_REFUSAL, key
+        elif cell["SRC"] == "local-bundle":
+            assert entry["maps_to"] == LOCAL_BUNDLE_REFUSALS[cell["OP"]], key
         else:
             assert entry["maps_to"] == UNINSTALL_MCP_REFUSALS[cell["SRC"]], key
     assert clauses == {
         "install of a local bundle is bundle-install": 9,
-        "marketplace add of a source without a catalog": 44,
+        "marketplace add of a source without a catalog": 43,
+        "uninstall of a local bundle": 9,
+        "update of a local bundle": 9,
+        "prune of a local bundle": 9,
         "uninstall of an MCP server (mcp-registry)": 3,
         "uninstall of an MCP server (inline-mcp)": 3,
     }

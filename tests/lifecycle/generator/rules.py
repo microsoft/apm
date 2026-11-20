@@ -200,8 +200,10 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "registry name or an inline server (--url, or a command after --), never a package "
         "source, and an MCP source delivers only MCP; a package registry delivers whole "
         "packages. Parsed-then-refused shapes are refusal cells, one per message class: "
-        "marketplace add of a source without a catalog, and uninstall of an MCP server "
-        "(a registry name is not found in apm.yml; an inline name is an MCP server)",
+        "marketplace add of a source without a catalog, uninstall of an MCP server "
+        "(a registry name is not found in apm.yml; an inline name is an MCP server), and a "
+        "local bundle, which writes no manifest entry (uninstall refuses it; update and "
+        "prune leave it untouched). A native plugin carries no canvas primitive",
         (
             Ev(_INSTALL, 1233, "detect_local_bundle"),
             Ev(_INSTALL, 997, '"--registry"'),
@@ -210,6 +212,10 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 698, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 690, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/update.py", 452, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/prune.py", 199, "Nothing to prune"),
+            Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
     ),
     "U-BIN": (
@@ -295,11 +301,21 @@ UNINSTALL_MCP_REFUSALS: Mapping[str, str] = {
     "mcp-registry": "rule|U8|uninstall-refuses-a-registry-mcp-name",
     "inline-mcp": "rule|U8|uninstall-refuses-an-inline-mcp-name",
 }
+# A local bundle writes no manifest entry: uninstall refuses it, update and
+# prune parse and leave it untouched (one cell per message class).
+LOCAL_BUNDLE_REFUSALS: Mapping[str, str] = {
+    "uninstall": "rule|U8|uninstall-refuses-a-local-bundle",
+    "update": "rule|U8|update-leaves-a-local-bundle-untouched",
+    "prune": "rule|U8|prune-leaves-a-local-bundle-untouched",
+}
 # Exit code and pinned message of every refusal rule cell.
 RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     MARKETPLACE_ADD_REFUSAL: (1, r"No marketplace\.json found in"),
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
+    LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
+    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
+    LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
 }
 
 # Rule cells: must-cover singletons a rule names on its own.
@@ -359,6 +375,7 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         (op == "bundle-install" and src != "local-bundle")
         or (op == "mcp-install" and src not in MCP_SOURCES)
         or (src in MCP_SOURCES and prim is not None and prim != "mcp")
+        or (src == "native-plugin" and prim == "canvas")
     ):
         return "U8"
     if u_bin_applies(cell) and u_bin_pinned():
@@ -387,6 +404,8 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
         return MARKETPLACE_ADD_REFUSAL, "U8"
     if op == "uninstall" and src in MCP_SOURCES:
         return UNINSTALL_MCP_REFUSALS[src], "U8"
+    if src == "local-bundle" and op in LOCAL_BUNDLE_REFUSALS:
+        return LOCAL_BUNDLE_REFUSALS[op], "U8"
     policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
     if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
         return None
