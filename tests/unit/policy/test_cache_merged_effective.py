@@ -53,6 +53,7 @@ from apm_cli.policy.schema import (
     BinDeployPolicy,
     DependencyPolicy,
     IntegrityPolicy,
+    MarketplacePolicy,
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
@@ -404,6 +405,26 @@ class TestBackdatedMetaOutcomes(unittest.TestCase):
             result = _read_cache("empty/.github", root)
             self.assertIsNotNone(result)
             self.assertEqual(result.outcome, "empty")
+
+    def test_marketplace_allow_only_policy_survives_cache_round_trip(self):
+        """#2903: a policy whose only rule is marketplace.allow is cached, not dropped."""
+        for allow in (("github.com/contoso/*",), ()):
+            with self.subTest(allow=allow):
+                policy = ApmPolicy(marketplace=MarketplacePolicy(allow=allow))
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    _write_cache("mkt/.github", policy, root)
+                    cache_dir = _get_cache_dir(root)
+                    cached = "".join(
+                        path.read_text(encoding="utf-8")
+                        for path in cache_dir.rglob("*")
+                        if path.is_file()
+                    )
+                    result = _read_cache("mkt/.github", root)
+                self.assertIn("marketplace", cached)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.outcome, "found")
+                self.assertEqual(result.policy.marketplace.allow, allow)
 
     def test_no_cache_fallback_outcome(self):
         """No cache + fetch error -> cache_miss_fetch_fail."""
