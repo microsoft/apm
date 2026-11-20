@@ -105,6 +105,7 @@ def require_requested_components(
     available: Collection[str],
     package: str,
     install_spec: str | None = None,
+    retry_args: tuple[str, ...] = (),
 ) -> bool:
     """Record one canonical failure when requested components are unavailable.
 
@@ -134,6 +135,7 @@ def require_requested_components(
             install_spec=install_spec,
             requested=requested_values,
             available=available_names,
+            retry_args=retry_args,
         )
     else:
         message += (
@@ -150,6 +152,7 @@ def _available_components_next_step(
     install_spec: str,
     requested: tuple[str, ...],
     available: frozenset[str],
+    retry_args: tuple[str, ...] = (),
 ) -> str:
     """Return the one runnable install command that selects available components."""
     kept = [
@@ -161,6 +164,7 @@ def _available_components_next_step(
     argv = ["apm", "install", install_spec]
     for value in selection:
         argv.extend((option, value))
+    argv.extend(retry_args)
     command = " ".join(
         arg if _UNQUOTED_ARG.fullmatch(arg) and not arg.startswith("#") else shlex.quote(arg)
         for arg in argv

@@ -26,6 +26,17 @@ def destination_tree_lines(phrase: str, paths: list[str], verbose: bool) -> list
     return [f"  |-- {phrase} -> {suffix}"]
 
 
+def log_bundle_deployed(logger: Any, summary: str, deployed: list[str], targets: Any) -> None:
+    """Report a local bundle install and name the folders it deployed into (#4192)."""
+    logger.success(summary)
+    if not deployed:
+        return
+    verbose = bool(getattr(logger, "verbose", False))
+    phrase = f"{len(deployed)} file(s) deployed"
+    for line in destination_tree_lines(phrase, destination_folders(deployed, targets), verbose):
+        logger.tree_item(line)
+
+
 def destination_folders(records: list[str], targets: Any) -> list[str]:
     """Return the primitive folders (``.github/agents/``) holding *records*, in order.
 

@@ -12,6 +12,7 @@ from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
 from apm_cli.drift import locked_marketplace_row
 from apm_cli.install.package_selection import (
+    complete_partial_selection,
     selected_dependency_identity,
     selected_subtree_dependencies,
 )
@@ -34,6 +35,15 @@ def _resolved_key(
     """
     locked = locked_marketplace_row(dependency, lockfile, marketplace_index)
     return (locked or dependency).get_unique_key()
+
+
+class _SilentLogger:
+    """Discard the MCP resolver's progress lines while dry-run previews its choice."""
+
+    verbose = False
+
+    def __getattr__(self, _name: str) -> Any:
+        return lambda *_args, **_kwargs: None
 
 
 @dataclass(frozen=True)
@@ -172,15 +182,19 @@ class ProspectiveInstallPlan:
         dependencies = (
             tuple(
                 selected_subtree_dependencies(
-                    self.only_packages,
-                    graph.dependency_tree,
-                    resolved_dependencies,
-                    locked_keys=lockfile.dependencies if lockfile is not None else {},
+                    self.only_packages, graph.dependency_tree, resolved_dependencies
                 )
             )
             if self.only_packages is not None
             else resolved_dependencies
         )
+        if self.only_packages is not None:
+            # Preview what a partial install locks: the selection plus unlocked locals (#4198).
+            dependencies = tuple(
+                complete_partial_selection(
+                    dependencies, resolved_dependencies, graph.dependency_tree, lockfile
+                )[0]
+            )
         resolved_keys = {dependency.get_unique_key() for dependency in dependencies}
         marketplace_index = lockfile.marketplace_index() if lockfile is not None else None
         dependencies += tuple(
@@ -209,7 +223,7 @@ class ProspectiveInstallPlan:
             return self
         from apm_cli.core.target_detection import resolve_package_target_decision
         from apm_cli.install.lsp.integration import lsp_target_config
-        from apm_cli.integration.mcp_integrator_install import select_target_runtimes_quietly
+        from apm_cli.integration.mcp_integrator_install import _resolve_target_runtimes
 
         explicit_target = ctx.target or ctx.runtime
         try:
@@ -219,7 +233,7 @@ class ProspectiveInstallPlan:
                 explicit_target=explicit_target,
                 create_config=False,
             )
-            runtimes = select_target_runtimes_quietly(
+            runtimes = _resolve_target_runtimes(
                 runtime=ctx.runtime,
                 exclude=ctx.exclude,
                 verbose=False,
@@ -229,6 +243,8 @@ class ProspectiveInstallPlan:
                 explicit_target=decision.value,
                 target_decision=decision,
                 scope=ctx.scope,
+                logger=_SilentLogger(),
+                console=None,
             )
         except (KeyError, RuntimeError, ValueError):
             return self

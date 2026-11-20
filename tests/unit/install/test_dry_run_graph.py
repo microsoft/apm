@@ -13,7 +13,10 @@ import pytest
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
-from apm_cli.install.package_selection import selected_subtree_dependencies
+from apm_cli.install.package_selection import (
+    selected_subtree_dependencies,
+    with_unlocked_local_dependencies,
+)
 from apm_cli.install.phases.resolve import _apply_only_filter
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
@@ -104,37 +107,6 @@ def test_selected_subtree_keeps_distinct_nodes_with_the_same_identity() -> None:
         first,
         leaf,
     ]
-
-
-@pytest.mark.parametrize(
-    ("locked_keys", "expected"),
-    [
-        (None, ["owner/root"]),
-        ((), ["owner/root", "./local"]),
-        (("./local",), ["owner/root"]),
-    ],
-    ids=["no-lock-evidence", "unlocked-local", "locked-local"],
-)
-def test_selected_subtree_adds_unlocked_direct_local_dependencies(
-    locked_keys: tuple[str, ...] | None, expected: list[str]
-) -> None:
-    """A partial install also locks declared local deps the lock lacks (#4198)."""
-    root = DependencyReference.parse("owner/root")
-    other = DependencyReference.parse("owner/other")
-    local = DependencyReference.parse_from_dict({"path": "./local"})
-    nested = DependencyReference.parse_from_dict({"path": "./nested"})
-    nested_node = SimpleNamespace(dependency_ref=nested, children=[], depth=2)
-    nodes = [
-        SimpleNamespace(dependency_ref=root, children=[], depth=1),
-        SimpleNamespace(dependency_ref=other, children=[], depth=1),
-        SimpleNamespace(dependency_ref=local, children=[], depth=1),
-        nested_node,
-    ]
-    tree = SimpleNamespace(nodes=dict(enumerate(nodes)))
-    selected = selected_subtree_dependencies(
-        ["owner/root"], tree, [root, other, local, nested], locked_keys=locked_keys
-    )
-    assert [dependency.get_unique_key() for dependency in selected] == expected
 
 
 @pytest.mark.parametrize(
@@ -237,13 +209,16 @@ def test_positional_preview_resolves_full_graph_before_selection(
         consumer.root
     )
     assert bool(graph.resolution_errors) == missing_unselected
+    complete = graph.flattened_dependencies.get_installation_list()
     install = SimpleNamespace(
         dependency_graph=graph,
-        deps_to_install=graph.flattened_dependencies.get_installation_list(),
+        deps_to_install=complete,
         only_packages=["../parent"],
         existing_lockfile=None,
     )
     _apply_only_filter(install)
+    # The pipeline also locks declared locals the lock lacks (#4198); so does the preview.
+    install.deps_to_install = with_unlocked_local_dependencies(install, complete)
     plan = _preview(consumer.root, only_packages=install.only_packages)
     assert bool(plan.dependency_preview_errors) == missing_unselected
     assert [dep.to_canonical() for dep in plan.selected_apm_dependencies] == [
