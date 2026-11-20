@@ -208,9 +208,6 @@ Re-approving replaces the package's pins with the current definitions.
 - an item cannot be pinned, for example a transitive registry server while the
   MCP registry is unreachable (`needs registry access to pin`).
 
-`apm approve` with no package and no `--pending`, `--all`, `--recommended`
-or `--list` is a usage error (exit 2).
-
 It exits 1 when a requested package is not installed, when any requested
 package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
@@ -295,11 +292,26 @@ ignores the personal store when it checks MCP consent, so CI and laptops agree.
 
 Existing `owner/repo#1.2.0` keys still match the package regardless of the
 installed version; `apm approve` folds them into the version-blind key. Local
-bundle grants are different: copy the full `name#version@sha256:<digest>` key
-from the install diagnostic. A changed local bundle does not inherit the prior
-grant. `apm approve` does not accept a local bundle key: add the key under
-`executables.allow` in `apm.yml`, as the install diagnostic prints it, then run
-`apm install` again.
+bundle grants are different: they bind the full `name#version@sha256:<digest>`
+key the install diagnostic prints. A changed local bundle does not inherit the
+prior grant.
+
+### Local bundles
+
+`apm install <bundle>` parks a local bundle's hooks, MCP, and LSP servers until
+its exact content key is approved, and prints that key. Approve it with:
+
+```bash
+apm approve "hookpkg#1.0.0@sha256:<digest>"   # the key the install printed
+apm install ./hookpkg-1.0.0                  # rerun the install to deploy
+```
+
+This writes the same grant as adding the key under `executables.allow` in
+`apm.yml` (or `$APM_HOME/config.json` with `--user`; use `-g` for a bundle
+installed with `apm install -g`). Either path works. `apm approve --pending`
+lists parked bundles with their keys. A key with a wrong digest, or a key
+printed before the bundle's bytes changed, is refused: `apm approve` exits 1
+with an `[x]` line and writes nothing.
 
 ## Examples
 
