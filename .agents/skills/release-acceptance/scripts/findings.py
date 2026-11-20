@@ -3,7 +3,11 @@
 
 Subcommands (all print JSON to stdout, diagnostics to stderr):
   add       validate findings from a JSONL file and merge them into the
-            ledger, deduplicating by fingerprint
+            ledger, deduplicating by fingerprint (same owner and observed
+            text across journeys is one finding)
+  verify    apply P4 verifier verdicts (CONFIRMED, FALSE-POSITIVE, CHANGED)
+  set       set route, pre_existing, lifecycle_test, owner_file or status
+            on one finding (status known-issue removes it from the gate)
   coverage  summarize coverage.csv rows per journey and status
   gate-row  compute the release-gate row from the ledger
   recheck   apply re-verification verdicts to open findings at a new SHA
@@ -22,7 +26,9 @@ import sys
 from pathlib import Path
 
 SEVERITIES = ("blocker", "should-fix", "nit")
-STATUSES = ("open", "verified", "false-positive", "fixed", "still-open", "changed")
+STATUSES = ("open", "verified", "false-positive", "fixed", "still-open", "changed", "known-issue")
+VERIFY_VERDICTS = ("CONFIRMED", "FALSE-POSITIVE", "CHANGED")
+SETTABLE = ("route", "pre_existing", "lifecycle_test", "owner_file", "owner_family", "status")
 VERDICTS = ("VERIFIED-FIXED", "STILL-OPEN", "CHANGED", "FALSE-POSITIVE")
 REQUIRED = ("title", "severity", "step", "observed", "expected", "repro", "sha")
 COVERAGE_STATUSES = ("pass", "fail", "not-covered", "unreachable")
@@ -33,15 +39,15 @@ class LedgerError(ValueError):
 
 
 def fingerprint(finding: dict) -> str:
-    """Stable identity: step, rule or owner, and the normalized observed text."""
-    basis = "|".join(
-        [
-            str(finding.get("step", "")).split(".")[0],
-            str(finding.get("owner_file", "")).split(":")[0],
-            " ".join(str(finding.get("observed", "")).lower().split())[:200],
-        ]
-    )
-    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+    """Stable identity: owner file (or journey when unknown) plus observed text.
+
+    The journey is not part of the identity when an owner is known, so one
+    defect seen from two journeys deduplicates to one finding.
+    """
+    owner = str(finding.get("owner_file", "")).split(":")[0]
+    anchor = owner or str(finding.get("step", "")).split(".")[0]
+    observed = " ".join(str(finding.get("observed", "")).lower().split())[:200]
+    return hashlib.sha256(f"{anchor}|{observed}".encode()).hexdigest()[:16]
 
 
 def validate(finding: dict) -> dict:
@@ -103,26 +109,28 @@ def coverage(rows: list[dict]) -> dict:
 
 
 def gate_row(ledger: dict, sha: str) -> dict:
-    """GO only when no blocker is open (verified or still-open) at this SHA."""
-    open_states = {"open", "verified", "still-open", "changed"}
-    blockers = [
-        f["id"]
-        for f in ledger["findings"]
-        if f["severity"] == "blocker" and f["status"] in open_states
-    ]
-    unverified = [
-        f["id"] for f in ledger["findings"] if f["status"] == "open" and f["severity"] == "blocker"
-    ]
+    """GO, NO-GO or PENDING-VERIFICATION for the exact SHA.
+
+    NO-GO: a blocker that a verifier confirmed is still open (verified,
+    still-open or changed). PENDING-VERIFICATION: no confirmed open blocker,
+    but at least one blocker still awaits P4. Known issues never count.
+    """
+    confirmed_open = {"verified", "still-open", "changed"}
+    blockers = [f["id"] for f in ledger["findings"] if f["severity"] == "blocker" and f["status"] in confirmed_open]
+    unverified = [f["id"] for f in ledger["findings"] if f["severity"] == "blocker" and f["status"] == "open"]
     without_test = [
-        f["id"]
-        for f in ledger["findings"]
-        if f["status"] in {"verified", "still-open", "changed"} and not f.get("lifecycle_test")
+        f["id"] for f in ledger["findings"] if f["status"] in confirmed_open and not f.get("lifecycle_test")
     ]
     counts = {sev: 0 for sev in SEVERITIES}
     for finding in ledger["findings"]:
-        if finding["status"] in open_states:
+        if finding["status"] in confirmed_open | {"open"}:
             counts[finding["severity"]] += 1
-    verdict = "NO-GO" if blockers else "GO"
+    if blockers:
+        verdict = "NO-GO"
+    elif unverified:
+        verdict = "PENDING-VERIFICATION"
+    else:
+        verdict = "GO"
     return {
         "gate": "exploratory acceptance: no open verified blocker on the exact SHA",
         "sha": sha,
@@ -130,8 +138,54 @@ def gate_row(ledger: dict, sha: str) -> dict:
         "open_blockers": blockers,
         "unverified_blockers": unverified,
         "open_counts": counts,
+        "known_issues": [f["id"] for f in ledger["findings"] if f["status"] == "known-issue"],
         "findings_without_lifecycle_test": without_test,
     }
+
+
+def verify(ledger: dict, verdicts: list[dict]) -> dict:
+    """Apply P4 verifier verdicts to open findings."""
+    by_id = {f["id"]: f for f in ledger["findings"]}
+    applied = []
+    for item in verdicts:
+        fid, verdict = item.get("id"), item.get("verdict")
+        if fid not in by_id:
+            raise LedgerError(f"unknown finding id {fid!r}")
+        if verdict not in VERIFY_VERDICTS:
+            raise LedgerError(f"verify verdict must be one of {VERIFY_VERDICTS}")
+        finding = by_id[fid]
+        finding["status"] = {"CONFIRMED": "verified", "FALSE-POSITIVE": "false-positive", "CHANGED": "changed"}[
+            verdict
+        ]
+        severity = item.get("severity")
+        if severity:
+            if severity not in SEVERITIES:
+                raise LedgerError(f"severity must be one of {SEVERITIES}")
+            finding["severity"] = severity
+        for key in ("pre_existing", "owner_file", "promise"):
+            if key in item:
+                finding[key] = item[key]
+        finding.setdefault("history", []).append({"phase": "P4", "verdict": verdict, "rationale": item.get("rationale", "")})
+        applied.append({"id": fid, "verdict": verdict, "status": finding["status"], "severity": finding["severity"]})
+    return {"applied": applied}
+
+
+def set_field(ledger: dict, fid: str, assignments: list[str]) -> dict:
+    by_id = {f["id"]: f for f in ledger["findings"]}
+    if fid not in by_id:
+        raise LedgerError(f"unknown finding id {fid!r}")
+    finding = by_id[fid]
+    for assignment in assignments:
+        key, sep, value = assignment.partition("=")
+        if not sep or key not in SETTABLE:
+            raise LedgerError(f"set expects KEY=VALUE with KEY in {SETTABLE}")
+        if key == "status" and value not in STATUSES:
+            raise LedgerError(f"status must be one of {STATUSES}")
+        parsed: object = {"true": True, "false": False, "null": None}.get(value, value)
+        if isinstance(parsed, str) and not parsed.isascii():
+            raise LedgerError(f"value for {key!r} is not ASCII")
+        finding[key] = parsed
+    return {"id": fid, "finding": finding}
 
 
 def recheck(ledger: dict, verdicts: list[dict], sha: str) -> dict:
@@ -182,6 +236,13 @@ def main(argv: list[str] | None = None) -> int:
     p_gate = sub.add_parser("gate-row", help="compute the release-gate row")
     p_gate.add_argument("--ledger", required=True)
     p_gate.add_argument("--sha", required=True)
+    p_ver = sub.add_parser("verify", help="apply P4 verifier verdicts")
+    p_ver.add_argument("--ledger", required=True)
+    p_ver.add_argument("--verdicts", required=True, help="JSONL of {id, verdict, severity?, ...}")
+    p_set = sub.add_parser("set", help="set fields on one finding")
+    p_set.add_argument("--ledger", required=True)
+    p_set.add_argument("--id", required=True)
+    p_set.add_argument("assignments", nargs="+", help="KEY=VALUE")
     p_re = sub.add_parser("recheck", help="apply verdicts at a new SHA")
     p_re.add_argument("--ledger", required=True)
     p_re.add_argument("--verdicts", required=True, help="JSONL of {id, verdict, evidence}")
@@ -198,12 +259,16 @@ def main(argv: list[str] | None = None) -> int:
             result = add(ledger, _read_jsonl(Path(args.findings)))
         elif args.command == "gate-row":
             result = gate_row(ledger, args.sha)
+        elif args.command == "verify":
+            result = verify(ledger, _read_jsonl(Path(args.verdicts)))
+        elif args.command == "set":
+            result = set_field(ledger, args.id, args.assignments)
         else:
             result = recheck(ledger, _read_jsonl(Path(args.verdicts)), args.sha)
     except (LedgerError, json.JSONDecodeError) as exc:
         print(f"findings: {exc}", file=sys.stderr)
         return 3
-    if args.command in {"add", "recheck"}:
+    if args.command in {"add", "recheck", "verify", "set"}:
         ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
     return 0

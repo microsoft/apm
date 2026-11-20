@@ -28,7 +28,11 @@ PROJECT HISTORY (from Atlas, background only): <wisdom block, max 1 page>.
 
 HOW TO WORK
 1. Create a world: `python3 <skill>/scripts/world.py --parent <dir>
-   --name <journey>-<lens> > <dir>/world.json`. Use only local git
+   --name <journey>-<lens> --apm-bin <path to apm> > <dir>/world.json`.
+   Put package remotes as bare repos under the world's `remotes/` dir
+   and reference them as `https://git.example.invalid/<owner>/<repo>.git`
+   (the world maps that host to the local repos; github.com is checked
+   against its API and does not work for local repos). Use only local
    remotes, local marketplaces and local paths. No real network.
 2. Run every step through
    `python3 <skill>/scripts/capture.py --world <dir>/world.json

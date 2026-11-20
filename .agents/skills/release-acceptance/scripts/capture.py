@@ -21,17 +21,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-HINT_RE = re.compile(
-    r"(?:`|')(apm [^`'\n]{1,200})(?:`|')|(?:^|[\s:])(apm\s+[a-z][a-z-]*(?:\s+[^\s].*)?)$"
+QUOTED_HINT_RE = re.compile(r"(?:`|')(apm [^`'\n]{1,200})(?:`|')")
+VERB_HINT_RE = re.compile(
+    r"\b(?:[Rr]un|[Tt]ry|[Uu]se|[Rr]erun|[Rr]e-run|[Ss]hare with|[Ii]nstall with):?\s+(apm\s+[^\s|].*?)"
+    r"(?=\s+(?:to|and|or|then|first|instead|before|after)\b|[.;,)]?\s*$)"
 )
-URL_RE = re.compile(r"https://microsoft\.github\.io/apm/([A-Za-z0-9_./-]*)(#[A-Za-z0-9_-]+)?")
+URL_RE = re.compile(r"https://microsoft\.github\.io/apm(?:/([A-Za-z0-9_./-]*))?(#[A-Za-z0-9_-]+)?")
+STATUS_PREFIXES = ("[+]", "[x]", "[!]", "[i]", "[*]", "[>]", "|--", "+-")
 STALE_NAMES = ("python -m apm_cli", "apm_cli.cli", "apm manifest migrate")
 TRACEBACK = ("Traceback (most recent call last)", 'File "/')
 ERROR_MARK = "[x]"
 
 
-def lint_lines(stdout: str, stderr: str, rc: int) -> list[dict]:
-    """Return deterministic line-level problems for one command."""
+def lint_lines(stdout: str, stderr: str, rc: int, *, help_output: bool = False) -> list[dict]:
+    """Return deterministic line-level problems for one command.
+
+    Help screens repeat option descriptions by design, so duplicate-line
+    checks are skipped when ``help_output`` is set.
+    """
     issues: list[dict] = []
     for stream_name, text in (("stdout", stdout), ("stderr", stderr)):
         seen: dict[str, int] = {}
@@ -71,7 +78,7 @@ def lint_lines(stdout: str, stderr: str, rc: int) -> list[dict]:
                         }
                     )
             key = line.strip()
-            if len(key) >= 12 and not set(key) <= set("-=|+ "):
+            if not help_output and len(key) >= 12 and not set(key) <= set("-=|+ "):
                 if key in seen:
                     issues.append(
                         {
@@ -107,30 +114,59 @@ def lint_lines(stdout: str, stderr: str, rc: int) -> list[dict]:
     return issues
 
 
+def unwrap(text: str, width: int = 70) -> list[str]:
+    """Join hard-wrapped continuation lines so a wrapped hint reads whole."""
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        stripped = line.strip()
+        if (
+            lines
+            and stripped
+            and len(lines[-1]) >= width
+            and not stripped.startswith(STATUS_PREFIXES)
+            and not lines[-1].rstrip().endswith((".", ":", "!", "?"))
+        ):
+            lines[-1] = f"{lines[-1].rstrip()} {stripped}"
+        else:
+            lines.append(line)
+    return lines
+
+
+def _clean_command(cmd: str) -> str:
+    cmd = cmd.split("|", 1)[0].strip()
+    return re.sub(r"\s{2,}.*$", "", cmd).rstrip(".,;:)")
+
+
 def extract_hints(text: str, docs_root: Path | None) -> list[dict]:
     """Return commands and docs links the CLI told the user to use."""
     hints: list[dict] = []
     seen: set[str] = set()
-    for line in text.splitlines():
-        for match in HINT_RE.finditer(line.strip()):
-            cmd = (match.group(1) or match.group(2) or "").strip().rstrip(".,;)")
-            if cmd and cmd not in seen and "<" not in cmd:
+    for line in unwrap(text):
+        stripped = line.strip()
+        if stripped.startswith("|") and not stripped.startswith("|--"):
+            continue
+        candidates = [m.group(1) for m in QUOTED_HINT_RE.finditer(stripped)]
+        candidates += [m.group(1) for m in VERB_HINT_RE.finditer(stripped)]
+        for raw in candidates:
+            cmd = _clean_command(raw)
+            if cmd and cmd not in seen and "<" not in cmd and len(cmd.split()) >= 2:
                 seen.add(cmd)
-                hints.append({"kind": "command", "value": cmd, "line": line.strip()[:200]})
+                hints.append({"kind": "command", "value": cmd, "line": stripped[:200]})
         for match in URL_RE.finditer(line):
-            url = match.group(0)
+            url = match.group(0).rstrip(".,;)")
             if url in seen:
                 continue
             seen.add(url)
-            hint = {"kind": "docs-url", "value": url, "line": line.strip()[:200]}
+            hint = {"kind": "docs-url", "value": url, "line": stripped[:200]}
             if docs_root is not None:
-                hint["resolves"] = docs_url_resolves(docs_root, match.group(1), match.group(2))
+                hint["resolves"] = docs_url_resolves(docs_root, match.group(1) or "", match.group(2))
             hints.append(hint)
     return hints
 
 
 def docs_url_resolves(docs_root: Path, slug: str, anchor: str | None) -> bool:
-    slug = slug.strip("/")
+    slug = slug.strip("/") or "index"
     candidates = [
         docs_root / f"{slug}.md",
         docs_root / f"{slug}.mdx",
@@ -166,8 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     if not cmd:
         parser.error("missing command after --")
     world = json.loads(Path(args.world).read_text(encoding="utf-8"))
-    env = {k: v for k, v in os.environ.items() if k not in world["unset"]}
-    env.update(world["env"])
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from world import scrub_env
+
+    env = scrub_env(dict(os.environ), world)
     cwd = args.cwd or world["project"]
     try:
         # The command is the journey step the operator asked to run.
@@ -198,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         "rc": rc,
         "stdout_log": str(logs / f"{safe}.stdout"),
         "stderr_log": str(logs / f"{safe}.stderr"),
-        "lint": lint_lines(out, err, rc),
+        "lint": lint_lines(out, err, rc, help_output="--help" in cmd or "-h" in cmd),
         "hints": extract_hints(out + "\n" + err, docs_root),
     }
     print(json.dumps(record, indent=2))
