@@ -87,7 +87,7 @@ class TestHttpCacheHitMiss:
 
         with (
             caplog.at_level(logging.DEBUG, logger="apm_cli.cache.http_cache"),
-            patch("apm_cli.cache.http_cache.os.utime", side_effect=failure("touch failed")),
+            patch("os.utime", side_effect=failure("touch failed")),
         ):
             entry = cache.get(url)
 
@@ -113,7 +113,7 @@ class TestHttpCacheHitMiss:
             (path / "body").unlink()
 
         before = path.stat().st_mtime_ns
-        with patch("apm_cli.cache.http_cache.os.utime") as touch:
+        with patch("os.utime") as touch:
             assert cache.get(url) is None
 
         touch.assert_not_called()

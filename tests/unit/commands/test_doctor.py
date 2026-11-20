@@ -25,7 +25,7 @@ def _clear_token_env(monkeypatch):
 @pytest.fixture
 def mock_subprocess_success():
     """Stub git/gh subprocess calls to deterministic success."""
-    with patch("apm_cli.commands.marketplace.doctor.subprocess.run") as run:
+    with patch("subprocess.run") as run:
         run.return_value.returncode = 0
         run.return_value.stdout = "git version 2.42.0"
         run.return_value.stderr = ""

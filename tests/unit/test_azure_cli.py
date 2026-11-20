@@ -35,11 +35,11 @@ class TestIsAvailable:
         """
         with (
             patch(
-                "apm_cli.core.azure_cli.shutil.which",
+                "shutil.which",
                 return_value=r"C:\Program Files\Azure CLI\az.cmd",
             ),
-            patch("apm_cli.core.azure_cli.subprocess.run") as mock_run,
-            patch("apm_cli.core.azure_cli.subprocess.Popen") as mock_popen,
+            patch("subprocess.run") as mock_run,
+            patch("subprocess.Popen") as mock_popen,
         ):
             provider = AzureCliBearerProvider()
             assert provider.is_available() is True
@@ -47,7 +47,7 @@ class TestIsAvailable:
             mock_popen.assert_not_called()
 
     def test_is_available_when_az_missing(self):
-        with patch("apm_cli.core.azure_cli.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             provider = AzureCliBearerProvider()
             assert provider.is_available() is False
 
@@ -59,11 +59,11 @@ class TestIsAvailable:
         keeps is_available() consistent with get_bearer_token()'s pre-check
         and avoids a "True now / az_not_found a moment later" race.
         """
-        with patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"):
+        with patch("shutil.which", return_value="/usr/bin/az"):
             provider = AzureCliBearerProvider()
         # Re-enter a context where which() would now say "missing": the
         # already-constructed provider must still report True.
-        with patch("apm_cli.core.azure_cli.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             assert provider.is_available() is True
 
 
@@ -81,15 +81,13 @@ class TestWindowsAzCmdResolution:
     WINDOWS_AZ_CMD = r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
 
     def test_init_resolves_via_shutil_which(self):
-        with patch(
-            "apm_cli.core.azure_cli.shutil.which", return_value=self.WINDOWS_AZ_CMD
-        ) as mock_which:
+        with patch("shutil.which", return_value=self.WINDOWS_AZ_CMD) as mock_which:
             provider = AzureCliBearerProvider()
             mock_which.assert_called_once_with("az")
             assert provider._az_command == self.WINDOWS_AZ_CMD
 
     def test_init_stores_none_when_not_on_path(self):
-        with patch("apm_cli.core.azure_cli.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             provider = AzureCliBearerProvider()
             assert provider._az_command is None
 
@@ -100,7 +98,7 @@ class TestWindowsAzCmdResolution:
         it has no drive. Use a real platform-native absolute path here.
         """
         az_command = str(tmp_path / "custom" / "az")
-        with patch("apm_cli.core.azure_cli.shutil.which") as mock_which:
+        with patch("shutil.which") as mock_which:
             provider = AzureCliBearerProvider(az_command=az_command)
             mock_which.assert_not_called()
             assert provider._az_command == az_command
@@ -110,7 +108,7 @@ class TestWindowsAzCmdResolution:
         shutil.which; otherwise a caller could hand subprocess.run a
         CWD-relative path that the OS resolves against the wrong
         directory. Only absolute paths are trusted verbatim."""
-        with patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az") as mock_which:
+        with patch("shutil.which", return_value="/usr/bin/az") as mock_which:
             provider = AzureCliBearerProvider(az_command="subdir/az")
             mock_which.assert_called_once_with("subdir/az")
             assert provider._az_command == "/usr/bin/az"
@@ -125,8 +123,8 @@ class TestWindowsAzCmdResolution:
         mock_result.stderr = ""
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value=self.WINDOWS_AZ_CMD),
-            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result) as mock_run,
+            patch("shutil.which", return_value=self.WINDOWS_AZ_CMD),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
         ):
             provider = AzureCliBearerProvider()
             provider.get_bearer_token()
@@ -162,8 +160,8 @@ class TestWindowsAzCmdResolution:
             return mock_result
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value=self.WINDOWS_AZ_CMD),
-            patch("apm_cli.core.azure_cli.subprocess.run", side_effect=fake_run),
+            patch("shutil.which", return_value=self.WINDOWS_AZ_CMD),
+            patch("subprocess.run", side_effect=fake_run),
         ):
             provider = AzureCliBearerProvider()
             # Would raise AzureCliBearerError(kind='subprocess_error') pre-fix.
@@ -180,8 +178,8 @@ class TestWindowsAzCmdResolution:
         mock_result.stderr = ""
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value=self.WINDOWS_AZ_CMD),
-            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result) as mock_run,
+            patch("shutil.which", return_value=self.WINDOWS_AZ_CMD),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
         ):
             provider = AzureCliBearerProvider()
             provider.get_current_tenant_id()
@@ -196,8 +194,8 @@ class TestWindowsAzCmdResolution:
         by the broad except). Mirrors get_bearer_token's is_available()
         pre-check."""
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value=None),
-            patch("apm_cli.core.azure_cli.subprocess.run") as mock_run,
+            patch("shutil.which", return_value=None),
+            patch("subprocess.run") as mock_run,
         ):
             provider = AzureCliBearerProvider()
             assert provider.get_current_tenant_id() is None
@@ -211,7 +209,7 @@ class TestWindowsAzCmdResolution:
 
 class TestGetBearerToken:
     def test_get_bearer_raises_when_az_missing(self):
-        with patch("apm_cli.core.azure_cli.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             provider = AzureCliBearerProvider()
             with pytest.raises(AzureCliBearerError) as exc_info:
                 provider.get_bearer_token()
@@ -224,8 +222,8 @@ class TestGetBearerToken:
         mock_result.stderr = ""
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
-            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result),
+            patch("shutil.which", return_value="/usr/bin/az"),
+            patch("subprocess.run", return_value=mock_result),
         ):
             provider = AzureCliBearerProvider()
             token = provider.get_bearer_token()
@@ -242,9 +240,9 @@ class TestGetBearerToken:
         mock_result.stderr = ""
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
+            patch("shutil.which", return_value="/usr/bin/az"),
             patch(
-                "apm_cli.core.azure_cli.subprocess.run",
+                "subprocess.run",
                 return_value=mock_result,
             ) as mock_run,
         ):
@@ -262,8 +260,8 @@ class TestGetBearerToken:
         mock_result.stderr = "Please run 'az login' to setup account."
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
-            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result),
+            patch("shutil.which", return_value="/usr/bin/az"),
+            patch("subprocess.run", return_value=mock_result),
         ):
             provider = AzureCliBearerProvider()
             with pytest.raises(AzureCliBearerError) as exc_info:
@@ -274,9 +272,9 @@ class TestGetBearerToken:
 
     def test_get_bearer_subprocess_timeout(self):
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
+            patch("shutil.which", return_value="/usr/bin/az"),
             patch(
-                "apm_cli.core.azure_cli.subprocess.run",
+                "subprocess.run",
                 side_effect=subprocess.TimeoutExpired(cmd="az", timeout=30),
             ),
         ):
@@ -292,8 +290,8 @@ class TestGetBearerToken:
         mock_result.stderr = ""
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
-            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result),
+            patch("shutil.which", return_value="/usr/bin/az"),
+            patch("subprocess.run", return_value=mock_result),
         ):
             provider = AzureCliBearerProvider()
             with pytest.raises(AzureCliBearerError) as exc_info:
@@ -318,8 +316,8 @@ class TestGetCurrentTenantId:
         # the constructor otherwise sets _az_command=None and
         # get_current_tenant_id short-circuits before subprocess.run.
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
-            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result),
+            patch("shutil.which", return_value="/usr/bin/az"),
+            patch("subprocess.run", return_value=mock_result),
         ):
             provider = AzureCliBearerProvider()
             tenant = provider.get_current_tenant_id()
@@ -327,9 +325,9 @@ class TestGetCurrentTenantId:
 
     def test_get_current_tenant_id_returns_none_on_failure(self):
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
+            patch("shutil.which", return_value="/usr/bin/az"),
             patch(
-                "apm_cli.core.azure_cli.subprocess.run",
+                "subprocess.run",
                 side_effect=OSError("az not found"),
             ),
         ):
@@ -350,9 +348,9 @@ class TestClearCache:
         mock_result.stderr = ""
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
+            patch("shutil.which", return_value="/usr/bin/az"),
             patch(
-                "apm_cli.core.azure_cli.subprocess.run",
+                "subprocess.run",
                 return_value=mock_result,
             ) as mock_run,
         ):
@@ -379,9 +377,9 @@ class TestThreadSafety:
         mock_result.stderr = ""
 
         with (
-            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
+            patch("shutil.which", return_value="/usr/bin/az"),
             patch(
-                "apm_cli.core.azure_cli.subprocess.run",
+                "subprocess.run",
                 return_value=mock_result,
             ) as mock_run,
         ):

@@ -104,7 +104,7 @@ class TestScanFiles:
         def fail_walk(_root, **_kwargs):
             raise AssertionError("explicit paths must not walk the source tree")
 
-        monkeypatch.setattr("apm_cli.security.gate.os.walk", fail_walk)
+        monkeypatch.setattr("os.walk", fail_walk)
         verdict = SecurityGate.scan_files(
             tmp_path,
             policy=BLOCK_POLICY,

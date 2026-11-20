@@ -27,7 +27,7 @@ class TestFrozenLoaderEnvIsolation:
         monkeypatch.setenv("DYLD_LIBRARY_PATH", "/bundle/_internal")
         monkeypatch.delenv("DYLD_LIBRARY_PATH_ORIG", raising=False)
         manager = RuntimeManager()
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=0)
             assert manager.run_embedded_script("echo setup", "", [])
         env = mock_run.call_args.kwargs["env"]

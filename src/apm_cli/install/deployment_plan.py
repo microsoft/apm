@@ -47,13 +47,17 @@ def _warn_parked_plugin(package_name, package_info, allow_executables, diagnosti
     """Name why the trust owner parked a native plugin, with the next step.
 
     A plugin that is merely not approved yet is reported by the registrar's
-    own refusal, so only changed, denied, transitive and APM-owned-path
-    parking is named here.
+    own refusal, so only changed, denied, transitive, APM-owned-path and
+    incomplete-grant parking is named here.
     """
     from .exec_gate import plugin_admission, resolve_package_key
 
     verdict = plugin_admission(package_name, package_info, allow_executables, ctx=ctx)
-    if verdict is None or verdict.allowed or verdict.reason == "unapproved-executables":
+    if (
+        verdict is None
+        or verdict.allowed
+        or (verdict.reason == "unapproved-executables" and not verdict.detail)
+    ):
         return verdict
     from apm_cli.security.executables import _strip_version
     from apm_cli.security.trust import parked_plugin_message
@@ -184,14 +188,20 @@ def prepare_package_deployment(  # noqa: PLR0913
             skip_bin=skip_bin,
         ),
     )
+    if hook_filter is not None and not hooks:
+        # No pinned hook file was admitted, so the source plan never asks the
+        # filter: name the parked files here. A deny is named by the skip line.
+        hook_filter.admits_any()
     if hook_filter is not None and hook_filter.parked:
         from apm_cli.security.executables import _strip_version
-        from apm_cli.security.trust import parked_hook_message
+        from apm_cli.security.trust import REASON_DENIED, parked_hook_message
 
         from .exec_gate import resolve_package_key
 
         package = _strip_version(resolve_package_key(package_info, package_name))
         for item, parked_reason in hook_filter.parked:
+            if not hooks and parked_reason == REASON_DENIED:
+                continue
             message = parked_hook_message(package, item, parked_reason)
             if diagnostics is not None:
                 diagnostics.warn(message)

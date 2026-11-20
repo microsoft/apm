@@ -280,7 +280,7 @@ def test_refresh_failure_serves_complete_stale_composition(project: Path) -> Non
     _discover(project, _GitLab(projects))
     later = time.time() + 2 * discovery.DEFAULT_CACHE_TTL
 
-    with patch("apm_cli.policy.discovery.time.time", return_value=later):
+    with patch("time.time", return_value=later):
         result = _discover(project, _GitLab({**projects, "acme/apm-policy": 503}))
 
     assert result.outcome == "cached_stale"

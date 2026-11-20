@@ -118,9 +118,9 @@ class TestEnterpriseBootstrapSelfUpdate:
             patch("requests.get", side_effect=fake_get),
             patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run,
             patch("apm_cli.commands.self_update.get_version", return_value="1.0.0"),
-            patch("apm_cli.commands.self_update.os.chmod"),
+            patch("os.chmod"),
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch("os.path.exists", return_value=True),
         ):
             result = self.runner.invoke(cli, ["self-update"])
 
@@ -178,9 +178,9 @@ class TestEnterpriseBootstrapSelfUpdate:
             patch("requests.get", side_effect=fake_get),
             patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run,
             patch("apm_cli.commands.self_update.get_version", return_value="1.0.0"),
-            patch("apm_cli.commands.self_update.os.chmod"),
+            patch("os.chmod"),
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch("os.path.exists", return_value=True),
         ):
             result = self.runner.invoke(cli, ["self-update"])
 
@@ -212,9 +212,9 @@ class TestEnterpriseBootstrapSelfUpdate:
             patch("requests.get") as mock_get,
             patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run,
             patch("apm_cli.commands.self_update.get_version", return_value="1.0.0"),
-            patch("apm_cli.commands.self_update.os.chmod"),
+            patch("os.chmod"),
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch("os.path.exists", return_value=True),
         ):
             response = Mock()
             response.text = "echo install"

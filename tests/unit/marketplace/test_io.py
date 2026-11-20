@@ -72,7 +72,7 @@ class TestAtomicWrite:
         path = tmp_path / "fail.txt"
         tmp_file = path.with_suffix(path.suffix + ".tmp")
 
-        with patch("apm_cli.marketplace._io.os.fsync", side_effect=OSError("disk full")):
+        with patch("os.fsync", side_effect=OSError("disk full")):
             with pytest.raises(OSError, match="disk full"):
                 atomic_write(path, "data")
 
@@ -83,7 +83,7 @@ class TestAtomicWrite:
         """If unlink raises OSError during cleanup, original exception propagates."""
         path = tmp_path / "fail_unlink.txt"
 
-        with patch("apm_cli.marketplace._io.os.fsync", side_effect=RuntimeError("boom")):
+        with patch("os.fsync", side_effect=RuntimeError("boom")):
             with patch("apm_cli.marketplace._io.Path.unlink", side_effect=OSError("locked")):
                 with pytest.raises(RuntimeError, match="boom"):
                     atomic_write(path, "data")
@@ -94,7 +94,7 @@ class TestAtomicWrite:
         tmp_file = path.with_suffix(path.suffix + ".tmp")
 
         with patch(
-            "apm_cli.marketplace._io.os.fsync",
+            "os.fsync",
             side_effect=KeyboardInterrupt,
         ):
             with pytest.raises(KeyboardInterrupt):

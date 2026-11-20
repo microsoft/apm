@@ -617,7 +617,7 @@ class TestBareCloneFallback:
             # Tier-1 happy path: every call succeeds.
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -673,7 +673,7 @@ class TestBareCloneFallback:
                 return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -721,7 +721,7 @@ class TestBareCloneFallback:
                 return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -761,7 +761,7 @@ class TestBareCloneFallback:
             captured.append(list(args))
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -821,7 +821,7 @@ class TestMaterializeFromBare:
                 return MagicMock(returncode=0, stdout="abc123\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             d._materialize_from_bare(bare, consumer, ref=None, env={})
 
         rev_parse_calls = [c for c in captured if "rev-parse" in c]
@@ -844,7 +844,7 @@ class TestMaterializeFromBare:
             captured.append(list(args))
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             sha = d._materialize_from_bare(
                 bare, consumer, ref=None, env={}, known_sha="deadbeef" * 5
             )
@@ -1086,7 +1086,7 @@ class TestBareCloneRetryRmtree:
                 assert not (bare / "stale_file").exists(), "rmtree did not run before init"
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -1161,7 +1161,7 @@ class TestBareScrubFetchHead:
             "https://oauth2:ghp_SECRET_TOKEN_FAKE@github.com/o/r\n"
         )
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as run_mock:
+        with patch("subprocess.run") as run_mock:
             run_mock.return_value = MagicMock(returncode=0, stdout="", stderr="")
             _scrub_bare_remote_url(bare, "/usr/bin/git", {})
 
@@ -1177,7 +1177,7 @@ class TestBareScrubFetchHead:
         bare.mkdir()
         # No FETCH_HEAD file present (tier-2 path: full clone --bare).
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as run_mock:
+        with patch("subprocess.run") as run_mock:
             run_mock.return_value = MagicMock(returncode=0, stdout="", stderr="")
             # Must not raise even when FETCH_HEAD does not exist.
             _scrub_bare_remote_url(bare, "/usr/bin/git", {})
@@ -1279,7 +1279,7 @@ class TestAdoBareBearerRetry:
         bearer_provider.get_bearer_token.return_value = "fake-bearer-token"
 
         with (
-            patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run),
+            patch("subprocess.run", side_effect=fake_run),
             patch(
                 "apm_cli.core.azure_cli.get_bearer_provider",
                 return_value=bearer_provider,
@@ -1321,7 +1321,7 @@ class TestFetchShaIntoBare:
         dep_ref = DependencyReference.parse("owner/repo/sub#main")
         mock_execute = MagicMock()
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             # rev-parse returns success (exit code 0)
             mock_run.return_value = MagicMock(returncode=0)
 
@@ -1363,7 +1363,7 @@ class TestFetchShaIntoBare:
             # Simulate successful fetch by setting returncode 0
             # The clone_action will be called with url, env, target
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             # First rev-parse returns 1 (SHA not present)
             # Second rev-parse (after fetch) returns 0 (SHA now present)
             mock_run.side_effect = [
@@ -1384,7 +1384,7 @@ class TestFetchShaIntoBare:
         assert len(captured_actions) == 1
         # Invoke the captured clone_action to verify it runs the right command
         captured_action = captured_actions[0]
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
+        with patch("subprocess.run") as mock_run_fetch:
             mock_run_fetch.return_value = MagicMock(returncode=0)
             captured_action(
                 url="https://github.com/owner/repo.git",
@@ -1419,7 +1419,7 @@ class TestFetchShaIntoBare:
         ) -> None:
             captured_actions.append(clone_action)
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             # First rev-parse returns 1 (SHA not present)
             # Second rev-parse (after broad fetch) returns 0
             # NOTE: update-ref is skipped for non-40-char SHAs (hex validation guard)
@@ -1441,7 +1441,7 @@ class TestFetchShaIntoBare:
         assert len(captured_actions) == 1
         # Verify the broad fetch action doesn't include the SHA
         captured_action = captured_actions[0]
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
+        with patch("subprocess.run") as mock_run_fetch:
             mock_run_fetch.return_value = MagicMock(returncode=0)
             captured_action(
                 url="https://github.com/owner/repo.git",
@@ -1473,7 +1473,7 @@ class TestFetchShaIntoBare:
             # Simulate transport plan failure
             raise Exception("Transport plan failed")
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             # rev-parse always returns 1 (SHA never present)
             mock_run.return_value = MagicMock(returncode=1)
 
@@ -1504,7 +1504,7 @@ class TestFetchShaIntoBare:
         ) -> None:
             captured_actions.append(clone_action)
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=1),  # SHA not present
                 MagicMock(returncode=0),  # SHA present after fetch
@@ -1522,7 +1522,7 @@ class TestFetchShaIntoBare:
         # Verify the action uses the explicit URL
         captured_action = captured_actions[0]
         explicit_url = "https://explicit.example.com/repo.git"
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
+        with patch("subprocess.run") as mock_run_fetch:
             mock_run_fetch.return_value = MagicMock(returncode=0)
             captured_action(url=explicit_url, env={}, target=bare_path)
 
@@ -1796,7 +1796,7 @@ class TestMaterializeCheckoutTarget:
         consumer_dir = tmp_path / "consumer"
         known_sha = "f" * 40
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             # Mock all subprocess calls (clone, config, checkout)
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1824,7 +1824,7 @@ class TestMaterializeCheckoutTarget:
         bare_path.mkdir()
         consumer_dir = tmp_path / "consumer"
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             # Mock all subprocess calls
             mock_run.return_value = MagicMock(returncode=0, stdout="abc1234567890", stderr="")
 

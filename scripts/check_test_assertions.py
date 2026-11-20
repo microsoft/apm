@@ -3,7 +3,8 @@
 
 AQ001 constant assertions, AQ002 broad pytest.raises, AQ003 component/e2e
 tests with no assertion on output, exit code or durable state, AQ004 tests
-that patch a symbol defined in an owner module they import, and AQ006 e2e
+that patch a symbol defined in an owner module they import, AQ005 patches of
+a process-global stdlib attribute through a module namespace, and AQ006 e2e
 modules that do not drive the installed CLI (or use CliRunner, or patch an
 owner module). Counts per file may only shrink; a reduction is reported as
 stale (info) and never fails.
@@ -38,8 +39,10 @@ RULE_AQ001 = "AQ001_constant_assertion"
 RULE_AQ002 = "AQ002_broad_pytest_raises"
 RULE_AQ003 = "AQ003_unobserved_outcome"
 RULE_AQ004 = "AQ004_patches_owner_it_imports"
+RULE_AQ005 = "AQ005_global_patch_through_namespace"
 RULE_AQ006 = "AQ006_e2e_not_driving_installed_cli"
-RULES = (RULE_AQ001, RULE_AQ002, RULE_AQ003, RULE_AQ004, RULE_AQ006)
+RULES = (RULE_AQ001, RULE_AQ002, RULE_AQ003, RULE_AQ004, RULE_AQ005, RULE_AQ006)
+_STDLIB_MODULES = frozenset(sys.stdlib_module_names)
 RULE_TEXT = {
     RULE_AQ001: (
         "constant assertion does not test behavior",
@@ -58,12 +61,76 @@ RULE_TEXT = {
         "test patches a symbol defined in an owner module it imports",
         "exercise the real owner and replace only its collaborators or I/O boundary",
     ),
+    RULE_AQ005: (
+        "patch target reaches a process-global stdlib attribute through another "
+        "module's namespace, so the mock also sees every other thread",
+        "patch an owner seam, or the stdlib target itself (e.g. 'time.sleep') when "
+        "global scope is intended and no threads are involved",
+    ),
     RULE_AQ006: (
         "e2e module does not drive the installed CLI only",
         "run the installed apm (ApmLifecycleRunner or the apm_binary fixture), drop "
         "CliRunner and in-process owner patches, or reclassify the module as component",
     ),
 }
+
+
+def _is_patch(node: ast.expr) -> bool:
+    return (isinstance(node, ast.Name) and node.id == "patch") or (
+        isinstance(node, ast.Attribute) and node.attr == "patch"
+    )
+
+
+def _patch_target(node: ast.Call) -> str | None:
+    """The dotted target of patch()/patch.dict()/patch.multiple()/monkeypatch.setattr()."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        name, owner = func.id, None
+    elif isinstance(func, ast.Attribute):
+        name, owner = func.attr, func.value
+    else:
+        return None
+    patches = (
+        name == "patch" and (owner is None or isinstance(owner, (ast.Name, ast.Attribute)))
+    ) or (name in {"dict", "multiple"} and owner is not None and _is_patch(owner))
+    sets = name == "setattr" and isinstance(owner, ast.Name) and owner.id == "monkeypatch"
+    if not (patches or sets):
+        return None
+    target = node.args[0] if node.args else None
+    if target is None:
+        target = next(
+            (keyword.value for keyword in node.keywords if keyword.arg in {"target", "in_dict"}),
+            None,
+        )
+    if isinstance(target, ast.Constant) and isinstance(target.value, str):
+        return target.value
+    return None
+
+
+def _project_module(root: Path, dotted: str) -> bool:
+    relative = Path(*dotted.split("."))
+    return any(
+        (base / relative).with_suffix(".py").is_file()
+        or (base / relative / "__init__.py").is_file()
+        for base in (root / "src", root)
+    )
+
+
+def global_patch_through_namespace(root: Path, target: str) -> bool:
+    """True for '<project module>.<stdlib module>.<attr>' (e.g. 'pkg.mod.time.sleep').
+
+    Such a target patches the process-global stdlib attribute, not the
+    project module's, so the mock records calls from every thread.
+    """
+    parts = target.split(".")
+    for index in range(1, len(parts) - 1):
+        if (
+            parts[index] in _STDLIB_MODULES
+            and _project_module(root, ".".join(parts[:index]))
+            and not _project_module(root, ".".join(parts[: index + 1]))
+        ):
+            return True
+    return False
 
 
 def _scan_module(
@@ -91,6 +158,10 @@ def _scan_module(
             and node.args[0].id in {"Exception", "BaseException"}
         ):
             observed[RULE_AQ002][relative].append(node.lineno)
+        if isinstance(node, ast.Call):
+            target = _patch_target(node)
+            if target is not None and global_patch_through_namespace(root, target):
+                observed[RULE_AQ005][relative].append(node.lineno)
     if not test_file_inventory.is_test_module_path(relative):
         return
     markers = module_markers(tree)

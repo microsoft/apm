@@ -6,9 +6,15 @@
   caller that reads ``.policy`` and drops the outcome fails closed here.
 * ``apm update`` keeps the content-hash check for a dependency whose
   resolved commit did not move.
+* Every registry download routes through ``download_registry_package``,
+  which verifies an unchanged registry version against its locked hash
+  (#4125).
 * ``apm unpack`` refuses executable content before it writes anything.
 * ``apm install -g <bundle>`` keeps its lock, approvals and gate config
   under ``APM_HOME`` (``core.scope``), never the home directory.
+* Every bundle deploy entry point admits the bundle through
+  ``install/bundle_admission.py`` (org policy and integrity) and records what
+  it deployed through the shared local-bundle lockfile owner (#4080).
 """
 
 from __future__ import annotations
@@ -27,9 +33,11 @@ from scripts.architecture_linter.models import Violation
 
 GUARD_TRUST_POLICY_OUTCOME = "install-deployment-trust-policy-outcome"
 GUARD_UPDATE_CONTENT_INTEGRITY = "install-deployment-update-content-integrity"
+GUARD_UPDATE_REGISTRY_INTEGRITY = "install-deployment-update-registry-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
 GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
 GUARD_LOCAL_BUNDLE_HOOK_TRUST = "install-deployment-local-bundle-hook-trust"
+GUARD_BUNDLE_ADMISSION = "install-deployment-bundle-admission-owner"
 
 _OWNER = "src/apm_cli/policy/outcome_routing.py"
 _EXECUTABLES = "src/apm_cli/security/executables.py"
@@ -37,6 +45,7 @@ _EXEC_GATE = "src/apm_cli/install/exec_gate.py"
 _LOCAL_BUNDLE = "src/apm_cli/install/local_bundle_handler.py"
 _SOURCES = "src/apm_cli/install/sources.py"
 _INTEGRATE = "src/apm_cli/install/phases/integrate.py"
+_RESOLVE = "src/apm_cli/install/phases/resolve.py"
 _HELPERS = "src/apm_cli/install/source_helpers.py"
 _UNPACKER = "src/apm_cli/bundle/unpacker.py"
 _INSTALL_COMMAND = "src/apm_cli/commands/install.py"
@@ -48,28 +57,28 @@ _CI_CHECKS = "src/apm_cli/policy/ci_checks.py"
 _DISCOVERY = "discover_policy_with_chain"
 # Every remaining direct discovery call consumes the outcome itself: the
 # install gate and preflight route it, audit/policy commands report it,
-# update and lifecycle scripts fail toward the gate. Trust readers are not
-# here; they ask resolve_trust_policy.
+# lifecycle scripts fail toward the gate. Trust readers, approve, update
+# and MCP admission are not here; they ask the routing owner.
 _DISCOVERY_CALLERS = frozenset(
     {
         (_OWNER, "discover_trust_policy"),
         ("src/apm_cli/policy/install_preflight.py", "run_policy_preflight"),
         ("src/apm_cli/install/phases/policy_gate.py", "_discover_with_chain"),
-        ("src/apm_cli/commands/approve.py", "_load_org_policy"),
         ("src/apm_cli/commands/policy.py", "status"),
         ("src/apm_cli/commands/audit.py", "_audit_ci_gate"),
         ("src/apm_cli/commands/audit.py", "_resolve_fail_on_drift"),
-        ("src/apm_cli/commands/update.py", "_policy"),
         ("src/apm_cli/core/lifecycle_scripts.py", "build_runner_from_context"),
-        # MCP admission records an unusable policy as ``policy_unavailable``,
-        # which audit reports; install paths then pass the routed policy gate.
-        ("src/apm_cli/security/trust.py", "resolve"),
     }
 )
 _TRUST_READERS: dict[str, str] = {
     _EXECUTABLES: "policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)",
     _EXEC_GATE: "policy = resolve_trust_policy(self._project_root, announce=False)",
     _LOCAL_BUNDLE: "policy = resolve_trust_policy(",
+    "src/apm_cli/commands/approve.py": "policy = resolve_trust_policy(project_root, logger=logger)",
+    # The ``apm audit --ci`` drift replay reuses the run's one discovery.
+    "src/apm_cli/commands/audit.py": (
+        "return resolve_trust_policy(cfg.project_root, announce=False, fetch_result=fetch_policy())"
+    ),
 }
 
 
@@ -194,6 +203,69 @@ def check_update_content_integrity(provider: FactsProvider) -> tuple[Violation, 
                     line=number,
                 )
             )
+    return tuple(findings)
+
+
+# Registry identity is name plus exact version: one predicate decides whether
+# the locked version moved, and one download owner verifies the locked hash.
+_REGISTRY_HELPER_NEEDLES = (
+    (
+        'and version == getattr(locked_dep, "version", None)',
+        "locked_version_unchanged must compare the exact locked registry version",
+    ),
+    (
+        "or not locked_version_unchanged(locked_dep, version)",
+        "download_registry_package must ask locked_version_unchanged",
+    ),
+    (
+        'or expected.removeprefix("sha256:").lower() == actual.removeprefix("sha256:").lower()',
+        "download_registry_package must compare the locked resolved_hash",
+    ),
+)
+_REGISTRY_DOWNLOADERS = (_SOURCES, _RESOLVE)
+
+
+def check_update_registry_integrity(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Registry downloads verify an unchanged version against its locked hash."""
+    findings: list[Violation] = []
+    helpers, failures = _facts_for(provider, _HELPERS, GUARD_UPDATE_REGISTRY_INTEGRITY)
+    findings.extend(failures)
+    if not failures:
+        findings.extend(
+            _summary(GUARD_UPDATE_REGISTRY_INTEGRITY, _HELPERS, message)
+            for needle, message in _REGISTRY_HELPER_NEEDLES
+            if not _present(helpers, needle)
+        )
+    for path in _REGISTRY_DOWNLOADERS:
+        facts, path_failures = _facts_for(provider, path, GUARD_UPDATE_REGISTRY_INTEGRITY)
+        findings.extend(path_failures)
+        if not path_failures and not _present(facts, "download_registry_package("):
+            findings.append(
+                _summary(
+                    GUARD_UPDATE_REGISTRY_INTEGRITY,
+                    path,
+                    "Registry downloads must route through download_registry_package",
+                )
+            )
+    # Closed world: no registry resolver download outside the owner.
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path.startswith("src/apm_cli/deps/registry/"):
+            continue
+        path_facts, path_failures = _facts_for(provider, path, GUARD_UPDATE_REGISTRY_INTEGRITY)
+        if path_failures:
+            continue
+        for call in path_facts.calls:
+            receiver, _, name = call.qualname.rpartition(".")
+            if name == "download_package" and "registry" in receiver.lower():
+                findings.append(
+                    violation(
+                        GUARD_UPDATE_REGISTRY_INTEGRITY,
+                        path,
+                        f"{call.scope} downloads a registry package directly; "
+                        "call install.source_helpers.download_registry_package",
+                        line=call.line,
+                    )
+                )
     return tuple(findings)
 
 
@@ -337,5 +409,126 @@ def check_local_bundle_hook_trust(provider: FactsProvider) -> tuple[Violation, .
             )
             for number, line in enumerate(_lines(facts), start=1)
             if any(token in line for token in _MARKER_TOKENS)
+        )
+    return tuple(findings)
+
+
+_ADMISSION = "src/apm_cli/install/bundle_admission.py"
+_PACK_COMMAND = "src/apm_cli/commands/pack.py"
+# Calls that write bundle files into a deployment root.
+_BUNDLE_DEPLOY_PRIMITIVES = frozenset({"integrate_local_bundle", "unpack_bundle"})
+# Closed world: every function that deploys bundle files, with the admission
+# call and the lockfile record call it must make.
+_BUNDLE_ENTRY_POINTS: dict[tuple[str, str], tuple[str, ...]] = {
+    (_LOCAL_BUNDLE, "install_local_bundle"): (
+        "admit_bundle",
+        "DeploymentLedgerCodec.record_local_bundle_files",
+    ),
+    (_PACK_COMMAND, "unpack_cmd"): ("apm_bundle_admission", "record_unpacked_files"),
+}
+# The owner's own routing: policy preflight and require_hashes in one place,
+# and the unpack record through the shared local-bundle lockfile owner.
+_ADMISSION_ROUTES: dict[str, tuple[str, ...]] = {
+    "admit_bundle": ("run_policy_preflight", "require_hashes_enabled"),
+    "admit": ("prepare_unpack_record", "admit_bundle", "_bundle_target_decision"),
+    "prepare_unpack_record": ("ensure_lockfile_writable",),
+    "_bundle_target_decision": ("pack_target_prefixes",),
+    "record_unpacked_files": ("DeploymentLedgerCodec.record_local_bundle_files",),
+}
+
+
+def _scope_calls(facts: object, scope: str) -> set[str]:
+    return {call.qualname for call in getattr(facts, "calls", ()) if call.scope == scope}
+
+
+def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every bundle deploy entry point routes through the bundle admission owner."""
+    import re
+
+    findings: list[Violation] = []
+    for path in _python_paths(provider, "src/apm_cli/"):
+        facts, failures = _facts_for(provider, path, GUARD_BUNDLE_ADMISSION)
+        if failures:
+            continue
+        findings.extend(
+            violation(
+                GUARD_BUNDLE_ADMISSION,
+                path,
+                f"{call.scope} deploys bundle files outside the registered bundle "
+                "entry points; admit the bundle through install/bundle_admission.py",
+                line=call.line,
+            )
+            for call in facts.calls
+            if call.qualname.rsplit(".", 1)[-1] in _BUNDLE_DEPLOY_PRIMITIVES
+            and (path, call.scope) not in _BUNDLE_ENTRY_POINTS
+        )
+    for (path, function), required in _BUNDLE_ENTRY_POINTS.items():
+        facts, failures = _facts_for(provider, path, GUARD_BUNDLE_ADMISSION)
+        findings.extend(failures)
+        if failures:
+            continue
+        missing = [name for name in required if name not in _scope_calls(facts, function)]
+        if missing:
+            findings.append(
+                _summary(
+                    GUARD_BUNDLE_ADMISSION,
+                    path,
+                    f"{function} must admit and record the bundle through the shared "
+                    "owners; missing " + ", ".join(missing),
+                )
+            )
+    facts, failures = _facts_for(provider, _ADMISSION, GUARD_BUNDLE_ADMISSION)
+    findings.extend(failures)
+    if not failures:
+        for function, required in _ADMISSION_ROUTES.items():
+            missing = [name for name in required if name not in _scope_calls(facts, function)]
+            if missing:
+                findings.append(
+                    _summary(
+                        GUARD_BUNDLE_ADMISSION,
+                        _ADMISSION,
+                        f"{function} must route through " + ", ".join(missing),
+                    )
+                )
+    facts, failures = _facts_for(provider, _UNPACKER, GUARD_BUNDLE_ADMISSION)
+    findings.extend(failures)
+    if not failures:
+        admit = _first_line_re(facts, re.compile(r"^\s+admit\($"))
+        first_exit = min(
+            (
+                line
+                for line in (
+                    _first_line_re(facts, re.compile(r"^\s+if dry_run:")),
+                    _first_line_re(facts, re.compile(r"shutil\.copy")),
+                )
+                if line is not None
+            ),
+            default=None,
+        )
+        if (
+            not _present(facts, "    admit: Callable[[UnpackCandidate], None],")
+            or admit is None
+            or (first_exit is not None and admit > first_exit)
+        ):
+            findings.append(
+                _summary(
+                    GUARD_BUNDLE_ADMISSION,
+                    _UNPACKER,
+                    "unpack_bundle must require an admission and run it before a preview or a write",
+                )
+            )
+    facts, failures = _facts_for(provider, _PACK_COMMAND, GUARD_BUNDLE_ADMISSION)
+    findings.extend(failures)
+    if not failures and not any(
+        definition.name == "unpack_cmd"
+        and "serialized_lifecycle_unless('dry_run')" in definition.decorators
+        for definition in facts.definitions
+    ):
+        findings.append(
+            _summary(
+                GUARD_BUNDLE_ADMISSION,
+                _PACK_COMMAND,
+                "apm unpack must hold the lifecycle lock (serialized_lifecycle_unless)",
+            )
         )
     return tuple(findings)

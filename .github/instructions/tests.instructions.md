@@ -108,6 +108,29 @@ production code must follow (see
   (`uv run pytest tests/unit/install/test_X.py -x`) before running the
   full suite (`uv run pytest tests/unit tests/test_console.py`).
 
+## Test module markers (tm006)
+
+Every new test module declares its behavioral marker and the promises it
+protects in one module-level `pytestmark`:
+
+```python
+import pytest
+
+pytestmark = [pytest.mark.<behavioral>, pytest.mark.promise("<catalog id>")]
+```
+
+- `<behavioral>`: exactly one of `unit`, `component` or `e2e`, chosen by
+  the boundary the tests cross (see "Behavioral classification authority"
+  below). Directory names are not evidence.
+- `<catalog id>`: one or more ids from `tests/quality/promise-catalog.json`
+  (`P-OWN-*`, `P-INV-*`, `P-LAW-*`, `P-DOC-*`); spec-conformance modules use
+  their OpenAPM `req-*` ids. Add a missing promise to the catalog in the
+  same pull request.
+- Local check before push (the gate's failure message names the fix):
+  `uv run --extra dev pytest -p no:cacheprovider -q tests/quality/test_test_taxonomy.py`.
+- When resolving a merge conflict, never resolve a modify/delete by dropping
+  main's tests; keep main's test and re-apply your change.
+
 ## Integration tests: placement and markers
 
 The integration suite uses **declarative gating** via pytest markers,

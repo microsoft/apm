@@ -101,7 +101,7 @@ class TestAtomicWriteText:
         """Unsupported hard links and permission failures remain explicit."""
         target = tmp_path / "control.txt"
         with (
-            patch("apm_cli.utils.atomic_io.os.link", side_effect=error),
+            patch("os.link", side_effect=error),
             patch(
                 "apm_cli.utils.atomic_io._replace_atomic_file",
                 side_effect=AssertionError("create-only must not replace"),
@@ -139,7 +139,7 @@ class TestAtomicWriteText:
             created_tmp_names.append(name)
             return fd, name
 
-        with patch("apm_cli.utils.atomic_io.tempfile.mkstemp", side_effect=capturing_mkstemp):
+        with patch("tempfile.mkstemp", side_effect=capturing_mkstemp):
             atomic_write_text(target, "data")
 
         assert len(created_tmp_names) == 1
@@ -161,7 +161,7 @@ class TestAtomicWriteText:
             captured_kwargs.append(dict(kwargs))
             return _orig_mkstemp(**kwargs)
 
-        with patch("apm_cli.utils.atomic_io.tempfile.mkstemp", side_effect=mock_mkstemp):
+        with patch("tempfile.mkstemp", side_effect=mock_mkstemp):
             atomic_write_text(target, "data")
 
         assert captured_kwargs[0]["prefix"] == "apm-atomic-"
@@ -189,7 +189,7 @@ class TestAtomicWriteText:
         target = tmp_path / "out.txt"
 
         with (
-            patch("apm_cli.utils.atomic_io.tempfile.mkstemp") as mock_mkstemp,
+            patch("tempfile.mkstemp") as mock_mkstemp,
             pytest.raises(ValueError, match="portable filename fragment"),
         ):
             atomic_write_text(target, "data", **{parameter: value})
@@ -205,7 +205,7 @@ class TestAtomicWriteText:
         target = tmp_path / "new_file.txt"
         assert not target.exists()
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
+        with patch("os.fchmod", create=True) as mock_fchmod:
             with patch("apm_cli.utils.atomic_io.hasattr", return_value=True):
                 atomic_write_text(target, "data", new_file_mode=0o600)
 
@@ -220,7 +220,7 @@ class TestAtomicWriteText:
         target.chmod(0o640)
         expected_mode = stat.S_IMODE(target.stat().st_mode)
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
+        with patch("os.fchmod", create=True) as mock_fchmod:
             atomic_write_text(target, "data", new_file_mode=0o600)
 
         mock_fchmod.assert_called_once()
@@ -231,7 +231,7 @@ class TestAtomicWriteText:
         """A new file without a requested mode does not call fchmod."""
         target = tmp_path / "out.txt"
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
+        with patch("os.fchmod", create=True) as mock_fchmod:
             atomic_write_text(target, "data", new_file_mode=None)
 
         mock_fchmod.assert_not_called()
@@ -253,9 +253,9 @@ class TestAtomicWriteText:
             tmp_names.append(name)
             return fd, name
 
-        with patch("apm_cli.utils.atomic_io.tempfile.mkstemp", side_effect=capturing_mkstemp):
+        with patch("tempfile.mkstemp", side_effect=capturing_mkstemp):
             with patch(
-                "apm_cli.utils.atomic_io.os.fdopen",
+                "os.fdopen",
                 side_effect=OSError("disk full"),
             ):
                 with pytest.raises(OSError, match="disk full"):
@@ -269,8 +269,8 @@ class TestAtomicWriteText:
         """If cleanup unlink fails, the original write exception still propagates."""
         target = tmp_path / "fail_unlink.txt"
 
-        with patch("apm_cli.utils.atomic_io.os.fdopen", side_effect=RuntimeError("boom")):
-            with patch("apm_cli.utils.atomic_io.os.unlink", side_effect=OSError("locked")):
+        with patch("os.fdopen", side_effect=RuntimeError("boom")):
+            with patch("os.unlink", side_effect=OSError("locked")):
                 with pytest.raises(RuntimeError, match="boom"):
                     atomic_write_text(target, "data")
 
@@ -278,7 +278,7 @@ class TestAtomicWriteText:
         """If write fails, the target path must not be created."""
         target = tmp_path / "ghost.txt"
 
-        with patch("apm_cli.utils.atomic_io.os.fdopen", side_effect=OSError("nope")):
+        with patch("os.fdopen", side_effect=OSError("nope")):
             with pytest.raises(OSError):
                 atomic_write_text(target, "data")
 
