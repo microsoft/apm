@@ -134,9 +134,9 @@ def test_local_bundle_content_approval_bypass_is_rejected() -> None:
     """The executable-trust rule must require content-bound bundle consent."""
     path = "src/apm_cli/install/local_bundle_handler.py"
     source = (ROOT / path).read_text(encoding="utf-8")
-    old = "bundle_approval_key = local_bundle_approval_key("
+    old = "    return local_bundle_approval_key("
     assert old in source
-    mutated = source.replace(old, "bundle_approval_key = build_approval_key(", 1)
+    mutated = source.replace(old, "    return build_approval_key(", 1)
 
     report = run_selected_rules(
         ROOT,
