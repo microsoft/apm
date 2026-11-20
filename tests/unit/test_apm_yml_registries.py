@@ -255,15 +255,19 @@ class TestRegistryUrlScheme:
             "https://registry.example.com/apm",
         ],
     )
-    def test_https_loopback_and_private_hosts_are_accepted(self, write_yml, schema_line, url):
+    def test_https_loopback_and_private_hosts_are_accepted(
+        self, write_yml, schema_line, url, capsys
+    ):
         p = write_yml(_registry_manifest(schema_line, f"url: {url}"))
         assert APMPackage.from_apm_yml(p).registries["corp"] == url
+        assert "Registry 'corp'" not in "".join(capsys.readouterr())
 
     @_CONTRACTS
-    def test_insecure_true_accepts_http_to_public_host(self, write_yml, schema_line):
+    def test_insecure_true_accepts_http_to_public_host(self, write_yml, schema_line, capsys):
         url = "http://registry.example.com/apm"
         p = write_yml(_registry_manifest(schema_line, f"url: {url}\n            insecure: true"))
         assert APMPackage.from_apm_yml(p).registries["corp"] == url
+        assert "Registry 'corp'" not in "".join(capsys.readouterr())
 
     @_CONTRACTS
     @pytest.mark.parametrize("value", ["false", '"true"', "1"])
@@ -298,10 +302,12 @@ class TestRegistryUrlScheme:
             "  opted: {url: 'http://registry.example.com/apm', insecure: true}\n"
             "  local: {url: 'http://127.0.0.1:9000/apm'}\n"
         )
+        before = workspace.read_bytes()
         assert _load_yaml_registries(workspace) == {
             "opted": "http://registry.example.com/apm",
             "local": "http://127.0.0.1:9000/apm",
         }
+        assert workspace.read_bytes() == before
 
 
 class TestRegistryEntryKeys:
@@ -315,10 +321,11 @@ class TestRegistryEntryKeys:
             APMPackage.from_apm_yml(p)
 
     @_CONTRACTS
-    def test_extension_key_is_accepted(self, write_yml, schema_line):
+    def test_extension_key_is_accepted(self, write_yml, schema_line, capsys):
         entry = "url: https://r.example.com\n            x-acme-note: 1"
         p = write_yml(_registry_manifest(schema_line, entry))
         assert APMPackage.from_apm_yml(p).registries["corp"] == "https://r.example.com"
+        assert "x-acme-note" not in "".join(capsys.readouterr())
 
     @_CONTRACTS
     def test_bare_x_prefix_is_not_an_extension(self, write_yml, schema_line):
