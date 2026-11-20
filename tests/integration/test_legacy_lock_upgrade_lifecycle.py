@@ -48,10 +48,21 @@ _IGNORED = {"apm_modules", ".git", ".apm-local"}
 _USER_EDIT = "\n# local note\n"
 
 
+_REMEDY = (
+    "Move it aside, then run 'apm install' to restore it, or 'apm install --force' to overwrite it."
+)
+
+
 def _kept_line(path: str) -> str:
+    """A file the pre-0.36 lock proves edited: its bytes differ from the recorded hash."""
+    return f"Kept {path}: it was modified since APM deployed it. {_REMEDY}"
+
+
+def _unproven_line(path: str) -> str:
+    """A file nothing proves APM wrote (#4360): a forged lock hash is not evidence."""
     return (
-        f"Kept {path}: it was modified since APM deployed it. Move it aside, then run "
-        "'apm install' to restore it, or 'apm install --force' to overwrite it."
+        f"Kept {path}: it differs from what APM renders and there is no local deployment "
+        f"receipt or locked render proving APM wrote it, so it may hold local edits. {_REMEDY}"
     )
 
 
@@ -272,7 +283,9 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre036_file(
     else:
         assert code == 1, f"{out}\n{err}"
         assert target.read_bytes() == edited_bytes
-        assert _kept_lines(out + err) == [_kept_line(_C3_EDITED)]
+        # The bytes equal the (forged) lock hash, so no edit is proven; without
+        # evidence the file is kept under the #4360 wording.
+        assert _kept_lines(out + err) == [_unproven_line(_C3_EDITED)]
         assert world._git("status", "--porcelain", "--", _C3_EDITED) == git_status
 
 
