@@ -2890,8 +2890,9 @@ def test_ambiguous_harness_hints_name_every_detected_target_and_converge(
 
     refused = runner.run(("install",), scenario_id="ambiguous", cwd=project, env=env)
     assert refused.returncode == 2, refused.stdout + refused.stderr
-    hint = refused.stdout + refused.stderr
+    hint = refused.stderr
     assert "Multiple harnesses detected: codex, cursor" in hint
+    assert "Multiple harnesses detected" not in refused.stdout, refused.stdout
     assert "  apm install --target codex,cursor\n" in hint
     assert "  targets:\n    - codex\n    - cursor" in hint
 
