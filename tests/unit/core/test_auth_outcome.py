@@ -15,7 +15,11 @@ from apm_cli.core.auth_chain import (
     ado_helper_path,
     authorization_headers,
 )
-from apm_cli.core.auth_outcome import AuthOutcomeKind, classify_auth_outcome
+from apm_cli.core.auth_outcome import (
+    AuthOutcomeKind,
+    classify_auth_outcome,
+    is_repository_not_found,
+)
 from apm_cli.core.token_manager import GitHubTokenManager
 
 pytestmark = pytest.mark.unit
@@ -224,6 +228,32 @@ def test_public_github_anonymous_404_may_hide_a_private_repository() -> None:
         host_kind="github", response=_response(404), public_github_anonymous=True
     ).is_auth_failure
     assert not classify_auth_outcome(host_kind="github", response=_response(404)).is_auth_failure
+
+
+_GIT_404 = "fatal: repository 'https://github.com/o/missing.git/' not found"
+
+
+@pytest.mark.parametrize(
+    ("error", "not_found"),
+    [
+        (_GIT_404, True),
+        (f"remote: Repository not found.\n{_GIT_404}", True),
+        ("remote: TF401019: The Git repository with name or identifier r does not exist", True),
+        (f"fatal: Authentication failed for 'https://github.com/o/r.git/'\n{_GIT_404}", False),
+        ("fatal: unable to access 'https://github.com/o/r/': Could not resolve host", False),
+        ("fatal: transport 'https' not allowed", False),
+    ],
+)
+def test_repository_not_found_is_neither_network_nor_auth(error: str, not_found: bool) -> None:
+    """#4199: Git's 404 wording is a missing repository, never a network error."""
+    assert is_repository_not_found(RuntimeError(error)) is not_found
+
+
+def test_public_github_anonymous_git_404_may_hide_a_private_repository() -> None:
+    """The anonymous leg escalates on Git's 404 wording as it does on GitHub's."""
+    assert classify_auth_outcome(
+        host_kind="github", error=_GIT_404, public_github_anonymous=True
+    ).is_auth_failure
 
 
 def test_authorization_headers_use_last_active_extraheader() -> None:

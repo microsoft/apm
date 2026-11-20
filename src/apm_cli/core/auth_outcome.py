@@ -104,6 +104,14 @@ class AuthOutcome:
         return self.kind is AuthOutcomeKind.CREDENTIAL_REJECTED and self.rejection_verified
 
 
+class RepositoryNotFoundError(RuntimeError):
+    """The host answered that the repository does not exist or is not visible.
+
+    Raised with a rendered message once every credential the chain may try was
+    tried, so callers can name a next step without re-reading Git stderr.
+    """
+
+
 class AuthAttemptFailed(RuntimeError):
     """Report a non-success attempt outcome to the auth chain.
 
@@ -241,7 +249,13 @@ def _names_other_host(text: str, host: str | None, port: int | None) -> bool:
 _PUBLIC_GITHUB_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403|404)\b",
 )
-_NOT_FOUND_RE = re.compile(r"\bTF401019\b|repository not found|\b404\b", re.IGNORECASE)
+# Git's own wording for an HTTP 404 on a repository URL: "fatal: repository
+# '<url>' not found". GitHub adds "remote: Repository not found." before it.
+_GIT_REPOSITORY_NOT_FOUND_RE = re.compile(r"\brepository '[^'\n]*' not found", re.IGNORECASE)
+_NOT_FOUND_RE = re.compile(
+    r"\bTF401019\b|repository not found|\b404\b|" + _GIT_REPOSITORY_NOT_FOUND_RE.pattern,
+    re.IGNORECASE,
+)
 
 
 def _cause_chain(error: object) -> Iterator[BaseException]:
@@ -421,6 +435,8 @@ def _classify_text(
     if public_github_anonymous:
         if any(phrase in lowered for phrase in (*_AUTH_PHRASES, "repository not found")):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
+        if _GIT_REPOSITORY_NOT_FOUND_RE.search(text):
+            return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         if any(status in {401, 403, 404} for status in statuses):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         if _PUBLIC_GITHUB_STATUS_RE.search(lowered):
@@ -507,6 +523,23 @@ def classify_auth_outcome(
         host=getattr(host_info, "host", None),
         port=getattr(host_info, "port", None),
     )
+
+
+def is_repository_not_found(error: object) -> bool:
+    """Return whether *error* reports a missing (or invisible) repository.
+
+    True for an HTTP 404, Git's "repository '<url>' not found", or Azure
+    DevOps TF401019, with no network, TLS, throttle, or auth signal. The
+    public github.com anonymous leg reads the same 404 as "credentials may be
+    required"; this answers the question after the chain has run.
+    """
+    outcome = classify_auth_outcome(error=error, credential_presented=True)
+    return outcome.kind is AuthOutcomeKind.NOT_FOUND
+
+
+def reports_repository_not_found(error: BaseException) -> bool:
+    """Return whether *error* or one of its causes is a :class:`RepositoryNotFoundError`."""
+    return any(isinstance(current, RepositoryNotFoundError) for current in _cause_chain(error))
 
 
 def raise_for_auth_outcome(

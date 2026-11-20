@@ -624,7 +624,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
     apm_dir = require_current_cli(get_apm_dir(scope), command="apm uninstall")
     deploy_root = get_deploy_root(scope)
     modules_dir = get_modules_dir(scope)
-    manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
+    from ...install.mcp.command import manifest_label
+
+    manifest_display = (
+        manifest_label(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
+    )
 
     logger = CommandLogger("uninstall", verbose=verbose, dry_run=dry_run)
     staged_local_refreshes = {}
@@ -660,7 +664,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         try:
             data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
-            logger.error(f"Failed to read {apm_yml_path}: {e}")
+            logger.error(f"Failed to read {manifest_display}: {e}")
             sys.exit(1)
         _enter_manifest_host_scope(host_scope, data, logger)
 
@@ -741,7 +745,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         try:
             data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
-            logger.error(f"Failed to re-read {apm_yml_path} after pre-uninstall: {e}")
+            logger.error(f"Failed to re-read {manifest_display} after pre-uninstall: {e}")
             sys.exit(1)
         had_dev_section, prod_deps, dev_deps, current_deps = _prepare_dependency_sections(data)
         lockfile = LockFile.read(lockfile_path)
@@ -940,9 +944,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 del data["devDependencies"]
         try:
             dump_yaml_roundtrip(data, apm_yml_path)
-            logger.success(f"Updated {apm_yml_path} (removed {len(packages_to_remove)} package(s))")
+            logger.success(
+                f"Updated {manifest_display} (removed {len(packages_to_remove)} package(s))"
+            )
         except Exception as e:
-            logger.error(f"Failed to write {apm_yml_path}: {e}")
+            logger.error(f"Failed to write {manifest_display}: {e}")
             sys.exit(1)
 
         # Step 5: Capture pre-uninstall MCP state (lockfile already read above)
