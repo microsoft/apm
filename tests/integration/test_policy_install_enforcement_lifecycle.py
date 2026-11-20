@@ -244,9 +244,14 @@ def test_dry_run_previews_blocked_dependencies_without_writing(
 def test_warn_policy_installs_and_reports_every_violation(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """I3 + I20: warn mode installs and reports each violation, not only the first."""
+    """I3 + I20: warn mode installs and reports each violation, not only the first.
+
+    Two independent checks fail (denylist and required packages), so a
+    regression that stops warn-mode evaluation after the first failed
+    check loses the required-package warning.
+    """
     packages = ("pkg-1", "pkg-2", "pkg-3")
-    policy = _policy("warn", deny=["contoso/pkg-*"])
+    policy = _policy("warn", deny=["contoso/pkg-*"], require=["contoso/pkg-required"])
     with _governed(tmp_path, apm_binary_path, policy=policy, packages=packages) as gov:
         before = gov.snapshot()
         result = gov.install(step="install-warn", expected=0)
@@ -255,6 +260,7 @@ def test_warn_policy_installs_and_reports_every_violation(
         assert _BLOCKED not in out, out
         for name in packages:
             assert f"github.com/contoso/{name}" in out, out
+        assert "contoso/pkg-required" in out, out
         assert "policy warning" in out.lower(), out
         gov.assert_installed(before, result, packages)
 
