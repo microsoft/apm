@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from apm_cli.core.remediation import CODEX_AGENT_FRONTMATTER_NOT_MAPPING
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import (
@@ -1773,7 +1774,7 @@ class TestCodexAgentIntegration:
         assert len(warnings) == 1
         assert "must be a mapping and was ignored" in warnings[0].message
         assert "may inherit broader tool access" in warnings[0].message
-        assert "rerun 'apm install'" in warnings[0].message
+        assert CODEX_AGENT_FRONTMATTER_NOT_MAPPING.clause() in warnings[0].message
 
     def test_codex_agent_invalid_frontmatter_emits_warning(self):
         """Invalid YAML must not make Codex conversion fail open silently."""

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import yaml
 
+from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
@@ -134,7 +135,7 @@ class InstructionIntegrator(BaseIntegrator):
         """Raise the package-facing malformed-frontmatter error."""
         raise yaml.YAMLError(
             f"Rejected frontmatter in {source.name}: {exc}\n"
-            "Fix or remove the invalid frontmatter, then rerun apm install."
+            f"{INSTRUCTION_FRONTMATTER_REJECTED.sentence()}"
         ) from exc
 
     def _prepare_instruction(
