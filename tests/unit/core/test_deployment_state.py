@@ -10,6 +10,7 @@ from apm_cli.core.deployment_state import (
     DeploymentIntent,
     DeploymentLedger,
     DeploymentLocator,
+    DeploymentReconcileResult,
     DeploymentReconciler,
     DeploymentRecord,
     LocatorKind,
@@ -1495,3 +1496,64 @@ class TestMcpHashCarryForward:
         DeploymentLedgerCodec.refresh_from_legacy(lockfile)
         hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
         assert hashes == {"copilot": {"server-a": _HASH_A}}
+
+
+@pytest.mark.parametrize(
+    ("target", "governed", "success", "failed", "expected"),
+    [
+        ("agents", True, False, False, True),
+        ("agents", True, True, False, False),
+        ("agents", True, False, True, False),
+        ("agents", True, True, True, False),
+        ("copilot", True, False, False, False),
+        ("agents", False, False, False, False),
+    ],
+    ids=["stale", "superseded", "failed", "both", "profiled-target", "ungoverned"],
+)
+def test_generic_row_is_stale_only_without_any_surviving_claim(
+    tmp_path: Path, target: str, governed: bool, success: bool, failed: bool, expected: bool
+) -> None:
+    locator = _locator(".agents/skills/a/SKILL.md", target=target)
+    intent = replace(
+        _intent(),
+        generic_governed_values=frozenset({locator.value} if governed else {"other"}),
+    )
+    successful = {locator.value: [_materialization("a", locator)]} if success else {}
+    failed_values = {locator.value} if failed else set()
+
+    stale = _reconciler(tmp_path)._is_generic_stale(
+        _record(locator), intent, successful, failed_values
+    )
+
+    assert stale is expected
+
+
+def test_dry_run_and_invalid_payloads_return_the_exact_unchanged_result(tmp_path: Path) -> None:
+    first, second = _locator(), _locator(".github/agents/other.agent.md")
+    previous = DeploymentLedger(
+        records={first.key: _record(first), second.key: _record(second)}
+    )
+    reconciler = _reconciler(tmp_path)
+
+    dry_run = reconciler.reconcile(previous, [], replace(_intent(), dry_run=True))
+    invalid = reconciler.reconcile(
+        previous, [_materialization("a", first, valid=False)], _intent()
+    )
+
+    retained = (first, second)
+    assert dry_run == DeploymentReconcileResult(
+        ledger=previous,
+        removed=(),
+        retained=retained,
+        owner_handoffs=(),
+        failed=(),
+        changed=False,
+    )
+    assert invalid == DeploymentReconcileResult(
+        ledger=previous,
+        removed=(),
+        retained=retained,
+        owner_handoffs=(),
+        failed=(first,),
+        changed=False,
+    )

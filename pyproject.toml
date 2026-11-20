@@ -204,6 +204,7 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/models/test_dependency_identity.py",
     "tests/unit/test_skill_subset_persistence.py",
     "tests/unit/test_dep_targets_persistence.py",
+    "tests/unit/core/test_deployment_ledger_codec.py",
     "tests/unit/test_audit_deployment_owners.py",
     "tests/unit/core/test_bundle_row_scope.py",
     "tests/unit/utils/test_atomic_io.py",
