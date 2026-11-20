@@ -100,6 +100,29 @@ class _LockPersistence:
     removal_pending: bool
 
 
+def _uninstall_deletion_evidence(
+    lockfile, lockfile_path, deploy_root, cleanup_keys, logger, *, user_scope: bool
+):
+    """Collect deletion evidence and render it before package sources go (#3701)."""
+    from ...integration.cleanup import DeploymentEvidence
+
+    evidence = DeploymentEvidence.collect(
+        deploy_root,
+        user_scope=user_scope,
+        lockfile=lockfile,
+        lockfile_root=lockfile_path.parent,
+        diagnostics=logger.diagnostics,
+    )
+    if lockfile:
+        evidence.prepare(
+            path
+            for key in cleanup_keys
+            if key in lockfile.dependencies
+            for path in lockfile.dependencies[key].deployed_files
+        )
+    return evidence
+
+
 def _persist_uninstall_lockfile(
     lockfile,
     lockfile_path,
@@ -201,6 +224,7 @@ def _sync_integrations_for_manifest(
     modules_dir,
     deployed_file_hashes,
     default_counts,
+    evidence,
     excluded_survivor_keys=frozenset(),
 ) -> tuple[IntegrationCleanupOutcome, Exception | None]:
     """Run post-uninstall integration cleanup when the manifest is parseable."""
@@ -232,6 +256,7 @@ def _sync_integrations_for_manifest(
                 modules_dir=modules_dir,
                 deployed_file_hashes=deployed_file_hashes,
                 excluded_survivor_keys=excluded_survivor_keys,
+                evidence=evidence,
             ),
             None,
         )
@@ -789,6 +814,17 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             return
 
+        # Deletion evidence (#3701): receipts, or the locked render, which is
+        # materialized here while the removed packages' sources still exist.
+        deletion_evidence = _uninstall_deletion_evidence(
+            lockfile,
+            lockfile_path,
+            deploy_root,
+            removed_keys | builtins.set(projected_orphans) | profile_keys,
+            logger,
+            user_scope=scope is InstallScope.USER,
+        )
+
         # Remove package content before releasing declarations or ownership.
         # A failed recursive delete can be partial; retain metadata for retry,
         # rather than claiming that already-deleted files were rolled back.
@@ -852,6 +888,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 active_targets=cleanup_targets,
                 declared_targets=cleanup_targets,
                 diagnostics=DiagnosticCollector(verbose=verbose),
+                evidence=deletion_evidence,
                 dependency_keys=cleanup_keys,
                 remove_selected_ownership=True,
                 selected_outcome=cleanup_outcome,
@@ -961,6 +998,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             deployed_file_hashes=all_deployed_file_hashes,
             default_counts=cleaned,
             excluded_survivor_keys=profile_keys,
+            evidence=deletion_evidence,
         )
         cleaned = integration_cleanup.counts
         surviving_deployed_files = integration_cleanup.deployed_files
