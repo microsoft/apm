@@ -176,6 +176,29 @@ class TestLockfileExecStatusIntegration:
         assert lockfile.dependencies["owner/repo"].exec_status == "gated_pending_approval"
         assert "exec_status: gated_pending_approval" in lockfile.to_yaml()
 
+    @pytest.mark.parametrize("lockfile_only", [True, False])
+    def test_lock_only_carries_recorded_exec_status_forward(self, lockfile_only: bool) -> None:
+        """``apm lock`` runs no gate, so recorded trust state survives (#4213)."""
+        existing = LockFile()
+        existing.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                exec_status="gated_pending_approval",
+                exec_allowed_types=("mcp",),
+            )
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="owner/repo"))
+        ctx = SimpleNamespace(
+            package_exec_status={}, existing_lockfile=existing, lockfile_only=lockfile_only
+        )
+
+        LockfileBuilder(ctx)._attach_exec_status(lockfile)
+
+        dep = lockfile.dependencies["owner/repo"]
+        expected = ("gated_pending_approval", ("mcp",)) if lockfile_only else (None, ())
+        assert (dep.exec_status, dep.exec_allowed_types) == expected
+
 
 class TestNonInteractiveExecutablePromptIntegration:
     """Integration: CI installs park executables instead of aborting."""

@@ -18,7 +18,7 @@ apm lock export [OPTIONS]
 
 `apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, cleanup, post-deps-local, and audit phases. The integrate phase still runs but deploys nothing because the target set is empty in lockfile-only mode -- no files are copied to or deleted from `.github/`, `.agents/`, or any other harness directory.
 
-If a prior install already deployed files and you later narrow `targets:`, `apm lock` keeps the existing `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows for any bytes still on disk. The next normal `apm install` performs the physical prune through the usual safety gates.
+If a prior install already deployed files and you later narrow `targets:`, `apm lock` keeps the existing `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows for any bytes still on disk. It also keeps each row's recorded `exec_status`, since it runs no approval gate. The next normal `apm install` performs the physical prune through the usual safety gates.
 
 Use `apm lock` to:
 
