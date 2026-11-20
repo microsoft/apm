@@ -611,12 +611,6 @@
         "PLR0911"
       ]
     },
-    "src/apm_cli/policy/parser.py": {
-      "validate_policy": [
-        "C901",
-        "PLR0912"
-      ]
-    },
     "src/apm_cli/policy/policy_checks.py": {
       "_classify_primitive_type": [
         "PLR0911"
