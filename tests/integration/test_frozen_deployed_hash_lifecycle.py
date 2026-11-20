@@ -19,6 +19,7 @@ edit to export.
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -28,7 +29,13 @@ import pytest
 
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-from tests.integration._target_compile_kit import Scenario, output, write, write_package
+from tests.integration._target_compile_kit import (
+    Scenario,
+    output,
+    tree_digest,
+    write,
+    write_package,
+)
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 pytestmark = [
@@ -54,7 +61,7 @@ _OLD_RENDERINGS = {
 # The closing line of a frozen replay that adopted both pre-0.37 renderings (#4398).
 _ADOPT_LINE = (
     "Adopted 2 file(s) deployed by APM before 0.37, unchanged as committed. Run "
-    "'apm install' to re-render them for this version and record deployment receipts."
+    "'apm install' to re-render them for this version."
 )
 _KEPT_REMEDY = (
     "Move it aside, then run 'apm install' to restore it, or 'apm install --force' to overwrite it."
@@ -146,6 +153,15 @@ def _flat(stream: str) -> str:
     return " ".join(stream.split())
 
 
+def _receipt_hashes(scenario: Scenario) -> dict[str, str]:
+    """Map each receipted project path to the hash its receipt records."""
+    hashes: dict[str, str] = {}
+    for path in _receipts(scenario):
+        for row in json.loads(path.read_text(encoding="utf-8")).get("records") or []:
+            hashes[row["value"]] = row["content_hash"]
+    return hashes
+
+
 def _receipts(scenario: Scenario) -> list[Path]:
     return [
         path
@@ -162,9 +178,16 @@ def test_frozen_replay_of_pre037_cli_output_adopts_then_install_migrates(
     scenario = Scenario.create(tmp_path, apm_binary_path)
     clone, env = _previous_cli_clone(scenario, stamp="0.35.1", staged=False)
     lock_before = (clone / "apm.lock.yaml").read_bytes()
+    project_before = tree_digest(clone, skip=("apm_modules", ".git", ".apm-local"))
 
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)
     text = output(frozen)
+    # RA-006: frozen writes only local evidence (receipts, the self-ignored
+    # .apm-local identity); project bytes stay identical.
+    assert tree_digest(clone, skip=("apm_modules", ".git", ".apm-local")) == project_before
+    receipted = _receipt_hashes(scenario)
+    for relative, old in _OLD_RENDERINGS.items():
+        assert receipted.get(relative) == _sha(old.encode("ascii")), (relative, receipted)
     assert "Kept " not in text and "Deployed files verified" not in text, text
     # An [i] line: on stdout only.
     assert _ADOPT_LINE in _flat(frozen.stdout), frozen.stdout
