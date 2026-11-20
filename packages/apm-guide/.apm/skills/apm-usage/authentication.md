@@ -313,6 +313,11 @@ apm install myenterprise.ghe.com/platform/standards
 
 No public repos exist on `*.ghe.com` -- auth is always required.
 
+`GITHUB_APM_PAT` (and `GITHUB_TOKEN`, `GH_TOKEN`) is sent to `github.com`
+and to any `*.ghe.com` host a dependency names. There is no per-host token;
+`GITHUB_APM_PAT_{ORG}` scopes a token to one organization name on any of
+these hosts. GHES joins this chain only when `GITHUB_HOST` names it.
+
 ## Enterprise Managed Users (EMU)
 
 - EMU orgs live on `github.com` (e.g., `contoso-microsoft`) or `*.ghe.com`

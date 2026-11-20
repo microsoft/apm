@@ -23676,7 +23676,7 @@
   },
   "U2": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:154",
+    "src/apm_cli/commands/approve.py:240",
     "src/apm_cli/policy/install_preflight.py:220"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
@@ -23730,12 +23730,12 @@
   },
   "U9": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:174",
-    "src/apm_cli/commands/approve.py:178"
+    "src/apm_cli/commands/approve.py:262",
+    "src/apm_cli/commands/approve.py:266"
    ],
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
  "schema_version": 1,
- "sha256": "e1257840745d3869ad12a695ec69d7cb5d9ad37a3fd4bb2fc33ed74ccd931ce1"
+ "sha256": "86d18cddae413577930956609d4b94f9116dc27a9291937f60b37f9cd2e48ea2"
 }

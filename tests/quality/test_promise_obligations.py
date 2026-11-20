@@ -15,6 +15,7 @@ import json
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,7 +23,9 @@ from tests.lifecycle import oracles, receipts
 from tests.lifecycle.obligations import (
     OBLIGATIONS_PATH,
     PROMISE_PREFIX,
+    Catalog,
     Obligation,
+    ReceiptWitnessPlugin,
     load_catalog,
     promise_ids,
     uncovered,
@@ -258,6 +261,84 @@ def test_a_refusal_never_witnesses_a_success_obligation() -> None:
     )
 
 
+def _receipt(node: str) -> receipts.Receipt:
+    return receipts.Receipt(node, {"op": "install"}, "", (), "project", "", "I4", "pass")
+
+
+def _plugin_session(monkeypatch: pytest.MonkeyPatch, default: Path) -> ReceiptWitnessPlugin:
+    """A plugin configured in a fresh main process on the default cache *default*."""
+    for name in (receipts.DIRECTORY_ENV, receipts.SESSION_ENV, "PYTEST_XDIST_WORKER"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    plugin = ReceiptWitnessPlugin(load_catalog())
+    plugin.pytest_configure(SimpleNamespace(cache=SimpleNamespace(mkdir=lambda _name: default)))
+    return plugin
+
+
+def _stale_session(directory: Path, node: str) -> receipts.Receipt:
+    stale = _receipt(node)
+    (directory / "session-old.jsonl").write_text(stale.to_json() + "\n", encoding="ascii")
+    return stale
+
+
+def _run_session(plugin: ReceiptWitnessPlugin, directory: Path, *nodes: str) -> None:
+    """Write this session's per-process receipts, then finish the session."""
+    session = os.environ[receipts.SESSION_ENV]
+    lines = "".join(_receipt(node).to_json() + "\n" for node in nodes)
+    if lines:
+        (directory / f"{session}-main-1.part.jsonl").write_text(lines, encoding="ascii")
+    plugin.pytest_sessionfinish(SimpleNamespace())
+
+
+def test_a_witness_session_replaces_stale_default_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Earlier partial runs in the default cache must not judge this run's witnesses."""
+    witness = next(iter(load_catalog().required.values()))
+    plugin = _plugin_session(monkeypatch, tmp_path)
+    _stale_session(tmp_path, witness)
+    assert os.environ[receipts.DIRECTORY_ENV] == str(tmp_path)
+    _run_session(plugin, tmp_path, witness, witness)
+    assert receipts.load(tmp_path) == [_receipt(witness), _receipt(witness)]
+
+
+@pytest.mark.parametrize("nodes", [(), ("tests/lifecycle/test_unrelated.py::test_x",)])
+def test_a_session_without_a_witness_keeps_earlier_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nodes: tuple[str, ...]
+) -> None:
+    """A collect-only run (no receipts) or a run of no witness never drops receipts."""
+    witness = next(iter(load_catalog().required.values()))
+    plugin = _plugin_session(monkeypatch, tmp_path)
+    stale = _stale_session(tmp_path, witness)
+    _run_session(plugin, tmp_path, *nodes)
+    assert stale in receipts.load(tmp_path)
+
+
+def test_an_explicit_receipts_directory_keeps_every_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    witness = next(iter(load_catalog().required.values()))
+    _plugin_session(monkeypatch, tmp_path / "default")
+    monkeypatch.setenv(receipts.DIRECTORY_ENV, str(tmp_path))
+    plugin = ReceiptWitnessPlugin(load_catalog())
+    plugin.pytest_configure(SimpleNamespace(cache=None))
+    stale = _stale_session(tmp_path, witness)
+    _run_session(plugin, tmp_path, witness)
+    assert stale in receipts.load(tmp_path)
+    assert len(receipts.load(tmp_path)) == 2
+
+
+def test_required_receipts_never_pass_vacuously() -> None:
+    catalog = load_catalog()
+    with pytest.raises(AssertionError, match="no lifecycle receipts"):
+        _hold_the_ratchet(catalog, [], required=True)
+    with pytest.raises(AssertionError, match="no required witness reported"):
+        _hold_the_ratchet(
+            catalog, [_receipt("tests/lifecycle/test_unrelated.py::test_x")], required=True
+        )
+    _hold_the_ratchet(catalog, [], required=False)
+
+
 # -- merged receipts of a lifecycle run ---------------------------------------
 
 
@@ -271,13 +352,18 @@ def test_merged_receipts_hold_the_ratchet() -> None:
 
     With ``APM_LIFECYCLE_RECEIPTS_REQUIRED=1`` every witness must have reported.
     """
-    catalog = load_catalog()
-    earned = receipts.load(_receipts_dir())
+    required = os.environ.get("APM_LIFECYCLE_RECEIPTS_REQUIRED") == "1"
+    _hold_the_ratchet(load_catalog(), receipts.load(_receipts_dir()), required=required)
+
+
+def _hold_the_ratchet(catalog: Catalog, earned: list[receipts.Receipt], *, required: bool) -> None:
     by_node: dict[str, list[receipts.Receipt]] = {}
     for receipt in earned:
         by_node.setdefault(receipt.node, []).append(receipt)
     witnesses = set(catalog.required.values())
-    if os.environ.get("APM_LIFECYCLE_RECEIPTS_REQUIRED") == "1":
+    if required:
+        assert earned, f"no lifecycle receipts under {_receipts_dir()}; run tests/lifecycle first"
+        assert witnesses & set(by_node), "no required witness reported a receipt"
         assert witnesses <= set(by_node), sorted(witnesses - set(by_node))
     problems = [
         failure
