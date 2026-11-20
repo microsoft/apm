@@ -1,0 +1,18 @@
+{
+ "partition": "unit/compilation+commands",
+ "steps_done": [
+  0
+ ],
+ "folds": {
+  "tests/unit/commands/test_pack_phase3.py::TestPackCmdFlags::test_help_text_includes_all_key_flags": "tests/unit/commands/test_pack_cli_surface.py::TestPackCmdFlags::test_help_text_includes_all_key_flags",
+  "tests/unit/commands/test_pack_phase3.py::TestRenderBundleResult::test_live_share_line_emitted": "tests/unit/commands/test_pack_cli_surface.py::TestRenderBundleResult::test_live_share_line_emitted",
+  "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCleanupOrphanedFiles::test_all_hand_authored_reports_zero_removed": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCleanupOrphanedFiles::test_all_hand_authored_reports_zero_removed",
+  "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCleanupOrphanedFiles::test_hand_authored_not_deleted": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCleanupOrphanedFiles::test_hand_authored_file_skipped_silently",
+  "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCompilationResult::test_defaults": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCompilationResult::test_defaults",
+  "tests/unit/compilation/test_distributed_compiler_phase3.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned"
+ },
+ "decisions": [
+  "step0: the 6 nodes unmapped after 011445baa/08030d1b4 each have a same-named or same-scenario survivor in the kept module whose assertions are a superset (pack: exact share line and extra help flags; distributed: same asserts on a markerless fixture constant, plus suppressed_empty_paths default)"
+ ],
+ "counts_left": {}
+}
