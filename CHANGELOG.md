@@ -12,16 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
-- Each command writes `apm.lock.yaml` at most once, and `apm compile` refuses a lockfile written by a newer APM before changing files. (closes #4086, #PR)
+- Each command writes `apm.lock.yaml` at most once, and `apm compile` refuses a lockfile written by a newer APM before changing files. (closes #4086, #4138)
 
 ### Fixed
 
-- `apm install --frozen` succeeds as a no-op when `apm.yml` declares no APM, MCP or LSP dependency, matching `apm audit --ci`. (closes #4050, #PR)
-- Cleanup no longer removes a target root such as a pre-existing `.github/` when it retires the last file APM deployed there, so repeat installs are byte-stable. (closes #4132, #PR)
+- `apm install` stops before writing `apm.lock.yaml` or deployed files when a check fails, and `--dry-run` previews through the same pipeline. (closes #4085, #4138)
+- `apm install --frozen` succeeds as a no-op when `apm.yml` declares no APM, MCP or LSP dependency, matching `apm audit --ci`. (closes #4050, #4138)
+- Cleanup no longer removes a target root such as a pre-existing `.github/` when it retires the last file APM deployed there, so repeat installs are byte-stable. (closes #4132, #4138)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 - `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
-- `apm install -g` installs a dependency's transitive relative local paths (`../sibling`, `./sub`), anchored on the declaring package, and any transitive local dependency that cannot be resolved now fails the install with exit 1 instead of being dropped silently. (closes #4153)
-- `apm update` (including `-g`) no longer reports `1 updated` and rewrites files on every run for a dependency declared without a ref; it reports a change only when the default branch moves. (closes #4166)
+- `apm install -g` installs a dependency's transitive relative local paths (`../sibling`, `./sub`), anchored on the declaring package, and any transitive local dependency that cannot be resolved now fails the install with exit 1 instead of being dropped silently. (closes #4153, #4138)
+- `apm update` (including `-g`) no longer reports `1 updated` and rewrites files on every run for a dependency declared without a ref; it reports a change only when the default branch moves. (closes #4166, #4138)
 
 ## [0.37.0] - 2026-11-20
 
