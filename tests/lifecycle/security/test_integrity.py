@@ -378,6 +378,8 @@ _SKILL_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
 _DRIFT = r"content-integrity\s*\|\s*1 file\(s\) with hash drift"
 _FROZEN_HASHES = r"--frozen: deployed files do not match the hashes recorded in apm.lock.yaml"
 _RETAINED = r"Uninstall could not remove tracked target files"
+# Uninstall refuses before any change when a file lacks deletion evidence (#3701).
+_REFUSED = r"Uninstall refused: deleting these tracked files needs deployment evidence"
 _FAILED_CLOSED_LEAVES_BYTES = (
     "#4353 install leaves fetched bytes in apm_modules when it fails closed"
 )
@@ -430,13 +432,13 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         # uninstall.md: a removed package's file is deleted only with evidence
         # that APM wrote its current bytes (a deployment receipt, or byte
         # equality with the locked render); a lockfile hash alone is never
-        # evidence. An edited file is retained and uninstall exits 1; an edited
-        # or missing lock hash does not change the evidence, so cleanup proceeds.
+        # evidence. An edited file makes uninstall refuse before any change
+        # (exit 1); an edited or missing lock hash does not change the
+        # evidence, so cleanup proceeds.
         ("uninstall-prune", "disk-or-cache"): Expect(
             1,
-            (_RETAINED, r"Retained user-edited file"),
+            (_REFUSED, r"Nothing was removed"),
             unchanged=_SKILL_STATE,
-            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
