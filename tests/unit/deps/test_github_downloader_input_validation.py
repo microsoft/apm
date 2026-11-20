@@ -707,7 +707,7 @@ class TestPathExistsInTreeAtRef:
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
             patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                "subprocess.run",
                 side_effect=[
                     MagicMock(),
                     MagicMock(),
@@ -729,7 +729,7 @@ class TestPathExistsInTreeAtRef:
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
             patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                "subprocess.run",
                 return_value=MagicMock(stdout=""),
             ),
         ):
@@ -747,7 +747,7 @@ class TestPathExistsInTreeAtRef:
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
             patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                "subprocess.run",
                 return_value=MagicMock(stdout="040000 tree abc123\tskills/foo\n"),
             ),
         ):
@@ -765,7 +765,7 @@ class TestPathExistsInTreeAtRef:
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
             patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                "subprocess.run",
                 side_effect=[
                     MagicMock(),
                     MagicMock(),

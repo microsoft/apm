@@ -193,20 +193,28 @@ CACHE_SCHEMA_VERSION = "6"  # Bump when cache format changes to auto-invalidate
 class PolicyFetchResult:
     """Result of a policy fetch attempt.
 
-    The ``outcome`` field discriminates the 9 discovery outcomes defined in
-    the plan (section B):
+    The ``outcome`` field takes one of the 11 discovery outcomes in the
+    closed set ``policy.outcome_routing.POLICY_DISCOVERY_OUTCOMES``; the
+    routing owner (``policy/outcome_routing.py``) decides how each is
+    handled, and an outcome outside the set fails closed:
 
     * ``found``               -- valid policy, enforce per ``enforcement``
     * ``absent``              -- no policy published (404 / empty repo)
     * ``cached_stale``        -- served from cache past TTL on refresh failure
     * ``cache_miss_fetch_fail`` -- no cache, fetch failed
-    * ``malformed``           -- YAML valid but schema invalid (fail-closed)
+    * ``malformed``           -- YAML valid but schema invalid
     * ``disabled``            -- ``--no-policy`` / ``APM_POLICY_DISABLE=1``
     * ``garbage_response``    -- 200 OK but body is not valid YAML
     * ``no_git_remote``       -- cannot determine org from git remote
     * ``empty``               -- valid policy with no actionable rules
     * ``hash_mismatch``       -- ``policy.hash`` pin in apm.yml does not match
-                                 the fetched policy bytes (always fail-closed)
+                                 the fetched policy bytes (always blocks)
+    * ``incomplete_chain``    -- an ancestor or ``extends:`` parent policy
+                                 could not be resolved (always blocks)
+
+    ``absent``, ``no_git_remote``, ``empty``, ``malformed``,
+    ``cache_miss_fetch_fail`` and ``garbage_response`` block only when the
+    project sets ``policy.fetch_failure_default: block``.
     """
 
     policy: ApmPolicy | None = None
@@ -299,7 +307,7 @@ def discover_policy_with_chain(
     -------
     PolicyFetchResult
         With merged effective policy and real chain_refs when inheritance
-        is present.  Outcome follows the 9-outcome matrix (section B).
+        is present.  Outcome is one of ``POLICY_DISCOVERY_OUTCOMES``.
     """
     # -- Escape hatch (defence-in-depth) -------------------------------
     # The CLI's --no-policy flag is handled by callers; this env-var
@@ -829,6 +837,7 @@ def discover_policy(
             return PolicyFetchResult(
                 error="Refusing plaintext http:// policy URL -- use https://",
                 source=f"url:{policy_override}",
+                outcome="cache_miss_fetch_fail",
             )
         if policy_override.startswith("https://"):
             result = _fetch_from_url(
