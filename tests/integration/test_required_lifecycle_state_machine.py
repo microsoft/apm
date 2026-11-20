@@ -4609,3 +4609,48 @@ def test_required_configured_hook_routing_lifecycle(
     assert _hook_commands(settings) == ["echo claude"]
     assert copilot_commands() == set()
     assert uninstall_audit["passed"] is True
+
+
+def test_required_update_failing_after_deploy_records_what_it_deployed(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """An update whose MCP write fails after deploy commits the lockfile for the deployed files."""
+    scenario = _new_scenario(tmp_path / "update-after-deploy", apm_binary_path)
+    source = _publish(scenario, "update-kit", skill="update-kit")
+    tracking = {key: value for key, value in source.dependency.items() if key != "ref"}
+    consumer = scenario.consumers.create(
+        "update-consumer", dependencies=(tracking,), targets=("claude",)
+    )
+    manifest = load_yaml(consumer.root / "apm.yml")
+    manifest["dependencies"]["mcp"] = [
+        {"name": "update-srv", "registry": False, "transport": "stdio", "command": "update-srv"}
+    ]
+    dump_yaml(manifest, consumer.root / "apm.yml")
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "claude"),
+        environment=source.environment,
+        scenario_id="update-after-deploy-install",
+    )
+
+    revision_b = _publish_revision(scenario, source, "b")
+    mcp_config = consumer.root / ".mcp.json"
+    mcp_config.unlink()
+    mcp_config.mkdir()
+    failed = scenario.runner.run(
+        ("update", "--yes", "--parallel-downloads", "0"),
+        scenario_id="update-after-deploy-mcp-failure",
+        cwd=consumer.root,
+        env=source.environment,
+    )
+
+    assert failed.returncode != 0, _result_evidence(failed)
+    deployed = consumer.root / ".claude/skills/update-kit/SKILL.md"
+    assert "revision-b" in deployed.read_text(encoding="ascii"), _result_evidence(failed)
+    locked = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert locked is not None
+    assert [dep.resolved_commit for dep in locked.get_package_dependencies()] == [revision_b.sha], (
+        _result_evidence(failed)
+    )

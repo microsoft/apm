@@ -20,9 +20,10 @@ after changing state: an install that deployed files and then exits non-zero
 what reached disk.  Most refusals happen before the first write, so nothing
 is staged to commit.  A check refusal raised after staging (an exception
 class with ``refuses_commit = True``, such as an org-policy or install-time
-audit block, anywhere in the error's cause chain), an interrupt (Ctrl-C, or
-SIGTERM, which the CLI raises as one) or a
-``sys.exit`` with a non-zero code discards what was staged.  Two explicit commit points
+audit block, anywhere in the error's cause chain) or an interrupt (Ctrl-C,
+or SIGTERM, which the CLI raises as one) discards what was staged; any other
+failure, including a non-zero ``sys.exit`` after the first staged write,
+commits it.  Two explicit commit points
 flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
 transaction must agree with the lockfile (native plugin registration, user
 lifecycle scripts, a command's own durable checkpoint).  State bound to the
@@ -134,15 +135,15 @@ def _refused(error: BaseException) -> bool:
 def _commits(error: BaseException) -> bool:
     """Whether a command ending in *error* still commits what it staged.
 
-    A failure after a state change records that change; a check refusal, an
-    interrupt or a non-zero ``sys.exit`` abandons the command, and a zero exit
-    completes it.
+    A failure after a state change records that change, whether it is raised
+    or reported through ``sys.exit``: the scope opens only at the first staged
+    write, so staged state means the command already changed state. A check
+    refusal (anywhere in the error's cause or context chain) and an interrupt
+    abandon the command.
     """
     if _refused(error):
         return False
-    if isinstance(error, SystemExit | _click_exit()):
-        return getattr(error, "exit_code", getattr(error, "code", 1)) in (0, None)
-    return isinstance(error, Exception)
+    return isinstance(error, Exception | SystemExit | _click_exit())
 
 
 def _click_exit() -> type[BaseException]:

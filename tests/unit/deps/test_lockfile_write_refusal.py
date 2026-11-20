@@ -1,4 +1,4 @@
-"""The lockfile writer scope commits nothing when a check refusal ends it (#4085)."""
+"""The lockfile writer scope commits nothing when a check refusal or an interrupt ends it."""
 
 from __future__ import annotations
 
@@ -28,16 +28,36 @@ def _refusal() -> BaseException:
             return wrapped
 
 
+def _exit_after_refusal() -> BaseException:
+    try:
+        raise PolicyViolationError("blocked")
+    except PolicyViolationError:
+        try:
+            raise SystemExit(1)
+        except SystemExit as exit_:
+            return exit_
+
+
 @pytest.mark.parametrize(
     ("error", "committed"),
     [
         (PolicyViolationError("blocked"), False),
         (_refusal(), False),
         (RuntimeError("native write failed after deploy"), True),
-        (SystemExit(1), False),
+        (SystemExit(1), True),
+        (_exit_after_refusal(), False),
         (SystemExit(0), True),
+        (KeyboardInterrupt(), False),
     ],
-    ids=["refusal", "refusal-in-cause-chain", "failure-after-deploy", "exit-1", "exit-0"],
+    ids=[
+        "refusal",
+        "refusal-in-cause-chain",
+        "failure-after-deploy",
+        "exit-1-after-deploy",
+        "exit-1-after-refusal",
+        "exit-0",
+        "interrupt",
+    ],
 )
 def test_scope_commits_unless_the_command_was_refused(
     tmp_path: Path, error: BaseException, committed: bool
