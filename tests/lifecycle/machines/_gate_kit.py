@@ -61,6 +61,29 @@ _PLUGIN_MARKERS = ("plugin-kit@apm", "plugin-kit-mcp")
 _GIT_REMOTE = "https://github.com/acme/project.git"
 _POLICY_REPO = "acme/.github-private"
 
+# Per-command write sets (#4133): every observed root is forbidden except these
+# prefixes. Bookkeeping any command may write under HOME at project scope.
+_PROJECT_HOME = (
+    ".apm/deployment-receipts",
+    ".apm/logs",
+    ".apm-local",
+    ".local/state/gh",
+    ".cache/apm",
+)
+# At user scope receipts and logs live under APM_HOME; HOME gets the deploy dir.
+_USER_HOME = (".copilot", ".apm-local", ".local/state/gh", ".cache/apm")
+_RECONCILE_WRITES = {
+    "project": {"project": ("apm.lock.yaml", "apm_modules", ".github", ".gitignore", ".apm-local")},
+    "user": {"apm-home": ("apm.lock.yaml", "apm_modules", "deployment-receipts", "logs")},
+}
+_STORE_WRITES = {"project": {"project": ("apm.yml",)}, "user": {"apm-home": ("config.json",)}}
+_MANIFEST_WRITES = {"project": {"project": ("apm.yml",)}, "user": {"apm-home": ("apm.yml",)}}
+_POLICY_WRITES = {
+    "project": {"project": (".git", "apm_modules")},
+    "user": {"home": (".git", "apm_modules")},
+}
+_RECONCILING = frozenset({"install", "install-frozen", "update", "prune", "uninstall"})
+
 VISITED_CELLS: set[str] = set()
 """Every ``cell:`` event emitted in this process; written by the session hook."""
 COMPLETED_SPINES: set[str] = set()
@@ -357,6 +380,9 @@ class GateWorld:
             deploy_root=self.deploy_root,
             lock=self.lock(),
             managed_paths=frozenset({_HOOK_FILE[self.scope]}),
+            # The world's LSP server, as the adapter config shows it; I1 reconciles
+            # it with the lock's lsp claims (#4133).
+            services={"lsp": frozenset({_LSP_SERVER}) if "lsp" in deployed else frozenset()},
         )
 
 
@@ -455,22 +481,29 @@ class GateMachine(RuleBasedStateMachine):
         return tuple(cells)
 
     def _forbidden(self) -> dict[str, tuple[str, ...]]:
-        if self.scope == "project":
-            # A project step may only write its receipts and bookkeeping under HOME.
-            return {"home": ("*",)}
-        return {"cwd": ("*",), "home": (".apm",)}
+        """Every observed root is closed; ``_allowed`` opens what one command may write."""
+        return {root: ("*",) for root in self.world.roots}
 
-    def _allowed(self) -> dict[str, tuple[str, ...]]:
-        if self.scope == "project":
-            return {
-                "home": (
-                    ".apm/deployment-receipts",
-                    ".apm-local",
-                    ".local/state/gh",
-                    ".cache/apm",
-                )
-            }
-        return {}
+    def _allowed(self, name: str) -> dict[str, tuple[str, ...]]:
+        """The write set of step *name* at this scope (#4133)."""
+        home = _PROJECT_HOME if self.scope == "project" else _USER_HOME
+        allowed: dict[str, tuple[str, ...]] = {"home": home}
+        if name in _RECONCILING:
+            sets = [_RECONCILE_WRITES]
+            if name == "uninstall":
+                sets.append(_MANIFEST_WRITES)
+        elif name in {"approve", "deny", "revoke"}:
+            sets = [_STORE_WRITES]
+        elif name in {"declare", "undeclare"}:
+            sets = [_MANIFEST_WRITES]
+        elif name.startswith("set-policy-"):
+            sets = [_POLICY_WRITES]
+        else:
+            sets = []
+        for writes in sets:
+            for root, prefixes in writes[self.scope].items():
+                allowed[root] = (*allowed.get(root, ()), *prefixes)
+        return allowed
 
     def _step(
         self,
@@ -501,7 +534,7 @@ class GateMachine(RuleBasedStateMachine):
             **{
                 **op.__dict__,
                 "forbidden": self._forbidden(),
-                "allowed": self._allowed(),
+                "allowed": self._allowed(op.name),
                 "cells": visited,
                 "scope": self.scope,
             }
@@ -513,9 +546,16 @@ class GateMachine(RuleBasedStateMachine):
         self.converged = False
         self._step(Operation(name, kinds, edit_only=True, **flags), lambda: edit() or None)
 
-    def _install_reference(self, mode: str):
+    def _install_reference(self, mode: str, name: str = "install"):
         def reference(before, after, result) -> list[str]:
-            if result is None or result.returncode != 0 or mode != "plain":
+            if result is None:
+                return []
+            # The outcome comes first: a plain install or update on local
+            # packages succeeds; --frozen refuses only without a lockfile (#4133).
+            expected = 1 if mode == "frozen" and before.lock is None else 0
+            if result.returncode != expected:
+                return [f"{name} exited {result.returncode}, expected {expected}"]
+            if result.returncode != 0 or mode != "plain":
                 return []
             problems = []
             for kind in ("hook", "lsp"):
@@ -612,7 +652,12 @@ class GateMachine(RuleBasedStateMachine):
     def install(self, mode: str) -> None:
         self._install(mode)
 
-    def _install(self, mode: str, paired: Mapping[str, int] | None = None) -> CommandResult | None:
+    def _install(
+        self,
+        mode: str,
+        paired: Mapping[str, int] | None = None,
+        paired_output: Mapping[str, str] | None = None,
+    ) -> CommandResult | None:
         args = ("install", *self.world.global_flag(), *(("--frozen",) if mode == "frozen" else ()))
         name = "install" if mode == "plain" else "install-frozen"
         result = self._step(
@@ -620,10 +665,11 @@ class GateMachine(RuleBasedStateMachine):
                 name,
                 mutating=True,
                 paired=paired or {},
+                paired_output=paired_output or {},
                 modifiers=("FROZEN",) if mode == "frozen" else (),
             ),
             lambda: self.world.run(args),
-            reference=self._install_reference(mode),
+            reference=self._install_reference(mode, name),
         )
         if mode == "plain" and result is not None and result.returncode == 0:
             self.converged = True
@@ -635,22 +681,65 @@ class GateMachine(RuleBasedStateMachine):
         result = self._step(
             Operation("update", mutating=True),
             lambda: self.world.run(args),
-            reference=self._install_reference("plain"),
+            reference=self._install_reference("plain", "update"),
         )
         self.converged = result is not None and result.returncode == 0 and self.converged
 
+    def update_package(self, kind: str) -> None:
+        """Spine step: ``apm update <pkg>``; an undeclared package is refused."""
+        path = str(self.world.packages[kind])
+        expected = 0 if kind in self.declared else 1
+
+        def reference(before, after, result) -> list[str]:
+            if result is not None and result.returncode != expected:
+                return [f"update {kind} exited {result.returncode}, expected {expected}"]
+            return []
+
+        result = self._step(
+            Operation("update", (kind,), mutating=True),
+            lambda: self.world.run(("update", *self.world.global_flag(), "--yes", path)),
+            reference=reference,
+        )
+        self.converged = result is not None and result.returncode == 0 and self.converged
+
+    def decide_nothing(self, verdict: str) -> None:
+        """Spine step: ``apm approve`` / ``apm deny`` naming no package is refused."""
+        user = ("--user",) if self.scope == "user" else ()
+
+        def reference(before, after, result) -> list[str]:
+            if result is not None and result.returncode != 1:
+                return [f"{verdict} without a package exited {result.returncode}, expected 1"]
+            return []
+
+        self._step(
+            Operation(verdict, ()), lambda: self.world.run((verdict, *user)), reference=reference
+        )
+
     @rule(kind=st.sampled_from(KINDS))
     def uninstall(self, kind: str) -> None:
-        if kind not in self.declared:
-            return
-        args = ("uninstall", *self.world.global_flag(), str(self.world.packages[kind]))
-        self.converged = False
+        path = str(self.world.packages[kind])
+        declared_before = kind in self.declared
+
+        def reference(before, after, result) -> list[str]:
+            # The outcome comes first; a success must remove the declaration (#4133).
+            if result is None:
+                return []
+            expected = 0 if declared_before else 1
+            if result.returncode != expected:
+                return [f"uninstall {kind} exited {result.returncode}, expected {expected}"]
+            if result.returncode == 0 and path in _declared_paths(self.world.manifest()):
+                return [f"uninstall {kind} exited 0 but {kind} is still declared"]
+            return []
+
+        args = ("uninstall", *self.world.global_flag(), path)
+        if declared_before:
+            self.converged = False
         result = self._step(
             Operation("uninstall", (kind,), mutating=True),
             lambda: self.world.run(args),
+            reference=reference,
         )
-        declared = self.world.manifest().get("dependencies", {}).get("apm", [])
-        if result is not None and str(self.world.packages[kind]) not in declared:
+        if result is not None and result.returncode == 0:
             self.declared.discard(kind)
 
     @rule()
@@ -667,7 +756,11 @@ class GateMachine(RuleBasedStateMachine):
             lambda: self.world.run(args),
         )
         assert audit is not None
-        self._install("frozen", paired={"audit": audit.returncode})
+        self._install(
+            "frozen",
+            paired={"audit": audit.returncode},
+            paired_output={"audit": audit.stdout + audit.stderr},
+        )
 
 
 class _ExpectedWithoutReference:
@@ -689,6 +782,10 @@ class _ExpectedWithoutReference:
 
     def record_expected(self, cell_id: str) -> None:
         self._machine.record_expected(cell_id)
+
+
+def _declared_paths(manifest: dict) -> list[str]:
+    return list((manifest.get("dependencies") or {}).get("apm") or [])
 
 
 def _store_grants(store: dict, path: str) -> bool:
