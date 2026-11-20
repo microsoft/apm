@@ -429,7 +429,8 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "approve-org-policy-warning-twice",
         "I9",
         "#4178",
-        _runs("approve"),
+        # 'apm approve <package>' prints it twice; '--recommended' prints it once.
+        lambda args, _scenario: _command_name(args) == "approve" and "--recommended" not in args,
         r"\[!\] (Org policy not applied|Using stale cached org policy)",
         output=r"^\[!\] (Org policy not applied|Using stale cached org policy)",
     ),
