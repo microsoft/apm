@@ -215,6 +215,11 @@ def _remove_created_directories(
         integrator.cleanup_empty_parents([path], stop)
 
 
+def kept_lines(kept: Mapping[str, str]) -> list[str]:
+    """Name each kept file with its reason and the runnable next step."""
+    return [f"  - kept {path}: {_KEPT_REASONS[reason]}" for path, reason in sorted(kept.items())]
+
+
 def refuse_unrecorded_deployments(
     withheld: Iterable[str], unclaimed: set[str], committed: LockFile, lockfile_dir: Path
 ) -> Exception:
@@ -239,9 +244,7 @@ def refuse_unrecorded_deployments(
         f"  - {path} is deployed by this install but not recorded in apm.lock.yaml"
         for path in _outermost(unclaimed)
     ]
-    reasons += [
-        f"  - kept {path}: {_KEPT_REASONS[reason]}" for path, reason in sorted(outcome.kept.items())
-    ]
+    reasons += kept_lines(outcome.kept)
     removed = "the other unrecorded files were" if outcome.kept else "the unrecorded files were"
     return FrozenInstallError(
         "--frozen: apm.lock.yaml does not record everything this install deploys.",
