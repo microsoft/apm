@@ -1425,23 +1425,8 @@ def run_baseline_checks(
     if _run(_check_deployment_ledger_owners(lock)):
         return result
 
-    # Check 4: Deployed files present, then recorded executables decisions
-    # are still the gate's (#4053)
-    if _run(_check_deployed_files_present(deployment_root, lock, resolved_targets)) or _run(
-        _check_exec_status_current(
-            project_root,
-            lock,
-            manifest,
-            resolved_targets,
-            user_scope=user_scope,
-            modules_root=(
-                prepared_replay.modules_root
-                if prepared_replay is not None
-                else project_root / APM_MODULES_DIR
-            ),
-            policy_provider=policy_provider,
-        )
-    ):
+    # Check 4: Deployed files present
+    if _run(_check_deployed_files_present(deployment_root, lock, resolved_targets)):
         return result
 
     # Check 5: No orphaned packages
@@ -1497,6 +1482,23 @@ def run_baseline_checks(
                 user_scope=user_scope,
                 no_policy=no_policy,
                 prepared_replay=prepared_replay,
+            )
+        )
+        or _run(
+            # 8d: recorded executables decisions are still the gate's (#4053),
+            # after the pins, so audit and --frozen name the same first cause.
+            _check_exec_status_current(
+                project_root,
+                lock,
+                manifest,
+                resolved_targets,
+                user_scope=user_scope,
+                modules_root=(
+                    prepared_replay.modules_root
+                    if prepared_replay is not None
+                    else project_root / APM_MODULES_DIR
+                ),
+                policy_provider=policy_provider,
             )
         )
     ):

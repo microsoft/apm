@@ -139,6 +139,23 @@ def _frozen_after_tightening(machine: GateMachine, op: Operation, before, after,
 
 
 _HOOK_KEY = "hook-file"
+# The exec_status a plain install records for each gate state (#4053).
+_RECORDED_STATUS = {"allow": "deployed", "pending": "gated_pending_approval"}
+
+
+def _stale_decision(machine: GateMachine, before: Observation) -> bool:
+    """The lock records an executables decision the gate no longer makes (#4053)."""
+    lock = before.lock
+    if lock is None:
+        return False
+    for kind in machine.declared:
+        path = str(machine.world.packages[kind])
+        wanted = _RECORDED_STATUS.get(machine.gate_state(kind), "denied")
+        for dependency in lock.get_package_dependencies():
+            recorded = dependency.exec_status
+            if dependency.local_path == path and recorded not in (None, "absent", wanted):
+                return True
+    return False
 
 
 def _recorded(observation: Observation) -> frozenset[str]:
@@ -567,7 +584,8 @@ class GateMachine(RuleBasedStateMachine):
             # packages succeeds; --frozen refuses without a lockfile (#4133) and
             # when it retired a hook the lock still records (I7-X1, #4043).
             retired = _frozen_after_tightening(self, Operation(name), before, after, result)
-            expected = 1 if mode == "frozen" and (before.lock is None or retired) else 0
+            refused = before.lock is None or retired or _stale_decision(self, before)
+            expected = 1 if mode == "frozen" and refused else 0
             if result.returncode != expected:
                 return [f"{name} exited {result.returncode}, expected {expected}"]
             if result.returncode != 0 or mode != "plain":
