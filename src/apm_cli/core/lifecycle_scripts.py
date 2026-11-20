@@ -41,6 +41,8 @@ from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -433,15 +435,15 @@ def _get_policy_scripts_dir() -> Path:
 
 def _get_user_apm_yml() -> Path:
     """Return the user-level apm.yml path (~/.apm/apm.yml or $APM_HOME/apm.yml)."""
-    from apm_cli.core.scope import get_apm_home
+    from apm_cli.core.scope import InstallScope, get_manifest_path
 
-    return get_apm_home() / "apm.yml"
+    return get_manifest_path(InstallScope.USER)
 
 
 def _get_project_apm_yml(project_root: str | None = None) -> Path:
     """Return the project-level apm.yml path at the repo root."""
     root = Path(project_root) if project_root else Path.cwd()
-    return root / "apm.yml"
+    return manifest_file(root)
 
 
 def _load_scripts_from_dir(
@@ -670,7 +672,9 @@ def build_runner_from_context(
     # Org deny_all ceiling, resolved through the install gate's outcome
     # routing: a policy outcome that blocks install (hash mismatch,
     # fetch_failure_default=block, cached fetch_failure=block) also
-    # suppresses scripts. Unexpected errors never raise into the command.
+    # suppresses scripts, as does a policy that cannot be resolved at all
+    # (for example an inheritance chain error). Errors never raise into the
+    # command.
     suppressed_reason = None
     try:
         from apm_cli.install.errors import PolicyViolationError
@@ -679,7 +683,7 @@ def build_runner_from_context(
         from apm_cli.policy.project_config import read_project_fetch_failure_default
 
         # Discovery joins paths onto the root, so a str root would raise
-        # TypeError here and the except below would silently skip deny_all.
+        # TypeError here and the except below would suppress every script.
         root = Path(project_root) if project_root else Path.cwd()
         fetch_result = discover_policy_with_chain(root)
         resolved = getattr(fetch_result, "policy", None)
@@ -696,6 +700,7 @@ def build_runner_from_context(
                 suppressed_reason = "org policy could not be enforced"
     except Exception:
         _logger.debug("Lifecycle org-policy check failed", exc_info=True)
+        suppressed_reason = "org policy could not be enforced"
 
     if suppressed_reason is not None:
         if logger is not None:

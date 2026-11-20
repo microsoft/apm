@@ -8,6 +8,8 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.subsets import _levenshtein_distance
 
+pytestmark = pytest.mark.unit
+
 
 class TestLocalPathDepTargets:
     """Regression tests for issue #1982: targets: ignored on path: deps."""

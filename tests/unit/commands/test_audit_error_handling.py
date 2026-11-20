@@ -30,8 +30,11 @@ from apm_cli.commands.audit import (
     _render_summary,
     _scan_single_file,
 )
+from apm_cli.core.command_logger import CommandLogger
 from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.file_scanner import FileScanResult
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -176,33 +179,26 @@ class TestScanSingleFile:
 
 
 class TestHasActionableFindings:
-    def test_empty_dict_returns_false(self) -> None:
-        assert _has_actionable_findings({}) is False
-
-    def test_info_only_returns_false(self) -> None:
-        findings = {"file.md": [_make_finding("info")]}
-        assert _has_actionable_findings(findings) is False
-
-    def test_warning_returns_true(self) -> None:
-        findings = {"file.md": [_make_finding("warning")]}
-        assert _has_actionable_findings(findings) is True
-
-    def test_critical_returns_true(self) -> None:
-        findings = {"file.md": [_make_finding("critical")]}
-        assert _has_actionable_findings(findings) is True
-
-    def test_mixed_info_and_critical(self) -> None:
+    @pytest.mark.parametrize(
+        ("severities_by_file", "expected"),
+        [
+            ({}, False),
+            ({"file.md": ["info"]}, False),
+            ({"file.md": ["warning"]}, True),
+            ({"file.md": ["critical"]}, True),
+            ({"file.md": ["info", "critical"]}, True),
+            ({"a.md": ["info"], "b.md": ["info"]}, False),
+        ],
+        ids=["empty", "info-only", "warning", "critical", "mixed", "multi-file-info"],
+    )
+    def test_actionable_when_any_finding_is_not_info(
+        self, severities_by_file: dict[str, list[str]], expected: bool
+    ) -> None:
         findings = {
-            "file.md": [_make_finding("info"), _make_finding("critical")],
+            path: [_make_finding(severity) for severity in severities]
+            for path, severities in severities_by_file.items()
         }
-        assert _has_actionable_findings(findings) is True
-
-    def test_multiple_files_with_info_only(self) -> None:
-        findings = {
-            "a.md": [_make_finding("info")],
-            "b.md": [_make_finding("info")],
-        }
-        assert _has_actionable_findings(findings) is False
+        assert _has_actionable_findings(findings) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -211,40 +207,36 @@ class TestHasActionableFindings:
 
 
 class TestRenderFindingsTable:
-    def test_empty_findings_returns_immediately(self) -> None:
-        """No output path; empty findings should not raise."""
-        _render_findings_table({})
+    @pytest.mark.parametrize("severities", [[], ["info"]], ids=["empty", "info-non-verbose"])
+    def test_nothing_rendered_without_visible_rows(self, severities: list[str]) -> None:
+        findings = {"file.md": [_make_finding(s) for s in severities]} if severities else {}
+        console = MagicMock()
+        with patch("apm_cli.commands.audit._get_console", return_value=console):
+            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
+                _render_findings_table(findings, verbose=False)
+        mock_echo.assert_not_called()
+        console.print.assert_not_called()
 
-    def test_info_filtered_in_non_verbose_mode(self) -> None:
-        """Info findings are filtered out when verbose=False."""
-        findings = {"file.md": [_make_finding("info")]}
-        # Should not raise even if no findings remain after filter
-        _render_findings_table(findings, verbose=False)
-
-    def test_info_included_in_verbose_mode(self) -> None:
+    def test_info_included_in_verbose_mode(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Info findings pass through filter in verbose mode."""
         findings = {"file.md": [_make_finding("info")]}
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=True)
-        # Should have produced some output
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=True)
+        assert "INFO       test.md 1:5  U+200B" in "".join(capsys.readouterr())
 
-    def test_critical_rendered_without_console(self) -> None:
+    def test_critical_rendered_without_console(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("critical")]}
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=False)
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=False)
+        assert "CRITICAL   test.md 1:5  U+200B  Zero-width space" in "".join(capsys.readouterr())
 
-    def test_warning_rendered_without_console(self) -> None:
+    def test_warning_rendered_without_console(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("warning")]}
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=False)
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=False)
+        assert "WARNING    test.md 1:5  U+200B  Zero-width space" in "".join(capsys.readouterr())
 
-    def test_severity_ordering(self) -> None:
+    def test_severity_ordering(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Critical findings should appear before warnings in output."""
         findings = {
             "file.md": [
@@ -253,9 +245,9 @@ class TestRenderFindingsTable:
             ]
         }
         with patch("apm_cli.commands.audit._get_console", return_value=None):
-            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
-                _render_findings_table(findings, verbose=True)
-        assert mock_echo.called
+            _render_findings_table(findings, verbose=True)
+        out = "".join(capsys.readouterr())
+        assert out.index("CRITICAL   test.md 1:5") < out.index("WARNING    test.md 2:5")
 
 
 # ---------------------------------------------------------------------------
@@ -264,45 +256,46 @@ class TestRenderFindingsTable:
 
 
 class TestRenderSummary:
-    def test_no_findings_logs_success(self) -> None:
-        logger = _make_logger()
-        _render_summary({}, files_scanned=5, logger=logger)
-        logger.success.assert_called_once()
-        args = logger.success.call_args[0][0]
-        assert "5" in args
+    def test_no_findings_logs_success(self, capsys: pytest.CaptureFixture[str]) -> None:
+        _render_summary({}, files_scanned=5, logger=CommandLogger("audit"))
+        assert "[*] 5 file(s) scanned -- no issues found" in "".join(capsys.readouterr())
 
-    def test_critical_findings_logs_error(self) -> None:
-        logger = _make_logger()
+    def test_critical_findings_logs_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("critical")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 1, "warning": 0, "info": 0}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        logger.error.assert_called_once()
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = "".join(capsys.readouterr())
+        assert (
+            out.count("[x] 1 critical finding(s) in 1 file(s) -- hidden characters detected") == 1
+        )
 
-    def test_warning_only_logs_warning(self) -> None:
-        logger = _make_logger()
+    def test_warning_only_logs_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("warning")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 0, "warning": 2, "info": 0}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        logger.warning.assert_called_once()
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = "".join(capsys.readouterr())
+        assert out.count("[!] 2 warning(s) in 1 file(s) -- hidden characters detected") == 1
 
-    def test_info_only_logs_progress(self) -> None:
-        logger = _make_logger()
+    def test_info_only_logs_progress(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("info")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 0, "warning": 0, "info": 3}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        logger.progress.assert_called()
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert "3 info-level finding(s) in 1 file(s) -- unusual characters" in out
 
-    def test_info_plus_critical_logs_extra_progress(self) -> None:
-        logger = _make_logger()
+    def test_info_plus_critical_logs_extra_progress(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         findings = {"file.md": [_make_finding("critical"), _make_finding("info")]}
         with patch("apm_cli.commands.audit.ContentScanner") as mock_cs:
             mock_cs.summarize.return_value = {"critical": 1, "warning": 0, "info": 1}
-            _render_summary(findings, files_scanned=1, logger=logger)
-        # Both error + progress for "Plus N info-level findings" should be called
-        assert logger.progress.call_count >= 1
+            _render_summary(findings, files_scanned=1, logger=CommandLogger("audit"))
+        out = "".join(capsys.readouterr())
+        assert "1 critical finding(s) in 1 file(s)" in out
+        assert "These characters may embed invisible instructions" in out
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +318,7 @@ class TestApplyStrip:
             modified = _apply_strip(findings, tmp_path, logger)
 
         assert modified == 1
+        assert bad_file.read_text(encoding="utf-8") == "Helloworld"
 
     def test_skips_nonexistent_files(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -332,6 +326,7 @@ class TestApplyStrip:
         findings = {missing: [_make_finding("critical")]}
         result = _apply_strip(findings, tmp_path, logger)
         assert result == 0
+        assert not (tmp_path / "nonexistent.md").exists()
 
     def test_skips_outside_project_root(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -343,6 +338,7 @@ class TestApplyStrip:
         result = _apply_strip(findings, project_root, logger)
         assert result == 0
         logger.warning.assert_called()
+        assert not (tmp_path / "outside.md").exists()
 
     def test_handles_os_error_gracefully(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -355,6 +351,7 @@ class TestApplyStrip:
 
         assert result == 0
         logger.warning.assert_called()
+        assert bad_file.read_text(encoding="utf-8") == "Hello\u202eworld"
 
     def test_no_change_means_no_write(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -367,6 +364,7 @@ class TestApplyStrip:
             result = _apply_strip(findings, tmp_path, logger)
 
         assert result == 0
+        assert clean_file.read_text(encoding="utf-8") == "Hello world"
 
 
 # ---------------------------------------------------------------------------
@@ -375,12 +373,11 @@ class TestApplyStrip:
 
 
 class TestPreviewStrip:
-    def test_no_strippable_returns_zero(self) -> None:
-        logger = _make_logger()
+    def test_no_strippable_returns_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
         findings = {"file.md": [_make_finding("info")]}
-        result = _preview_strip(findings, logger)
+        result = _preview_strip(findings, CommandLogger("audit"))
         assert result == 0
-        logger.progress.assert_called()
+        assert "Nothing to clean -- no strippable characters found" in "".join(capsys.readouterr())
 
     def test_strippable_returns_affected_count(self) -> None:
         logger = _make_logger()

@@ -18,6 +18,8 @@ from apm_cli.deps.reachability import compute_forward_reachable_keys
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.models.dependency import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _isolated_apm_yml_cache():

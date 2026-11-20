@@ -39,7 +39,7 @@ content (the root `.apm/` directory) is always trusted.
 | Type | Gated | Notes |
 |------|-------|-------|
 | Hooks (`.apm/hooks/`, `hooks/`) | Yes | Auto-fire in IDE on lifecycle events |
-| Bin executables (`bin/`) | Yes | Deployed to agent PATH via symlinks |
+| Bin executables (`bin/`) | Yes | Deployed only for a marketplace plugin installed at user scope (`-g`) with the Claude target; copied into the plugin folder on Claude Code's PATH |
 | MCP servers (self-defined) | Yes | `registry: false` servers write to IDE MCP config |
 | LSP servers | Yes | Supported runtimes may start generated server commands automatically |
 | Canvas extensions (`.apm/extensions/`) | Yes | Deploys executable Node.js to IDE extensions |
@@ -110,7 +110,10 @@ Each item is then admitted in this order (first match wins):
 When an approved definition changes upstream, install parks the item and
 warns `Parked MCP server 'kit-docs' (acme/agent-kit): definition changed since
 approval` (or `Parked hook file '<path>' ...`), naming the review and
-re-approve commands.
+re-approve commands. A package none of whose hook files matches its pin
+retires the hooks it deployed earlier. `apm install --frozen` and
+`apm audit --ci` both fail while the lockfile still records such a hook as
+deployed.
 
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
@@ -123,6 +126,10 @@ holds on Windows; the installed copy is still integrity-checked including file
 modes. Any byte change parks the whole plugin: it is not registered, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
+An Agent Plugin's root `mcp.json` counts: `mcp`, plus `bin` when a server
+runs a command. `apm approve --pending`, `--list` and `apm policy explain`
+list those types, and a type-level grant must cover both; one that misses a
+type parks the plugin with `not approved (missing grant: bin)`.
 A plugin that runs files under its root `.apm/` or `apm.yml` that are not
 copies of pinned files cannot be pinned: `apm approve` refuses it (exit 1)
 with `APM cannot pin files under .apm/ or apm.yml`, and install parks it.
@@ -202,7 +209,10 @@ Re-approving replaces the package's pins with the current definitions.
 
 It exits 1 when any requested package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
-approval that was not recorded. The first pinned approval in a project also
+approval that was not recorded. It also exits 1, writing nothing, when the
+org policy outcome blocks, exactly as `apm install` would (for example an
+unreachable policy under `policy.fetch_failure_default: block`); run
+`apm policy status --no-cache` to diagnose. The first pinned approval in a project also
 prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,

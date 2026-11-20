@@ -358,23 +358,23 @@ class TestBuildRepoUrl:
     """URL construction for different backends and configurations."""
 
     def test_github_https_with_token(self) -> None:
-        """Builds authenticated GitHub HTTPS clone URL."""
+        """Builds a credential-free GitHub HTTPS clone URL even when a token exists."""
         from urllib.parse import urlparse
 
         host = _make_host(github_host="github.com", github_token="mytoken")
         backend_mock = MagicMock()
         backend_mock.kind = "github"
         backend_mock.is_github_family = True
-        backend_mock.build_clone_https_url.return_value = (
-            "https://mytoken@github.com/owner/repo.git"
-        )
+        backend_mock.build_clone_https_url.return_value = "https://github.com/owner/repo.git"
         with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
             delegate = DownloadDelegate(host)
             dep = _make_dep_ref("owner/repo", host="github.com")
             url = delegate.build_repo_url("owner/repo", dep_ref=dep)
+        backend_mock.build_clone_https_url.assert_called_once_with(dep)
         parsed = urlparse(url)
         assert parsed.scheme == "https"
-        assert "github.com" in parsed.netloc
+        assert parsed.hostname == "github.com"
+        assert parsed.username is None
 
     def test_github_ssh_url(self) -> None:
         """Builds SSH URL when use_ssh=True."""
@@ -405,35 +405,8 @@ class TestBuildRepoUrl:
         parsed = urlparse(url)
         assert parsed.scheme == "http"
 
-    def test_no_dep_ref_uses_ssh_url(self) -> None:
-        """Legacy no-dep_ref path: SSH URL when use_ssh=True."""
-
-        host = _make_host(github_host="github.com", github_token=None)
-        backend_mock = MagicMock()
-        backend_mock.kind = "github"
-        backend_mock.is_github_family = True
-        with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
-            delegate = DownloadDelegate(host)
-            url = delegate.build_repo_url("owner/repo", use_ssh=True, dep_ref=None)
-        assert "owner/repo" in url or "git@" in url
-
-    def test_no_dep_ref_https_without_token(self) -> None:
-        """Legacy no-dep_ref: HTTPS without embedding a token when no token."""
-        from urllib.parse import urlparse
-
-        host = _make_host(github_host="github.com", github_token=None)
-        backend_mock = MagicMock()
-        backend_mock.kind = "github"
-        backend_mock.is_github_family = True
-        with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
-            delegate = DownloadDelegate(host)
-            url = delegate.build_repo_url("owner/repo", dep_ref=None)
-        assert url  # Should produce some URL
-        parsed = urlparse(url)
-        assert parsed.scheme in ("https", "http")
-
-    def test_empty_token_suppresses_credential(self) -> None:
-        """token='' means 'suppress token' — HTTPS URL has no credential."""
+    def test_host_token_never_reaches_url(self) -> None:
+        """The downloader token is never forwarded to the URL builder."""
         host = _make_host(github_token="should_not_appear")
         backend_mock = MagicMock()
         backend_mock.kind = "github"
@@ -442,7 +415,8 @@ class TestBuildRepoUrl:
         with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
             delegate = DownloadDelegate(host)
             dep = _make_dep_ref("owner/repo", host="github.com")
-            url = delegate.build_repo_url("owner/repo", dep_ref=dep, token="")
+            url = delegate.build_repo_url("owner/repo", dep_ref=dep)
+        backend_mock.build_clone_https_url.assert_called_once_with(dep)
         assert "should_not_appear" not in url
 
 

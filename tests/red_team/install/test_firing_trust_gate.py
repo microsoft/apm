@@ -14,6 +14,8 @@ import pytest
 
 from .conftest import fire_via_context, touch_cmd, trust, write_project
 
+pytestmark = pytest.mark.component
+
 
 def test_untrusted_clone_does_not_run_scripts(apm_home: Path, tmp_path: Path) -> None:
     """Untrusted project -> post-install must be skipped (no sentinel)."""

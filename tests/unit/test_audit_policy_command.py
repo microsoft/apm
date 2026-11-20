@@ -69,6 +69,8 @@ def _write_policy_file(project: Path, **overrides) -> Path:
         "name": "test-policy",
         "version": "1.0.0",
         "enforcement": "block",
+        # One rule so discovery reports ``found``; a rule-less policy is ``empty``.
+        "dependencies": {"deny": ["blocked-org/*"]},
     }
     data.update(overrides)
     policy_path = project / "apm-policy.yml"
@@ -177,7 +179,9 @@ class TestCiWithPolicyOrg:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
+        mock_result = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:test/.github", outcome="found"
+        )
 
         with patch(
             "apm_cli.policy.discovery.discover_policy", return_value=mock_result
@@ -199,7 +203,7 @@ class TestCiPolicyNotFound:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(error=None, policy=None)
+        mock_result = PolicyFetchResult(error=None, policy=None, outcome="absent")
 
         with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result):
             result = runner.invoke(
@@ -243,7 +247,9 @@ class TestNoCacheFlag:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
+        mock_result = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:test/.github", outcome="found"
+        )
 
         with patch(
             "apm_cli.policy.discovery.discover_policy", return_value=mock_result
@@ -317,8 +323,8 @@ class TestCiWithoutPolicy:
         # found; JSON is on stdout. Read stdout explicitly so the warning does
         # not corrupt JSON parsing.
         data = json.loads(result.stdout)
-        # Only the nine baseline checks, including deployment ownership.
-        assert data["summary"]["total"] == 10
+        # Only the baseline checks, including deployment ownership and hook pins.
+        assert data["summary"]["total"] == 11
 
 
 # -- #3195: explicit --policy fails closed when it cannot be loaded -------

@@ -12,6 +12,8 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency
 
+pytestmark = pytest.mark.unit
+
 
 def test_exec_status_defaults_to_none():
     dep = LockedDependency(repo_url="owner/repo")

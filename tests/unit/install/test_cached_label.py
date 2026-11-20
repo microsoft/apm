@@ -17,7 +17,11 @@ plumbs the value through, and the integrate phase computes it from
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.install.sources import CachedDependencySource
+
+pytestmark = pytest.mark.component
 
 
 def _make_source(

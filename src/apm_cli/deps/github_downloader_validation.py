@@ -427,8 +427,6 @@ def _build_validation_attempts(
             dep_ref.repo_url,
             use_ssh=False,
             dep_ref=dep_ref,
-            token="",
-            auth_scheme=dep_auth_scheme,
         )
         ado_env = (
             downloader.auth_resolver.git_env_for_remote(dep_auth_ctx, ado_url)
@@ -472,8 +470,6 @@ def _build_validation_attempts(
             dep_ref.repo_url,
             use_ssh=False,
             dep_ref=dep_ref,
-            token="",
-            auth_scheme=dep_auth_scheme if is_ado else "basic",
         )
         token_env = (
             downloader.auth_resolver.git_env_for_remote(
@@ -495,7 +491,6 @@ def _build_validation_attempts(
         dep_ref.repo_url,
         use_ssh=False,
         dep_ref=dep_ref,
-        token="",
     )
     if public_github_anonymous_first:
         plain_env = downloader.auth_resolver.build_public_github_anonymous_git_env(
@@ -613,7 +608,6 @@ def _ref_exists_via_ls_remote(
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token="",
             )
             output = (
                 _run_remote(url, probe_env)

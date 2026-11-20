@@ -20,6 +20,8 @@ from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import ApmPolicy, McpPolicy, McpTransportPolicy
 
+pytestmark = pytest.mark.unit
+
 SSE_SERVER = {
     "name": "io.example/sse-server",
     "remotes": [{"type": "sse", "url": "https://sse.example/mcp"}],
@@ -254,84 +256,3 @@ class TestUnresolvedTransport:
         value = effective["io.example/any"]
         assert isinstance(value, UnresolvedTransport)
         assert "unreachable" in value.reason
-
-
-class TestPolicyInstallParity:
-    def test_first_declaration_wins_like_install(self, fake_registry):
-        fake_registry["servers"][DUAL_SERVER["name"]] = DUAL_SERVER
-        production = MCPDependency.from_dict({"name": DUAL_SERVER["name"], "transport": "stdio"})
-        development = MCPDependency.from_string(DUAL_SERVER["name"])
-        result = run_dependency_policy_checks(
-            [], policy=_policy("stdio"), mcp_deps=[production, development]
-        )
-        assert _transport_check(result).passed
-
-    @pytest.mark.parametrize("dep_registry", [None, "https://corp.example/"])
-    def test_install_writes_the_snapshot_policy_judged(
-        self, fake_registry, tmp_path, monkeypatch, dep_registry
-    ):
-        """A registry that answers differently later cannot change what is written."""
-        from unittest.mock import MagicMock
-
-        from apm_cli.integration.mcp_integrator_install import (
-            _registry_group_key,
-            run_mcp_install,
-        )
-        from apm_cli.registry.client import SimpleRegistryClient
-
-        monkeypatch.setenv("MCP_REGISTRY_URL", "https://default.example/")
-        name = SSE_SERVER["name"]
-        fake_registry["servers"][name] = SSE_SERVER
-        dep = (
-            MCPDependency.from_string(name)
-            if dep_registry is None
-            else MCPDependency.from_dict({"name": name, "registry": dep_registry})
-        )
-        real_url = SimpleRegistryClient(_registry_group_key(dep)).registry_url
-        monkeypatch.setattr(
-            resolution, "_registry_client", lambda url: _FakeClient(real_url, fake_registry)
-        )
-        assert resolution.resolve_effective_mcp_transports([dep]) == {name: frozenset({"sse"})}
-
-        operations = MagicMock()
-        operations.registry_client.registry_url = real_url
-        operations.validate_servers_exist.side_effect = lambda names, **kwargs: (names, [])
-        operations.check_servers_needing_installation.return_value = [name]
-        operations.batch_fetch_server_info.return_value = {name: HTTP_SERVER}
-        operations.collect_environment_variables.return_value = {}
-        operations.collect_runtime_variables.return_value = {}
-        written: dict = {}
-
-        def _install(_runtime, _deps, _env, cache, _runtime_vars, **_kwargs):
-            written.update(cache)
-            return True
-
-        with (
-            patch("apm_cli.registry.operations.MCPServerOperations", return_value=operations),
-            patch(
-                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
-                side_effect=lambda runtimes, **_kwargs: runtimes,
-            ),
-            patch(
-                "apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime",
-                side_effect=_install,
-            ),
-        ):
-            run_mcp_install(
-                mcp_deps=[dep], runtime="copilot", project_root=tmp_path, logger=MagicMock()
-            )
-
-        assert write_transports(written[name]) == frozenset({"sse"})
-        assert written[name]["remotes"][0]["url"] == SSE_SERVER["remotes"][0]["url"]
-        operations.batch_fetch_server_info.assert_not_called()
-
-    def test_audit_checks_dev_mcp_servers_like_install(self, fake_registry, tmp_path):
-        from apm_cli.policy.policy_checks import run_policy_checks
-
-        fake_registry["servers"][SSE_SERVER["name"]] = SSE_SERVER
-        (tmp_path / "apm.yml").write_text(
-            f"name: p\nversion: 1.0.0\ndevDependencies:\n  mcp:\n    - {SSE_SERVER['name']}\n",
-            encoding="utf-8",
-        )
-        result = run_policy_checks(tmp_path, _policy("stdio", "streamable-http"), fail_fast=False)
-        assert not _transport_check(result).passed

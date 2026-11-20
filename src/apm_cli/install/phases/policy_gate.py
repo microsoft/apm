@@ -3,9 +3,9 @@
 Runs AFTER ``resolve.run(ctx)`` (so ``ctx.deps_to_install`` is populated)
 and BEFORE ``targets.run(ctx)`` (so denied deps never reach integration).
 
-Discovery outcomes (plan section B, 9-outcome matrix):
-  found, absent, cached_stale, cache_miss_fetch_fail, malformed,
-  disabled, garbage_response, no_git_remote, empty
+Discovery outcomes are the closed set
+``policy.outcome_routing.POLICY_DISCOVERY_OUTCOMES``; the routing owner
+decides how each is handled.
 
 Target-aware compilation checks are NOT performed here -- they run
 AFTER the targets phase when the effective target is known
@@ -51,7 +51,7 @@ def run(ctx: InstallContext) -> None:
     source = fetch_result.source
 
     # ------------------------------------------------------------------
-    # 2. Route outcome through the shared 9-outcome table.
+    # 2. Route outcome through the policy-outcome routing owner.
     # Logging + fail-closed gating live in one place
     # (``policy/outcome_routing.py``) so this phase and the
     # ``install --mcp`` / ``install --dry-run`` preflight stay aligned.
@@ -178,14 +178,24 @@ def _read_project_fetch_failure_default(ctx: InstallContext) -> str:
     """Resolve project-side ``policy.fetch_failure_default`` (closes #829).
 
     Reads from ctx attribute first (test-friendly override) then falls
-    back to parsing ``<project_root>/apm.yml``. Default is ``"warn"``.
+    back to parsing the scope manifest. Default is ``"warn"``.
     """
     explicit = getattr(ctx, "policy_fetch_failure_default", None)
     if isinstance(explicit, str) and explicit in {"warn", "block"}:
         return explicit
     from apm_cli.policy.project_config import read_project_fetch_failure_default
 
-    return read_project_fetch_failure_default(ctx.project_root)
+    return read_project_fetch_failure_default(_policy_root(ctx))
+
+
+def _policy_root(ctx: InstallContext):
+    """Return the scope manifest root that policy settings and discovery read.
+
+    At user scope this is ``$APM_HOME``, not the deploy root (HOME).
+    """
+    from apm_cli.core.scope import is_user_scope, manifest_root
+
+    return manifest_root(ctx.project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))
 
 
 def _discover_with_chain(ctx: InstallContext):
@@ -197,4 +207,4 @@ def _discover_with_chain(ctx: InstallContext):
     """
     from apm_cli.policy.discovery import discover_policy_with_chain
 
-    return discover_policy_with_chain(ctx.project_root)
+    return discover_policy_with_chain(_policy_root(ctx))

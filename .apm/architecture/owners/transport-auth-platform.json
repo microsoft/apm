@@ -207,8 +207,8 @@
     },
     {
       "id": "credential-origin-scope",
-      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops)",
-      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
+      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops); HTTP sessions are CredentialScopedSession unless frozen-exempt, and no URL builder takes a credential",
+      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
       "selectors": [
         "src/apm_cli/utils/http_credentials.py",
         "src/apm_cli/deps/registry_proxy.py"
@@ -216,7 +216,38 @@
       "guards": [
         "transport-platform-authenticated-egress-credential-headers",
         "transport-platform-credential-origin-scope",
-        "transport-platform-origin-bounded-redirect"
+        "transport-platform-http-session-construction",
+        "transport-platform-origin-bounded-redirect",
+        "transport-platform-url-builder-credential-free"
+      ]
+    },
+    {
+      "id": "egress-route-policy",
+      "decision": "Route of every outbound request (direct, proxy-only or refused) and registry-only (PROXY_REGISTRY_ONLY) enforcement, with the org policy fetch kept direct as the documented governance-channel exception",
+      "owner": "deps/egress_route.py (EgressSurface, EgressRoute, route_for, is_refused, is_proxy_only); deps/registry_proxy.py parses the flag (is_enforce_only) for the owner only; consumers: install/pipeline.py, install/validation.py, install/phases/integrate.py, install/helpers/ref_reuse.py, deps/git_reference_resolver.py, deps/git_semver_resolver.py, deps/artifactory_orchestrator.py, models/dependency/reference.py, commands/view.py, commands/outdated.py, registry/client.py, marketplace/client.py, policy/_policy_http.py",
+      "selectors": ["src/apm_cli/deps/egress_route.py"],
+      "guards": ["transport-platform-egress-route-policy"]
+    },
+    {
+      "id": "credential-value-rendering",
+      "decision": "How credential values render in command output: stored secrets show a fixed mask with presence reported, other config values drop URL userinfo, mask URL query values and redact labelled secrets and credential flag values, every apm config output call renders values through the owner, and free-text diagnostics, debug logs, script logs and SBOM export redact through one pattern and one URL userinfo stripper",
+      "owner": "utils/credential_rendering.py (render_credential_value, render_config_value, is_credential_key, redact_secrets, SECRET_RE, redact_url_userinfo, mask_known_values); consumers: commands/config.py (_echo_setting, _add_table_row, every output call), core/auth.py (SecretRedactionFilter), core/auth_outcome.py (sanitize_diagnostic_detail), core/script_executors.py, export/purl.py (scrub_url), install/mcp/warnings.py, deps/registry_proxy.py, deps/registry/client.py, deps/registry/auth.py, deps/registry/resolver.py, models/apm_package.py",
+      "selectors": [
+        "src/apm_cli/utils/credential_rendering.py",
+        "src/apm_cli/commands/config.py"
+      ],
+      "guards": ["transport-platform-credential-value-rendering"]
+    },
+    {
+      "id": "archive-extraction-limits",
+      "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries (#4235)",
+      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member and _stream_member); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
+      "selectors": [
+        "src/apm_cli/utils/archive.py",
+        "src/apm_cli/deps/registry/extractor.py"
+      ],
+      "guards": [
+        "transport-platform-archive-extraction-limits"
       ]
     }
   ]

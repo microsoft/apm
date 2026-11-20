@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+pytestmark = pytest.mark.unit
 
 
 class TestRuntimeDetection(unittest.TestCase):

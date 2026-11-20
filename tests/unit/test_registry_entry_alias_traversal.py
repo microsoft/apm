@@ -9,6 +9,8 @@ import pytest
 from apm_cli.models.dependency.registry_entry import parse_registry_object_entry
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _enable_registry_feature():

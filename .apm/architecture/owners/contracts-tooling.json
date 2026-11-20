@@ -9,6 +9,21 @@
       "guards": ["contracts-tooling-governance-evidence"]
     },
     {
+      "id": "ci-validation-topology",
+      "decision": "Merge-time validation topology: which merge_group jobs produce every merge-gate.yml merge_group EXPECTED_CHECKS name, how ci-integration.yml shards the merge-time integration corpus, and the alarm that fails when main moves without a merge_group run",
+      "owner": ".github/workflows/merge-gate.yml (merge_group EXPECTED_CHECKS) + .github/workflows/ci-integration.yml (merge-time lanes via the scripts/ci_sharding.py planner) + .github/workflows/merge-queue-freshness.yml with scripts/merge_queue_freshness.py (freshness alarm); closed-world guard in tests/quality/test_ci_topology.py",
+      "selectors": [
+        ".github/workflows/ci-integration.yml",
+        ".github/workflows/merge-gate.yml",
+        ".github/workflows/merge-queue-freshness.yml",
+        "scripts/merge_queue_freshness.py"
+      ],
+      "guards": [
+        "contracts-tooling-ci-merge-queue-freshness",
+        "contracts-tooling-ci-merge-time-topology"
+      ]
+    },
+    {
       "id": "onboarding-metadata-only",
       "decision": "Discovery inventory and consented consumer dependency delta; never source or deployment mutation",
       "owner": "adopt/discovery.py + adopt/materialize.py + adopt/manifest_edit.py",
@@ -107,7 +122,10 @@
       "decision": "Whether a discovered lifecycle script may fire (APM_NO_SCRIPTS, org executables.deny_all, project script trust)",
       "owner": "core/lifecycle_scripts.py (build_runner_from_context is the only LifecycleScriptRunner constructor)",
       "selectors": ["src/apm_cli/core/lifecycle_scripts.py"],
-      "guards": ["contracts-tooling-lifecycle-script-gate"]
+      "guards": [
+        "contracts-tooling-lifecycle-script-gate",
+        "contracts-tooling-lifecycle-policy-errors"
+      ]
     },
     {
       "id": "lockfile-generator-compatibility",

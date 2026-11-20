@@ -55,6 +55,42 @@ ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/deps/registry/extractor.py",
+            "    safe_extract_tar(tar, dest_root, error_type=UnsafeTarballError)",
+            "    tar.extractall(dest_root)",
+            id="registry-tar-extractall",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/download_strategies.py",
+            "return read_zip_member(zf, entry, error_type=ArchiveError)",
+            "return archive_handle.open(entry).read()",
+            id="renamed-zip-member-read",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            "from ..utils.archive import (",
+            'import zipfile\n_SIDE = zipfile.ZipFile("side.zip")\nfrom ..utils.archive import (',
+            id="unlisted-archive-opener",
+        ),
+    ],
+)
+def test_archive_member_reads_cannot_bypass_the_limits_owner(
+    path: str, original: str, replacement: str
+) -> None:
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "transport-platform-archive-extraction-limits"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/install/drift.py",
             "deployment_modules_dir, deployment_frame = replay_deployment_frame(",
             "deployment_modules_dir, deployment_frame = private_deployment_frame(",
@@ -868,8 +904,8 @@ def test_gated_hooks_retire_and_replay_through_trust_owner(path: str, old: str, 
     [
         (
             "src/apm_cli/install/template.py",
-            'manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))',
-            "Path.home()",
+            'project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))',
+            "project_root, user_scope=False",
         ),
         (
             "src/apm_cli/security/executables.py",
@@ -912,7 +948,10 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-trust-policy-outcome",
             "src/apm_cli/install/exec_gate.py",
-            "            policy = resolve_trust_policy(self._project_root, announce=False)\n",
+            "            policy = resolve_trust_policy(\n"
+            "                manifest_root(self._project_root, user_scope=self._user_scope), "
+            "announce=False\n"
+            "            )\n",
             "            policy = None\n",
         ),
         (
@@ -996,6 +1035,13 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "src/apm_cli/policy/outcome_routing.py",
             "        fetch_result = discover_trust_policy(root)\n",
             "        fetch_result = discover_policy_with_chain(root)\n",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/commands/audit.py",
+            "        return resolve_trust_policy(cfg.project_root, announce=False, "
+            "fetch_result=fetch_policy())\n",
+            '        return getattr(fetch_policy(), "policy", None)\n',
         ),
     ],
 )
@@ -1406,6 +1452,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Policy cache serializer stops routing through the canonical shape helper.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-ci-merge-queue-freshness",
+        rule_id="contracts-tooling-ci-merge-queue-freshness",
+        path="scripts/merge_queue_freshness.py",
+        old="return 0 if verdict.fresh else 1",
+        new="return 0",
+        intent="The freshness alarm reports a bypassed merge queue but never fails.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-ci-merge-time-topology",
+        rule_id="contracts-tooling-ci-merge-time-topology",
+        path="tests/quality/test_ci_topology.py",
+        old="    assert not missing, (",
+        new="    assert missing or not missing, (",
+        intent="The guard stops failing when merge_group waits for a check no merge_group job produces.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-compile-inventory",
         rule_id="registry_delegation.compile_inventory_authority",
         path="src/apm_cli/compilation/inventory.py",
@@ -1452,6 +1514,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="authorizes_implementation: false",
         new="authorizes_implementation: true",
         intent="Advisory evidence starts claiming implementation authority.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-lifecycle-policy-errors",
+        rule_id="contracts-tooling-lifecycle-policy-errors",
+        path="src/apm_cli/core/lifecycle_scripts.py",
+        old=(
+            '        _logger.debug("Lifecycle org-policy check failed", exc_info=True)\n'
+            '        suppressed_reason = "org policy could not be enforced"\n'
+        ),
+        new='        _logger.debug("Lifecycle org-policy check failed", exc_info=True)\n',
+        intent="An org-policy read error lets lifecycle scripts fire with the org ceiling unread.",
     ),
     MutationCase(
         guard_id="contracts-tooling-lifecycle-script-gate",
@@ -1768,6 +1841,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
+        guard_id="install-deployment-bundle-admission-owner",
+        rule_id="install-deployment-bundle-admission-owner",
+        path="src/apm_cli/commands/pack.py",
+        old="            admit=apm_bundle_admission(Path(output), logger, dry_run=dry_run),\n",
+        new="            admit=lambda candidate: None,\n",
+        intent="apm unpack deploys a bundle without the shared bundle admission owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-bundle-compile-staging",
         rule_id="install-deployment-bundle-compile-staging",
         path="src/apm_cli/install/local_bundle_handler.py",
@@ -1864,6 +1945,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="InstallService stops owning the frozen-install mutation preflight.",
     ),
     MutationCase(
+        guard_id="install-deployment-hook-pin-frozen-audit-parity",
+        rule_id="install-deployment-hook-pin-frozen-audit-parity",
+        path="src/apm_cli/install/service.py",
+        old="mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)",
+        new="mismatches = []",
+        intent="install --frozen stops verifying locked hook pins while audit --ci still does.",
+    ),
+    MutationCase(
         guard_id="install-deployment-immutable-requirements",
         rule_id="install-deployment-immutable-requirements",
         path="src/apm_cli/deps/apm_resolver.py",
@@ -1902,6 +1991,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    legacy = lockfile.replacements is None\n",
         new=("    legacy = lockfile.replacements is None\n    parent_depth = target.depth - 1\n"),
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-locked-content-verdict",
+        rule_id="install-deployment-locked-content-verdict",
+        path="src/apm_cli/install/drift.py",
+        old=(
+            "    if locked_content_mismatch(\n"
+            "        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info\n"
+            "    ):\n"
+        ),
+        new="    if False:\n",
+        intent="The audit --ci scratch replay stops asking install's locked content verdict.",
     ),
     MutationCase(
         guard_id="install-deployment-locked-copy-validity",
@@ -2028,12 +2129,28 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A command reads APM_POLICY_DISABLE directly instead of the single helper.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-field-types",
+        rule_id="install-deployment-policy-field-types",
+        path="src/apm_cli/policy/parser.py",
+        old="        if not isinstance(value, str) or value not in valid:\n",
+        new="        if value not in valid:\n",
+        intent="A list-valued enum field reaches the membership test and crashes the parser.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-mcp-transport-projection",
         rule_id="install-deployment-policy-mcp-transport-projection",
         path="src/apm_cli/policy/policy_checks.py",
         old="_check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp)",
         new="_check_mcp_transport({m.name: frozenset({m.transport}) for m in mcp_list}, policy.mcp)",
         intent="Policy check 9 reads the raw declared transport instead of the effective one.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-policy-outcome-routing",
+        rule_id="install-deployment-policy-outcome-routing",
+        path="src/apm_cli/commands/audit.py",
+        old="    elif route.blocks:\n",
+        new='    elif route.blocks or fetch_result.outcome in ("malformed", "empty"):\n',
+        intent="audit --ci classifies policy outcomes with its own list beside the routing owner.",
     ),
     MutationCase(
         guard_id="install-deployment-policy-remote-origin-owner",
@@ -2186,7 +2303,12 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-trust-policy-outcome",
         rule_id="install-deployment-trust-policy-outcome",
         path="src/apm_cli/security/executables.py",
-        old="    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)\n",
+        old=(
+            "    policy = resolve_trust_policy(\n"
+            "        manifest_root(project_root, user_scope=user_scope), no_policy=no_policy, "
+            "logger=logger\n"
+            "    )\n"
+        ),
         new=(
             "    from apm_cli.policy.discovery import discover_policy_with_chain\n\n"
             '    policy = getattr(discover_policy_with_chain(project_root), "policy", None)\n'
@@ -2224,6 +2346,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='    return bool(commit not in (None, "", "cached") and commit == locked_commit)\n',
         new="    return False\n",
         intent="apm update treats every locked commit as moved and skips the content-hash check.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-update-registry-integrity",
+        rule_id="install-deployment-update-registry-integrity",
+        path="src/apm_cli/install/sources.py",
+        old="                    package_info = download_registry_package(\n",
+        new="                    package_info = _registry_resolver.download_package(\n",
+        intent="A registry update download skips the locked-hash check for an unchanged version.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
@@ -2576,6 +2706,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Runtime command hard-codes runtime names instead of the registry vocabulary.",
     ),
     MutationCase(
+        guard_id="registry-delegation-scope-manifest-path",
+        rule_id="registry_delegation.scope_manifest_path",
+        path="src/apm_cli/install/phases/policy_gate.py",
+        old="return discover_policy_with_chain(_policy_root(ctx))",
+        new="return discover_policy_with_chain(ctx.project_root)",
+        intent="User-scope install policy discovery reads the deploy root again.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-target-vocabulary",
         rule_id="registry_delegation.target_vocabulary",
         path="src/apm_cli/commands/uninstall/engine.py",
@@ -2636,6 +2774,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='        if host_kind == "ado" and not token:',
         new='        if host_kind == "generic" and not token:',
         intent="Tokenless ADO environments can reactivate native Git helpers.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-archive-extraction-limits",
+        rule_id="transport-platform-archive-extraction-limits",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="return read_zip_member(zf, entry, error_type=ArchiveError)",
+        new='return zf.open(entry, "r").read()',
+        intent="An archive reader reads a zip member directly instead of through the capped owner reader.",
     ),
     MutationCase(
         guard_id="transport-platform-artifactory-full-commit-sha",
@@ -2708,6 +2854,25 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    elif outcome.is_verified_rejection:",
         new="    elif outcome.is_auth_failure:",
         intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-credential-value-rendering",
+        rule_id="transport-platform-credential-value-rendering",
+        path="src/apm_cli/commands/config.py",
+        old='                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n',
+        new=(
+            '                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n'
+            '                click.echo(body["token"])\n'
+        ),
+        intent="apm config echoes a stored registry token outside the owner's mask.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-egress-route-policy",
+        rule_id="transport-platform-egress-route-policy",
+        path="src/apm_cli/install/pipeline.py",
+        old="if is_refused(EgressSurface.SOURCE_PROBE):",
+        new="if False:",
+        intent="The update auth preflight probes source hosts without asking the egress-route owner.",
     ),
     MutationCase(
         guard_id="transport-platform-git-cache-identity",
@@ -2835,8 +3000,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-git-url-credentials-out-of-argv",
         rule_id="transport-platform-git-child-environment",
         path="src/apm_cli/deps/clone_engine.py",
-        old='                    token="",\n                    auth_scheme="basic",',
-        new='                    token=token,\n                    auth_scheme="basic",',
+        old="                    use_ssh=False,\n                    dep_ref=dep_ref,\n                )",
+        new="                    use_ssh=False,\n                    dep_ref=dep_ref,\n                    token=token,\n                )",
         intent="Authenticated GitHub clone URLs regain process-visible credentials.",
     ),
     MutationCase(
@@ -2971,6 +3136,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Host-qualified reference parsing loses its canonical coordinate owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-http-session-construction",
+        rule_id="transport-platform-http-session-construction",
+        path="src/apm_cli/registry/client.py",
+        old="self.session = CredentialScopedSession(ambient_credentials=False)",
+        new="self.session = requests.Session()",
+        intent="The MCP registry client builds an ad hoc session outside the credential-origin owner.",
+    ),
+    MutationCase(
         guard_id="transport-platform-ls-remote-tag-commits",
         rule_id="transport-platform-ls-remote-tag-commits",
         path="src/apm_cli/marketplace/ref_resolver.py",
@@ -3065,6 +3238,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="\napm_require_owned_bundle\n",
         new="\n:\n",
         intent="Unix installation skips bundle ownership preflight before destructive replacement.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-url-builder-credential-free",
+        rule_id="transport-platform-url-builder-credential-free",
+        path="src/apm_cli/utils/github_host.py",
+        old="def build_ssh_url(\n    host: str,",
+        new="def build_ssh_url(\n    host: str,\n    token: str,",
+        intent="A clone URL builder regrows a credential parameter.",
     ),
     MutationCase(
         guard_id="transport-platform-url-path-security",
@@ -3216,6 +3397,80 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="skip, adopted = self._check_adopt_or_skip(",
         new="skip, adopted = self._local_collision_check(",
         intent="Rendered rules bypass the shared adopt-or-skip collision owner.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-scope-manifest-path",
+        rule_id="registry_delegation.scope_manifest_path",
+        path="src/apm_cli/policy/ci_checks.py",
+        old="apm_yml_path = manifest_file(project_root)",
+        new='apm_yml_path = project_root / "apm.yml"',
+        intent="Policy settings re-derive apm.yml from a root outside the scope owner.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-scope-manifest-path",
+        rule_id="registry_delegation.scope_manifest_path",
+        path="src/apm_cli/security/executables.py",
+        old="def effective_exec_map_for_project(",
+        new=(
+            "def project_manifest_path(project_root):\n"
+            "    return manifest_file(project_root)\n\n\n"
+            "def effective_exec_map_for_project("
+        ),
+        intent="A root-to-manifest sibling helper returns beside the scope owner.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-scope-manifest-path",
+        rule_id="registry_delegation.scope_manifest_path",
+        path="src/apm_cli/commands/update.py",
+        old="manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)",
+        new="get_deploy_root(scope)",
+        intent="User-scope update discovers policy from the deploy root.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-scope-manifest-path",
+        rule_id="registry_delegation.scope_manifest_path",
+        path="src/apm_cli/policy/discovery.py",
+        old="    if not policy_discovery_uses_git_remote(project_root):\n",
+        new="    if False:\n",
+        intent="Git-remote policy discovery bypasses the one user-scope decision.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-http-session-construction",
+        rule_id="transport-platform-http-session-construction",
+        path="src/apm_cli/registry/client.py",
+        old="CredentialScopedSession(ambient_credentials=False)",
+        new="CredentialScopedSession()",
+        intent="The MCP registry client lets requests attach ambient netrc credentials.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/commands/approve.py",
+        old="                declaration = native_declaration(declaration, package_dir)\n",
+        new="                pass\n",
+        intent="apm approve no longer sees a native plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/install/exec_gate.py",
+        old=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            "    )\n    if ctx is not None:"
+        ),
+        new=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            '        extra_types=("mcp",),\n    )\n    if ctx is not None:'
+        ),
+        intent="Install adds native plugin types the approve views cannot see (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/security/trust.py",
+        old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
+        new="",
+        intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
     ),
 )
 
@@ -3499,7 +3754,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = [key for key in lockfile.dependencies if key not in wanted]\n",
-            "orphaned_packages must come from the decide_orphan_removal decision",
+            "Removal sites must not filter installed or locked sets",
             id="renamed-evidence-predicate",
         ),
         pytest.param(
@@ -3666,7 +3921,7 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/integration/mcp_config_view.py",
-            'if not package_dir.is_dir() or (package_dir / "apm.yml").exists():',
+            "if not package_dir.is_dir() or manifest_file(package_dir).exists():",
             "if not package_dir.is_dir():",
         ),
         (
@@ -4579,8 +4834,8 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
             id="mcp-install-raw-selection",
         ),
         pytest.param(
-            "src/apm_cli/install/local_bundle_handler.py",
-            "effective_target=deployment_decision.canonical_targets,",
+            "src/apm_cli/install/bundle_admission.py",
+            "effective_target=target_decision.canonical_targets,",
             "effective_target=[resolved.name for resolved in targets],",
             id="local-bundle-raw-names",
         ),
@@ -4747,8 +5002,8 @@ def test_install_layering_guard_rejects_bypasses(path: str, old: str, new: str) 
         ),
         pytest.param(
             "src/apm_cli/commands/init.py",
-            "    apm_yml_path = project_root / APM_YML_FILENAME\n",
-            "    apm_yml_path = project_root / APM_YML_FILENAME\n"
+            "    apm_yml_path = manifest_file(project_root)\n",
+            "    apm_yml_path = manifest_file(project_root)\n"
             "    _names = ManifestTargetDeclaration().authored_names()\n",
             id="authored-names-outside-rewrite-owner",
         ),
@@ -5446,7 +5701,7 @@ def test_pack_mcp_reads_only_authored_sources(old: str, new: str) -> None:
         ),
         pytest.param(
             "src/apm_cli/security/executables.py",
-            "            project_manifest_path(project_root),\n",
+            "            scope_manifest_path(project_root, user_scope=user_scope),\n",
             "            Path(project_root),\n",
             id="registered-caller-passes-a-path-built-from-a-root",
         ),
@@ -5528,9 +5783,8 @@ def test_bundle_baseline_guard_rejects_unjudged_or_unreceipted_servers(
         ),
         pytest.param(
             "src/apm_cli/install/local_bundle_handler.py",
-            "    grants_manifest = project_manifest_path(manifest_root(project_root, "
-            "user_scope=user_scope))\n",
-            "    grants_manifest = project_manifest_path(project_root)\n",
+            "    grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)\n",
+            "    grants_manifest = manifest_file(project_root)\n",
             id="bundle-grants-skip-the-scope-owner",
         ),
         pytest.param(

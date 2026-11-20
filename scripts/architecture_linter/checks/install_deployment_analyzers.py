@@ -64,6 +64,12 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
 )
+from scripts.architecture_linter.checks.install_locked_content_verdict import (
+    GUARD as _GUARD_LOCKED_CONTENT_VERDICT,
+)
+from scripts.architecture_linter.checks.install_locked_content_verdict import (
+    check_locked_content_verdict,
+)
 from scripts.architecture_linter.checks.install_locked_copy_validity import (
     GUARD as _GUARD_LOCKED_COPY_VALIDITY,
 )
@@ -103,6 +109,12 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
     check_package_target_authorization,
 )
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
+from scripts.architecture_linter.checks.install_policy_outcome_routing import (
+    GUARD_POLICY_FIELD_TYPES,
+    GUARD_POLICY_OUTCOME_ROUTING,
+    check_policy_field_types,
+    check_policy_outcome_routing,
+)
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
 )
@@ -145,16 +157,20 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
     check_skills_root_derivation,
 )
 from scripts.architecture_linter.checks.install_trust_integrity import (
+    GUARD_BUNDLE_ADMISSION,
     GUARD_BUNDLE_USER_SCOPE_ROOT,
     GUARD_LOCAL_BUNDLE_HOOK_TRUST,
     GUARD_TRUST_POLICY_OUTCOME,
     GUARD_UNPACK_EXECUTABLES,
     GUARD_UPDATE_CONTENT_INTEGRITY,
+    GUARD_UPDATE_REGISTRY_INTEGRITY,
+    check_bundle_admission_owner,
     check_bundle_user_scope_root,
     check_local_bundle_hook_trust,
     check_trust_policy_outcome,
     check_unpack_executable_refusal,
     check_update_content_integrity,
+    check_update_registry_integrity,
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
@@ -173,6 +189,11 @@ RULES: tuple[Rule, ...] = (
         check_bundle_compile_staging,
     ),
     _rule(
+        _GUARD_LOCKED_CONTENT_VERDICT,
+        "Install and audit --ci replay share one locked content-hash verdict.",
+        check_locked_content_verdict,
+    ),
+    _rule(
         _GUARD_LOCKED_COPY_VALIDITY,
         "apm_modules copy validity against the lock is owned by drift.locked_copy_proof.",
         check_locked_copy_validity,
@@ -183,6 +204,16 @@ RULES: tuple[Rule, ...] = (
         check_package_content_hash,
     ),
     _rule(
+        GUARD_POLICY_OUTCOME_ROUTING,
+        "Every policy-discovery outcome routes through one closed-world owner.",
+        check_policy_outcome_routing,
+    ),
+    _rule(
+        GUARD_POLICY_FIELD_TYPES,
+        "A wrongly typed policy field is a malformed policy, never a parser crash.",
+        check_policy_field_types,
+    ),
+    _rule(
         GUARD_TRUST_POLICY_OUTCOME,
         "Executables-trust readers route policy outcomes through resolve_trust_policy.",
         check_trust_policy_outcome,
@@ -191,6 +222,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_UPDATE_CONTENT_INTEGRITY,
         "apm update keeps the content-hash check for an unchanged commit.",
         check_update_content_integrity,
+    ),
+    _rule(
+        GUARD_UPDATE_REGISTRY_INTEGRITY,
+        "apm update verifies an unchanged registry version against its locked hash.",
+        check_update_registry_integrity,
     ),
     _rule(
         GUARD_BUNDLE_USER_SCOPE_ROOT,
@@ -206,6 +242,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_UNPACK_EXECUTABLES,
         "apm unpack refuses executable content before any write.",
         check_unpack_executable_refusal,
+    ),
+    _rule(
+        GUARD_BUNDLE_ADMISSION,
+        "Every bundle deploy entry point admits and records through the shared bundle owners.",
+        check_bundle_admission_owner,
     ),
     _rule(
         _GUARD_SINGLE_FILE,

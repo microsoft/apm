@@ -13,6 +13,14 @@ on:
     branches: [ main ]
     types: [ checks_requested ]
 
+# Superseded pushes to a PR cancel their in-flight run so they stop spending
+# the shared Actions API quota. Push, merge_group and schedule runs are never
+# grouped or cancelled: each run keeps its own group, so every SHA keeps its
+# evidence.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -54,6 +62,16 @@ jobs:
         # Fails on new violations, stale entries, or baseline growth vs base.
         git fetch --no-tags --depth=1 origin "$BASE_SHA"
         uv run --frozen --extra dev python scripts/check_complexity_ratchet.py \
+          --base-ref "$BASE_SHA"
+
+    - name: Taxonomy allowance ratchet (shrink-only vs base)
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      run: |
+        # Unclassified, misplaced and promise-less allowances may only shrink;
+        # an added entry is accepted only as a validated move of a removed one.
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        uv run --frozen --extra dev python scripts/check_taxonomy_allowances.py \
           --base-ref "$BASE_SHA"
 
     - name: Check YAML encoding safety
@@ -399,7 +417,10 @@ jobs:
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
           tests/quality/test_lifecycle_bug_ledger.py \
-          tests/quality/test_ci_topology.py
+          tests/quality/test_ci_topology.py \
+          tests/quality/test_promise_obligations.py \
+          tests/quality/test_cli_docs_surface.py \
+          tests/quality/test_journey_index.py
 
   test-architecture-scaling:
     name: Architecture Scaling (Linux)
@@ -432,21 +453,23 @@ jobs:
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
 
+  # Required by merge-gate.yml at PR time and on merge_group. It gates only
+  # the deterministic contracts: the wall-clock scaling ratio stays its own
+  # non-required "Architecture Scaling (Linux)" check (timing asserts flake).
   test-architecture:
     name: Test Architecture Ratchets
-    needs: [test-architecture-contracts, test-architecture-scaling]
+    needs: [test-architecture-contracts]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
     steps:
-    - name: Require both architecture executions
+    - name: Require the architecture contracts
       env:
         CONTRACT_RESULT: ${{ needs.test-architecture-contracts.result }}
-        SCALING_RESULT: ${{ needs.test-architecture-scaling.result }}
       run: |
-        if [ "$CONTRACT_RESULT" != success ] || [ "$SCALING_RESULT" != success ]; then
-          echo "Architecture execution failed: contracts=$CONTRACT_RESULT scaling=$SCALING_RESULT"
+        if [ "$CONTRACT_RESULT" != success ]; then
+          echo "Architecture contracts failed: contracts=$CONTRACT_RESULT"
           exit 1
         fi
 
@@ -464,7 +487,7 @@ jobs:
   # eating most of the sharding win. The fan-in survives as the
   # non-required `coverage-combine` job below: it still combines and
   # enforces the global 80% floor, just off the PR-time critical path,
-  # and is escalated to required on `merge_group`.
+  # and merge-gate.yml requires it on `merge_group`.
   #
   # scripts/ci_sharding.py balances the two shards by the measured seed in
   # .github/ci-durations/linux-unit.json (weights, not an allowlist), keeps
@@ -521,9 +544,8 @@ jobs:
     # Per-shard floor of 60% catches regressions at PR time on roughly
     # half the codebase (observed per-shard coverage today is ~65%).
     # The global 80% floor declared in pyproject.toml runs after combine
-    # in the non-required `coverage-combine` job below, and is also
-    # enforced on `merge_group` via ci-integration.yml -- so the union
-    # gate is preserved on the path that actually merges to main.
+    # in the `coverage-combine` job below, which merge-gate.yml requires
+    # on `merge_group` -- so the union gate blocks the actual merge.
     - name: Run tests with coverage
       run: |
         uv run python -m pytest tests/unit tests/test_console.py tests/red_team tests/fixtures/policy \
@@ -557,9 +579,9 @@ jobs:
   # this job's runner pickup, eating most of the sharding win. The shard
   # jobs themselves are the required checks (see merge-gate.yml
   # EXPECTED_CHECKS); this job exists so the global 80% coverage floor
-  # still surfaces as a red check on the PR if it drops, and the
-  # canonical merge-time enforcement runs in ci-integration.yml on
-  # `merge_group`.
+  # still surfaces as a red check on the PR if it drops. On `merge_group`
+  # merge-gate.yml requires it, so this job is the canonical merge-time
+  # enforcement of the floor (tests/quality/test_ci_topology.py).
   coverage-combine:
     name: Coverage Combine (Linux)
     needs: [build-and-test-shard]
@@ -599,8 +621,8 @@ jobs:
 
       # Same 80% floor pyproject.toml declares. Non-blocking at PR time
       # (this job is not in merge-gate.yml's EXPECTED_CHECKS), but the
-      # red check is visible in the PR UI. ci-integration.yml enforces
-      # the same floor on `merge_group`, which IS the merge gate.
+      # red check is visible in the PR UI. merge-gate.yml requires this
+      # check on `merge_group`, which IS the merge gate.
       - name: Enforce unit coverage gate
         if: always()
         run: |
@@ -724,8 +746,8 @@ jobs:
   # Deterministic release selection
   # -------------------------------
   # The bounded required release expression excludes contracts explicitly
-  # marked `lifecycle_merge_group`; ci-integration.yml's full integration
-  # shards still execute them from the unfiltered tests/integration root.
+  # marked `lifecycle_merge_group`; ci-integration.yml's hermetic shards
+  # and network lane still execute them on merge_group.
   #
   # Why this required partition, Consume/Produce/Govern coverage
   # -------------------------------------------------------------
@@ -740,8 +762,8 @@ jobs:
   #
   # #2238 (bounded best-effort ref-lookup retries) is intentionally NOT
   # duplicated here: its regression coverage
-  # (tests/unit/deps/test_download_strategies_phase3.py,
-  # tests/unit/deps/test_git_reference_resolver.py) is unit-level and
+  # (tests/unit/deps/test_download_strategies_selection.py,
+  # tests/integration/test_git_reference_resolver.py) is in-process and
   # already required today via build-and-test-shard.
   #
   # Why this stays hermetic, network-free, and credential-free
@@ -820,7 +842,7 @@ jobs:
           -p scripts.ci_sharding --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
           --shard-durations .github/ci-durations/linux-x86_64.json \
           -n 4 --dist loadgroup --durations=20 \
-          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration tests/lifecycle
 
     # The M-GATE spines write their visited cells to build/gate-cells/;
     # gate-cell-coverage merges every shard's set.

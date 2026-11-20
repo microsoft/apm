@@ -32,6 +32,8 @@ from apm_cli.agent_plugins import (
 )
 from apm_cli.deps.plugin_parser import normalize_plugin_directory
 
+pytestmark = pytest.mark.component
+
 
 def _write_manifest(root: Path, **overrides: object) -> None:
     root.mkdir(parents=True, exist_ok=True)

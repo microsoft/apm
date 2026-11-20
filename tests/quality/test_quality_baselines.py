@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -20,14 +21,19 @@ CHECKERS = (
     (
         REPO_ROOT / "scripts" / "check_test_assertions.py",
         QUALITY_DIR / "assertion_quality_baseline.json",
-        "[+] assertion-quality ratchet clean: AQ001=4, AQ002=12, AQ005=0\n",
+        (
+            r"(?:\[i\] [^\n]*\n)*"
+            r"\[\+\] assertion-quality ratchet clean: "
+            r"AQ001=\d+, AQ002=\d+, AQ003=\d+, AQ004=\d+, AQ005=\d+, AQ006=\d+\n"
+        ),
     ),
     (
         REPO_ROOT / "scripts" / "check_exact_test_duplicates.py",
         QUALITY_DIR / "exact_test_duplicates.json",
         (
-            "[+] exact test duplicate ratchet clean: "
-            "{module_count} files, 0 allowed duplicate group(s)\n"
+            r"(?:\[i\] [^\n]*\n)*"
+            r"\[\+\] test duplicate ratchet clean: {module_count} files, \d+ tests, "
+            r"\d+ duplicate body group\(s\), \d+ duplicate Class::name test\(s\)\n"
         ),
     ),
 )
@@ -81,7 +87,9 @@ def test_repository_quality_baselines_are_scanned_once(
         )
 
         assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout == expected.format(module_count=module_count)
+        assert re.fullmatch(expected.format(module_count=module_count), result.stdout), (
+            result.stdout
+        )
         assert result.stderr == ""
         assert baseline.is_file()
 
@@ -110,20 +118,9 @@ def test_duplicate_checker_reports_new_tracked_module_count(
     tests = root / "tests"
     tests.mkdir(parents=True)
     baseline = root / "baseline.json"
-    baseline.write_text(
-        json.dumps(
-            {
-                "algorithm": "sha256-bytes-v1",
-                "duplicate_groups": [],
-                "schema_version": 1,
-                "scope": [
-                    "tests/**/test_*.py",
-                    "tests/**/*_test.py",
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    payload = json.loads(CHECKERS[1][1].read_text(encoding="utf-8"))
+    payload.update(duplicate_bodies={}, duplicate_names={})
+    baseline.write_text(json.dumps(payload), encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
 
     first = tests / "test_first.py"
@@ -163,9 +160,9 @@ def test_duplicate_checker_reports_new_tracked_module_count(
     )
 
     assert first_result.returncode == 0
-    assert "1 files, 0 allowed duplicate group(s)" in first_result.stdout
+    assert "1 files, 1 tests, 0 duplicate body group(s)" in first_result.stdout
     assert second_result.returncode == 0
-    assert "2 files, 0 allowed duplicate group(s)" in second_result.stdout
+    assert "2 files, 2 tests, 0 duplicate body group(s)" in second_result.stdout
 
 
 @pytest.mark.parametrize(

@@ -381,15 +381,17 @@ def test_cowork_row_removed_only_with_valid_provenance(
     )
     cwd = isolated.work_root
     world.apm(cwd, "experimental", "enable", "copilot-cowork")
-    world.apm(
-        cwd,
-        "install",
-        "-g",
-        "test/cowork-kit#v0.1.0",
-        "--target",
-        "copilot-cowork",
-        "--no-policy",
+    # Declared, not positional: positional github.com packages are validated
+    # through the REST API, which the local git rewrite does not serve.
+    dump_yaml(
+        {
+            "name": "user",
+            "version": "1.0.0",
+            "dependencies": {"apm": ["test/cowork-kit#v0.1.0"]},
+        },
+        isolated.home / ".apm" / "apm.yml",
     )
+    world.apm(cwd, "install", "-g", "--target", "copilot-cowork", "--no-policy")
     skill = onedrive / "demo" / "SKILL.md"
     assert skill.is_file()
     lock = LockFile.read(isolated.home / ".apm" / "apm.lock.yaml")

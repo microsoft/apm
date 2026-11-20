@@ -17,6 +17,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import (
     DEPLOYMENT_OWNER_REMEDIATION,
@@ -622,6 +624,62 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
 # -- Mode handlers --------------------------------------------------
 
 
+def _route_ci_policy_outcome(cfg: _AuditConfig, fetch_result, *, auto_discovered: bool):
+    """Render the routed policy outcome for ``audit --ci``; return the result to enforce.
+
+    Returns ``None`` when no policy applies; exits 1 when the outcome blocks.
+    """
+    # The routing owner decides every outcome exactly as install does
+    # (#1159, #4084); audit only renders the decision:
+    #   * block -> `[x]` and exit 1
+    #   * no usable policy -> `[!]` and skip enforcement (absent /
+    #     no_git_remote / empty only under auto-discovery; `--policy org`
+    #     reports fetch failures)
+    #   * disabled (auto-discovery) -> forensic `[i]` breadcrumb
+    from ..policy.outcome_routing import classify_discovery_outcome
+    from ..policy.project_config import read_project_fetch_failure_default
+
+    route = classify_discovery_outcome(
+        fetch_result,
+        fetch_failure_default=read_project_fetch_failure_default(cfg.project_root),
+    )
+    source = fetch_result.source
+    err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
+    cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
+
+    if route.disabled:
+        if auto_discovered:
+            click.echo(
+                "[i] Org-policy auto-discovery disabled by project apm.yml "
+                "(policy.discovery_enabled=false); no enforcement applied",
+                err=True,
+            )
+        fetch_result = None
+    elif route.blocks:
+        if route.from_fetch_failure_default:
+            click.echo(f"[x] {cause} (policy.fetch_failure_default=block)", err=True)
+        else:
+            click.echo(f"[x] {cause}", err=True)
+            click.echo(f"    Blocked by org policy: {route.block_reason}", err=True)
+        if fetch_result.discovery_hint:
+            click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
+        sys.exit(1)
+    elif route.policy is None:
+        if auto_discovered or route.unresolved:
+            click.echo(
+                f"[!] {cause}; enforcement skipped "
+                "(set policy.fetch_failure_default=block in apm.yml to fail closed)",
+                err=True,
+            )
+            if cfg.verbose and fetch_result.discovery_hint:
+                click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
+        # A named source that resolved a rule-less (empty) policy is still the
+        # policy this audit evaluated and reports; it has nothing to enforce.
+        if auto_discovered or fetch_result.policy is None:
+            fetch_result = None
+    return fetch_result
+
+
 def _audit_ci_gate(
     cfg: _AuditConfig,
     policy_source: str | None,
@@ -656,7 +714,12 @@ def _audit_ci_gate(
     def replay_policy():
         if no_policy and not policy_source:
             return None
-        return getattr(fetch_policy(), "policy", None)
+        from ..policy.outcome_routing import resolve_trust_policy
+
+        # Routed like install: a blocking outcome raises PolicyViolationError,
+        # which the replay reports as a failed check. This command reports the
+        # policy outcome itself below.
+        return resolve_trust_policy(cfg.project_root, announce=False, fetch_result=fetch_policy())
 
     materialization = resolve_ci_audit_materialization(
         cfg.project_root, verbose=cfg.verbose, policy_provider=replay_policy
@@ -677,10 +740,6 @@ def _audit_ci_gate(
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
     # files via unmanaged-files checks. --no-policy skips discovery.
-    from ..policy.project_config import (
-        read_project_fetch_failure_default,
-    )
-
     fetch_result = None
     auto_discovered = not policy_source
     # Explicit --policy and auto-discovery (mirror install path) share one
@@ -718,64 +777,7 @@ def _audit_ci_gate(
             sys.exit(1)
 
     if fetch_result is not None:
-        # Honour project-side fetch_failure_default for outcomes that
-        # mean "no enforcement applied".  Pre-#1159, auto-discovery
-        # silently swallowed `absent` / `no_git_remote` / `empty` /
-        # `disabled` -- a fail-open governance bypass.  Now those
-        # outcomes are surfaced explicitly:
-        #
-        #   * malformed / cache_miss_fetch_fail / garbage_response
-        #     -> existing fetch-failure handling (warn unless block);
-        #     applies to auto-discovery and `--policy org`. Any other
-        #     explicit --policy already failed closed above (#3195).
-        #   * absent / no_git_remote / empty   (auto-discovery only)
-        #     -> were silently dropped pre-#1159; now surfaced as
-        #        explicit warnings, and honour `block` for parity with
-        #        install.  `--policy org` keeps the legacy fall-through.
-        #   * disabled   (auto-discovery only)
-        #     -> emit a forensic `[i]` breadcrumb in --ci mode so
-        #        audit logs explain WHY no policy ran.
-        fetch_failure_outcomes = (
-            "malformed",
-            "cache_miss_fetch_fail",
-            "garbage_response",
-            "incomplete_chain",
-        )
-        no_policy_outcomes = ("absent", "no_git_remote", "empty")
-
-        if auto_discovered and fetch_result.outcome == "disabled":
-            click.echo(
-                "[i] Org-policy auto-discovery disabled by project apm.yml "
-                "(policy.discovery_enabled=false); no enforcement applied",
-                err=True,
-            )
-            fetch_result = None
-        elif (
-            fetch_result.outcome in fetch_failure_outcomes
-            or fetch_result.error
-            or (auto_discovered and fetch_result.outcome in no_policy_outcomes)
-        ):
-            project_default = read_project_fetch_failure_default(cfg.project_root)
-            source = fetch_result.source
-            err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
-            cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
-            if fetch_result.outcome == "incomplete_chain" or project_default == "block":
-                click.echo(
-                    f"[x] {cause} (policy.fetch_failure_default=block)",
-                    err=True,
-                )
-                if fetch_result.discovery_hint:
-                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
-                sys.exit(1)
-            else:
-                click.echo(
-                    f"[!] {cause}; enforcement skipped "
-                    "(set policy.fetch_failure_default=block in apm.yml to fail closed)",
-                    err=True,
-                )
-                if cfg.verbose and fetch_result.discovery_hint:
-                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
-                fetch_result = None
+        fetch_result = _route_ci_policy_outcome(cfg, fetch_result, auto_discovered=auto_discovered)
 
     if fetch_result is not None and fetch_result.found:
         policy_obj = fetch_result.policy
@@ -817,7 +819,7 @@ def _audit_ci_gate(
 
     # -- Drift detection (default-on per ADR-02) --------------------
     drift_findings: list = []
-    if not no_drift and (cfg.project_root / "apm.yml").exists():
+    if not no_drift and manifest_file(cfg.project_root).exists():
         from ..deps.lockfile import LockFile, get_lockfile_path
 
         lockfile_path = get_lockfile_path(cfg.project_root)
@@ -1027,7 +1029,7 @@ def _require_installed_package_key(
     from ..models.manifest_io import load_manifest
     from .uninstall.engine import select_installed_lock_key
 
-    manifest_path = project_root / APM_YML_FILENAME
+    manifest_path = manifest_file(project_root)
     try:
         manifest = load_manifest(manifest_path) if manifest_path.is_file() else None
     except Exception as e:
@@ -1062,7 +1064,7 @@ def _reject_invalid_manifest(project_root: Path, logger: CommandLogger) -> None:
     """Refuse an apm.yml every command refuses, before scanning or stripping."""
     from ..models.manifest_io import InvalidManifestError, read_manifest_text
 
-    manifest_path = project_root / "apm.yml"
+    manifest_path = manifest_file(project_root)
     if not manifest_path.is_file():
         return
     try:
@@ -1215,7 +1217,7 @@ def _audit_content_scan(
         and not strip
         and not file_path
         and not package
-        and (project_root / "apm.yml").exists()
+        and manifest_file(project_root).exists()
     ):
         from ..policy.ci_checks import DRIFT_SKIP_PREFIX, _check_drift
 

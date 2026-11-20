@@ -1347,11 +1347,12 @@ def _fire_uninstall_scripts(
             PackageInfo,
             build_runner_from_context,
         )
+        from apm_cli.core.scope import is_user_scope, manifest_root
 
         runner = build_runner_from_context(
             logger=logger,
             verbose=verbose,
-            project_root=str(deploy_root),
+            project_root=str(manifest_root(deploy_root, user_scope=is_user_scope(scope))),
         )
 
         pkg_infos = [PackageInfo(name=str(pkg)) for pkg in packages]

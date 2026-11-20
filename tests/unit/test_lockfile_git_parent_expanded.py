@@ -5,8 +5,12 @@ explicit virtual git dependency. The lockfile must persist those expanded fields
 and never use ``parent`` as durable ``repo_url`` / ``source`` identity.
 """
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _expanded_parent_equivalent_ref() -> DependencyReference:
@@ -52,6 +56,7 @@ class TestLockfileExpandedGitParent:
         assert locked.resolved_by == "org/monorepo/agents/pkg-a"
         assert locked.source is None
 
+    @pytest.mark.req("req-mf-010")
     def test_to_dict_has_no_parent_sentinel(self):
         locked = LockedDependency.from_dependency_ref(
             dep_ref=_expanded_parent_equivalent_ref(),
@@ -227,3 +232,19 @@ class TestParentExpansionToLockfilePipeline:
         locked, reloaded = self._round_trip(expanded, sha="b" * 40)
         assert locked.resolved_ref == "v1.2.3"
         assert reloaded.resolved_ref == "v1.2.3"
+
+
+@pytest.mark.req("req-mf-010")
+def test_resolver_expands_parent_to_parent_coordinates():
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+    parent = DependencyReference.parse("gitlab.example.com/org/monorepo#v1.2.0")
+    child = DependencyReference.parse_from_dict({"git": "parent", "path": "skills/shared"})
+
+    expanded = APMDependencyResolver().expand_parent_repo_decl(parent, child)
+
+    assert expanded.host == "gitlab.example.com"
+    assert expanded.repo_url == "org/monorepo"
+    assert expanded.reference == "v1.2.0"
+    assert expanded.virtual_path == "skills/shared"
+    assert expanded.is_parent_repo_inheritance is False

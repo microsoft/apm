@@ -231,7 +231,8 @@ apm marketplace list --verbose
 
 Show the packages exposed by a registered marketplace. Each plugin prints
 its full install name (`plugin@marketplace`) and version, with the
-description wrapped underneath.
+description wrapped underneath. `--offline` reads a live local `apm.yml`
+catalog without network access.
 
 ```bash
 apm marketplace browse awesome-agents
@@ -394,9 +395,18 @@ remote, as `apm marketplace check` requires; otherwise the command exits
 
 ### `apm marketplace package set NAME`
 
-Update fields on an existing package entry. Same flag set as
-`package add` minus `--name` and `--no-verify` (`--subdir` has no `-s`
-short form); only the fields you pass are modified.
+Update fields on an existing package entry. Only the fields you pass are
+modified.
+
+| Flag | Description |
+|---|---|
+| `--version` | Semver range (e.g. `>=1.0.0`). |
+| `--ref` | Pin to a git ref (SHA, tag, or `HEAD`). |
+| `--subdir` | Subdirectory inside the source repo. |
+| `--tag-pattern` | Tag pattern (e.g. `v{version}`). |
+| `--category` | Package category (e.g. `developer-tools`). |
+| `--tags` | Comma-separated tags. |
+| `--include-prerelease` | Include prerelease versions. |
 
 ### `apm marketplace package remove NAME`
 

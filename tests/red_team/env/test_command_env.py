@@ -21,6 +21,8 @@ from apm_cli.core.script_executors import _build_script_env, _execute_command
 
 from .fixtures.helpers import make_event
 
+pytestmark = pytest.mark.component
+
 
 def _dump_env_script(out_path: Path) -> ScriptEntry:
     """A command script that writes os.environ to *out_path* as KEY=VALUE."""
