@@ -302,3 +302,15 @@ def transactional_pipeline(
         return result
 
     return wrapped
+
+
+def stage_existing_copy(ctx: Any, path: Path, *, skip: bool = False) -> None:
+    """Preserve an existing ``apm_modules`` copy before a re-fetch replaces it.
+
+    The install transaction restores it byte for byte when the attempt is
+    refused (for example on a content hash mismatch) and discards it once the
+    attempt completes, so a refused install leaves ``apm_modules`` as it was.
+    *skip* marks a copy this attempt already fetched (it is staged already).
+    """
+    if not skip and (path.exists() or path.is_symlink()):
+        resolution_for_context(ctx).prepare_path(path)

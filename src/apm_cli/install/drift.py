@@ -271,10 +271,8 @@ def _materialize_install_path(
     For local deps -- contents live at the source directory the install
     resolver anchored on: ``project_root`` for direct (root-declared) deps,
     or the declaring package's directory for transitive ``../sibling`` deps
-    (resolved via ``resolved_by``; see
-    :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`). The
-    ``lockfile`` is required to walk that chain; it is unused for remote
-    deps and for direct local deps (``resolved_by is None``).
+    (``resolved_by``; see :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`).
+    ``lockfile`` walks that chain; remote and direct local deps do not use it.
     For remote deps -- contents live at the canonical apm_modules subpath.
     In ``cache_only`` mode the replay reads a verified live cache entry. In
     self-hydrating mode it materializes a scratch-private copy using the lock's
@@ -613,6 +611,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     registry_resolver = None
     declared_transports: DeclaredTransportIndex | None = None
     if not config.cache_only:
+        from apm_cli.cache.git_cache import attach_persistent_git_cache
         from apm_cli.core.auth import AuthResolver
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.registry.resolver import RegistryPackageResolver
@@ -620,6 +619,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         from apm_cli.models.apm_package import APMPackage
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+        attach_persistent_git_cache(downloader)
         declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
         if (apm_yml := manifest_file(project_root)).exists():
             manifest = APMPackage.from_apm_yml(apm_yml)

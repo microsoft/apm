@@ -2074,6 +2074,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Integrate re-derives apm_modules copy validity outside drift.locked_copy_proof.",
     ),
     MutationCase(
+        guard_id="install-deployment-locked-source-cache",
+        rule_id="install-deployment-locked-source-cache",
+        path="src/apm_cli/install/drift.py",
+        old="        attach_persistent_git_cache(downloader)\n",
+        new="",
+        intent="The audit --ci replay reads locked git sources outside install's git cache.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-capability-gate",
         rule_id="install-deployment-lsp-capability-gate",
         path="src/apm_cli/install/phases/integrate.py",

@@ -663,6 +663,7 @@ class FreshDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.drift import build_download_ref
+        from apm_cli.install.transaction import stage_existing_copy
         from apm_cli.utils.path_security import safe_rmtree
 
         ctx = self.ctx
@@ -679,11 +680,8 @@ class FreshDependencySource(DependencySource):
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
-            # Workstream B (#1116): per-dep progress is owned by the
-            # shared InstallTui ``ctx.tui``; legacy local Progress is
-            # only wired when integrate is invoked outside the install
-            # pipeline (no callers do this today, but the parameter is
-            # kept for back-compat).
+            # Workstream B (#1116): the shared InstallTui ``ctx.tui`` owns per-dep
+            # progress; legacy local Progress is kept only for back-compat.
             task_id = None
             if progress is not None:
                 task_id = progress.add_task(
@@ -700,6 +698,7 @@ class FreshDependencySource(DependencySource):
                 ref_changed=ref_changed,
             )
 
+            stage_existing_copy(ctx, install_path, skip=dep_key in ctx.pre_download_results)
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
