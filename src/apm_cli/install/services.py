@@ -123,7 +123,12 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger | None) -> None:
+def _log_canvas_skip(
+    package_name: str,
+    package_info: Any,
+    logger: InstallLogger | None,
+    ctx: InstallContext | None = None,
+) -> None:
     """Warn about skipped canvas extensions when the package ships them."""
     _install = Path(package_info.install_path)
     extensions_root = _install / ".apm" / "extensions"
@@ -137,11 +142,13 @@ def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:
-        logger.warning(
-            f"{_pkg_label}: canvas extension(s) skipped (not approved in executables.allow). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
-            symbol="warning",
+        from apm_cli.install.exec_gate import executable_skip_reason
+        from apm_cli.security.executables import EXEC_TYPE_CANVAS
+
+        reason = executable_skip_reason(
+            ctx, package_name, _pkg_label, EXEC_TYPE_CANVAS, "canvas extension(s)"
         )
+        logger.warning(f"{_pkg_label}: {reason}", symbol="warning")
 
 
 def _warn_target_reconcile_failure(
@@ -471,7 +478,7 @@ def integrate_package_primitives(  # noqa: PLR0913
                 EXEC_TYPE_CANVAS,
             )
             if not _dep_canvas_ok:
-                _log_canvas_skip(package_name, package_info, logger)
+                _log_canvas_skip(package_name, package_info, logger, ctx)
                 continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         # A primitive can be statically present on a target (e.g. the
@@ -655,7 +662,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
         from apm_cli.install.exec_gate import log_bin_status
 
-        log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
+        log_bin_status(
+            skill_result, _skill_suffix, package_name, package_info, _log_integration, ctx=ctx
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
     deployed.extend(
