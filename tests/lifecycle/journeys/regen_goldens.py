@@ -4,7 +4,8 @@ Usage (from the repository root)::
 
     uv run --extra dev python tests/lifecycle/journeys/regen_goldens.py [--check] [J01 ...]
 
-It runs the golden journeys (index ``golden: true``, or the ids given) through
+It runs the golden journeys (index ``golden: true``; ``--all`` adds every
+journey whose index assigns O1 to a step; or the ids given) through
 pytest with ``APM_JOURNEY_RECORD_DIR`` set, so every O1 step writes its
 normalized transcript instead of comparing it. Every other oracle still runs;
 a failing journey writes nothing. A transcript with a non-ASCII byte or a line
@@ -34,9 +35,15 @@ sys.path.insert(0, str(REPO))
 from tests.lifecycle.journeys import normalize as norm  # noqa: E402
 
 
-def golden_ids() -> list[str]:
+def golden_ids(*, every: bool = False) -> list[str]:
+    """Golden journeys, or (*every*) every journey with a step the index assigns O1."""
     index = yaml.safe_load((HERE / "index.yaml").read_text(encoding="ascii"))
-    return [journey["id"] for journey in index["journeys"] if journey.get("golden")]
+    return [
+        journey["id"]
+        for journey in index["journeys"]
+        if journey.get("golden")
+        or (every and any("O1" in step.get("oracles", ()) for step in journey["steps"]))
+    ]
 
 
 def record(ids: list[str], directory: Path) -> int:
@@ -97,12 +104,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("ids", nargs="*", help="journey ids (default: every golden journey)")
     parser.add_argument("--check", action="store_true", help="compare only; never write")
+    parser.add_argument(
+        "--all", action="store_true", help="every journey with an O1 step (default: golden ones)"
+    )
     parser.add_argument("--record-dir", type=Path, help="keep raw transcripts here")
     args = parser.parse_args(argv)
-    ids = args.ids or golden_ids()
-    unknown = set(ids) - set(golden_ids())
+    ids = args.ids or golden_ids(every=args.all)
+    unknown = set(ids) - set(golden_ids(every=True))
     if unknown:
-        print(f"[x] not golden journeys: {sorted(unknown)}")
+        print(f"[x] no step of these journeys has O1: {sorted(unknown)}")
         return 2
     directory = args.record_dir or Path(tempfile.mkdtemp(prefix="apm-journey-goldens-"))
     shutil.rmtree(directory, ignore_errors=True)
