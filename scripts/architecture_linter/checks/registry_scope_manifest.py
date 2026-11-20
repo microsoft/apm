@@ -91,8 +91,8 @@ _SCOPE_ROOT_CONSUMERS: dict[str, tuple[str, ...]] = {
             'user_scope=is_user_scope(getattr(ctx, "scope", None)))'
         ),
     ),
-    "src/apm_cli/commands/update.py": (
-        "manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)",
+    "src/apm_cli/install/exec_gate.py": (
+        "manifest_root(get_deploy_root(scope), user_scope=user_scope)",
     ),
     "src/apm_cli/commands/uninstall/cli.py": (
         "project_root=str(manifest_root(deploy_root, user_scope=is_user_scope(scope))),",

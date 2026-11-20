@@ -86,11 +86,11 @@ _EXEC_DECISION_CALLERS = {
         {
             ("src/apm_cli/security/trust.py", "package_exec_status"),
             (_EXEC_GATE, "check_executable_approval"),
-            (_EXEC_GATE, "current_exec_decision"),
+            (_EXEC_GATE, "current_exec_verdict"),
         }
     ),
     "recorded_exec_status_is_stale": frozenset(
-        {(_EXEC_GATE, "lock_exec_decisions_stale"), (_EXEC_GATE, "for_dependency")}
+        {(_EXEC_GATE, "stale_lock_exec_rows"), (_EXEC_GATE, "for_dependency")}
     ),
 }
 _MANIFEST_DERIVATION_TOKENS = ('"apm.yml"', "APM_YML_FILENAME")
@@ -165,6 +165,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "denied = frozenset(t for t, status in pinned_status.items() "
                     "if status == TRUST_DENIED)",
                     "self._trust_ctx_value = exec_trust_context_for_project(",
+                    "get_manifest_path(scope),",
                 ),
                 # Audit replay withholds what the install gate withheld, under
                 # the audit's own single policy fetch (#3924), and what it would now
@@ -185,7 +186,6 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 "src/apm_cli/security/trust.py": (
                     "grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)",
                 ),
-                "src/apm_cli/commands/update.py": ("get_manifest_path(scope),",),
                 _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
                 _MCP_PIPELINE: ("admission = McpAdmission.for_project(",),
                 _MCP_VIEW: ("approval_keys = locked_dependency_approval_keys(dependency)",),

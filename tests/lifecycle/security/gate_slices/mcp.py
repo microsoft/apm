@@ -26,14 +26,9 @@ _UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agre
 _UNINSTALL_SIBLING = (
     "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
 )
-_DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
 _XFAIL = {
     "G|update|policy-dep-deny|mcp": _UPDATE_DEP_DENY,
     **{f"G|uninstall-prune-rebuild|{change}|mcp": _UNINSTALL_SIBLING for change in _ALL},
-    **{
-        f"G|dry-run|{change}|mcp": _DRY_RUN
-        for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
-    },
 }
 _BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _XFAIL.update(

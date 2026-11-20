@@ -3453,8 +3453,8 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="registry-delegation-scope-manifest-path",
         rule_id="registry_delegation.scope_manifest_path",
-        path="src/apm_cli/commands/update.py",
-        old="manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)",
+        path="src/apm_cli/install/exec_gate.py",
+        old="manifest_root(get_deploy_root(scope), user_scope=user_scope)",
         new="get_deploy_root(scope)",
         intent="User-scope update discovers policy from the deploy root.",
     ),
@@ -5474,8 +5474,8 @@ def test_mcp_dependency_target_selection_guard_rejects_mutations(
     [
         pytest.param(
             "src/apm_cli/install/exec_gate.py",
-            "                status, allowed_types = current_exec_decision(",
-            "                status, allowed_types = package_exec_decision(",
+            "                status, allowed_types, exec_types = current_exec_verdict(",
+            "                status, allowed_types, exec_types = package_exec_decision(",
             id="update-probe-reads-verdicts-outside-the-owner",
         ),
         pytest.param(

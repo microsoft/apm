@@ -158,34 +158,15 @@ def _executables_need_reconcile(
     """
     if lockfile is None:
         return False
-    from apm_cli.core.scope import InstallScope as _Scope
-    from apm_cli.core.scope import get_deploy_root, get_manifest_path, manifest_root
-    from apm_cli.install.exec_gate import lock_exec_decisions_stale
-    from apm_cli.integration.targets import resolve_audit_targets
+    from apm_cli.install.exec_gate import scope_stale_exec_rows
 
-    def _policy() -> Any:
-        from apm_cli.install.exec_gate import ExecPolicyUnavailable
-        from apm_cli.policy.outcome_routing import classify_project_policy
-
-        route = classify_project_policy(
-            manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)
-        )
-        # A blocking or unresolved outcome fails toward running the install
-        # gate, which routes the same outcome and reports it.
-        if route.blocks or route.unresolved:
-            raise ExecPolicyUnavailable(route.outcome)
-        return route.policy
-
-    return lock_exec_decisions_stale(
+    rows = scope_stale_exec_rows(
         lockfile,
         modules_dir,
-        get_manifest_path(scope),
-        policy_provider=_policy,
-        targets=resolve_audit_targets(
-            get_deploy_root(scope), user_scope=scope is _Scope.USER, lockfile=lockfile
-        ),
+        scope,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
     )
+    return next(rows, None) is not None
 
 
 def _build_revision_pin_downloader() -> RemoteRefDownloader:

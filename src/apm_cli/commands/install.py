@@ -1829,6 +1829,8 @@ def _install_apm_packages(ctx, outcome):
             apm_dir=ctx.apm_dir,
             local_cleanup_pending=_local_cleanup_pending,
             project_root=None if ctx.scope is _InstallScope.USER else ctx.project_root,
+            scope=ctx.scope,
+            fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         )
         return (*prospective_plan.dependency_counts, None)
 
