@@ -9,7 +9,7 @@ oracles:
   O1:
     name: TRANSCRIPT
     invariant: '-'
-    check: normalized stdout+stderr of each step equals the reviewed golden file tests/journeys/goldens/<J>/<step>.txt; package blocks compared as unordered units, lines inside a block ordered
+    check: normalized stdout+stderr of each step equals the reviewed golden file tests/lifecycle/journeys/goldens/<J>/<nn>.txt; package blocks compared as unordered units, lines inside a block ordered
     applies: golden journeys only (PR tier)
   O2:
     name: DOCS-OUTPUT
