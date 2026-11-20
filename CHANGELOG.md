@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm approve -g <pkg>` (and `apm deny -g`, `apm policy explain -g`) approves a native plugin that `apm install -g` parked; user-scope parked notices print that command, an unapproved Codex bundle parks instead of failing the install, and `apm approve` exits 1 when a package is not installed (a `#ref` spec names the identity to approve). (closes #4154)
 - `apm install -g` and global `apm uninstall` now apply the `executables` approvals in `~/.apm/apm.yml` to hooks, MCP servers and LSP servers; they were ignored, so unapproved executables could deploy. (#3986)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native Agent Plugin is installed. (closes #3901, #3946)
 - Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)

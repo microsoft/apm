@@ -529,6 +529,23 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4154,
+      "fixed_in": "Unreleased",
+      "summary": "A native plugin parked at user scope could not be approved: apm approve had no -g, scanned a local plugin's source instead of the copy install gated, printed project-scope hints, and exited 0 when it approved nothing; an unapproved Codex bundle failed the install instead of parking.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_user_scope_claude_plugin_is_approved_by_the_printed_command",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_user_scope_codex_bundle_parks_and_the_printed_command_approves_it",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_approve_exits_1_when_it_approves_nothing"
+      ]
     }
   ],
   "lifecycle_contracts": [
