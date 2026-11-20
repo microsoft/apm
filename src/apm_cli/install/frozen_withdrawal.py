@@ -91,8 +91,15 @@ def take_write_journal(lockfile_path: Path) -> WriteJournal | None:
     if committed is None:
         return None
     deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
+    receipts = _receipts(deploy_root, lockfile_path.parent, user_scope=user_scope)
     return WriteJournal(
-        receipts=_receipts(deploy_root, lockfile_path.parent, user_scope=user_scope),
+        # A receipt proves an earlier write only while its file is still on disk;
+        # once the user moved it aside, rewriting it is this invocation's write.
+        receipts={
+            path: digest
+            for path, digest in receipts.items()
+            if Path(path).exists() or Path(path).is_symlink()
+        },
         directories=_directories(deploy_root, {target.root_dir for target in targets}),
     )
 
