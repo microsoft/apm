@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from unittest.mock import patch
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -132,8 +133,13 @@ def _assert_skill_receipt(
     owner: str,
     expected: Mapping[str, Path],
     bound: bool,
+    user_env: Mapping[str, str] | None = None,
 ) -> Path:
-    """Check successful-write evidence and its expected committed-claim binding."""
+    """Check successful-write evidence and its expected committed-claim binding.
+
+    *user_env* is the command's target-root environment, under which
+    target-relative user-lockfile rows resolve.
+    """
     receipts = list((scenario.isolated.config_root / "deployment-receipts").glob("*.json"))
     assert len(receipts) == 1
     receipt = receipts[0]
@@ -167,8 +173,9 @@ def _assert_skill_receipt(
     lock = LockFile.read(lock_root / "apm.lock.yaml")
     assert lock is not None
     if scope == "user":
-        # Read the user lockfile as the CLI does, whatever this process's APM_HOME.
-        DeploymentLedgerCodec.adopt_user_lockfile_rows(lock)
+        # Read the user lockfile as the CLI does, under the command's target roots.
+        with patch.dict(os.environ, user_env or {}):
+            DeploymentLedgerCodec.adopt_user_lockfile_rows(lock)
     claims = DeploymentLedgerCodec.from_lockfile(lock).records
     for key, row in ledger.records.items():
         path = expected[row.locator.target]
@@ -3535,6 +3542,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
             owner=f"{_OWNER}/{source.package.name}",
             expected={target: external_roots[target] / skill_paths[target] for target in targets},
             bound=True,
+            user_env={_EXTERNAL_USER_ROOT_ENV[t]: str(root) for t, root in external_roots.items()},
         )
 
     manifest_path = physical_apm_home / "apm.yml"
