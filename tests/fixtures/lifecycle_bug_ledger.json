@@ -543,6 +543,22 @@
         "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_unreadable_target_config_still_fails_closed",
         "tests/integration/test_opencode_lsp_lifecycle.py::test_uninstall_removes_the_opencode_lsp_entry"
       ]
+    },
+    {
+      "issue": 4119,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H6: every architecture-linter mutation case re-walked the inventory and re-parsed the repository, so the owner mutation matrix cost about 29 s per case; a session cache now parses each file content once with identical findings.",
+      "failure_modes": [
+        "cache"
+      ],
+      "properties": [
+        "portability.byte_deterministic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_per_group",
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_parses_each_file_content_at_most_once_over_full_matrix",
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix"
+      ]
     }
   ],
   "lifecycle_contracts": [
