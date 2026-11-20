@@ -603,7 +603,7 @@ def _no_ref_change_summary(exec_reconciled: bool, provenance_restored: bool) -> 
     return "Restored dependency cache without changing refs."
 
 
-def _reverified_lock(lockfile, lock_path: Path, logger):
+def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool):
     """Re-verify locked marketplace provenance before planning; fail closed (#4228).
 
     Returns ``(lockfile, restored)``: the lockfile with restored rows applied
@@ -612,16 +612,16 @@ def _reverified_lock(lockfile, lock_path: Path, logger):
     ``marketplace_provenance``, #4430); a failed update writes nothing.
     """
     from apm_cli.marketplace.catalog_origin import locked_provenance, reverify_locked_provenance
-    from apm_cli.marketplace.client import catalog_cache_read_only
+    from apm_cli.marketplace.client import catalog_cache_writes_on_success
     from apm_cli.marketplace.errors import MarketplaceError
 
     rows = lockfile.dependencies if lockfile is not None else {}
     before = {key: locked_provenance(dep) for key, dep in rows.items()}
     try:
-        # Re-verification reads catalogs but persists nothing, so a refused
-        # update leaves the catalog cache unchanged; the install that follows
-        # refreshes it (#4484).
-        with catalog_cache_read_only():
+        # A refused re-verification leaves the catalog cache unchanged; a
+        # completed one persists what it fetched, validators included, and a
+        # dry run persists nothing (#4484).
+        with catalog_cache_writes_on_success(commit=not dry_run):
             restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
     except MarketplaceError as exc:
         _rich_error(str(exc), symbol="error")
@@ -1079,7 +1079,7 @@ def _run_dep_update_locked(
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
     _existing_lock, _restored_provenance = _reverified_lock(
-        LockFile.read(_lock_path), _lock_path, logger
+        LockFile.read(_lock_path), _lock_path, logger, dry_run=dry_run
     )
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
