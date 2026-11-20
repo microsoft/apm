@@ -120,10 +120,12 @@ def _has_dep_instruction_files(ctx: InstallContext) -> bool:
 
     The all-modules scan is intentionally conservative: after any successful
     install, every dependency instruction must be represented in the next
-    compile.
+    compile.  Diagnostics are optional at this boundary: the hint must work
+    for a context that carries none (unsafe links are then skipped silently).
     """
     apm_modules = ctx.apm_modules_dir or (ctx.project_root / "apm_modules")
-    return any(True for _ in _iter_dep_instruction_files(apm_modules, ctx.diagnostics))
+    diagnostics = getattr(ctx, "diagnostics", None)
+    return any(True for _ in _iter_dep_instruction_files(apm_modules, diagnostics))
 
 
 def _project_compile_hint(target_names: list[str], families: frozenset[str], verb: str) -> str:
