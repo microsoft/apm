@@ -49,6 +49,8 @@ from tests.spec_conformance._helpers import (
     waive,
 )
 
+pytestmark = pytest.mark.component
+
 # --- req-mf-001..005: manifest shape, producer side ---------------------
 
 

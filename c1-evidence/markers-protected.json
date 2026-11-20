@@ -9,12 +9,13 @@
     "tests/quality/test_gate_cell_obligations.py edited for marker only (allowed by partition scope).",
     "Removed stale '# noqa: F401' on 'import pytest' where pytestmark now uses it (RUF100).",
     "Assertion ratchet: classifying component exposes pre-existing AQ003 debt (check_test_assertions only scores component/e2e modules). Baselines are off limits here, so the integrator must regenerate tests/quality/assertion_quality_baseline.json after merge; per-file growth is listed in aq003_exposed.",
-    "Pre-existing failures identical on base (sandbox env): tests/test_lockfile.py::TestLockFile::test_write_parses_legacy_lockfile_once, 2 sparse-checkout tests in tests/test_gitlab_git_transport.py, 8 git-driven tests in tests/spec_conformance/test_mode_b_detector.py.",
-    "Branch rebased onto origin/danielmeppiel-refactored-happiness 805be4f62 (baseline regeneration) before the second push."
+    "Pre-existing failures identical on base (sandbox env): tests/test_lockfile.py::TestLockFile::test_write_parses_legacy_lockfile_once, 2 sparse-checkout tests in tests/test_gitlab_git_transport.py, 8 git-driven tests in tests/spec_conformance/test_mode_b_detector.py, tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_survives_full_install_and_persistent_cache.",
+    "Branch rebased onto origin/danielmeppiel-refactored-happiness 805be4f62 (baseline regeneration) before the second push.",
+    "test_manifest_reqs.py and test_policy_reqs.py run python -m apm_cli.cli in one test each but are mostly CliRunner/file tests; classified component (e2e would add AQ006)."
   ],
   "counts_left": {
     "same_body_groups": 13,
-    "unclassified_modules": 24,
+    "unclassified_modules": 15,
     "placement_offenders": 0,
     "weak_tests": 536
   },
@@ -50,6 +51,15 @@
     "tests/red_team/trust/test_path_identity.py": 3,
     "tests/red_team/trust/test_tier_confusion.py": 2,
     "tests/red_team/trust/test_trust_store_integrity.py": 3,
+    "tests/spec_conformance/test_copilot_plugins_reqs.py": 1,
+    "tests/spec_conformance/test_cowork_deployed_hash_reqs.py": 1,
+    "tests/spec_conformance/test_manifest_extension_reqs.py": 4,
+    "tests/spec_conformance/test_manifest_reqs.py": 18,
+    "tests/spec_conformance/test_native_activation_profile_reqs.py": 1,
+    "tests/spec_conformance/test_policy_reqs.py": 9,
+    "tests/spec_conformance/test_portable_mcp_approval_reqs.py": 3,
+    "tests/spec_conformance/test_resolution_reqs.py": 27,
+    "tests/spec_conformance/test_user_scope_executable_gate_reqs.py": 1,
     "tests/test_apm_package_models.py": 118,
     "tests/test_apm_resolver.py": 42,
     "tests/test_codex_docker_args_fix.py": 6,
