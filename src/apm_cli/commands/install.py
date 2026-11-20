@@ -241,7 +241,7 @@ def _frozen_verified_line(result) -> str:
     from apm_cli.core.remediation import LEGACY_RENDER_MIGRATE
 
     return (
-        f"Adopted {adopted} file(s) an APM before 0.37 deployed, unchanged as committed. "
+        f"Adopted {adopted} file(s) deployed by APM before 0.37, unchanged as committed. "
         f"{LEGACY_RENDER_MIGRATE.sentence()}"
     )
 

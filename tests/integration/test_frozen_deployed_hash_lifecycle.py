@@ -53,7 +53,7 @@ _OLD_RENDERINGS = {
 }
 # The closing line of a frozen replay that adopted both pre-0.37 renderings (#4398).
 _ADOPT_LINE = (
-    "Adopted 2 file(s) an APM before 0.37 deployed, unchanged as committed. Run "
+    "Adopted 2 file(s) deployed by APM before 0.37, unchanged as committed. Run "
     "'apm install' to re-render them for this version and record deployment receipts."
 )
 _KEPT_REMEDY = (
@@ -142,6 +142,10 @@ def _previous_cli_clone(
     return clone, env
 
 
+def _flat(stream: str) -> str:
+    return " ".join(stream.split())
+
+
 def _receipts(scenario: Scenario) -> list[Path]:
     return [
         path
@@ -162,7 +166,9 @@ def test_frozen_replay_of_pre037_cli_output_adopts_then_install_migrates(
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)
     text = output(frozen)
     assert "Kept " not in text and "Deployed files verified" not in text, text
-    assert _ADOPT_LINE in text, text
+    # An [i] line: on stdout only.
+    assert _ADOPT_LINE in _flat(frozen.stdout), frozen.stdout
+    assert "Adopted " not in frozen.stderr, frozen.stderr
     for relative, old in _OLD_RENDERINGS.items():
         assert (clone / relative).read_bytes() == old.encode("ascii")
     assert (clone / "apm.lock.yaml").read_bytes() == lock_before
@@ -198,11 +204,14 @@ def test_frozen_replay_of_unproven_cli_output_fails_closed_and_names_paths(
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env, expect=1)
     text = output(frozen)
     for relative, old in _OLD_RENDERINGS.items():
-        assert (
+        kept = (
             f"Kept {relative}: it differs from what APM renders and there is no local "
             "deployment receipt or locked render proving APM wrote it, so it may hold "
             f"local edits. {_KEPT_REMEDY}"
-        ) in text, text
+        )
+        # An [x] error: on stderr only.
+        assert kept in _flat(frozen.stderr), frozen.stderr
+        assert f"Kept {relative}" not in frozen.stdout, frozen.stdout
         assert (clone / relative).read_bytes() == old.encode("ascii")
     assert "Deployed files verified" not in text
     assert (clone / "apm.lock.yaml").read_bytes() == lock_before
