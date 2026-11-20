@@ -42,7 +42,7 @@ class ServiceIntegrationResult:
     target_decision: EffectiveTargetDecision | None
 
 
-def run_service_integrations(
+def run_service_integrations(  # noqa: PLR0913
     ctx: ServiceCommandContext,
     *,
     apm_package: Any,
