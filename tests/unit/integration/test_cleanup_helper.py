@@ -631,3 +631,39 @@ def test_alias_index_is_built_once_per_cleanup(project_root, diagnostics, monkey
 
     assert sorted(result.deleted) == sorted(stale)
     assert calls["key"] <= len(stale) + len(live)
+
+
+@pytest.mark.parametrize("user_scope", [False, True])
+def test_synced_removal_retires_receipts_in_the_evidence_scope(
+    project_root, monkeypatch, user_scope
+):
+    """User-scope syncs retire receipts in the user store, not the project one (#3701)."""
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.integration.cleanup import DeploymentEvidence, remove_synced_files
+
+    rel = ".github/prompts/old.prompt.md"
+    target = _make_managed_file(project_root, rel, "deployed\n")
+    retired: list[bool] = []
+    monkeypatch.setattr(
+        DeploymentMaterializationSession,
+        "retire_removed",
+        classmethod(lambda cls, root, deleted, *, user_scope: retired.append(user_scope)),
+    )
+    evidence = DeploymentEvidence(
+        deploy_root=project_root,
+        receipts={target.resolve().as_posix(): compute_file_hash(target)},
+        render=None,
+        user_scope=user_scope,
+    )
+
+    result = remove_synced_files(
+        {rel},
+        project_root,
+        prefixes=(".github/prompts/",),
+        dep_key="pkg",
+        targets=None,
+        evidence=evidence,
+    )
+
+    assert result.deleted == [rel]
+    assert retired == [user_scope]

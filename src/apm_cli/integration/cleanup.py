@@ -79,8 +79,10 @@ class DeploymentEvidence:
         receipts: Mapping[str, str],
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
+        user_scope: bool = False,
     ) -> None:
         self._deploy_root = deploy_root
+        self.user_scope = user_scope
         self._receipts = dict(receipts)
         self._render = render
         self._owners = dict(owners or {})
@@ -117,7 +119,9 @@ class DeploymentEvidence:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}
         if lockfile is None or not lockfile.dependencies:
-            return cls(deploy_root=deploy_root, receipts=receipts, render=None)
+            return cls(
+                deploy_root=deploy_root, receipts=receipts, render=None, user_scope=user_scope
+            )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
         locked = copy.deepcopy(lockfile)
         owners: dict[str, list[str]] = {}
@@ -133,6 +137,7 @@ class DeploymentEvidence:
             receipts=receipts,
             render=render,
             owners={path: tuple(keys) for path, keys in owners.items()},
+            user_scope=user_scope,
         )
 
     def prepare(self, claims: Iterable[str]) -> None:
@@ -920,6 +925,8 @@ def remove_synced_files(
         evidence=evidence or DeploymentEvidence.none(project_root),
         recorded_hashes=recorded_hashes,
         failed_path_retained=False,
+        # Evidence is scope-bound: user-scope syncs validate and retire receipts there.
+        user_scope=evidence is not None and evidence.user_scope,
         allow_final_symlink=allow_final_symlink,
         receipt_retirements=receipt_retirements,
     )
