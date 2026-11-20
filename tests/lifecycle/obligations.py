@@ -18,7 +18,7 @@ import json
 import os
 import uuid
 from collections.abc import Collection, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
@@ -29,6 +29,11 @@ from tests.lifecycle import receipts
 QUALITY_DIR = Path(__file__).parents[1] / "quality"
 OBLIGATIONS_PATH = QUALITY_DIR / "promise_obligations.json"
 GATE_CELLS_PATH = QUALITY_DIR / "gate_cell_obligations.json"
+# Required witnesses and known-failing cells of the generated obligation space
+# (security tables and journey step oracles, ``tests/lifecycle/obligation_space.py``).
+GENERATED_PATH = QUALITY_DIR / "generated_obligations.json"
+# The oracle id ``oracles.check_obligation`` writes; mirrors oracles.OBLIGATION_ORACLE.
+OBLIGATION_ORACLE = "OBLIGATION"
 # The single promise catalog; every promise id resolves here and nowhere else.
 PROMISE_CATALOG_PATH = QUALITY_DIR / "promise-catalog.json"
 PROMISE_PREFIX = "P-INV-"
@@ -46,6 +51,8 @@ class Obligation:
     law: str | None = None
     op: str | None = None
     cell: str | None = None
+    # Required strength of a generated obligation; None for invariant and GATE rows.
+    strength: str | None = None
 
     @property
     def promise(self) -> str | None:
@@ -59,6 +66,12 @@ class Obligation:
         return "success" if self.law else "any"
 
     def covered_by(self, receipt: receipts.Receipt) -> bool:
+        if self.strength is not None:
+            return (
+                receipt.oracle_id == OBLIGATION_ORACLE
+                and receipt.params.get("obligation") == self.id
+                and receipt.params.get("strength") == self.strength
+            )
         if self.outcome not in ("any", receipt.outcome):
             return False
         params = receipt.params
@@ -79,12 +92,21 @@ class Catalog:
     baseline: Mapping[str, str]
     lanes: Mapping[str, str]
     raw: Mapping[str, object]
+    # The generated space: its own universe, required witnesses, baseline lanes
+    # and known-failing cells. A known-failing cell earns no receipt; it is
+    # tracked apart from the baseline so a release gate can count it separately.
+    generated: Mapping[str, Obligation] = field(default_factory=dict)
+    generated_required: Mapping[str, str] = field(default_factory=dict)
+    generated_baseline: Mapping[str, str] = field(default_factory=dict)
+    known_failing: Mapping[str, str] = field(default_factory=dict)
 
     @cached_property
     def _by_witness(self) -> Mapping[str, tuple[Obligation, ...]]:
         index: dict[str, list[Obligation]] = {}
         for key, witness in self.required.items():
             index.setdefault(witness, []).append(self.obligations[key])
+        for key, witness in self.generated_required.items():
+            index.setdefault(receipts.normalize_node(witness), []).append(self.generated[key])
         return {witness: tuple(items) for witness, items in index.items()}
 
     def witnessed_by(self, node: str) -> tuple[Obligation, ...]:
@@ -100,7 +122,11 @@ def invariant_op_id(law: str, op: str) -> str:
     return f"{PROMISE_PREFIX}{law}|op:{op}"
 
 
-def load_catalog(path: Path = OBLIGATIONS_PATH, gate_cells_path: Path = GATE_CELLS_PATH) -> Catalog:
+def load_catalog(
+    path: Path = OBLIGATIONS_PATH,
+    gate_cells_path: Path = GATE_CELLS_PATH,
+    generated_path: Path = GENERATED_PATH,
+) -> Catalog:
     data = json.loads(path.read_text(encoding="ascii"))
     obligations: dict[str, Obligation] = {}
     for law, ops in data["invariant_ops"].items():
@@ -109,7 +135,39 @@ def load_catalog(path: Path = OBLIGATIONS_PATH, gate_cells_path: Path = GATE_CEL
             obligations[key] = Obligation(key, law=law, op=op)
     for cell in json.loads(gate_cells_path.read_text(encoding="ascii"))["cells"]:
         obligations[cell] = Obligation(cell, cell=cell)
-    return Catalog(obligations, data["required"], data["baseline"], data["lanes"], data)
+    generated, required, baseline, known = load_generated(generated_path)
+    return Catalog(
+        obligations,
+        data["required"],
+        data["baseline"],
+        data["lanes"],
+        data,
+        generated=generated,
+        generated_required=required,
+        generated_baseline=baseline,
+        known_failing=known,
+    )
+
+
+def load_generated(
+    path: Path = GENERATED_PATH,
+) -> tuple[dict[str, Obligation], dict[str, str], dict[str, str], dict[str, str]]:
+    """The generated universe, its required witnesses, baseline lanes and known-failing cells.
+
+    The baseline is every generated id that is neither required nor known
+    failing, mapped to the lane that owns it; it is derived, never listed.
+    """
+    from tests.lifecycle.obligation_space import generated_obligations
+
+    rows = generated_obligations()
+    universe = {key: Obligation(key, strength=strength) for key, (strength, _) in rows.items()}
+    data = json.loads(path.read_text(encoding="ascii")) if path.is_file() else {}
+    required = dict(data.get("required", {}))
+    known = dict(data.get("known_failing", {}))
+    baseline = {
+        key: lane for key, (_, lane) in rows.items() if key not in required and key not in known
+    }
+    return universe, required, baseline, known
 
 
 def uncovered(obligations: Iterable[Obligation], earned: Collection[receipts.Receipt]) -> list[str]:
