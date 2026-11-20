@@ -4206,6 +4206,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_origin_evidence_lifecycle.py::test_failed_update_keeps_the_lock_after_reverifying_provenance",
+        "tests/integration/test_marketplace_origin_evidence_lifecycle.py::test_noop_update_records_restored_provenance_in_one_lock_write",
         "tests/integration/test_architecture_lockfile_write_authority.py::test_commit_sites_only_shrink"
       ]
     },
