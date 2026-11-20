@@ -136,6 +136,7 @@ class LocalDependencySource(DependencySource):
             InstalledPackage,
             extensions_from_resolved_package,
         )
+        from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
         from apm_cli.install.phases.local_content import _copy_local_package
         from apm_cli.install.source_helpers import package_digests
         from apm_cli.models.apm_package import (
@@ -154,39 +155,24 @@ class LocalDependencySource(DependencySource):
         diagnostics = ctx.diagnostics
         logger = ctx.logger
 
-        # User scope: relative paths are project-relative and have no
-        # meaningful root outside a project, so reject them.  Absolute
-        # paths are unambiguous and supported.
-        if ctx.scope is InstallScope.USER:
-            local_path_str = dep_ref.local_path or ""
-            if not local_path_str or not Path(local_path_str).expanduser().is_absolute():
-                diagnostics.warn(
-                    f"Skipped local package '{local_path_str}' "
-                    "-- relative local paths are not supported at user scope "
-                    "(--global). Use an absolute path or a remote reference "
-                    "(owner/repo) instead.",
-                    package=local_path_str,
-                )
-                if logger:
-                    logger.verbose_detail(
-                        f"  Skipping {local_path_str} (relative local paths "
-                        "are project-relative and have no root at user scope)"
-                    )
-                return None
-
-        # Determine the anchor for relative ``local_path`` (#857). For
-        # direct deps from the root project this is ``ctx.source_root``
-        # (which equals ``ctx.project_root`` unless ``apm install --root``
-        # redirects writes -- then it stays at $PWD).  For transitive
-        # deps declared inside another local package, the parent's
-        # source directory was captured during resolve via
-        # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
-        # has nothing to do.
-        base_dir = (
-            ctx.source_root
-            if dep_ref.replacement is not None
-            else getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
+        # The declaring package anchors relative paths (#857, #4153); resolve
+        # captured it in ``ctx.dep_base_dirs``.
+        base_dir = local_dep_base_dir(
+            dep_ref.local_path or "",
+            declaring_dir=(
+                None
+                if dep_ref.replacement is not None
+                else getattr(ctx, "dep_base_dirs", {}).get(dep_key)
+            ),
+            source_root=ctx.source_root,
+            user_scope=ctx.scope is InstallScope.USER,
         )
+        if base_dir is None:
+            diagnostics.error(
+                f"{dep_ref.local_path} -- {USER_SCOPE_RELATIVE_PATH_ERROR}",
+                package=dep_ref.local_path,
+            )
+            return None
         original_src = Path(dep_ref.local_path).expanduser()
         if not original_src.is_absolute():
             original_src = (base_dir / original_src).resolve()
