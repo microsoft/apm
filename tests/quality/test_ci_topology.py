@@ -40,9 +40,11 @@ RATCHET_CHECK = "Test Architecture Ratchets"
 RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
-ARCHITECTURE_SCALING_TARGET = (
+ARCHITECTURE_SCALING_TARGETS = (
     "tests/perf/test_architecture_linter_scaling.py::"
-    "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction"
+    "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction",
+    "tests/perf/test_architecture_linter_scaling.py::"
+    "test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n",
 )
 ALLOW_PROVISIONAL_KEY = "APM_ALLOW_PROVISIONAL_BASELINES"
 DRAFT_PROVISIONAL_GUARD = (
@@ -287,7 +289,7 @@ def _assert_ci_test_targets(
     ratchet = workflow_job(ci, RATCHET_CONTRACT_JOB)
     expected_ratchet_targets = Counter({path: 1 for path in repository_modules | fixture_modules})
     assert Counter(_pytest_targets(ratchet)) == expected_ratchet_targets
-    assert _pytest_targets(workflow_job(ci, RATCHET_SCALING_JOB)) == (ARCHITECTURE_SCALING_TARGET,)
+    assert _pytest_targets(workflow_job(ci, RATCHET_SCALING_JOB)) == ARCHITECTURE_SCALING_TARGETS
 
     required_shard = workflow_job(ci, "build-and-test-shard")
     assert _pytest_targets(required_shard) == REQUIRED_SHARD_ROOTS
@@ -319,7 +321,7 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
         expected_env = {ALLOW_PROVISIONAL_KEY: DRAFT_PROVISIONAL_GUARD}
     else:
         assert job_id == RATCHET_SCALING_JOB
-        expected_command = [*prefix, "-m", "benchmark", ARCHITECTURE_SCALING_TARGET]
+        expected_command = [*prefix, "-m", "benchmark", *ARCHITECTURE_SCALING_TARGETS]
         expected_env = {"PYTEST_PERF": "1"}
     assert list(shell_commands(steps[4])) == [expected_command]
     assert steps[4].get("env", {}) == expected_env
