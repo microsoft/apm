@@ -534,6 +534,21 @@ def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
     )
 
 
+def _warn_unhashed_dependencies(project_root: Path, fetch_result) -> None:
+    """Name locked entries without a content hash when policy does not require one."""
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..install.integrity import unhashed_dependencies_advisory
+
+    lockfile = LockFile.read(get_lockfile_path(project_root))
+    if lockfile is None:
+        return
+    policy = fetch_result.policy if fetch_result is not None and fetch_result.found else None
+    integrity = getattr(getattr(policy, "security", None), "integrity", None)
+    advisory = unhashed_dependencies_advisory(lockfile.get_package_dependencies(), integrity)
+    if advisory is not None:
+        _rich_warning(advisory, symbol="warning", err=True)
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -816,6 +831,8 @@ def _audit_ci_gate(
                             warned=not check.passed,
                         )
                     )
+
+    _warn_unhashed_dependencies(cfg.project_root, fetch_result)
 
     # -- Drift detection (default-on per ADR-02) --------------------
     drift_findings: list = []
