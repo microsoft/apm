@@ -281,7 +281,8 @@ def test_shared_skill_partial_failure_does_not_claim_sibling_or_unwritten_assets
     result = scenario.run(
         "install", str(scenario.packages["a"]), "--target", "claude,codex", expected=1
     )
-    assert "Could not" in result.stdout or "failed" in result.stdout
+    output = result.stdout + result.stderr  # error lines go to stderr (RA-004)
+    assert "Could not" in output or "failed" in output
     after = load_yaml(scenario.lock_root / "apm.lock.yaml")
     assert after["deployments"] == before["deployments"]
     for previous, current in zip(before["dependencies"], after["dependencies"], strict=True):
