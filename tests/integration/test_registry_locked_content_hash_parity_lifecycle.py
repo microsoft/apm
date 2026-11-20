@@ -35,6 +35,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I3", "P-OWN-package-content-hash"),
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
 ]
 

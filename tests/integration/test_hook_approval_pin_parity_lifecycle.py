@@ -33,6 +33,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I3", "P-OWN-executable-item-admission"),
 ]
 
 _PACKAGE = "../hooky"

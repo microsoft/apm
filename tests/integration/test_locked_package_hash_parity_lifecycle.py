@@ -30,7 +30,12 @@ from tests.integration._install_audit_replay_kit import (
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
-pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I3", "P-OWN-package-content-hash"),
+]
 
 _TARGETS = ("copilot", "claude")
 _OTHER_HASH = "sha256:" + "0" * 64
