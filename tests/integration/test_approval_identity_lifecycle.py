@@ -21,7 +21,16 @@ import yaml
 from tests.integration.test_approve_parked_native_plugin_lifecycle import _evidence, _World
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
-pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise(
+        "P-LAW-outcome.status_matches_state",
+        "P-OWN-executable-trust-context",
+        "P-OWN-dependency-cli-selection",
+    ),
+]
 
 _MARKER = "hooky-ran"
 _SPEC = "hooky@loc"
