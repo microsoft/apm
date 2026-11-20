@@ -270,18 +270,31 @@ def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
 
     if gate_off == "deny":
         apm("deny", "../hooky")
+        source = "../hooky is denied locally"
     else:
         dump_yaml({**manifest, "executables": {}}, project / "apm.yml")
+        source = "../hooky is no longer approved locally"
     lock_bytes = lock_path.read_bytes()
 
-    frozen = " ".join(apm("install", "--frozen", "--no-policy", expect=1).split())
-    for path in sorted(hook_paths):
-        assert path in frozen, frozen
-    assert "run 'apm install' without --frozen" in frozen, frozen
-    assert "commit apm.lock.yaml" in frozen, frozen
-    assert _hook_residue(project) == []
-    assert lock_path.read_bytes() == lock_bytes
+    # Read-only modes report the retirement without applying it.
+    preview = " ".join(apm("install", "--dry-run", "--no-policy").split())
+    assert "Executables that would be retired" in preview, preview
+    assert f"- {source}" in preview, preview
+    assert set(_hook_residue(project)) == hook_paths
     apm("audit", "--ci", "--no-policy", expect=1)
+
+    # I7-X1: deny wins, so frozen retires the hook, then fails naming each file;
+    # a second run changes nothing more and fails the same way.
+    for _attempt in range(2):
+        frozen = " ".join(apm("install", "--frozen", "--no-policy", expect=1).split())
+        assert "[x] --frozen: files recorded in apm.lock.yaml are missing from disk." in frozen
+        for path in sorted(hook_paths):
+            assert f"- {path}: retired because {source}" in frozen, frozen
+        assert "run 'apm install' without --frozen" in frozen, frozen
+        assert "commit apm.lock.yaml" in frozen, frozen
+        assert _hook_residue(project) == []
+        assert lock_path.read_bytes() == lock_bytes
+        apm("audit", "--ci", "--no-policy", expect=1)
 
     apm("install", "--no-policy")
     assert not hook_paths & claimed()

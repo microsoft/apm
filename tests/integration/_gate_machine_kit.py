@@ -338,7 +338,16 @@ class GateWorld:
             deploy_root=self.deploy_root,
             lock=self.lock(),
             managed_paths=frozenset({_HOOK_FILE[self.scope]}),
+            surface_paths=self._surface_paths(),
         )
+
+    def _surface_paths(self) -> dict[str, frozenset[str]]:
+        """Artifact paths each gate surface deploys, under the deploy root's id."""
+        root = "project" if self.scope == "project" else "home"
+        return {
+            "hook": frozenset({f"{root}:{_HOOK_FILE[self.scope]}"}),
+            "lsp": frozenset({f"{root}:{_LSP_FILE[self.scope]}"}),
+        }
 
 
 def _hook_package(root: Path) -> Path:

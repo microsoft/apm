@@ -333,6 +333,36 @@ def test_context_protection_cannot_regress_to_root_only(
             "missing, gitignored_skipped = _local_presence_loop(project_root, lock, targets)",
             id="audit-bypasses-shared-presence-verifier",
         ),
+        pytest.param(
+            "src/apm_cli/install/service.py",
+            "raise frozen_missing_files_error(",
+            "raise _local_missing_files_error(",
+            id="frozen-refusal-skips-retirement-owner",
+        ),
+        pytest.param(
+            "tests/utils/lifecycle_oracle.py",
+            "if after.deployed - before.deployed or retired & model.allowed_surfaces():",
+            "if after.deployed - before.deployed:",
+            id="i7-x1-widened-to-allowed-surfaces",
+        ),
+        pytest.param(
+            "tests/utils/lifecycle_oracle.py",
+            "if after.state.lockfile_bytes != before.state.lockfile_bytes:",
+            "if False:",
+            id="i7-x1-widened-to-lock-writes",
+        ),
+        pytest.param(
+            "tests/utils/lifecycle_oracle.py",
+            "if not _within_retirement(path, retirement) and _RETIREMENT_BOOKKEEPING not in path",
+            "if False",
+            id="i7-x1-widened-to-any-file",
+        ),
+        pytest.param(
+            "tests/utils/lifecycle_oracle.py",
+            'return path in retirement or any(retired.startswith(path + "/") for retired in retirement)',
+            "return True",
+            id="i7-x1-widened-beyond-retired-ancestors",
+        ),
     ],
 )
 def test_frozen_and_audit_share_deployed_hash_verifier(

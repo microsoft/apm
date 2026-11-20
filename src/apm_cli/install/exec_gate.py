@@ -341,8 +341,22 @@ def current_exec_decision(
     are not, as the lock records them (``exec_allowed_types``, #3991).
     *trust_ctx_provider* is called only for a package that declares some.
     """
+    from apm_cli.security.trust import package_exec_decision
+
+    pkg_key, install, native, exec_types = _declared_exec_types(package_info, package_name)
+    if not exec_types:
+        return None, ()
+    return package_exec_decision(
+        trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
+    )
+
+
+def _declared_exec_types(
+    package_info: Any, package_name: str
+) -> tuple[str, Path, bool, tuple[str, ...]]:
+    """Scan one materialized package as the install gate does (native union included)."""
     from apm_cli.security.executables import scan_package_executables
-    from apm_cli.security.trust import native_plugin_exec_types, package_exec_decision
+    from apm_cli.security.trust import native_plugin_exec_types
 
     pkg_key = resolve_package_key(package_info, package_name)
     install = Path(package_info.install_path)
@@ -353,11 +367,80 @@ def current_exec_decision(
         exec_types = scan_package_executables(
             install, package_name, "", approval_identity=pkg_key
         ).exec_types
-    if not exec_types:
-        return None, ()
-    return package_exec_decision(
-        trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
-    )
+    return pkg_key, install, native, tuple(exec_types)
+
+
+_ORG_DENY_LAYERS = frozenset({"org-deny-all", "org-deny"})
+_LOCAL_DENY_LAYERS = frozenset({"user-deny", "project-deny"})
+
+
+def withheld_executable_sources(
+    lockfile: Any,
+    modules_dir: Path,
+    manifest_path: Path,
+    *,
+    policy_provider: Callable[[], Any],
+    targets: list[Any] | None = None,
+    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+) -> builtins.dict[str, str]:
+    """Say why the gate now withholds each locked package's executables (#4043).
+
+    Keys are dependency keys; values name the deciding source: ``org policy
+    denies <pkg>``, ``<pkg> is denied locally`` or ``<pkg> is no longer
+    approved locally``. Packages the gate still allows are absent, as are
+    packages whose decision cannot be read now (an unreadable package, or
+    *policy_provider* raising :class:`ExecPolicyUnavailable`). ``install
+    --frozen`` names retired files with it and ``--dry-run`` previews them.
+    """
+    from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import TRUST_ABSENT, exec_trust_context_for_project
+    from apm_cli.security.trust import package_withholding_layers
+
+    trust: list[Any] = []
+
+    def _trust_ctx() -> Any:
+        if not trust:
+            trust.append(
+                exec_trust_context_for_project(
+                    manifest_path,
+                    policy=policy_provider(),
+                    fallback_allow_executables=fallback_allow_executables,
+                    migrate_user_legacy=False,
+                )
+            )
+        return trust[0]
+
+    sources: builtins.dict[str, str] = {}
+    with native_registration_scope(targets):
+        for key, dep in sorted((getattr(lockfile, "dependencies", None) or {}).items()):
+            if key == "." or dep.exec_status == TRUST_ABSENT:
+                continue
+            install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+            if not install_path.is_dir():
+                continue
+            try:
+                package_key, install, native, exec_types = _declared_exec_types(
+                    _build_package_info(dep, install_path), key
+                )
+                layers = set(
+                    package_withholding_layers(
+                        _trust_ctx() if exec_types else None,
+                        tuple(_candidate_keys(package_key)),
+                        install,
+                        exec_types,
+                        native=native,
+                    )
+                )
+            except (ExecPolicyUnavailable, OSError, ValueError):
+                continue
+            if layers & _ORG_DENY_LAYERS:
+                sources[key] = f"org policy denies {key}"
+            elif layers & _LOCAL_DENY_LAYERS:
+                sources[key] = f"{key} is denied locally"
+            elif layers:
+                sources[key] = f"{key} is no longer approved locally"
+    return sources
 
 
 def recorded_exec_status_is_stale(

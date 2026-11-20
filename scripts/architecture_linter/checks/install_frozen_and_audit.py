@@ -92,6 +92,28 @@ _DEPLOYED_HASH_FRAGMENTS = (
     (_DRIFT_DIFF, "= verify_deployed_file_hashes(project_root, lockfile, targets)"),
 )
 
+# I7-X1 (#4043): a failed frozen install may only have retired executables
+# the gate now withholds. The refusal names them through the exec gate owner,
+# and the GATE oracle's exception stays closed: the lockfile never changes,
+# no allowed surface goes, and no file changes beyond the retired ones.
+_FROZEN_RETIREMENT = "src/apm_cli/install/frozen_retirement.py"
+_GATE_ORACLE = "tests/utils/lifecycle_oracle.py"
+_RETIREMENT_FRAGMENTS = (
+    (_FROZEN_OWNER, "raise frozen_missing_files_error("),
+    (_FROZEN_RETIREMENT, "return withheld_executable_sources("),
+    (_GATE_ORACLE, "if after.state.lockfile_bytes != before.state.lockfile_bytes:"),
+    (_GATE_ORACLE, "if after.deployed - before.deployed or retired & model.allowed_surfaces():"),
+    (
+        _GATE_ORACLE,
+        "if not _within_retirement(path, retirement) and _RETIREMENT_BOOKKEEPING not in path",
+    ),
+    (
+        _GATE_ORACLE,
+        'return path in retirement or any(retired.startswith(path + "/") for retired in retirement)',
+    ),
+    (_GATE_ORACLE, '_RETIREMENT_BOOKKEEPING = "deployment-receipts/"'),
+)
+
 
 def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     """Frozen install decisions must route through InstallService before mutation."""
@@ -107,6 +129,8 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
     audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
+    retirement, retirement_fail = _facts_for(provider, _FROZEN_RETIREMENT, rule_id)
+    oracle, oracle_fail = _facts_for(provider, _GATE_ORACLE, rule_id)
     drift, drift_fail = _facts_for(provider, _DRIFT_DIFF, rule_id)
     failures = (
         drift_fail
@@ -117,6 +141,8 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         + outcome_fail
         + mcp_fail
         + audit_fail
+        + retirement_fail
+        + oracle_fail
     )
     if failures:
         return tuple(failures)
@@ -237,6 +263,12 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         or not all(
             _present({_FROZEN_OWNER: owner, _DRIFT_DIFF: drift}.get(path, audit), needle)
             for path, needle in _DEPLOYED_HASH_FRAGMENTS
+        )
+        or not all(
+            _present(
+                {_FROZEN_OWNER: owner, _FROZEN_RETIREMENT: retirement}.get(path, oracle), needle
+            )
+            for path, needle in _RETIREMENT_FRAGMENTS
         )
         or bool(duplicates)
     )

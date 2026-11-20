@@ -826,17 +826,17 @@ class InstallService:
         deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
         missing, _gitignored = find_missing_deployed_files(deploy_root, committed, targets)
         if missing:
-            # A file the gate retired (deny wins, #3944) is still claimed by
-            # the lockfile frozen may not rewrite (#4043).
-            raise FrozenInstallError(
-                "--frozen: files recorded in apm.lock.yaml are missing from disk.",
-                reasons=[
-                    f"  - {path} is recorded in apm.lock.yaml but missing" for path in missing
-                ],
-                tip=(
-                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                    "or --global if specified, then commit apm.lock.yaml."
-                ),
+            # Deny wins (#3944); frozen names the retired files it cannot unrecord.
+            from apm_cli.install.frozen_retirement import frozen_missing_files_error
+
+            raise frozen_missing_files_error(
+                request,
+                committed,
+                withheld,
+                missing,
+                lockfile_dir=lockfile_path.parent,
+                deploy_root=deploy_root,
+                targets=targets,
             )
         InstallService._enforce_frozen_deployed_hashes(request, committed, deployed=True)
 

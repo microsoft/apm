@@ -26,6 +26,7 @@ def render_and_exit(
     apm_dir: Path,
     local_cleanup_pending: Callable[[LockFile], bool] | None = None,
     project_root: Path | None = None,
+    no_policy: bool = False,
 ) -> None:
     """Render the dry-run preview to the user.
 
@@ -111,6 +112,20 @@ def render_and_exit(
                 logger.progress(f"  - {_orphan}")
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
+
+    if _dryrun_lock and plan.should_install_apm:
+        from apm_cli.install.frozen_retirement import preview_executable_retirements
+
+        # Deny wins (#3944, #4043): install would remove these packages' deployed
+        # executables; the preview removes nothing.
+        retirements = preview_executable_retirements(_dryrun_lock, apm_dir, no_policy=no_policy)
+        if retirements:
+            logger.progress(
+                f"Executables that would be retired (decision changed since apm.lock.yaml): "
+                f"{len(retirements)}"
+            )
+            for source in retirements:
+                logger.progress(f"  - {source}")
 
     if _dryrun_lock and plan.should_install_mcp and project_root is not None:
         from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves

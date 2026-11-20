@@ -54,7 +54,8 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
     ),
     "I6": OracleLaw("output is ASCII; JSON mode prints valid JSON", ()),
     "I7": OracleLaw(
-        "no silent success; a failed command preserves durable state",
+        "no silent success; a failed command preserves durable state "
+        "(I7-X1: except retiring an executable it denies or revoked)",
         ("transaction.failed_command_preserves_state",),
     ),
     "I8": OracleLaw("exit code is in {0, 1, 2}", ("outcome.status_matches_state",)),
@@ -92,6 +93,9 @@ class Observation:
     deploy_root: Path
     lock: LockFile | None
     managed_paths: frozenset[str] = frozenset()
+    # Surface -> the artifact paths ("<root id>:<path>") it deploys, so I7-X1
+    # can tell a retired executable's files from any other write.
+    surface_paths: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -338,7 +342,6 @@ def _i6_ascii(before, after, result: CommandResult | None, model, op: Operation)
 def _i7_failure_preserves_state(
     before: Observation, after: Observation, result: CommandResult | None, model, op: Operation
 ) -> list[Violation]:
-    del model
     if result is None or result.returncode == 0 or op.edit_only:
         return []
     found = []
@@ -346,9 +349,44 @@ def _i7_failure_preserves_state(
         found.append(Violation("I7", f"failed {op.name} changed the manifest"))
     if after.state.lockfile_bytes != before.state.lockfile_bytes:
         found.append(Violation("I7", f"failed {op.name} changed the lockfile"))
-    if after.deployed != before.deployed:
-        found.append(Violation("I7", f"failed {op.name} changed deployed surfaces"))
+    found.extend(_i7_x1_retirement_only(before, after, model, op))
     return found
+
+
+# Retiring a file rewrites APM's local evidence of it, never the lockfile.
+_RETIREMENT_BOOKKEEPING = "deployment-receipts/"
+
+
+def _within_retirement(path: str, retirement: frozenset[str]) -> bool:
+    """A retired file, or an ancestor directory its cleanup left empty and removed."""
+    return path in retirement or any(retired.startswith(path + "/") for retired in retirement)
+
+
+def _i7_x1_retirement_only(
+    before: Observation, after: Observation, model, op: Operation
+) -> list[Violation]:
+    """I7-X1: a failed command may still retire an executable it no longer allows.
+
+    Deny wins (#3944): removing a deployed executable whose current decision
+    is deny or revoked is applied even when the command then fails (for
+    example ``install --frozen``, #4043). The exception is closed: no surface
+    may appear, no allowed surface may go, and no file may change beyond the
+    retired surfaces' own files and their receipts.
+    """
+    if after.deployed == before.deployed:
+        return []
+    retired = before.deployed - after.deployed
+    if after.deployed - before.deployed or retired & model.allowed_surfaces():
+        return [Violation("I7", f"failed {op.name} changed deployed surfaces")]
+    retirement = frozenset().union(*(before.surface_paths.get(kind, ()) for kind in retired))
+    stray = [
+        path
+        for path in _changed_paths(before.artifacts, after.artifacts)
+        if not _within_retirement(path, retirement) and _RETIREMENT_BOOKKEEPING not in path
+    ]
+    if stray:
+        return [Violation("I7", f"failed {op.name} changed more than retired executables: {stray}")]
+    return []
 
 
 def _i8_exit_code(before, after, result: CommandResult | None, model, op) -> list[Violation]:

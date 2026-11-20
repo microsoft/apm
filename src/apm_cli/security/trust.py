@@ -1062,6 +1062,26 @@ def package_exec_decision(
     return status, tuple(sorted(allowed)) if partial else ()
 
 
+def package_withholding_layers(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> tuple[str, ...]:
+    """Return the deciding layers that withhold this package's executables now.
+
+    Empty when the gate is off or every declared type is allowed. The layers
+    name where the decision came from (org policy, a local deny, or no
+    approval), which ``install --frozen`` and ``--dry-run`` report (#4043).
+    """
+    if ctx is None or not exec_types or not ctx.gate_enabled:
+        return ()
+    verdicts = package_type_verdicts(ctx, package_keys, install_path, exec_types, native=native)
+    return tuple(sorted({verdict.layer for verdict in verdicts.values() if not verdict.allowed}))
+
+
 # -------------------------------------------------------------------
 # Legacy content-blind grants (warned in 0.37)
 # -------------------------------------------------------------------
