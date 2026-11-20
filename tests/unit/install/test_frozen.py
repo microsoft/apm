@@ -779,3 +779,25 @@ class TestOutermost:
             ".claude/skills/b",
             ".claude/skills/bc",
         ]
+
+
+@pytest.mark.req("req-lk-018")
+class TestResolveFrozen:
+    """req-lk-018: a truthy CI selects frozen unless the invocation is explicitly non-frozen."""
+
+    @pytest.mark.parametrize("ci", ["true", "1", "TRUE", "yes"])
+    def test_truthy_ci_selects_frozen(self, ci: str) -> None:
+        assert InstallService.resolve_frozen(None, False, environ={"CI": ci}) is True
+
+    @pytest.mark.parametrize("environ", [{}, {"CI": ""}, {"CI": "0"}, {"CI": "False"}])
+    def test_absent_or_falsy_ci_stays_non_frozen(self, environ: dict[str, str]) -> None:
+        assert InstallService.resolve_frozen(None, False, environ=environ) is False
+
+    @pytest.mark.parametrize("flag", [True, False])
+    def test_explicit_flag_wins_over_ci(self, flag: bool) -> None:
+        assert InstallService.resolve_frozen(flag, False, environ={"CI": "true"}) is flag
+        assert InstallService.resolve_frozen(flag, False, environ={}) is flag
+
+    @pytest.mark.parametrize("intent", [True, ("org/pkg",), "server"])
+    def test_resolve_intent_stays_non_frozen_under_ci(self, intent: object) -> None:
+        assert InstallService.resolve_frozen(None, intent, environ={"CI": "true"}) is False

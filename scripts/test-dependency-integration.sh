@@ -75,7 +75,7 @@ EOF
     
     # Test apm install (should download real dependency)
     log_info "Testing 'apm install' with real GitHub dependency"
-    if ! "$apm_binary" install; then
+    if ! "$apm_binary" install --no-frozen; then
         log_error "Failed to install real dependency"
         return 1
     fi
@@ -166,7 +166,7 @@ EOF
     
     # Install multiple dependencies
     log_info "Installing multiple real dependencies"
-    if ! "$apm_binary" install; then
+    if ! "$apm_binary" install --no-frozen; then
         log_error "Failed to install multiple dependencies"
         return 1
     fi

@@ -238,7 +238,7 @@ def test_ado_noninteractive_credential_fill_disables_helper_ui_in_ci(
     project = scenario.project(manifest=manifest(ado_dependency_entry()))
     with scenario.serve() as proxy:
         env = scenario.env(proxy, {"CI": "1"})
-        result = scenario.run(INSTALL, cwd=project, env=env, step="ci-install")
+        result = scenario.run((*INSTALL, "--no-frozen"), cwd=project, env=env, step="ci-install")
         assert result.returncode == 0, describe(result)
     gets = helper.gets()
     assert gets

@@ -150,23 +150,52 @@ def test_locked_content_hash_is_recomputed_and_names_both_envelopes(
 # --- req-lk-018: frozen by default under CI ------------------------------------
 
 
-@pytest.mark.req("req-lk-018")
-@pytest.mark.xfail(strict=True, reason="#4292: CI does not select frozen install behaviour")
-def test_install_under_ci_defaults_to_frozen(tmp_path: Path, apm_binary_path: Path) -> None:
+def _install_with_ci(tmp_path: Path, apm_binary_path: Path, ci: str | None, *args: str):
     sample = create_hermetic_packaged_sample(
         tmp_path, apm_binary_path=apm_binary_path, project_name="consumer"
     )
+    env = {key: value for key, value in sample.environment.items() if key != "CI"}
+    if ci is not None:
+        env["CI"] = ci
     project = sample.project.root
-
     result = sample.runner.run(
-        ("install",),
-        scenario_id="lk-018-ci-default",
-        cwd=project,
-        env={**sample.environment, "CI": "true"},
+        ("install", *args), scenario_id="lk-018-ci-default", cwd=project, env=env
     )
+    return project, result
+
+
+@pytest.mark.req("req-lk-018")
+@pytest.mark.parametrize("ci", ["true", "1", "TRUE"])
+def test_install_under_ci_defaults_to_frozen(
+    tmp_path: Path, apm_binary_path: Path, ci: str
+) -> None:
+    project, result = _install_with_ci(tmp_path, apm_binary_path, ci)
 
     output = _text(result)
     assert result.returncode == 1, output
     assert "--frozen requires apm.lock.yaml" in output
+    assert "--no-frozen" in output
     assert not (project / "apm.lock.yaml").exists()
     assert not (project / "apm_modules").exists()
+
+
+@pytest.mark.req("req-lk-018")
+@pytest.mark.parametrize(
+    ("ci", "args"),
+    [
+        pytest.param(None, (), id="unset"),
+        pytest.param("", (), id="empty"),
+        pytest.param("0", (), id="zero"),
+        pytest.param("FALSE", (), id="false"),
+        pytest.param("true", ("--no-frozen",), id="explicit-no-frozen"),
+    ],
+)
+def test_install_without_truthy_ci_or_with_no_frozen_resolves(
+    tmp_path: Path, apm_binary_path: Path, ci: str | None, args: tuple[str, ...]
+) -> None:
+    project, result = _install_with_ci(tmp_path, apm_binary_path, ci, *args)
+
+    output = _text(result)
+    assert result.returncode == 0, output
+    assert "installing as --frozen" not in output
+    assert (project / "apm.lock.yaml").exists()

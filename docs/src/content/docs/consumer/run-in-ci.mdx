@@ -17,6 +17,8 @@ apm audit --ci
   fails if the lockfile is missing or out of sync with `apm.yml` (source,
   ref, host, transport or MCP config), and never rewrites it. It also fails, before
   writing anything, when a deployed file differs from its locked hash.
+  When `CI` is set (not empty, `0` or `false`), plain `apm install` runs as
+  `--frozen` too; pass `--no-frozen` to resolve and update the lockfile.
 - `apm audit --ci` checks the lockfile, replays the install in a scratch
   folder and compares it with the checkout, and scans for hidden Unicode. It
   exits 1 on any failure; the checks are listed in

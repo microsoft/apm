@@ -870,13 +870,12 @@ def _handle_mcp_install(  # noqa: PLR0913
     help="Overwrite locally-authored files on collision and deploy despite critical security findings (does NOT refresh refs; use 'apm update' for that)",
 )
 @click.option(
-    "--frozen",
-    is_flag=True,
+    "--frozen/--no-frozen",
+    default=None,
     help=(
-        "Refuse to install when apm.lock.yaml is missing or out of sync with "
-        "apm.yml, including Git source, ref, host provider, transport, and MCP "
-        "config state, or when deployed files do not match the hashes it records "
-        "(CI-safe; mutually exclusive with --update, --mcp, and positional packages)."
+        "Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (Git "
+        "source, ref, host provider, transport, MCP config) or deployed files do not match its "
+        "hashes. Default when CI is truthy. Mutually exclusive with --update, --mcp, and packages."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
@@ -1190,6 +1189,7 @@ def install(  # noqa: PLR0913
     transaction: InstallTransaction | None = None
     from ..install.service import InstallService
 
+    frozen = InstallService.resolve_frozen(frozen, update or refresh or packages or mcp_name)
     ctx.with_resource(InstallService.frozen_writes(frozen))
     ctx.with_resource(
         InstallService.catalog_freshness(update_refs=update, refresh=refresh, frozen=frozen)

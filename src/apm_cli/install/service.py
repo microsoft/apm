@@ -22,6 +22,7 @@ the blast radius of a deeper DI rewrite.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
@@ -71,6 +72,12 @@ class FrozenDisposition:
         return self.replay
 
 
+def ci_selects_frozen(environ: Mapping[str, str] | None = None) -> bool:
+    """req-lk-018: ``CI`` is truthy when present and not ``""``, ``"0"`` or ``"false"``."""
+    value = (os.environ if environ is None else environ).get("CI")
+    return value is not None and value.lower() not in {"", "0", "false"}
+
+
 def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
     """One ``--frozen`` refusal line for an unrecorded service claim."""
     return f"  - {service} server {name!a} target {target!a} ownership is not recorded in apm.lock.yaml"
@@ -99,6 +106,29 @@ class InstallService:
     extension point for collaborator injection (downloader, scanner,
     integrator factory) when programmatic callers need to swap them.
     """
+
+    @staticmethod
+    def resolve_frozen(
+        frozen: bool | None, resolve_intent: Any, *, environ: Mapping[str, str] | None = None
+    ) -> bool:
+        """The single decision whether ``apm install`` runs frozen (req-lk-006, req-lk-018).
+
+        An explicit ``--frozen``/``--no-frozen`` wins. Otherwise an invocation that
+        asks to resolve (``--update``, ``--refresh``, positional packages, ``--mcp``)
+        stays non-frozen, and a truthy ``CI`` selects frozen.
+        """
+        if frozen is not None:
+            return frozen
+        if resolve_intent or not ci_selects_frozen(environ):
+            return False
+        from apm_cli.utils.console import _rich_info
+
+        _rich_info(
+            "CI is set: installing as --frozen. Pass --no-frozen to resolve and "
+            "update apm.lock.yaml.",
+            symbol="info",
+        )
+        return True
 
     @staticmethod
     def frozen_disposition(source: Any) -> FrozenDisposition:

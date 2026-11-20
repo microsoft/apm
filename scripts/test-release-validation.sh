@@ -390,7 +390,7 @@ dependencies:
 APMYML
         
         echo "Running: apm install (no token)"
-        "$BINARY_PATH" install
+        "$BINARY_PATH" install --no-frozen
         local install_exit=$?
         if [[ $install_exit -ne 0 ]]; then
             echo "apm install failed with exit code $install_exit"
