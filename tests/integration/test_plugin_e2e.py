@@ -1243,10 +1243,10 @@ class TestPluginNetworkE2E:
         assert plugin_entry is not None, (
             f"Plugin not found in lockfile. Deps: {lockfile['dependencies']}"
         )
-        # The normalized apm.yml/.apm package outranks its plugin publishing
-        # surface and retains the root skills/ bundle classification.
-        assert plugin_entry.get("package_type") == "skill_bundle", (
-            f"Expected package_type 'skill_bundle', got: {plugin_entry.get('package_type')}"
+        # reference/package-types.md (layout table; "Plugin collection"): a
+        # plugin.json without $schema is a Claude plugin collection (#4270).
+        assert plugin_entry.get("package_type") == "marketplace_plugin", (
+            f"Expected package_type 'marketplace_plugin', got: {plugin_entry.get('package_type')}"
         )
 
     # ---- Test 11: idempotent reinstall ----------------------------------
