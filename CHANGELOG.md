@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
 - A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
 - `apm install --frozen` now fails like `apm audit --ci` when a denied or unapproved hook was removed but `apm.lock.yaml` still records it, naming each missing file. (closes #4043, #4054)
+- `apm install --frozen` and `apm audit --ci` fail when `apm deny` or org policy changed a package's executables decision since `apm.lock.yaml` recorded it. (closes #4053, #4065)
 
 ## [0.37.0] - 2026-11-20
 
