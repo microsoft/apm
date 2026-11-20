@@ -79,6 +79,71 @@ def ascii_safe(text: str) -> str:
     return text.encode("ascii", "backslashreplace").decode("ascii")
 
 
+def ascii_text(text: Any) -> Any:
+    """Return a Rich ``Text`` whose plain text is ``ascii_safe``, keeping its styles.
+
+    Escaping changes lengths, so the text is split at every span boundary
+    and each piece is escaped and re-styled on its own (#4330).
+    """
+    if text.plain.isascii():
+        return text
+    from rich.text import Span, Text
+
+    boundaries = sorted({offset for span in text.spans for offset in (span.start, span.end)})
+    escaped = Text(
+        style=text.style,
+        justify=text.justify,
+        overflow=text.overflow,
+        no_wrap=text.no_wrap,
+        end=text.end,
+        tab_size=text.tab_size,
+    )
+    for piece in text.divide(boundaries):
+        plain = ascii_safe(piece.plain)
+        escaped.append_text(
+            Text(plain, spans=[Span(0, len(plain), span.style) for span in piece.spans])
+        )
+    return escaped
+
+
+def _ascii_renderable(renderable: Any) -> Any:
+    """Escape pre-built ``Text`` in *renderable* before Rich measures it (#4330).
+
+    Plain strings are escaped by ``render_str``; a ``Text`` (or one inside a
+    table, panel, tree or group) is not, and escaping it after layout would
+    widen its cell past the measured column.
+    """
+    from rich.console import Group
+    from rich.padding import Padding
+    from rich.panel import Panel as RichPanel
+    from rich.table import Table as RichTable
+    from rich.text import Text
+    from rich.tree import Tree
+
+    if isinstance(renderable, Text):
+        return ascii_text(renderable)
+    if isinstance(renderable, RichTable):
+        for column in renderable.columns:
+            column._cells = [_ascii_renderable(cell) for cell in column._cells]
+            column.header = _ascii_renderable(column.header)
+            column.footer = _ascii_renderable(column.footer)
+        renderable.title = _ascii_renderable(renderable.title)
+        renderable.caption = _ascii_renderable(renderable.caption)
+    elif isinstance(renderable, RichPanel):
+        renderable.renderable = _ascii_renderable(renderable.renderable)
+        renderable.title = _ascii_renderable(renderable.title)
+        renderable.subtitle = _ascii_renderable(renderable.subtitle)
+    elif isinstance(renderable, Padding):
+        renderable.renderable = _ascii_renderable(renderable.renderable)
+    elif isinstance(renderable, Tree):
+        renderable.label = _ascii_renderable(renderable.label)
+        for child in renderable.children:
+            _ascii_renderable(child)
+    elif isinstance(renderable, Group):
+        renderable._renderables = [_ascii_renderable(item) for item in renderable._renderables]
+    return renderable
+
+
 def _ascii_ellipsis(segment: Any) -> Any:
     """Return *segment* in ASCII: U+2026 runs become dots of the same width.
 
@@ -112,6 +177,10 @@ def _ascii_console(base: Any, **kwargs: Any) -> Any:
             def render_str(self, text: str, **kwargs: Any) -> Any:
                 # Escape before layout so table columns size the escaped text.
                 return super().render_str(ascii_safe(text), **kwargs)
+
+            def print(self, *objects: Any, **kwargs: Any) -> None:
+                # Pre-built Text bypasses render_str; escape it before measurement.
+                super().print(*(_ascii_renderable(item) for item in objects), **kwargs)
 
             def _render_buffer(self, buffer: Any) -> str:
                 # Rich truncates with U+2026 whatever the encoding (#3994); swap

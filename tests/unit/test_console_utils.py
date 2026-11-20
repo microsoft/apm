@@ -680,3 +680,42 @@ def test_ascii_ellipsis_keeps_ansi_styles_intact():
     assert ".." in out
     assert not re.search(r"\x1b\[[0-9;]*\.", out)
     assert "\x1b[32mabcdefgh\x1b[0m" in out
+
+
+def test_non_ascii_text_cells_are_escaped_before_table_layout():
+    """Pre-built Text cells escape before measurement, so columns stay aligned (#4330)."""
+    import io
+
+    from rich.table import Table
+    from rich.text import Text
+
+    from apm_cli.utils.console import new_console
+
+    buf = io.StringIO()
+    console = new_console(file=buf, width=40, color_system=None)
+    table = Table()
+    table.add_column("File")
+    table.add_column("N", width=3)
+    table.add_row(Text("plain.md"), "1")
+    table.add_row(Text("caf\u00e9-\u00fcber/notes.md"), "2")
+    console.print(table)
+
+    out = buf.getvalue()
+    assert out.isascii()
+    assert "caf\\xe9-\\xfcber/notes.md" in out
+    assert len({len(line) for line in out.splitlines()}) == 1
+    assert max(len(line) for line in out.splitlines()) <= 40
+
+
+def test_ascii_text_keeps_style_spans_on_the_escaped_text():
+    from rich.text import Text
+
+    from apm_cli.utils.console import ascii_text
+
+    escaped = ascii_text(Text.assemble(("ab\u00e9", "bold"), ("cd", "red")))
+
+    assert escaped.plain == "ab\\xe9cd"
+    assert [(span.start, span.end, str(span.style)) for span in escaped.spans] == [
+        (0, 6, "bold"),
+        (6, 8, "red"),
+    ]
