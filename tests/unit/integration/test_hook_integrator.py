@@ -31,6 +31,7 @@ from apm_cli.integration.hook_integrator import (
 )
 from apm_cli.integration.hook_ownership import dependency_hook_sources
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _make_package_info(install_path: Path, name: str = "test-pkg") -> PackageInfo:
@@ -1447,6 +1448,7 @@ class TestCursorIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -1622,6 +1624,7 @@ class TestSyncIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -1673,6 +1676,7 @@ class TestSyncIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -2836,6 +2840,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
         assert stats["files_removed"] > 0
 
@@ -2883,6 +2888,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
         assert stats["files_removed"] >= 2
         assert not (temp_project / ".github" / "hooks" / "ralph-loop-hooks.json").exists()
@@ -2910,6 +2916,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=native,
             managed_file_hashes={path.replace("/", "\\"): hashes[path] for path in hashes},
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == len(posix) >= 2
@@ -3544,6 +3551,7 @@ class TestScopeResolvedHookDeployment:
             self.root,
             managed_files=managed,
             managed_file_hashes=compute_deployed_hashes(managed, self.root),
+            evidence=receipted_evidence(self.root),
             targets=[copilot_target],
         )
         assert stats["files_removed"] > 0

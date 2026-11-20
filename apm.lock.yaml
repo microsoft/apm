@@ -3006,7 +3006,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:63178d8c3384274d3a2337cf7ad14f89c74a32fa308388a96d0a80627dbf5fe4
+  content_hash: sha256:a5f19cafb5b53ddce3d6ce842d8ef36f1335b70d789f8261f0286d03237cd28a
 - kind: project-relative
   target: copilot
   value: .github/instructions/cli.instructions.md
@@ -3069,7 +3069,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:58265539158320a3a63f12d03aece9579d4087145763dc3d23edc75ad73a982b
+  content_hash: sha256:b963a75c8e4d5befe1e2e27d23c6ab125a63116025052eeef7ef49403877bba4
 local_deployed_files:
 - .agents/skills/apm-lifecycle-tests
 - .agents/skills/apm-lifecycle-tests/SKILL.md
@@ -3514,11 +3514,11 @@ local_deployed_file_hashes:
   .github/agents/test-coverage-expert.agent.md: sha256:0fd1d562f95bc0491fe2748417c60f5be35ed2b016757fc148421fcbb9f0ca9f
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
   .github/instructions/changelog.instructions.md: sha256:575bafcc313df6387b5724ae002858bd0d0020aee10eeb780a057f53eedf0dac
-  .github/instructions/cicd.instructions.md: sha256:63178d8c3384274d3a2337cf7ad14f89c74a32fa308388a96d0a80627dbf5fe4
+  .github/instructions/cicd.instructions.md: sha256:a5f19cafb5b53ddce3d6ce842d8ef36f1335b70d789f8261f0286d03237cd28a
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:42ee2a5aa3bd0a81e4c54e1900d96f4fb5118597367cd34b4ac34a8d0adffa5c
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:58265539158320a3a63f12d03aece9579d4087145763dc3d23edc75ad73a982b
+  .github/instructions/tests.instructions.md: sha256:b963a75c8e4d5befe1e2e27d23c6ab125a63116025052eeef7ef49403877bba4

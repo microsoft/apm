@@ -34,6 +34,7 @@ from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
 
 
@@ -498,6 +499,7 @@ class InstructionIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed instruction files for a single *target*."""
         mapping = target.primitives.get("instructions")
@@ -513,6 +515,7 @@ class InstructionIntegrator(BaseIntegrator):
             managed_files,
             prefix=prefix,
             targets=[target],
+            evidence=evidence,
         )
 
     # ------------------------------------------------------------------

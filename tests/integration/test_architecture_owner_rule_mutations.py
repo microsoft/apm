@@ -21,6 +21,9 @@ Design notes:
 * Exactly one rule executes per case, so an unrelated startup problem cannot be
   mistaken for teeth: the assertion is a `Violation` carrying that rule's ID,
   never a bare non-zero exit code.
+* Every run in this module shares one session-scoped linter cache
+  (`linter_session`): the tree is walked and each file content parsed once,
+  and each case's override is applied on top.
 * Mutations must stay surgical.  A syntax error, an unreadable file, or a
   deleted module would trip almost any rule for the wrong reason, so
   `test_owner_guard_mutation_is_surgical_and_meaningful` rejects those shapes
@@ -30,6 +33,7 @@ Design notes:
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -40,6 +44,7 @@ from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
+from scripts.architecture_linter.session_cache import LinterSession, linter_session
 from tests.utils.xdist_shared import shared_session_value, sources_digest
 
 pytestmark = [
@@ -49,6 +54,13 @@ pytestmark = [
 ROOT = Path(__file__).resolve().parents[2]
 OWNERS_DIR = ROOT / ".apm/architecture/owners"
 ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm/architecture")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _shared_linter_session() -> Iterator[LinterSession]:
+    """Share one inventory and one parse per file content across this module (#4119)."""
+    with linter_session() as session:
+        yield session
 
 
 @pytest.mark.parametrize(
@@ -110,6 +122,39 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(original) == 1
     rule = "install-deployment-audit-replay"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("rule", "path", "original", "replacement"),
+    [
+        pytest.param(
+            "install-deployment-lsp-lifecycle",
+            "src/apm_cli/install/lsp/integration.py",
+            "        recorded_targets=recorded_lsp_targets(lockfile),\n",
+            "        recorded_targets=(),\n",
+            id="uninstall-reselects-lsp-targets",
+        ),
+        pytest.param(
+            "registry_delegation.audit_target_selection",
+            "src/apm_cli/install/lsp/integration.py",
+            "def recorded_lsp_targets(",
+            "def resolve_deployment_target_decision(**kwargs): return None\n\n\n"
+            "def recorded_lsp_targets(",
+            id="second-deployment-target-owner",
+        ),
+    ],
+)
+def test_uninstall_lsp_target_selection_cannot_bypass_owner(
+    rule: str, path: str, original: str, replacement: str
+) -> None:
+    """Uninstall keeps survivors on the recorded LSP targets through one owner (#4059)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
     report = run_selected_rules(
         ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
     )
@@ -1248,6 +1293,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Policy cache serializer stops routing through the canonical shape helper.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-ci-validation-topology",
+        rule_id="contracts-tooling-ci-validation-topology",
+        path=".github/workflows/ci.yml",
+        old="uv run --frozen python -m scripts.ci_selections windows-unit",
+        new="uv run --frozen python -m pytest -m windows_compat tests/unit",
+        intent="The PR Windows gate falls back to its own windows_compat-only unit selection.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-compile-inventory",
         rule_id="registry_delegation.compile_inventory_authority",
         path="src/apm_cli/compilation/inventory.py",
@@ -1302,6 +1355,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    runner = build_runner_from_context(verbose=verbose, project_root=project_root, events=(event,))",
         new="    runner = LifecycleScriptRunner(scripts=matching, verbose=verbose, project_root=project_root)",
         intent="lifecycle test --execute fires scripts the script gate would withhold.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-linter-cache-content-key",
+        rule_id="contracts-tooling-linter-cache-content-key",
+        path="scripts/architecture_linter/session_cache.py",
+        old="return (relative_path, content_digest(text), self.linter_digest, token)",
+        new="return (relative_path, relative_path, self.linter_digest, token)",
+        intent="Session facts ignore source content, so an override reuses stale facts.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-linter-cache-parse-once",
+        rule_id="contracts-tooling-linter-cache-parse-once",
+        path="scripts/architecture_linter/facts.py",
+        old="reused = self.session.lookup_facts(key)",
+        new="reused = None",
+        intent="The facts provider skips the session and re-parses content it already built.",
     ),
     MutationCase(
         guard_id="contracts-tooling-lockfile-generator-gate",
@@ -1688,6 +1757,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def exec_trust_context_for_project(",
         new="def exec_trust_context_for_project_disabled(",
         intent="Executable trust loses its canonical project-context resolver.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-frozen-flag-reader",
+        rule_id="install-deployment-frozen-flag-reader",
+        path="src/apm_cli/install/phases/cleanup.py",
+        old="if frozen_disposition.retain_package_orphans:",
+        new="if ctx.frozen:",
+        intent="Orphan cleanup reads the frozen flag instead of the owner's disposition.",
     ),
     MutationCase(
         guard_id="install-deployment-frozen-mutation-eligibility",
@@ -2315,6 +2392,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def has_valid_build_id(content: str) -> bool:",
         new="def _has_valid_build_id_removed(content: str) -> bool:",
         intent="The Build ID owner loses its canonical verification entry point.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-cli-startup-import-budget",
+        rule_id="registry_delegation.cli_startup_imports",
+        path="src/apm_cli/cli.py",
+        old="from apm_cli.version_output import print_version\n",
+        new=(
+            "from apm_cli.version_output import print_version\n"
+            "from apm_cli.commands.install import install\n"
+        ),
+        intent="CLI startup eagerly imports a command module again (and GitPython with it).",
     ),
     MutationCase(
         guard_id="registry-delegation-compiled-output-writes",
@@ -3783,7 +3871,7 @@ def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) 
         ),
         (
             "src/apm_cli/install/phases/integrate.py",
-            "if ctx.frozen and ctx.existing_lockfile is not None:",
+            "if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:",
             "if False:",
             "install-deployment-frozen-mutation-eligibility",
         ),
@@ -3832,6 +3920,87 @@ def test_frozen_mcp_verification_cannot_bypass_owners(
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "if lockfile_only or frozen_disposition.withhold_lockfile_writes",
+            'if lockfile_only or getattr(self.ctx, "frozen", False)',
+            id="getattr-read",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/apm_resolver.py",
+            "frozen=self._frozen,",
+            'frozen=vars(self)["frozen"],',
+            id="subscript-read-outside-install",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            "    frozen_disposition: FrozenDisposition,\n",
+            "    frozen_disposition: FrozenDisposition | None = None,\n",
+            id="disposition-fails-open-when-omitted",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition: FrozenDisposition,\n) -> None:",
+            "    frozen_disposition: FrozenDisposition,\n    frozen: bool = False,\n) -> None:",
+            id="new-bare-frozen-parameter",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            (
+                "    match vars(ctx):\n"
+                '        case {"frozen": replay}:\n'
+                "            del replay\n"
+                "    frozen_disposition = InstallService.frozen_disposition(ctx)\n"
+            ),
+            id="mapping-pattern-read",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            "    ctx.frozen |= False\n    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            id="augmented-assignment-read",
+        ),
+    ],
+)
+def test_frozen_flag_reads_outside_owner_fail_guard(path: str, old: str, new: str) -> None:
+    """Only InstallService reads the frozen flag; consumers require its disposition."""
+    rule_id = "install-deployment-frozen-flag-reader"
+    assert run_selected_rules(ROOT, (rule_id,)).violations == ()
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_frozen_flag_writes_and_defaults_are_not_reads() -> None:
+    """Writes, deletes and a get/pop default named "frozen" do not read the flag."""
+    rule_id = "install-deployment-frozen-flag-reader"
+    path = "src/apm_cli/install/phases/cleanup.py"
+    old = "    frozen_disposition = InstallService.frozen_disposition(ctx)\n"
+    new = (
+        '    options = {"frozen": False}\n'
+        '    options["frozen"] = False\n'
+        '    del options["frozen"]\n'
+        '    options.get("mode", "frozen")\n'
+        '    options.pop("mode", "frozen")\n'
+        f"{old}"
+    )
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert report.violations == ()
 
 
 def test_frozen_preflight_uses_selected_lockfile_store() -> None:

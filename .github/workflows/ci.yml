@@ -124,24 +124,24 @@ jobs:
     - name: Lint - architecture authority boundaries
       run: bash scripts/lint-architecture-boundaries.sh
 
-  # Focused Windows compatibility gate -- runs at PR time (not just
-  # post-merge in build-release.yml) so Windows-only path, encoding,
-  # process, and junction regressions are caught before merge. Python
-  # contracts are selected declaratively via the `windows_compat`
-  # marker; the contributor dashboard's dependency-free Node suite
-  # separately exercises its static-asset junction boundary. This is
-  # intentionally narrower than either full suite.
+  # Windows compatibility gate -- runs at PR time (not just post-merge
+  # in build-release.yml) so Windows-only path, encoding, process, and
+  # junction regressions are caught before merge (#4115). Each shard runs:
+  #   1. its slice of the full Windows unit suite through
+  #      scripts/ci_selections.py, the same selection main push runs;
+  #   2. its slice of the `windows_compat` integration contracts (serial).
+  # The contributor dashboard's dependency-free Node suite separately
+  # exercises its static-asset junction boundary.
   #
-  # The serial selection runs as three shards on parallel runners.
-  # scripts/ci_sharding.py balances them by the measured seed in
-  # .github/ci-durations/windows-compat.json (weights, not an allowlist),
-  # keeps every module and xdist group on one shard, and fails unless the
-  # shards partition the selection exactly. The required
+  # scripts/ci_sharding.py balances each selection by its measured seed
+  # in .github/ci-durations/ (weights, not an allowlist), keeps every
+  # module and xdist group on one shard, and fails unless the shards
+  # partition the selection exactly. The required
   # `Windows Compatibility Gate` aggregate needs all three results.
   windows-compat-gate-1:
     name: Windows Compatibility Gate (1/3)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -184,7 +184,15 @@ jobs:
         git --version
         where git
 
+    - name: Run Windows unit suite
+      env:
+        PYTHONUNBUFFERED: '1'
+      run: >-
+        uv run --frozen python -m scripts.ci_selections windows-unit
+        --shard-count 3 --shard-index $env:SHARD
+
     - name: Run cross-platform contract family
+      if: ${{ !cancelled() }}
       env:
         APM_E2E_TESTS: '1'
       run: >-
@@ -192,7 +200,6 @@ jobs:
         -p scripts.ci_sharding --shard-count 3 --shard-index $env:SHARD
         --shard-durations .github/ci-durations/windows-compat.json
         -m windows_compat
-        tests/unit
         tests/integration
 
     - name: Diagnostics on failure
@@ -208,7 +215,7 @@ jobs:
   windows-compat-gate-2:
     name: Windows Compatibility Gate (2/3)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -218,7 +225,7 @@ jobs:
   windows-compat-gate-3:
     name: Windows Compatibility Gate (3/3)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -441,6 +448,7 @@ jobs:
         uv run --frozen --extra dev pytest -p no:cacheprovider -q
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
+        tests/perf/test_architecture_linter_scaling.py::test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n
 
   test-architecture:
     name: Test Architecture Ratchets
@@ -790,7 +798,7 @@ jobs:
   lifecycle-smoke-shard-1:
     name: Lifecycle Smoke Shard 1 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -845,7 +853,7 @@ jobs:
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -855,7 +863,7 @@ jobs:
   lifecycle-smoke-shard-3:
     name: Lifecycle Smoke Shard 3 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -865,7 +873,7 @@ jobs:
   lifecycle-smoke-shard-4:
     name: Lifecycle Smoke Shard 4 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
