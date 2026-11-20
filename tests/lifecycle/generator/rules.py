@@ -154,7 +154,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 171, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 84, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1495, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1519, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
 }
 
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 701, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 855, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 693, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 450, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 451, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 210, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
@@ -314,15 +314,13 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
     LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
-    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
+    # The update names the bundle it leaves untouched (#4318).
+    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"Local bundle p-exec not updated"),
     LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
 }
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex
 # the fixed output matches). The cell is known-failing until that output appears.
-RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {
-    # The message says there is nothing to update while a local bundle is installed.
-    LOCAL_BUNDLE_REFUSALS["update"]: ("#4318", r"p-exec"),
-}
+RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
 
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {

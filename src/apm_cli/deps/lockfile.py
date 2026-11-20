@@ -1525,6 +1525,10 @@ class LockFile:
             return "3"
         return "2" if self._needs_v2() or self.version_floor != "1" else "1"
 
+    def is_origin_recording_format(self) -> bool:
+        """Whether this lock's version is one only APM 0.37+ writes (#4228)."""
+        return self.lockfile_version == FRAMED_CONTENT_HASH_VERSION
+
     def sync_lockfile_version(self) -> None:
         """Re-derive ``lockfile_version`` from current content.
 
