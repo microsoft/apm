@@ -241,6 +241,51 @@ def _forge_lock_hash(world: _World, path: str) -> bytes:
     return target.read_bytes()
 
 
+def _kept_entry(world: _World, path: str) -> tuple[str | None, list[str | None]]:
+    """The lock's hash for *path* and every deployment ledger row hash naming it."""
+    lock = load_yaml(world.project / "apm.lock.yaml") or {}
+    (dependency,) = lock["dependencies"]
+    rows = [
+        row.get("content_hash") for row in lock.get("deployments") or [] if row.get("value") == path
+    ]
+    return dependency["deployed_file_hashes"].get(path), rows
+
+
+def _assert_kept_partial_apply(
+    world: _World, output: str, kept_entry_before: tuple, edited_bytes: bytes
+) -> None:
+    """RA-009/RA-010: a failed install with a kept file is an honest partial apply.
+
+    The kept file's lock entry and ledger rows are unchanged, the lock matches
+    the disk for every file, the closing sentence names what was written, the
+    two read-only verifiers agree, and either printed remedy converges.
+    """
+    target = world.project / _C3_EDITED
+    assert _kept_entry(world, _C3_EDITED) == kept_entry_before
+    _assert_lock_matches_disk(world)
+    flat = [" ".join(line.split()) for line in output.splitlines()]
+    header = next(line for line in flat if line.startswith("[i] This install wrote "))
+    written = int(header.split()[4])
+    assert written > 0, header
+    assert (
+        f"apm.lock.yaml records the {written} written file(s) and keeps the previous "
+        "entries of the 1 kept file(s)."
+    ) in " ".join(flat)
+    audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
+    assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
+    # Remedy 1: move the kept file aside; the next install restores and converges.
+    aside = world.project.parent / "kept-aside"
+    target.rename(aside)
+    world.ok("install")
+    _assert_lock_matches_disk(world)
+    # Remedy 2: an edited copy is overwritten by --force, then install converges.
+    target.write_bytes(edited_bytes)
+    world.ok("install", "--force")
+    world.ok("install")
+    _assert_lock_matches_disk(world)
+    assert aside.read_bytes() == edited_bytes
+
+
 _C3_EDITED = RE_RENDERED[1]
 _C3_GIT_STATES = {
     "tracked-dirty": (),
@@ -313,6 +358,8 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
     git_status = world._git("status", "--porcelain", "--", _C3_EDITED)
     assert (git_status == "") is (git_state == "tracked-clean"), git_status
 
+    kept_entry_before = _kept_entry(world, _C3_EDITED)
+
     code, out, err = world.run("install")
 
     target = world.project / _C3_EDITED
@@ -331,6 +378,7 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
         # evidence the file is kept under the #4360 wording.
         assert _kept_lines(out + err) == [_unproven_line(_C3_EDITED)]
         assert world._git("status", "--porcelain", "--", _C3_EDITED) == git_status
+        _assert_kept_partial_apply(world, out + err, kept_entry_before, edited_bytes)
 
 
 def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_path: Path) -> None:

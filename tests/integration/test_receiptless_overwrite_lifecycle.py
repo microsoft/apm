@@ -181,7 +181,13 @@ def test_receiptless_install_keeps_each_edited_kind(
         assert result.returncode == 1, output
         for path in paths.values():
             assert _kept_line(_entry(world, path), user_scope=user_scope) in output, output
-        assert "apm.lock.yaml keeps the previous entries of the 5 kept file(s)." in output
+        # The closing line names what the rewritten lock records (RA-009).
+        written = re.search(r"\[i\] This install wrote (\d+) file\(s\)", output)
+        assert written is not None, output
+        assert (
+            f"apm.lock.yaml records the {written.group(1)} written file(s) and keeps "
+            "the previous entries of the 5 kept file(s)."
+        ) in output
         assert {path: path.read_bytes() for path in paths.values()} == edited
         assert _locked_hashes(world) == hashes_before
 
