@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -1560,3 +1561,83 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
         jobs[MACOS_ARM_BUILD_JOB]["steps"].append({"run": MACOS_UNIT_COMMAND})
     with pytest.raises((AssertionError, KeyError)):
         _assert_macos_arm_split(release_workflow)
+
+
+# Opt-in full integration before the queue (#4116): ci-integration.yml runs on
+# workflow_dispatch and on PRs labeled `full-integration`; merge-gate.yml
+# requires its checks at PR time only when that label is present.
+FULL_INTEGRATION_LABEL = "full-integration"
+FULL_INTEGRATION_GATE = (
+    "github.event_name != 'pull_request' || "
+    f"contains(github.event.pull_request.labels.*.name, '{FULL_INTEGRATION_LABEL}')"
+)
+FULL_INTEGRATION_CHECKS = (
+    "Build (Linux)",
+    "Smoke Test (Linux)",
+    "Integration Tests (Linux)",
+    "Release Validation (Linux)",
+)
+_GATE_CONTEXTS = re.compile(
+    r"^\$\{\{ github\.event_name == 'merge_group' && '([^']+)' \|\| "
+    r"contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-integration'\) "
+    r"&& '([^']+)' \|\| '([^']+)' \}\}$"
+)
+
+
+def _integration_triggers(workflow: WorkflowNode) -> dict:
+    triggers = workflow["on"]
+    assert isinstance(triggers, dict)
+    return triggers
+
+
+def _assert_full_integration_opt_in(integration: WorkflowNode, merge_gate: WorkflowNode) -> None:
+    triggers = _integration_triggers(integration)
+    assert set(triggers) == {"merge_group", "workflow_dispatch", "pull_request"}, sorted(triggers)
+    assert triggers["pull_request"] == {
+        "branches": ["main"],
+        "types": ["labeled", "synchronize", "reopened"],
+    }
+    for job_id, job in integration["jobs"].items():
+        condition = str(job.get("if", ""))
+        assert FULL_INTEGRATION_GATE in condition, (
+            f"{job_id} must be skipped on PRs without the {FULL_INTEGRATION_LABEL} label"
+        )
+
+    wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+    match = _GATE_CONTEXTS.match(str(wait["env"]["EXPECTED_CHECKS"]))
+    assert match, "EXPECTED_CHECKS must branch on merge_group, then on the label"
+    merge_time, labeled, unlabeled = (
+        tuple(name.strip() for name in group.split(",")) for group in match.groups()
+    )
+    assert not set(FULL_INTEGRATION_CHECKS) & set(unlabeled)
+    assert labeled == (*unlabeled, *FULL_INTEGRATION_CHECKS)
+    assert set(FULL_INTEGRATION_CHECKS) <= set(merge_time)
+
+
+def test_ci_integration_can_be_dispatched() -> None:
+    integration = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    assert "workflow_dispatch" in _integration_triggers(integration)
+
+
+def test_full_integration_label_runs_and_gates_only_labeled_prs() -> None:
+    _assert_full_integration_opt_in(
+        load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW),
+        load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"),
+    )
+
+
+@pytest.mark.parametrize("mutation", ["ungated-job", "pull-request-target", "unlabeled-gate"])
+def test_full_integration_opt_in_drift_fails(mutation: str) -> None:
+    integration = deepcopy(load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW))
+    merge_gate = deepcopy(load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"))
+    if mutation == "ungated-job":
+        del integration["jobs"]["build"]["if"]
+    elif mutation == "pull-request-target":
+        integration["on"]["pull_request_target"] = {"branches": ["main"]}
+    else:
+        wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+        expression = str(wait["env"]["EXPECTED_CHECKS"])
+        head, _, unlabeled = expression.rpartition(" || '")
+        wait["env"]["EXPECTED_CHECKS"] = f"{head} || 'Build (Linux),{unlabeled}"
+    with pytest.raises(AssertionError):
+        _assert_full_integration_opt_in(integration, merge_gate)
