@@ -285,6 +285,8 @@ class InstallLogger(CommandLogger):
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
+        # Policy banners already shown; the package and MCP phases share them.
+        self._policy_banners: set[tuple[str, ...]] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -954,8 +956,13 @@ class InstallLogger(CommandLogger):
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
         active.  Always visible (never silenceable) -- matches the
-        ``--allow-insecure`` pattern.
+        ``--allow-insecure`` pattern.  Shown once per invocation even when
+        several install phases check the escape hatch.
         """
+        key = ("disabled", reason)
+        if key in self._policy_banners:
+            return
+        self._policy_banners.add(key)
         _rich_warning(
             f"Policy enforcement disabled by {reason} for this invocation. "
             "This does NOT bypass apm audit --ci. "

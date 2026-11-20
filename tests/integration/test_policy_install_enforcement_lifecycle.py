@@ -23,6 +23,7 @@ transport rows have installed-CLI homes in
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from collections.abc import Iterator, Mapping, Sequence
@@ -148,6 +149,7 @@ def _governed(
     undeclared: Sequence[str] = (),
     extra_dependencies: Sequence[str] = (),
     parent_policies: Mapping[str, Mapping[str, object]] | None = None,
+    mcp: Sequence[Mapping[str, object]] = (),
 ) -> Iterator[_Governed]:
     """Publish packages and policies, then serve them to one consumer."""
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
@@ -164,7 +166,9 @@ def _governed(
         repository = world.repositories.create(name, source_tree=source)
         world.repositories.commit(repository, message=name)
         served[f"contoso/{name}"] = repository
-    project = world.consumer(dependencies=[*(pkg.slug for pkg in published), *extra_dependencies])
+    apm = [*(pkg.slug for pkg in published), *extra_dependencies]
+    extra = {"dependencies": {"apm": apm, "mcp": [dict(server) for server in mcp]}} if mcp else None
+    project = world.consumer(dependencies=apm, extra=extra)
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
     with local_github_https_fixture(tmp_path / "certs", served) as fx:
         yield _Governed(world, project, fx.child_environment(world.git_env()), runner)
@@ -370,3 +374,29 @@ def test_non_enforcing_policy_outcomes_install(
             assert "is not valid YAML" in out, out
             assert "proceeding without policy enforcement" in out, out
         gov.assert_installed(before, result, ("pkg-a",))
+
+
+_STDIO_SERVER = {"name": "policy-echo", "registry": False, "transport": "stdio", "command": "echo"}
+
+
+def test_no_policy_warning_prints_once_with_mcp_servers(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I9 (#4241): the package and MCP phases share one --no-policy warning."""
+    policy = _policy("block", deny=["contoso/pkg-a"])
+    with _governed(tmp_path, apm_binary_path, policy=policy, mcp=(_STDIO_SERVER,)) as gov:
+        before = gov.snapshot()
+        result = gov.install("--no-policy", step="install-no-policy-mcp", expected=0)
+
+        out = _flat(output(result))
+        line = (
+            "[!] Policy enforcement disabled by --no-policy for this invocation. "
+            "This does NOT bypass apm audit --ci."
+        )
+        assert out.count(line) == 1, out
+        after = gov.snapshot()
+        assert after[0] != before[0], out
+        assert lock_repo_urls(gov.project) == {"contoso/pkg-a"}
+        assert deployed_skills(gov.project) == {"pkg-a-skill"}
+        servers = json.loads((gov.project / ".mcp.json").read_text(encoding="utf-8"))
+        assert set(servers["mcpServers"]) == {"policy-echo"}, servers
