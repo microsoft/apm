@@ -120,16 +120,19 @@ def run_mcp_policy_preflight(
     logger,
     target_decision: EffectiveTargetDecision,
     registry: tuple[str | None, str | None] = (None, None),
+    user_scope: bool = False,
 ) -> None:
-    """Run policy checks for a direct MCP install before any persistent write.
+    """Judge a direct MCP install through the commit gate before any persistent write.
 
     *registry* is the ``(url, source)`` pair from ``_resolve_registry_url``;
     the registry override is active so the transport check resolves a
-    registry server against the same registry the install will query.
+    registry server against the same registry the install will query. A
+    blocked server is refused exactly as ``apm install`` refuses it.
     """
     registry_url, registry_source = registry
     from ...models.dependency.mcp import MCPDependency
-    from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
+    from ...policy.install_preflight import PolicyBlockError
+    from ..commit_gate import enforce_mcp_policy, refuse_blocked_mcp
 
     resolved_transport = transport
     if resolved_transport is None:
@@ -149,9 +152,13 @@ def run_mcp_policy_preflight(
             allow_http=registry_source == "flag",
             source=registry_source,
         ):
-            run_policy_preflight(
+            enforce_mcp_policy(
+                [dependency],
+                brought_in_by=None,
+                runtime=None,
+                target_decision=target_decision,
+                user_scope=user_scope,
                 project_root=Path.cwd(),
-                mcp_deps=[dependency],
                 no_policy=no_policy,
                 logger=logger,
                 dry_run=logger.dry_run,
@@ -159,8 +166,7 @@ def run_mcp_policy_preflight(
                 effective_target_source=target_decision.source,
             )
     except PolicyBlockError:
-        logger.render_summary()
-        raise click.exceptions.Exit(1) from None
+        refuse_blocked_mcp(logger)
 
 
 def run_mcp_install(  # noqa: PLR0913

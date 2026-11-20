@@ -781,6 +781,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         logger=logger,
         target_decision=target_decision,
         registry=(resolved_registry_url, registry_source),
+        user_scope=is_user_scope(scope),
     )
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
@@ -2008,6 +2009,7 @@ def _install_apm_packages(ctx, outcome):
 
         clear_apm_yml_cache()
 
+    from apm_cli.install.commit_gate import refuse_blocked_mcp
     from apm_cli.install.service_integration import run_service_integrations
     from apm_cli.policy.install_preflight import PolicyBlockError
 
@@ -2034,9 +2036,7 @@ def _install_apm_packages(ctx, outcome):
             ),
         )
     except PolicyBlockError:
-        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
-        logger.render_summary()
-        raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
+        refuse_blocked_mcp(logger)
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
         logger.render_summary()

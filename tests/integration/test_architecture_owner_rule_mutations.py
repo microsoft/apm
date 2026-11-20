@@ -5581,3 +5581,36 @@ def test_package_content_hash_guard_rejects_second_streams_and_hashers(
     report = run_selected_rules(ROOT, (rule,), source_overrides={path: source.replace(old, new, 1)})
     assert report.failures == ()
     assert any(violation.rule_id == rule for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/mcp/command.py",
+            "            enforce_mcp_policy(\n                [dependency],\n",
+            "            run_policy_preflight(\n                mcp_deps=[dependency],\n",
+            id="mcp-entry-preflight-outside-commit-gate",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/command.py",
+            "        refuse_blocked_mcp(logger)\n",
+            "        raise click.exceptions.Exit(1) from None\n",
+            id="mcp-entry-own-refusal",
+        ),
+    ],
+)
+def test_direct_mcp_entry_judges_policy_through_commit_gate(path: str, old: str, new: str) -> None:
+    """``install --mcp`` reaches the commit gate's MCP policy verdict (#4085)."""
+    rule_id = "install-deployment-install-commit-order"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {(violation.rule_id, violation.path) for violation in report.violations} == {
+        (rule_id, path)
+    }

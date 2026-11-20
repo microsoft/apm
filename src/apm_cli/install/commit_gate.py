@@ -19,7 +19,7 @@ integration and restores them if the install fails before the audit passes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,14 +77,20 @@ def enforce_mcp_policy(
     no_policy: bool,
     logger: Any,
     dry_run: bool = False,
+    effective_target: tuple[str, ...] | None = None,
+    effective_target_source: str = "effective target",
 ) -> None:
-    """Enforce org MCP policy on the merged direct and transitive server set."""
+    """Enforce org MCP policy on the merged direct and transitive server set.
+
+    An entry without a package pipeline (``install --mcp``) also passes its
+    *effective_target* projection so target policy is judged in the same call.
+    """
     from apm_cli.policy.install_preflight import run_policy_preflight
 
     subjects = policy_subject_mcp_deps(
         mcp_deps, runtime=runtime, target_decision=target_decision, user_scope=user_scope
     )
-    if not subjects:
+    if not subjects and effective_target is None:
         return
     run_policy_preflight(
         project_root=project_root,
@@ -93,7 +99,18 @@ def enforce_mcp_policy(
         no_policy=no_policy,
         logger=logger,
         dry_run=dry_run,
+        effective_target=effective_target,
+        effective_target_source=effective_target_source,
     )
+
+
+def refuse_blocked_mcp(logger: Any) -> NoReturn:
+    """Render the MCP policy refusal every install entry shows, then fail the install."""
+    from apm_cli.install.errors import InstallFailureAlreadyRendered
+
+    logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
+    logger.render_summary()
+    raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
 
 
 def _resolved_rows(ctx: InstallContext) -> list[tuple[Any, None, int, str | None, bool]]:

@@ -10,6 +10,7 @@ fresh project and on a project that already holds an earlier install.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -239,3 +240,52 @@ def test_audit_block_sees_hidden_character_only_in_transformed_output(
 
     _write_audit_package(chain, revision="v2", description=_HIDDEN_DESCRIPTION, extra=True)
     _assert_audit_block_commits_nothing(chain, before)
+
+
+_ELAPSED = re.compile(r"after \d+(\.\d+)?s")
+
+
+def _refusal_lines(text: str) -> list[str]:
+    """Return the error lines of a run, with elapsed time masked."""
+    return sorted(
+        _ELAPSED.sub("after <t>", line.strip()) for line in text.splitlines() if "[x]" in line
+    )
+
+
+@pytest.mark.parametrize(
+    "entry", [("install", "--mcp"), ("mcp", "install")], ids=["install-mcp", "mcp-install"]
+)
+def test_direct_mcp_entry_reaches_the_install_policy_verdict(
+    tmp_path: Path, apm_binary_path: Path, entry: tuple[str, str]
+) -> None:
+    """A denied ``--mcp`` server is refused by the commit gate, like a declared one.
+
+    The direct entry writes nothing (apm.yml, apm.lock.yaml and every MCP
+    config keep their bytes) and renders the same refusal, with the same exit
+    code, as ``apm install`` with that server declared in apm.yml.
+    """
+    chain = Chain(tmp_path / "direct-mcp", apm_binary_path, dirs=(".github",))
+    chain.seed_org_policy(_DENY_POLICY)
+    chain.write_manifest([stdio_server("good-srv", "good")])
+    chain.ok("install", *_TARGET)
+    manifest = (chain.project / "apm.yml").read_bytes()
+    before = _committed_state(chain.project)
+    assert "apm.lock.yaml" in before and ".mcp.json" in before, before
+
+    direct = chain.run(*entry, "evil-srv", *_TARGET, "--", "npx", "evil")
+    direct_text = direct.stdout + direct.stderr
+    assert direct.returncode == 1, direct_text
+    assert (chain.project / "apm.yml").read_bytes() == manifest, direct_text
+    assert _committed_state(chain.project) == before, direct_text
+
+    chain.write_manifest([stdio_server("good-srv", "good"), stdio_server("evil-srv", "evil")])
+    declared = chain.run("install", *_TARGET)
+    declared_text = declared.stdout + declared.stderr
+    assert declared.returncode == 1, declared_text
+    assert _committed_state(chain.project) == before, declared_text
+
+    assert "evil-srv" in direct_text, direct_text
+    assert _refusal_lines(direct_text) == _refusal_lines(declared_text), (
+        direct_text,
+        declared_text,
+    )
