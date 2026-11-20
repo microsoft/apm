@@ -551,7 +551,7 @@ _PROVENANCE_REQUIRED = {
     _CATALOG_ORIGIN: (
         "def reverify_locked_provenance(",
         "require_locked_row_origin(dep)",
-        "resolution = resolve_marketplace_plugin(plugin, alias)",
+        "resolution = resolve_marketplace_plugin(plugin, alias, enforce_ref_pins=False)",
     ),
 }
 # Lock catalog provenance is written by the lockfile phase and the origin owner only.
