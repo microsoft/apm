@@ -27,6 +27,7 @@ import yaml
 from tomlkit.exceptions import TOMLKitError
 
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.remediation import MCP_LOCKFILE_UNWRITABLE
 from apm_cli.deps.lockfile import (
     LockFile,
     LockfileRefusal,
@@ -1303,7 +1304,8 @@ class MCPIntegrator:
                 # level would hide the fix silently not applying.
                 message = (
                     f"Could not write {lock_path.name}; 'apm audit' will report it as "
-                    "missing. Ensure the directory is writable and re-run 'apm install'."
+                    "missing. "
+                    f"{MCP_LOCKFILE_UNWRITABLE.bind(lockfile=lock_path.name).sentence()}"
                 )
                 if logger is not None:
                     logger.warning(message)

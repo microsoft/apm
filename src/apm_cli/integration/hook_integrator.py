@@ -29,6 +29,7 @@ from apm_cli.core.deployment_state import (
     MaterializationStatus,
     NativePayloadValidation,
 )
+from apm_cli.core.remediation import HOOK_PATH_ESCAPES_PACKAGE
 from apm_cli.core.scope import InstallScope
 from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
 from apm_cli.hook_contract import walk_hook_commands
@@ -675,7 +676,7 @@ class HookIntegrator(BaseIntegrator):
                 _rich_warning(
                     f"Hook path escapes package '{package_label}': "
                     f"{printable_ascii_text(residual)}. "
-                    "Keep the path inside the package, then run apm install again."
+                    f"{HOOK_PATH_ESCAPES_PACKAGE.sentence()}"
                 )
                 continue
             warn_unresolved_plugin_root(new_command, residual, package_label)

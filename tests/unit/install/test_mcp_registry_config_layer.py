@@ -29,6 +29,7 @@ import requests
 from click.testing import CliRunner, Result
 
 from apm_cli.cli import cli
+from apm_cli.core.remediation import MCP_REGISTRY_ALTERNATIVE
 from apm_cli.integration.mcp_integrator_install import (
     CHOOSING_MCP_REGISTRY_DOCS_URL,
     _validate_registry_servers,
@@ -133,8 +134,8 @@ def _printed_hosts(output: str) -> set[str]:
 def _extract_choice_argv(output: str, registry_url: str) -> list[str]:
     """Extract the printed example command with ``<URL>`` replaced by the user."""
     match = re.search(
-        r"Use another registry \(replace <URL>\): "
-        r'(?P<command>apm install --mcp "[^"]+" --registry <URL>[^\r\n]*)',
+        r"Run '(?P<command>apm install --mcp \"[^\"]+\" --registry <URL>[^'\r\n]*)' "
+        + re.escape(f"to {MCP_REGISTRY_ALTERNATIVE.fixes_promise}"),
         output,
     )
     assert match is not None, output
@@ -445,8 +446,7 @@ def test_default_registry_miss_hint_is_ordered_and_neutral(
     for name in server_names:
         expected.append(f'Search this registry: apm mcp search "{name}"')
         expected.append(
-            "Use another registry (replace <URL>): "
-            f'apm install --mcp "{name}" --registry <URL> --target claude'
+            MCP_REGISTRY_ALTERNATIVE.bind(server=name, retry=" --target claude").sentence()
         )
     expected.append("Or save it for every lookup: apm config set mcp-registry-url <URL>")
     expected.append(f"Choosing an MCP registry: {CHOOSING_MCP_REGISTRY_DOCS_URL}")

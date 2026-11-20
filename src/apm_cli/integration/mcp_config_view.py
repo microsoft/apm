@@ -15,6 +15,12 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 
+from apm_cli.core.remediation import (
+    MCP_ADMITTED_DENIED,
+    MCP_ADMITTED_UNAPPROVED,
+    MCP_LOCAL_PACKAGE_UNRESOLVED,
+    MCP_PACKAGE_MANIFEST_MISSING,
+)
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -333,13 +339,12 @@ class CurrentMcpConfigView:
                 # A deny is not a missing approval: name the gate and the deny (#3957).
                 problems[name] = (
                     "admitted in apm.lock.yaml but the executables gate now parks it "
-                    f"(denied); see 'apm policy explain {target}' for the deny to lift, "
-                    "then re-run 'apm install'"
+                    f"(denied); {MCP_ADMITTED_DENIED.bind(target=target).clause()}"
                 )
                 continue
             problems[name] = (
                 f"admitted in apm.lock.yaml but not approved in apm.yml ({reason}); "
-                f"run 'apm approve {target}' and re-run 'apm install'"
+                f"{MCP_ADMITTED_UNAPPROVED.bind(target=target).clause()}"
             )
         return problems
 
@@ -886,7 +891,7 @@ def _collect_locked_dependencies(
                     manifest_path=fallback_path,
                     message=(
                         f"cannot resolve local package: {exc}; "
-                        "re-run 'apm install' to rebuild the lockfile"
+                        f"{MCP_LOCAL_PACKAGE_UNRESOLVED.clause()}"
                     ),
                 )
             )
@@ -960,7 +965,8 @@ def _collect_locked_dependencies(
             ):
                 continue
             message = (
-                f"package manifest not found at {manifest_path}; re-run 'apm install' to restore it"
+                f"package manifest not found at {manifest_path}; "
+                f"{MCP_PACKAGE_MANIFEST_MISSING.clause()}"
             )
             if (
                 dependency.source == "local"

@@ -20,6 +20,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from apm_cli.core.remediation import MCP_LOCKFILE_UNWRITABLE
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage
@@ -103,7 +104,10 @@ class TestLockfileCreatedForMcpOnlyProject(_ProjectCase):
 
         warning.assert_called_once()
         self.assertIn("Could not write", warning.call_args.args[0])
-        self.assertIn("Ensure the directory is writable", warning.call_args.args[0])
+        self.assertIn(
+            MCP_LOCKFILE_UNWRITABLE.bind(lockfile="apm.lock.yaml").sentence(),
+            warning.call_args.args[0],
+        )
 
 
 class TestLegacyLockfileIsMigratedFirst(_ProjectCase):

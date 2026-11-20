@@ -24,6 +24,7 @@ from apm_cli.core.apm_yml import (
     UnknownTargetError,
 )
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.remediation import MCP_REGISTRY_ALTERNATIVE
 from apm_cli.core.target_catalog import accepted_target_values
 from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
@@ -106,8 +107,7 @@ def _emit_registry_choice_hint(
             search = f"{search} (with MCP_REGISTRY_URL set to {registry_url})"
         logger.info(f"Search this registry: {search}", soft_wrap=True)
         logger.info(
-            "Use another registry (replace <URL>): "
-            f'apm install --mcp "{server_name}" --registry <URL>{suffix}',
+            MCP_REGISTRY_ALTERNATIVE.bind(server=server_name, retry=suffix).sentence(),
             soft_wrap=True,
         )
     if registry_source == "env":
