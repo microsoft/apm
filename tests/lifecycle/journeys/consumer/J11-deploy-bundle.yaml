@@ -52,11 +52,6 @@ steps:
       - "[!] 'apm unpack' is deprecated and will be removed in a future release. Repack with the default plugin format and use 'apm install <bundle-path>'."
     forbidden_lines: ["[!] No files were unpacked"]
 known_cells:
-  - id: J11-bundle-install-does-not-name-destinations
-    law: O6
-    tracking: "#4192"
-    step: 1
-    match: "changed but no output line announces it"
   - id: J11-legacy-pack-drops-agents-skills
     law: FORBID
     tracking: "#4202"

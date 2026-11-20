@@ -297,7 +297,11 @@ def test_global_declaration_reports_matching_install_scope(
     assert _declared_local_paths(onboarding.isolated.home / ".apm") == [str(source)]
 
 
-_REMOTE = "https://github.com/acme/tools.git"
+# A non-GitHub host keeps validation off the public GitHub API: the packaged
+# binary is not under the in-process network guard (#4198 CI parity).
+_TOOLS_HOST = "git.example.invalid"
+_TOOLS = f"{_TOOLS_HOST}/acme/tools"
+_REMOTE = f"https://{_TOOLS}.git"
 _TOOLS_SKILL = b"---\nname: tools-skill\ndescription: Tools.\n---\n\nUse tools.\n"
 
 
@@ -350,7 +354,7 @@ def test_install_package_locks_declared_local_dependency_and_reports_adoption(
     copy.write_bytes(_TOOLS_SKILL)
     source = ArtifactSnapshot.capture(onboarding.source)
 
-    installed = apm("install", "acme/tools#v1.0.0", "--target", "claude")
+    installed = apm("install", f"{_TOOLS}#v1.0.0", "--target", "claude")
 
     lines = installed.stdout.splitlines()
     assert "  |-- 1 skill(s) adopted -> .claude/skills/" in lines, installed.stdout
@@ -363,7 +367,7 @@ def test_install_package_locks_declared_local_dependency_and_reports_adoption(
         ".claude/skills/review/SKILL.md",
         ".claude/skills/review/resources/sample.bin",
     }
-    assert ".claude/skills/tools-skill/SKILL.md" in lock.dependencies["acme/tools"].deployed_files
+    assert ".claude/skills/tools-skill/SKILL.md" in lock.dependencies[_TOOLS].deployed_files
     _assert_lock_claims_deployed(onboarding.root, lock)
     assert copy.read_bytes() == _TOOLS_SKILL
     assert_unchanged(source, ArtifactSnapshot.capture(onboarding.source))

@@ -75,21 +75,11 @@ steps:
       - .agents/skills/*/SKILL.md
       - .claude/skills/*/SKILL.md
     key_lines:
-      - "[i] Cleaned 20 stale deployed files for vercel-labs/agent-skills"
+      - "[i] Cleaned 10 stale deployed paths for vercel-labs/agent-skills:"
       - "[i] Removed vercel-labs/agent-skills from dependencies.apm in apm.yml"
 known_cells:
-  - id: skill-bundle-integrated-twice
-    law: FORBID
-    tracking: "#4207"
-    step: 1
-    match: "Skill integrated ->"
   - id: skill-miss-no-runnable-advice
     law: O8
     tracking: "#4206"
     step: 3
     match: "is not printed"
-  - id: uninstall-cleanup-unannounced
-    law: O6
-    tracking: "#4193"
-    step: 5
-    match: "skills/.+/SKILL.md changed but no output line announces it"

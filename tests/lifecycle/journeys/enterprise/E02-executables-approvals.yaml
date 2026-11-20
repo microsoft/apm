@@ -69,9 +69,4 @@ known_cells:
   # The install deletes the retired hook file but never names it; it instead
   # warns that historical claims were retained (the --verbose list names the
   # deleted .github/hooks/p-exec-session.json as retained).
-  - id: e02-deny-retired-hook-not-announced
-    law: O6
-    tracking: "#4173"
-    step: 5
-    match: 'p-exec-session\.json changed but no output line announces it'
 

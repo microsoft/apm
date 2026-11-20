@@ -9,7 +9,7 @@ $ apm install --frozen
 [>] Installing dependencies from apm.yml...
 [>] Resolving claude-plugins-official-commit-commands...
 [i] Targets: claude  (source: apm.yml)
-  [+] github.com/anthropics/claude-plugins-official/plugins/commit-commands#main #<SHA40> @<SHA8>
+  [+] github.com/anthropics/claude-plugins-official/plugins/commit-commands #main @<SHA8>
   |-- 3 commands integrated -> .claude/commands/
 
 [*] Installed 1 APM dependency in <DUR>.
