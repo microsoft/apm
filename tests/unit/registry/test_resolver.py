@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.registry.client import RegistryClient, RegistryError, VersionEntry
+from apm_cli.deps.registry.extractor import HashMismatchError
 from apm_cli.deps.registry.resolver import (
     RegistryPackageResolver,
     RegistryResolutionError,
@@ -283,7 +284,7 @@ class TestFailurePaths:
         fake.archive_url.return_value = "https://x"
 
         resolver = _make_resolver(fake)
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(HashMismatchError) as excinfo:
             resolver.download_package(_make_dep(), tmp_path / "p")
         # Either HashMismatchError or RegistryResolutionError wrapping it.
         assert "mismatch" in str(excinfo.value).lower() or "Hash" in type(excinfo.value).__name__
@@ -518,7 +519,7 @@ class TestDownloadFromLockfile:
         fake.fetch_from_url.return_value = (raw, "application/gzip")
 
         resolver = _make_resolver(fake)
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(HashMismatchError) as excinfo:
             resolver.download_from_lockfile(
                 _make_dep(),
                 tmp_path / "p",

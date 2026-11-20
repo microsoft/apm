@@ -222,6 +222,7 @@ def test_write_zip_archive_excludes_symlinks(tmp_path: Path) -> None:
 
     write_zip_archive(bundle_dir, archive_path)
 
+    assert archive_path.is_file()
     with zipfile.ZipFile(archive_path, "r") as zf:
         assert zf.namelist() == ["bundle/plugin.json"]
 

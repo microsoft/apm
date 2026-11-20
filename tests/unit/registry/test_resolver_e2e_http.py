@@ -29,6 +29,7 @@ from typing import ClassVar
 
 import pytest
 
+from apm_cli.deps.registry.extractor import HashMismatchError
 from apm_cli.deps.registry.resolver import (
     RegistryPackageResolver,
     RegistryResolutionError,
@@ -248,7 +249,7 @@ class TestE2EErrorPaths:
         with _running_server(routes) as (host, port):
             base = f"http://{host}:{port}"
             resolver = RegistryPackageResolver({"corp": base})
-            with pytest.raises(Exception) as excinfo:
+            with pytest.raises(HashMismatchError) as excinfo:
                 resolver.download_package(_make_dep(), tmp_path / "p")
             # Either HashMismatchError directly or wrapped in RegistryResolutionError
             assert (

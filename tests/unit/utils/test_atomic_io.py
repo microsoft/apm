@@ -144,6 +144,8 @@ class TestAtomicWriteText:
 
         assert len(created_tmp_names) == 1
         assert Path(created_tmp_names[0]).parent == tmp_path
+        assert not Path(created_tmp_names[0]).exists()
+        assert target.read_text() == "data"
 
     def test_tmp_file_uses_apm_atomic_prefix(self, tmp_path: Path) -> None:
         """mkstemp is called with prefix='apm-atomic-'."""
@@ -163,6 +165,7 @@ class TestAtomicWriteText:
             atomic_write_text(target, "data")
 
         assert captured_kwargs[0]["prefix"] == "apm-atomic-"
+        assert target.read_text() == "data"
 
     @pytest.mark.parametrize(
         ("parameter", "value"),
@@ -232,6 +235,7 @@ class TestAtomicWriteText:
             atomic_write_text(target, "data", new_file_mode=None)
 
         mock_fchmod.assert_not_called()
+        assert target.read_text() == "data"
 
     # ------------------------------------------------------------------
     # Error paths
