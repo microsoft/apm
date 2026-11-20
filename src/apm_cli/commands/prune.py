@@ -95,6 +95,10 @@ def prune(ctx, dry_run):
     from ..deps.lockfile_generator import require_current_cli
 
     require_current_cli(Path.cwd(), command="apm prune")
+    if not dry_run:
+        from ..core.deployment_ledger import collect_orphaned_receipts
+
+        collect_orphaned_receipts()
     apm_modules_dir = Path(APM_MODULES_DIR)
     logger = CommandLogger("prune", dry_run=dry_run)
     registration_token = _publish_native_registration(Path.cwd())

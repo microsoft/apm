@@ -59,7 +59,7 @@
         "src/apm_cli/integration/skill_support.py",
         "src/apm_cli/install/pipeline.py"
       ],
-      "guards": ["install-deployment-provenance-state"]
+      "guards": ["install-deployment-provenance-state", "install-deployment-receipt-collection"]
     },
     {
       "id": "target-scoped-deployed-file-contraction",

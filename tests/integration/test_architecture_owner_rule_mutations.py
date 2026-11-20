@@ -118,6 +118,39 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
 
 
 @pytest.mark.parametrize(
+    ("rule", "path", "original", "replacement"),
+    [
+        pytest.param(
+            "install-deployment-lsp-lifecycle",
+            "src/apm_cli/install/lsp/integration.py",
+            "        recorded_targets=recorded_lsp_targets(lockfile),\n",
+            "        recorded_targets=(),\n",
+            id="uninstall-reselects-lsp-targets",
+        ),
+        pytest.param(
+            "registry_delegation.audit_target_selection",
+            "src/apm_cli/install/lsp/integration.py",
+            "def recorded_lsp_targets(",
+            "def resolve_deployment_target_decision(**kwargs): return None\n\n\n"
+            "def recorded_lsp_targets(",
+            id="second-deployment-target-owner",
+        ),
+    ],
+)
+def test_uninstall_lsp_target_selection_cannot_bypass_owner(
+    rule: str, path: str, original: str, replacement: str
+) -> None:
+    """Uninstall keeps survivors on the recorded LSP targets through one owner (#4059)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement"),
     [
         pytest.param(
@@ -1979,6 +2012,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="reconcile_owner_references",
         new="reconcile_owner_references_disabled",
         intent="Prune stops reconciling deployment provenance through the state owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-receipt-collection",
+        rule_id="install-deployment-receipt-collection",
+        path="src/apm_cli/install/pipeline.py",
+        old="        collect_orphaned_receipts()\n",
+        new="        pass\n",
+        intent="apm install stops collecting receipts whose project root is gone.",
     ),
     MutationCase(
         guard_id="install-deployment-request-defaults",

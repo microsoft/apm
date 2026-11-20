@@ -657,6 +657,7 @@ install-deployment-lock-parent-placement
 install-deployment-locked-copy-validity
 install-deployment-lockfile-required
 install-deployment-package-content-hash
+install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
