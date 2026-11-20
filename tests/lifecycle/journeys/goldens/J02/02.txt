@@ -6,9 +6,9 @@ $ apm install --frozen
 [>] Resolving microsoft/apm-sample-package...
 [>] Resolving awesome-copilot-review-and-refactor...
 [i] Targets: claude, copilot  (source: apm.yml)
-  [+] github.com/github/awesome-copilot/skills/review-and-refactor #<SHA40> @<SHA8>
+  [+] github.com/github/awesome-copilot/skills/review-and-refactor @<SHA8>
   |-- (files unchanged)
-  [+] microsoft/apm-sample-package #<SHA40> @<SHA8>
+  [+] microsoft/apm-sample-package #v1.0.0 @<SHA8>
   |-- 2 prompts adopted -> .github/prompts/
   |-- 2 agents adopted -> .claude/agents/, .github/agents/
   |-- 2 commands integrated -> .claude/commands/

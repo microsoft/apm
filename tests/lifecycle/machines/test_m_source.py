@@ -285,11 +285,6 @@ def _gated_rows(observation: Observation) -> bool:
     )
 
 
-def _lock_drops_exec_status(machine, op, before, after, result) -> bool:
-    del after
-    return result is not None and op.name == "lock" and machine.converged and _gated_rows(before)
-
-
 def _lsp_survivor(machine, op, before=None, after=None, result=None) -> bool:
     """#4214: uninstall with a surviving LSP-only local package fails its cleanup."""
     del before, after
@@ -310,13 +305,6 @@ KNOWN_CELLS = (
         r"^failed uninstall (changed (the manifest|the lockfile|deployed surfaces|durable files: .*)"
         r"|exited 1 without announcing why)$",
         _lsp_survivor,
-    ),
-    KnownCell(
-        "lock-drops-exec-status",
-        "I2",
-        "#4213",
-        r"^lock or manifest semantics changed on a converged state$",
-        _lock_drops_exec_status,
     ),
     KnownCell(
         "dry-run-writes-ref-pin",

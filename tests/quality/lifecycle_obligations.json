@@ -23676,7 +23676,7 @@
   },
   "U2": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:154",
+    "src/apm_cli/commands/approve.py:170",
     "src/apm_cli/policy/install_preflight.py:220"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
@@ -23708,15 +23708,15 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:953"
+    "src/apm_cli/commands/install.py:961"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1233",
-    "src/apm_cli/commands/install.py:997",
-    "src/apm_cli/commands/install.py:971",
+    "src/apm_cli/commands/install.py:1241",
+    "src/apm_cli/commands/install.py:1005",
+    "src/apm_cli/commands/install.py:979",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:698",
@@ -23730,12 +23730,12 @@
   },
   "U9": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:174",
-    "src/apm_cli/commands/approve.py:178"
+    "src/apm_cli/commands/approve.py:195",
+    "src/apm_cli/commands/approve.py:199"
    ],
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
  "schema_version": 1,
- "sha256": "1dbec0fa89c1a5b2bf57598f8cfa8828f40ccd0d96c325c8379c4af0a2e85793"
+ "sha256": "593b5a092337fa5b2a4c1bc140011f1be5480e6409948d990946e6297f17d32f"
 }
