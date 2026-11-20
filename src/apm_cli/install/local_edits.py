@@ -36,9 +36,11 @@ def install_keeps_edit(path: str) -> bool:
 
 def local_edit_hint(count: int) -> str:
     """Return the audit hint for *count* edits the next ``apm install`` overwrites."""
+    from apm_cli.core.remediation import LOCAL_EDITS_EXPORT
+
     return (
         f"{count} local edit(s) to managed files that the next 'apm install' overwrites; "
-        "run 'apm export-patch' first to export them as upstream patches"
+        f"first {LOCAL_EDITS_EXPORT.clause()}"
     )
 
 
@@ -46,9 +48,11 @@ def overwrite_notice(paths: Collection[str]) -> str:
     """Return the warning for edited files this install is about to overwrite."""
     shown = ", ".join(sorted(paths)[:5])
     more = f" (+{len(paths) - 5} more)" if len(paths) > 5 else ""
+    from apm_cli.core.remediation import LOCAL_EDITS_EXPORT
+
     return (
         f"This install overwrites {len(paths)} locally edited managed file(s): {shown}{more}. "
-        "To keep such edits, run 'apm export-patch' before installing"
+        f"To keep such edits, first {LOCAL_EDITS_EXPORT.clause()}"
     )
 
 
@@ -77,9 +81,11 @@ def edited_file_remediations(
 
 def rendering_change_hint(count: int) -> str:
     """Return the hint for drift whose on-disk bytes still match apm.lock.yaml."""
+    from apm_cli.core.remediation import RENDERING_CHANGED
+
     return (
         f"{count} file(s) still match apm.lock.yaml but this APM version renders them "
-        "differently; run 'apm install' and commit the result to adopt the new rendering"
+        f"differently; {RENDERING_CHANGED.clause()}"
     )
 
 

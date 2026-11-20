@@ -1025,10 +1025,323 @@ GITHUB_GITLAB_HOST_CONFLICT = _entry(
 
 # -- install/policy (W4) -------------------------------------------------------
 # -- W4 frozen-policy --
+# Advice printed by policy/ and install/{service,integrity,errors,local_edits}.py
+# and install/phases/content_hash_stream.py. Keep W4 frozen-policy additions here.
+_UNFROZEN = "without --frozen, keeping --root DIR or --global if specified"
+FROZEN_LOCK_STATE_DRIFT = _entry(
+    "frozen-lock-state-drift",
+    "apm install",
+    f"create or repair {{lock_state}} ({_UNFROZEN})",
+)
+FROZEN_SELECTIONS_CHANGED = _entry(
+    "frozen-selections-changed",
+    "apm install",
+    f"record the resolved dependency selections ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
+)
+DEPENDENCY_SELECTION_CHANGED = _entry(
+    "dependency-selection-changed",
+    "apm install",
+    "record the resolved selection",
+    then="commit apm.lock.yaml",
+)
+FROZEN_OPERATION_REJECTED = _entry(
+    "frozen-operation-rejected",
+    "apm install",
+    "refresh apm.lock.yaml (without --frozen)",
+    before="update apm.yml first",
+    then="retry the frozen install",
+)
+FROZEN_LOCAL_CONTENT_CHANGED = _entry(
+    "frozen-local-content-changed",
+    "apm install",
+    "accept and record the local content change (without --frozen)",
+)
+FROZEN_LOCKFILE_WITHHELD = _entry(
+    "frozen-lockfile-withheld",
+    "apm install",
+    f"record what this install deployed in apm.lock.yaml ({_UNFROZEN})",
+    then="commit the deployed files and apm.lock.yaml",
+)
+LOCAL_EDITS_EXPORT = _entry(
+    "local-edits-export", "apm export-patch", "export the local edits as upstream patches"
+)
+RENDERING_CHANGED = _entry(
+    "rendering-changed", "apm install", "adopt the new rendering", then="commit the result"
+)
+CONTENT_HASH_UNVERIFIED = _entry(
+    "content-hash-unverified",
+    "apm install",
+    "record verified content hashes in apm.lock.yaml",
+    before="reinstall {package} so its bytes are verified",
+)
+DEPLOYMENT_OWNERSHIP_MISSING = _entry(
+    "deployment-ownership-missing", "apm install", "record the missing deployment ownership"
+)
+MANAGED_PATHS_UNRESOLVED = _entry(
+    "managed-paths-unresolved", "apm install", "restore the unsafe or unresolved managed paths"
+)
+LOCAL_DEPENDENCY_GRAPH_CORRUPT = _entry(
+    "local-dependency-graph-corrupt",
+    "apm install",
+    "regenerate the local dependency graph in apm.lock.yaml",
+)
+DRIFT_CACHE_UNPOPULATED = _entry(
+    "drift-cache-unpopulated", "apm install", "populate the install cache drift replay reads"
+)
+BUNDLE_HOOKS_UNADMITTED = _entry(
+    "bundle-hooks-unadmitted", "apm install", "retire the unadmitted bundle hooks"
+)
+BUNDLE_HOOKS_APPROVED = _entry(
+    "bundle-hooks-approved",
+    "apm install <bundle>",
+    "redeploy the bundle with its approved hooks",
+    before="approve the bundle",
+)
+REQUIRED_PACKAGE_UNLOCKED = _entry(
+    "required-package-unlocked",
+    "apm install --no-policy",
+    "record the required packages in the lockfile",
+    then="reinstall normally",
+)
+UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "track a flagged file")
+CONTENT_HASHES_MISSING = _entry(
+    "content-hashes-missing", "apm install", "regenerate the missing content hashes"
+)
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
+# Advice printed by install/ drift replay, audit replay, cache pins, executable
+# gates, local bundles, native plugin admission, install/mcp and install/helpers.
+REPLACEMENT_SOURCES_UNRECORDED = _entry(
+    "replacement-sources-unrecorded",
+    "apm install",
+    "record the selected sources in apm.lock.yaml",
+)
+USER_PACKAGE_COPIES_STALE = _entry(
+    "user-package-copies-stale",
+    "apm install --global",
+    "refresh the user-scope package copies from apm.lock.yaml",
+)
+USER_PACKAGE_MATERIALIZATION_MISSING = _entry(
+    "user-package-materialization-missing",
+    "apm install --global",
+    "restore the user-scope package materialization",
+)
+REMOTE_DEPENDENCY_UNPINNED = _entry(
+    "remote-dependency-unpinned",
+    "apm install",
+    "record its resolved commit in apm.lock.yaml",
+    before="pin the dependency to a commit, tag, or specific branch HEAD",
+)
+REPLAY_CACHE_MISSING = _entry(
+    "replay-cache-missing", "apm install", "populate the apm_modules cache"
+)
+REPLAY_CACHE_STALE = _entry(
+    "replay-cache-stale", "apm install", "refresh the apm_modules cache to the locked commit"
+)
+HOOKS_UNAPPROVED = _entry(
+    "hooks-unapproved",
+    "apm approve {package}",
+    "approve its hooks",
+)
+BIN_EXECUTABLES_UNAPPROVED = _entry(
+    "bin-executables-unapproved",
+    "apm approve {package}",
+    "approve its bin/ executables",
+)
+BIN_EXECUTABLES_UNTRUSTED = _entry(
+    "bin-executables-untrusted",
+    "apm install --trust-bin {package}",
+    "deploy its bin/ executables",
+)
+BIN_EXECUTABLES_NOT_RETRUSTED = _entry(
+    "bin-executables-not-retrusted",
+    "apm install --trust-bin {package}",
+    "restore its bin/ executables",
+)
+ABSENCE_UNCONFIRMED = _entry(
+    "absence-unconfirmed",
+    "apm install",
+    "confirm the absence and release its ownership",
+    before="check the path permissions",
+)
+AGENT_SOURCE_SYMLINKED = _entry(
+    "agent-source-symlinked",
+    "apm install",
+    "deploy the agent sources",
+    before="use real files and directories in .apm/agents/ (or real *.agent.md files at "
+    "the package root)",
+)
+CLAUDE_PLUGIN_CACHE_INVALID = _entry(
+    "claude-plugin-cache-invalid",
+    "apm deps clean --yes",
+    "remove every cached dependency",
+    then="retry",
+)
+BUNDLE_INSTRUCTIONS_STAGED = _entry(
+    "bundle-instructions-staged",
+    "apm compile",
+    "merge the staged instructions into AGENTS.md / GEMINI.md / equivalent",
+)
+BUNDLE_HOOKS_RETIRED = _entry(
+    "bundle-hooks-retired",
+    "apm install <bundle>",
+    "redeploy its hooks",
+    before="approve the bundle",
+)
+MCP_UPDATE_FLAG = _entry("mcp-update-flag", "apm update", "update MCP entries")
+MCP_REGISTRY_URL_INVALID = _entry(
+    "mcp-registry-url-invalid",
+    "apm config unset mcp-registry-url",
+    "drop the invalid configured registry URL",
+    then="retry",
+)
+AGENT_PLUGIN_EXECUTABLES_UNAPPROVED = _entry(
+    "agent-plugin-executables-unapproved",
+    "apm approve {package}",
+    "trust its executables for GitHub Copilot registration",
+)
+NATIVE_PLUGIN_HASH_MISSING = _entry(
+    "native-plugin-hash-missing", "apm install", "regenerate its integrity baseline"
+)
+NATIVE_PLUGIN_CACHE_DIFFERS = _entry(
+    "native-plugin-cache-differs", "apm install", "restore the package"
+)
 # -- end W4 drift-trust --
 # -- W4 phases-targets --
+# Advice printed by install/phases, install/presentation and the install
+# target, staging and source helpers.
+INSTALL_AUDIT_FORCE = _entry(
+    "install-audit-force",
+    "apm install --force",
+    "install despite the critical findings (downgrades the audit block to a warning)",
+)
+CODEX_ADMISSION_STALE = _entry(
+    "codex-admission-stale",
+    "apm install",
+    "admit the Codex native plugins again",
+    before="review the executables approval",
+)
+CODEX_NATIVE_LOOSE_FILES = _entry(
+    "codex-native-loose-files",
+    "apm install -g --target codex",
+    "register the Codex native plugin",
+    before="preserve or relocate your edits and resolve the cleanup conflicts",
+)
+ROOT_CONTEXT_COMPILE = _entry("root-context-compile", "apm compile", "update {outputs}")
+USER_ROOT_CONTEXT_COMPILE = _entry(
+    "user-root-context-compile", "apm compile -g", "update root context files for {targets}"
+)
+EXECUTABLES_PARKED = _entry(
+    "executables-parked",
+    "apm approve {package}",
+    "trust its executables",
+    then="run 'apm install' to deploy them",
+)
+LOCAL_PACKAGE_PATH_MISSING = _entry(
+    "local-package-path-missing",
+    "apm install",
+    "materialize the local package",
+    before="restore the source or correct the dependency path",
+)
+LOCAL_PACKAGE_UNREADABLE = _entry(
+    "local-package-unreadable",
+    "apm install",
+    "materialize the local package",
+    before="check the source permissions and symlink target",
+)
+LOCAL_PACKAGE_CONTENT_INVALID = _entry(
+    "local-package-content-invalid",
+    "apm install",
+    "materialize the local package",
+    before="use UTF-8 Markdown with valid YAML frontmatter",
+)
+REPLACEMENT_RULES_PARTIAL_INSTALL = _entry(
+    "replacement-rules-partial-install",
+    "apm install",
+    "apply the complete replacement table (a partial install with package selectors cannot)",
+)
+COWORK_SKILLS_DIR_REQUIRED = _entry(
+    "cowork-skills-dir-required",
+    "apm config set copilot-cowork-skills-dir <path>",
+    "point APM at the Cowork skills directory",
+)
+COWORK_TARGET_USER_SCOPE = _entry(
+    "cowork-target-user-scope",
+    "apm install --target copilot-cowork --global",
+    "deploy to Copilot Cowork at user scope",
+)
+AGENT_SOURCE_UNREADABLE = _entry(
+    "agent-source-unreadable",
+    "apm install",
+    "deploy the agent",
+    before="fix the file permissions",
+)
+AGENT_SOURCE_ASSET_SKIPPED = _entry(
+    "agent-source-asset-skipped",
+    "apm install",
+    "deploy the agents without skipping the asset",
+    before="move the asset to a supported package surface or inline the content",
+)
+CASING_MIGRATION_SOURCE_MISSING = _entry(
+    "casing-migration-source-missing", "apm install", "materialize the package again"
+)
+CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS = _entry(
+    "claude-native-switch-loose-hooks",
+    "apm uninstall --global {package}",
+    "remove the loose hook deployment",
+    then="run 'apm install --global {package}' to activate it as a native Claude plugin",
+)
+SKILL_PATH_MIGRATION_CONFLICT = _entry(
+    "skill-path-migration-conflict",
+    "apm install",
+    "migrate the skills to .agents/skills/",
+    before="remove the conflicting file(s)",
+)
+SKILL_PATH_MIGRATION_LEGACY = _entry(
+    "skill-path-migration-legacy",
+    "apm install --legacy-skill-paths",
+    "keep per-client skill paths",
+)
+CONTENT_HASH_CACHE_CLEAN = _entry(
+    "content-hash-cache-clean",
+    "apm cache clean",
+    "discard the cached package copies",
+    then="retry",
+)
+CONTENT_HASH_REPIN = _entry(
+    "content-hash-repin",
+    "apm install",
+    "re-pin the dependency to the new content",
+    before="remove the '{dep_key}' entry from {lockfile}",
+)
+CONTENT_HASH_REPIN_GLOBAL = _entry(
+    "content-hash-repin-global",
+    "apm install -g",
+    "re-pin the dependency to the new content",
+    before="remove the '{dep_key}' entry from {lockfile}",
+)
+MATERIALIZED_MANIFEST_INVALID = _entry(
+    "materialized-manifest-invalid",
+    "apm install",
+    "materialize the dependency again",
+    before="restore valid dependency metadata",
+)
+HOOK_RECONCILE_INCOMPLETE = _entry(
+    "hook-reconcile-incomplete", "apm install", "finish reconciling these hook configs"
+)
+HOOKS_SKIPPED_UNAPPROVED = _entry(
+    "hooks-skipped-unapproved",
+    "apm approve {package}",
+    "approve its hooks",
+    then="run 'apm install' to deploy them",
+)
+CANVAS_SKIPPED_UNAPPROVED = _entry(
+    "canvas-skipped-unapproved",
+    "apm approve {package}",
+    "approve its canvas extensions",
+    then="run 'apm install' to deploy them",
+)
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------
 

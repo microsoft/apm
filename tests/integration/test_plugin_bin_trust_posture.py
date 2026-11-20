@@ -248,7 +248,8 @@ def test_log_bin_status_not_trusted() -> None:
     log_bin_status(skill_result, "", "pkg", SimpleNamespace(name="pkg"), lines.append)
 
     assert lines == [
-        "  |-- bin/ executables skipped (not trusted). Run 'apm install --trust-bin pkg' to deploy."
+        "  |-- bin/ executables skipped (not trusted). "
+        "Run 'apm install --trust-bin pkg' to deploy its bin/ executables."
     ]
 
 
@@ -281,7 +282,7 @@ def test_log_bin_status_explains_uninstall_retrust() -> None:
 
     assert lines == [
         "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-        "Run 'apm install --trust-bin pkg' to restore them."
+        "Run 'apm install --trust-bin pkg' to restore its bin/ executables."
     ]
 
 

@@ -545,10 +545,10 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         save_user_executables(updated, deny_exec)
         if ctx.logger:
             from apm_cli import config
+            from apm_cli.core.remediation import EXECUTABLES_APPROVED
 
             ctx.logger.info(
-                f"Updated {config.CONFIG_FILE}. "
-                "Run 'apm install' again to deploy approved executables.",
+                f"Updated {config.CONFIG_FILE}. {EXECUTABLES_APPROVED.sentence()}",
                 symbol="info",
             )
 
@@ -566,8 +566,10 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             f"{len(parked)} package(s) left parked. Their executables will not run until trusted.",
             symbol="info",
         )
+        from apm_cli.core.remediation import EXECUTABLES_PARKED
+
         logger.info(
-            f"Deploy later: apm approve {first} (then re-run apm install)  |  "
+            f"Deploy later: {EXECUTABLES_PARKED.bind(package=first).clause()}  |  "
             f"Why parked?: apm policy explain {first}",
             symbol="info",
         )

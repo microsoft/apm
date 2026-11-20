@@ -82,7 +82,9 @@ def _carried_install_path(ctx: Any, dep: LockedDependency):
 
 
 def _keep_stream(ctx: Any, lockfile: LockFile, dep_key: str, recorded_framed: bool) -> None:
-    hint = f"reinstall {dep_key} so its bytes are verified, then run 'apm install' again"
+    from apm_cli.core.remediation import CONTENT_HASH_UNVERIFIED
+
+    hint = CONTENT_HASH_UNVERIFIED.bind(package=dep_key).clause()
     if recorded_framed:  # this run's rows are framed: never mislabel them
         raise RuntimeError(f"Cannot verify the locked content of {dep_key}; {hint}")
     lockfile.set_content_hash_stream(framed=False)

@@ -39,6 +39,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import (
+    SKILL_PATH_MIGRATION_CONFLICT,
+    SKILL_PATH_MIGRATION_LEGACY,
+    either_sentence,
+)
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -73,10 +78,7 @@ COLLISION_HEADER_TEMPLATE = (
     "already exist with different content."
 )
 COLLISION_DETAIL_TEMPLATE = "  {dst_path} conflicts with {src_path} (from {dep_name})"
-COLLISION_HINT = (
-    "Remove the conflicting file(s) and re-run `apm install`, "
-    "or pass --legacy-skill-paths to keep per-client paths."
-)
+COLLISION_HINT = either_sentence(SKILL_PATH_MIGRATION_CONFLICT, SKILL_PATH_MIGRATION_LEGACY)
 
 
 @dataclass(frozen=True)

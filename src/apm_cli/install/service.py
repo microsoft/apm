@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core import remediation
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
@@ -378,10 +379,7 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: dependency selections differ from apm.lock.yaml.",
                 reasons=[f"  - {reason}" for reason in changes],
-                tip=(
-                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                    "or --global if specified, then commit apm.lock.yaml."
-                ),
+                tip=f"Tip: {remediation.FROZEN_SELECTIONS_CHANGED.sentence()}",
             )
 
     @staticmethod
@@ -393,8 +391,7 @@ class InstallService:
 
         raise FrozenInstallError(
             f"--frozen cannot be combined with {operation}. "
-            "Update apm.yml first, run 'apm install' without --frozen to refresh "
-            "apm.lock.yaml, then retry the frozen install."
+            f"{remediation.FROZEN_OPERATION_REJECTED.sentence()}"
         )
 
     @staticmethod
@@ -651,8 +648,8 @@ class InstallService:
                 "--frozen: local dependency content does not match apm.lock.yaml.",
                 reasons=reasons,
                 tip=(
-                    "Restore the locked local content, or run 'apm install' without "
-                    "--frozen to explicitly accept and record the change."
+                    "Restore the locked local content, or "
+                    f"{remediation.FROZEN_LOCAL_CONTENT_CHANGED.clause()}."
                 ),
             )
 
@@ -803,10 +800,7 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: dependency selections differ from apm.lock.yaml.",
                 reasons=[f"  - {reason}" for _key, reason in sorted(changed_selections.items())],
-                tip=(
-                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                    "or --global if specified, then commit apm.lock.yaml."
-                ),
+                tip=f"Tip: {remediation.FROZEN_SELECTIONS_CHANGED.sentence()}",
             )
         if unclaimed:
             raise FrozenInstallError(
@@ -854,8 +848,8 @@ class InstallService:
             return
         if deployed:
             tip = (
-                _FROZEN_REPAIR_TIP
-                + " To keep local edits, run 'apm export-patch' or move them aside first."
+                f"{_FROZEN_REPAIR_TIP} To keep local edits, first "
+                f"{remediation.LOCAL_EDITS_EXPORT.clause()}, or move them aside."
             )
         else:
             # True per primitive kind (RA-009): see install/local_edits.py.
@@ -878,9 +872,8 @@ class InstallService:
 
 
 _FROZEN_REPAIR_TIP = (
-    "Tip: the files were still deployed; only the lockfile write was "
-    "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
-    "or --global if specified, then commit the deployed files and apm.lock.yaml."
+    "Tip: the files were still deployed; only the lockfile write was withheld. "
+    f"{remediation.FROZEN_LOCKFILE_WITHHELD.sentence()}"
 )
 
 
@@ -908,8 +901,8 @@ def frozen_selection_changes(deps_to_install: Iterable[Any], committed: LockFile
         if recorded != dependency_pairing(dep_ref):
             reasons[key] = (
                 f"selection for {key} changed: the skills and targets its declaring "
-                "manifests request differ from apm.lock.yaml; run 'apm install' and "
-                "commit apm.lock.yaml"
+                "manifests request differ from apm.lock.yaml; "
+                f"{remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
             )
     return [reasons[key] for key in sorted(reasons)]
 
@@ -928,8 +921,8 @@ def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, s
             if before != after:
                 changed[key] = (
                     f"selection for {key} changed: locked {label} {before or 'all'}, "
-                    f"resolved {label} {after or 'all'}; run 'apm install' and commit "
-                    "apm.lock.yaml"
+                    f"resolved {label} {after or 'all'}; "
+                    f"{remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
                 )
                 break
         else:
@@ -941,7 +934,7 @@ def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, s
             if not same:
                 changed[key] = (
                     f"selection for {key} changed: the skills paired with each target "
-                    "differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml"
+                    f"differ from apm.lock.yaml; {remediation.DEPENDENCY_SELECTION_CHANGED.clause()}"
                 )
     return changed
 

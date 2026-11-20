@@ -148,6 +148,7 @@ class TestLocalPathFailureReason:
         assert _local_path_failure_reason(dep) is None
 
     def test_path_does_not_exist_returns_message(self, tmp_path: Path) -> None:
+        from apm_cli.core.remediation import LOCAL_PACKAGE_PATH_MISSING
         from apm_cli.install.validation import _local_path_failure_reason
 
         dep = MagicMock()
@@ -156,7 +157,7 @@ class TestLocalPathFailureReason:
         reason = _local_path_failure_reason(dep)
         assert reason == (
             f"Local package path does not exist: {dep.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            f"{LOCAL_PACKAGE_PATH_MISSING.sentence()}"
         )
 
     def test_path_is_file_not_dir_returns_message(self, tmp_path: Path) -> None:

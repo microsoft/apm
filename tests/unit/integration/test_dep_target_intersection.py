@@ -303,8 +303,10 @@ def test_reconcile_failure_diagnostic_names_target_and_config(tmp_path: Path) ->
 
     warning = diagnostics.by_category()[CATEGORY_WARNING][0]
     assert warning.message == "Could not fully reconcile hooks excluded by target restrictions"
+    from apm_cli.core.remediation import HOOK_RECONCILE_INCOMPLETE
+
     assert warning.detail == (
-        "targets: [cursor]; configs: [.cursor/hooks.json]; run apm install again"
+        f"targets: [cursor]; configs: [.cursor/hooks.json]; {HOOK_RECONCILE_INCOMPLETE.clause()}"
     )
 
 

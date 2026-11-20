@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import ABSENCE_UNCONFIRMED
+
 if TYPE_CHECKING:
     from apm_cli.core.deployment_state import CompletedReintegration
     from apm_cli.integration.targets import TargetProfile
@@ -49,7 +51,7 @@ def verified_absent_dependency_values(
         except OSError as exc:
             diagnostics.warn(
                 f"Could not confirm whether {path} is absent; ownership retained. "
-                "Check path permissions, then rerun apm install.",
+                f"{ABSENCE_UNCONFIRMED.sentence()}",
                 package=completed.owner,
                 detail=str(exc),
             )

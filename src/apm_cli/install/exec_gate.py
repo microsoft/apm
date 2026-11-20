@@ -12,6 +12,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import (
+    BIN_EXECUTABLES_NOT_RETRUSTED,
+    BIN_EXECUTABLES_UNAPPROVED,
+    BIN_EXECUTABLES_UNTRUSTED,
+    HOOKS_UNAPPROVED,
+)
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -559,18 +566,18 @@ def log_bin_status(
         )
     elif skill_result.bin_skipped_reason == "not_approved":
         log_fn(
-            f"  |-- bin/ executables skipped (not approved in executables.allow). "
-            f"Run 'apm approve {package_label}' to approve."
+            "  |-- bin/ executables skipped (not approved in executables.allow). "
+            f"{BIN_EXECUTABLES_UNAPPROVED.bind(package=package_label).sentence()}"
         )
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
             "  |-- bin/ executables skipped (not trusted). "
-            f"Run 'apm install --trust-bin {package_label}' to deploy."
+            f"{BIN_EXECUTABLES_UNTRUSTED.bind(package=package_label).sentence()}"
         )
     elif skill_result.bin_skipped_reason == "not_retrusted_on_uninstall":
         log_fn(
             "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-            f"Run 'apm install --trust-bin {package_label}' to restore them."
+            f"{BIN_EXECUTABLES_NOT_RETRUSTED.bind(package=package_label).sentence()}"
         )
 
 
@@ -604,7 +611,7 @@ def log_hooks_skip(
     else:
         message = (
             f"{label}: hooks skipped (not approved in executables.allow). "
-            f"Run 'apm approve {label}' to approve."
+            f"{HOOKS_UNAPPROVED.bind(package=label).sentence()}"
         )
     logger.warning(message, symbol="warning")
 

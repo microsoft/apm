@@ -92,9 +92,11 @@ def test_grok_cloud_disabled_flag_emits_enable_hint(
 
     _check_grok_cloud_flag_gate("grok-cloud", [], ctx)
 
+    from apm_cli.core.remediation import EXPERIMENTAL_FLAG_DISABLED
+
     ctx.logger.progress.assert_called_once_with(
         "The 'grok-cloud' target requires an experimental flag. "
-        "Run: apm experimental enable grok-cloud",
+        f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='grok-cloud').sentence()}",
         symbol="info",
     )
 
