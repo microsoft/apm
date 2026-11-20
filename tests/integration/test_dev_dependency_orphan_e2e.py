@@ -10,6 +10,9 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 
+pytestmark = pytest.mark.e2e
+
+
 TIMEOUT = 180
 
 

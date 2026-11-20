@@ -27,6 +27,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

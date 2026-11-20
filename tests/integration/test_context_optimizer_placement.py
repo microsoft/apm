@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.compilation.context_optimizer import (
     ContextOptimizer,
     DirectoryAnalysis,
@@ -33,6 +35,9 @@ from apm_cli.compilation.context_optimizer import (
     PlacementCandidate,
 )
 from apm_cli.primitives.models import Instruction
+
+pytestmark = pytest.mark.component
+
 
 # ---------------------------------------------------------------------------
 # Helpers

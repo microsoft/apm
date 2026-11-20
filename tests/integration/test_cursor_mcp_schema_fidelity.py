@@ -18,6 +18,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.e2e
+
 
 def _write_apm_yml(project_dir: Path, mcp_servers: list[dict]) -> None:
     config = {

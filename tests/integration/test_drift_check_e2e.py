@@ -29,6 +29,9 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers (kept local so this file is self-contained)
 # ---------------------------------------------------------------------------

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.commands.deps.cli import (
     _add_tree_children,
     _dep_display_name,
@@ -11,6 +13,8 @@ from apm_cli.commands.deps.cli import (
     _format_primitive_counts,
 )
 from apm_cli.deps.lockfile import LockedDependency
+
+pytestmark = pytest.mark.unit
 
 
 class TestFormatPrimitiveCounts:

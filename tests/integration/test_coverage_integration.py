@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 class TestAdaptersIntegration:
     """Integration tests for adapter module functionality."""

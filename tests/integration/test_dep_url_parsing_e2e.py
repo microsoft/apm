@@ -40,6 +40,8 @@ from apm_cli.policy.discovery import (
     discover_policy_with_chain,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _clear_cache():

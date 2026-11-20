@@ -32,6 +32,8 @@ from apm_cli.integration.skill_integrator import (
 from apm_cli.output.formatters import CompilationFormatter
 from apm_cli.output.models import CompilationResults, OptimizationStats, ProjectAnalysis
 
+pytestmark = pytest.mark.component
+
 
 class TestCopilotEnvPlaceholderTranslation:
     """Test Copilot adapter env-var placeholder translation."""

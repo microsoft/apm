@@ -20,6 +20,9 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
+
 _GLOBAL = "example/dev/presets/global"
 _ANTI_SLOP = "example/dev/presets/anti-slop"
 _GENERAL = "example/dev/presets/general"

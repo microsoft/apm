@@ -20,6 +20,9 @@ import pytest
 
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 
+pytestmark = pytest.mark.component
+
+
 # ===========================================================================
 # copilot_app_db -- constants
 # ===========================================================================

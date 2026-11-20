@@ -61,6 +61,9 @@ from apm_cli.deps.revision_pins import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

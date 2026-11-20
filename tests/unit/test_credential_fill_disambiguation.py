@@ -20,6 +20,8 @@ import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def isolated_env():

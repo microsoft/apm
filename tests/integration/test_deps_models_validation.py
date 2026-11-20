@@ -29,6 +29,9 @@ import yaml
 
 from apm_cli.deps.lockfile import LockedDependency
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

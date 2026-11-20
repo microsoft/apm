@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 # Skip all tests if no GitHub token is available
-pytestmark = pytest.mark.requires_github_token
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_github_token]
 
 
 @pytest.fixture

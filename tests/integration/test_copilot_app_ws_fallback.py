@@ -23,9 +23,14 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.integration import copilot_app_ws as ws_mod
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
+
+pytestmark = pytest.mark.component
+
 
 _SCHEMA: str = """
 CREATE TABLE IF NOT EXISTS "projects" (
