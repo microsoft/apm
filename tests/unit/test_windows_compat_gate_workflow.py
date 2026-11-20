@@ -8,9 +8,10 @@ was Linux-only for PR feedback and the full Windows matrix only runs
 post-merge in build-release.yml. These tests pin the focused Windows
 job that closes that gap.
 
-Selection is declarative: the job runs `pytest -m windows_compat`
-over `tests/unit` and `tests/integration` rather than
-enumerating test files in this workflow. Adding a new Windows-relevant
+Selection is declarative: each shard runs `pytest -m windows_compat`
+over the test files `python -m scripts.ci_sharding files` derives from
+`tests/unit` and `tests/integration`, rather than enumerating test
+files in this workflow. Adding a new Windows-relevant
 regression test therefore only requires applying the `windows_compat`
 marker (see pyproject.toml `[tool.pytest.ini_options].markers`) to the
 test -- not editing ci.yml or this file. These tests assert the
@@ -48,9 +49,11 @@ GATE_JOB = "windows-compat-gate"
 GATE_CHECK_NAME = "Windows Compatibility Gate"
 GATE_SHARD_JOBS = ("windows-compat-gate-1", "windows-compat-gate-2", "windows-compat-gate-3")
 GATE_STEP = "Run cross-platform contract family"
+SELECT_STEP = "Select shard test files"
+SHARD_FILE_LIST = "shard-files.txt"
 GATE_MARKER = "windows_compat"
 GATE_DURATIONS = ".github/ci-durations/windows-compat.json"
-_SHARD_VALUE_FLAGS = ("--shard-count", "--shard-index", "--shard-durations")
+_SHARD_VALUE_FLAGS = ("--shard-count", "--shard-index", "--shard-durations", "--out")
 
 # The full-suite roots already covered by build-and-test-shard (Linux).
 # The gate must never invoke these WITHOUT a marker filter -- that
@@ -76,6 +79,20 @@ def _expected_checks_env(merge_gate: dict) -> str:
 
 def _gate_step(ci: dict, job_id: str = GATE_SHARD_JOBS[0]) -> dict:
     return workflow_step(workflow_job(ci, job_id), GATE_STEP)
+
+
+def _select_step(ci: dict, job_id: str = GATE_SHARD_JOBS[0]) -> dict:
+    return workflow_step(workflow_job(ci, job_id), SELECT_STEP)
+
+
+def _emitter_args(step: dict) -> list[str]:
+    """Return the shard file-list emitter's arguments (after ``files``)."""
+    matches = [command for command in shell_commands(step) if "scripts.ci_sharding" in command]
+    assert len(matches) == 1, f"{SELECT_STEP!r} must run the shard file-list emitter once"
+    command = matches[0]
+    index = command.index("scripts.ci_sharding")
+    assert command[index + 1 : index + 2] == ["files"], "the emitter must run its files mode"
+    return command[index + 2 :]
 
 
 def _gate_pytest_command(step: dict) -> list[str]:
@@ -188,14 +205,18 @@ def test_windows_compat_gate_runs_on_windows_with_bounded_timeout(shard: int) ->
 
 
 def test_windows_compat_gate_shards_partition_one_family() -> None:
-    """Each shard selects its slice of one duration-weighted partition."""
-    args = _gate_pytest_args(_gate_step(_ci_workflow()))
+    """Each shard runs only its own file list of one duration-weighted partition."""
+    ci = _ci_workflow()
+    args = _emitter_args(_select_step(ci))
     pairs = [args[index : index + 2] for index in range(len(args) - 1)]
-    assert ["-p", "scripts.ci_sharding"] in pairs
+    run_args = _gate_pytest_args(_gate_step(ci))
+    assert _positional_test_paths(run_args) == [f"@{SHARD_FILE_LIST}"]
+    assert not any(arg.startswith("--shard") for arg in run_args)
     for flag, value in (
         ("--shard-count", str(len(GATE_SHARD_JOBS))),
         ("--shard-index", "$env:SHARD"),
         ("--shard-durations", GATE_DURATIONS),
+        ("--out", SHARD_FILE_LIST),
     ):
         assert args.count(flag) == 1 and [flag, value] in pairs, f"{flag} must be {value}"
     durations = json.loads((ROOT / GATE_DURATIONS).read_text(encoding="utf-8"))
@@ -298,12 +319,17 @@ def test_windows_compat_gate_selects_tests_via_registered_marker() -> None:
     assert marker_index + 1 < len(args) and args[marker_index + 1] == GATE_MARKER, (
         f"{GATE_STEP!r} must select tests via `-m {GATE_MARKER}`, got: {args!r}"
     )
+    emitter = _emitter_args(_select_step(_ci_workflow()))
+    assert emitter[emitter.index("-m") + 1] == GATE_MARKER, (
+        f"{SELECT_STEP!r} must choose files for the same `-m {GATE_MARKER}` selection"
+    )
 
 
 def test_windows_compat_gate_runs_over_narrowest_maintainable_root() -> None:
     """Discover marked contracts without a per-file integration allowlist."""
-    step = _gate_step(_ci_workflow())
-    args = _gate_pytest_args(step)
+    ci = _ci_workflow()
+    step = _gate_step(ci)
+    args = _emitter_args(_select_step(ci))
     positional = _positional_test_paths(args)
     expected = ["tests/unit", "tests/integration"]
     assert positional == expected, (
@@ -320,9 +346,8 @@ def test_windows_compat_gate_does_not_duplicate_full_suite() -> None:
     invocation with no marker filter would duplicate build-and-test-shard's
     Linux coverage at double the PR-time cost with no new signal.
     """
-    step = _gate_step(_ci_workflow())
-    # Only pytest's own arguments: `python -m pytest` must not count as a marker.
-    tokens = set(_gate_pytest_args(step))
+    # The emitter's roots and marker decide the family pytest runs.
+    tokens = set(_emitter_args(_select_step(_ci_workflow())))
 
     overlapping_roots = set(FULL_SUITE_ROOTS) & tokens
     assert overlapping_roots, "sanity: gate should scope at least one known root"
@@ -358,8 +383,8 @@ def test_windows_compat_gate_marker_selects_nonempty_subset() -> None:
     arbitrary test-count ceiling that breaks when legitimate coverage grows.
     Unix-only imports must not fail collection before marker deselection.
     """
-    step = _gate_step(_ci_workflow())
-    _assert_gate_family_collection(_collect_gate_family(_selection_args(_gate_pytest_args(step))))
+    step = _select_step(_ci_workflow())
+    _assert_gate_family_collection(_collect_gate_family(_selection_args(_emitter_args(step))))
 
 
 @pytest.mark.parametrize(
@@ -504,11 +529,10 @@ def test_dropping_marker_filter_is_detected_as_full_suite_duplication() -> None:
     from the run step while leaving `tests/unit` in place, the
     duplicate-full-suite guard must catch it."""
     ci = deepcopy(_ci_workflow())
-    step = _gate_step(ci)
+    step = _select_step(ci)
     step["run"] = step["run"].replace(f"-m {GATE_MARKER}\n", "").replace(f"-m {GATE_MARKER}", "")
 
-    # Only pytest's own arguments: `python -m pytest` must not count as a marker.
-    tokens = set(_gate_pytest_args(step))
+    tokens = set(_emitter_args(step))
     overlapping_roots = set(FULL_SUITE_ROOTS) & tokens
     assert overlapping_roots and "-m" not in tokens, (
         "mutation setup sanity check failed -- marker was not actually removed"
@@ -519,10 +543,10 @@ def test_narrowing_root_below_windows_compat_root_breaks_contract() -> None:
     """Mutation-break proof: if the declared root no longer matches
     `tests/unit`, the narrowest-root contract test must fail."""
     ci = deepcopy(_ci_workflow())
-    step = _gate_step(ci)
+    step = _select_step(ci)
     step["run"] = step["run"].replace("tests/unit", "tests/unit/scripts")
 
-    args = _gate_pytest_args(step)
+    args = _emitter_args(step)
     positional = [arg for arg in _positional_test_paths(args) if arg != GATE_MARKER]
     assert positional != ["tests/unit"], (
         "mutation setup sanity check failed -- root was not actually narrowed"

@@ -88,10 +88,18 @@ def test_push_shards_execute_the_original_suites() -> None:
             step = workflow_step(job, name)
             assert job["env"]["SHARD"] == str(i)
             assert "if" not in step and not step.get("continue-on-error")
-            assert f"python -m pytest {selection} " in step["run"]
+            select = step
+            if group == "windows-unit":
+                # The shard runs only its own file list from the emitter.
+                select = workflow_step(job, "Select shard test files")
+                assert "python -m pytest '@shard-files.txt' " in step["run"]
+                assert "python -m scripts.ci_sharding files " in select["run"]
+                assert select["run"].endswith(f"--out shard-files.txt {selection}")
+            else:
+                assert f"python -m pytest {selection} " in step["run"]
             assert "--collect-only" not in step["run"]
-            assert f"--shard-count {count} --shard-index" in step["run"]
-            assert f"--shard-durations .github/ci-durations/{seed}.json" in step["run"]
+            assert f"--shard-count {count} --shard-index" in select["run"]
+            assert f"--shard-durations .github/ci-durations/{seed}.json" in select["run"]
             if group == "windows-unit":
                 assert job["if"] == BRANCH_PUSH and job["runs-on"] == "windows-latest"
                 assert step["timeout-minutes"] == 60
