@@ -17,9 +17,11 @@ writers (``apm update`` running the install service) join the outer one.
 A command commits what it staged when it completes, and also when it fails
 after changing state: an install that deployed files and then exits non-zero
 (a later MCP conflict, a native write failure) keeps the lockfile records of
-what reached disk.  Refusals happen before the first write, so nothing is
-staged to commit.  Only an interrupt (Ctrl-C, or a ``sys.exit`` with a
-non-zero code) discards what was staged.  Two explicit commit points
+what reached disk.  Most refusals happen before the first write, so nothing
+is staged to commit.  A check refusal raised after staging (an exception
+class with ``refuses_commit = True``, such as an org-policy or install-time
+audit block, anywhere in the error's cause chain), an interrupt (Ctrl-C) or a
+``sys.exit`` with a non-zero code discards what was staged.  Two explicit commit points
 flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
 transaction must agree with the lockfile (native plugin registration, user
 lifecycle scripts, a command's own durable checkpoint).  Removal and rollback
@@ -107,12 +109,34 @@ def _scope(*, open_: bool = False) -> _WriteScope | None:
     return active.scope
 
 
+def _refused(error: BaseException) -> bool:
+    """Whether *error*, or an error in its cause/context chain, is a check refusal.
+
+    A refusal (an exception class with ``refuses_commit = True``, such as an
+    org-policy block) means the command must commit nothing (#4085).
+    """
+    seen: set[int] = set()
+    pending: list[BaseException] = [error]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if getattr(type(current), "refuses_commit", False):
+            return True
+        pending.extend(e for e in (current.__cause__, current.__context__) if e is not None)
+    return False
+
+
 def _commits(error: BaseException) -> bool:
     """Whether a command ending in *error* still commits what it staged.
 
-    A failure after a state change records that change; an interrupt or a
-    non-zero ``sys.exit`` abandons the command, and a zero exit completes it.
+    A failure after a state change records that change; a check refusal, an
+    interrupt or a non-zero ``sys.exit`` abandons the command, and a zero exit
+    completes it.
     """
+    if _refused(error):
+        return False
     if isinstance(error, SystemExit | _click_exit()):
         return getattr(error, "exit_code", getattr(error, "code", 1)) in (0, None)
     return isinstance(error, Exception)
