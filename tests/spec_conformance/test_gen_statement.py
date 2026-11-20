@@ -129,7 +129,7 @@ def _statement_provider(document: dict) -> SimpleNamespace:
     return SimpleNamespace(source_cache=SimpleNamespace(read=lambda _path: (text, None)))
 
 
-def test_partial_requirement_is_reported_and_still_needs_behavioral_coverage(monkeypatch):
+def test_partial_requirement_is_reported_and_still_needs_behavioral_coverage(monkeypatch, tmp_path):
     """A PARTIAL_CONFORMANCE entry is reported partial with its scope, never as active."""
     requirements = [
         Requirement("req-zz-001", "SHOULD", "1.1", "consumer"),
@@ -149,7 +149,9 @@ def test_partial_requirement_is_reported_and_still_needs_behavioral_coverage(mon
         gen_statement, "PARTIAL_CONFORMANCE", {"req-zz-001": scope, "req-zz-003": scope}
     )
 
-    document = gen_statement.build_json()
+    statement = tmp_path / "CONFORMANCE.json"
+    statement.write_text(json.dumps(gen_statement.build_json()), encoding="ascii")
+    document = json.loads(statement.read_text(encoding="ascii"))
     entries = {entry["id"]: entry for entry in document["requirements"]}
     assert entries["req-zz-001"]["status"] == "partial"
     assert entries["req-zz-001"]["partial"] == scope
@@ -159,7 +161,9 @@ def test_partial_requirement_is_reported_and_still_needs_behavioral_coverage(mon
     assert "partial" not in entries["req-zz-003"]
     assert document["summary_by_class"]["consumer"]["partial"] == 1
 
-    markdown = gen_statement.build_md(document)
+    rendered = tmp_path / "CONFORMANCE.md"
+    rendered.write_text(gen_statement.build_md(document), encoding="ascii")
+    markdown = rendered.read_text(encoding="ascii")
     assert "| Class | Active | Partial | Skipped | Xfail | Text-only | Unbound |" in markdown
     assert "| Consumer | 1 | 1 | 0 | 0 | 1 | 0 |" in markdown
     assert "| consumer | partial | 1 / 1 |" in markdown
