@@ -65,10 +65,16 @@ _POLICY_PREFLIGHT = re.compile(r"\brun_policy_preflight\b")
 _TRANSACTION_CLASS = re.compile(r"^class InstallTransaction\b")
 
 
-def _code_lines(facts: object) -> list[tuple[int, str]]:
+def _source_lines(provider: FactsProvider, path: str) -> tuple[str, ...]:
+    """Return raw source lines without parsing: closed-list scans stay cheap."""
+    text, _error = provider.source_cache.read(path)
+    return tuple(text.splitlines()) if text else ()
+
+
+def _code_lines(lines: tuple[str, ...]) -> list[tuple[int, str]]:
     """Return numbered lines with comments and docstring-style text dropped."""
     numbered = []
-    for number, line in enumerate(_lines(facts), start=1):
+    for number, line in enumerate(lines, start=1):
         stripped = line.strip()
         if stripped.startswith(("#", '"""', "``")) or "``" in stripped:
             continue
@@ -89,8 +95,7 @@ def _closed_list_violations(
     for path in _python_paths(provider, _SRC_PREFIX):
         if path in allowed or path.startswith("src/apm_cli/policy/"):
             continue
-        facts = provider.file_facts(path)
-        for number, line in _code_lines(facts):
+        for number, line in _code_lines(_source_lines(provider, path)):
             if skip_def and f"def {skip_def}" in line:
                 continue
             if pattern.search(line):
@@ -212,7 +217,14 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
     for path in _python_paths(provider, _SRC_PREFIX):
         if path == _TRANSACTION:
             continue
-        line = _first_line_re(provider.file_facts(path), _TRANSACTION_CLASS)
+        line = next(
+            (
+                number
+                for number, text in enumerate(_source_lines(provider, path), start=1)
+                if _TRANSACTION_CLASS.search(text)
+            ),
+            None,
+        )
         if line is not None:
             found.append(
                 violation(rule_id, path, "InstallTransaction has one definition", line=line)

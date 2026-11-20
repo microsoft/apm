@@ -38,12 +38,6 @@ from scripts.architecture_linter.checks.install_codex_agent_links import (
     check_codex_agent_link_resolution,
 )
 from scripts.architecture_linter.checks.install_deployment_shared import _rule
-from scripts.architecture_linter.checks.install_entry_and_commit import (
-    GUARD_COMMIT_ORDER,
-    GUARD_ENTRY_ROUTING,
-    check_install_commit_order,
-    check_install_entry_routing,
-)
 from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
     check_prospective_dry_run_plan,
@@ -51,6 +45,12 @@ from scripts.architecture_linter.checks.install_dry_run_plan import (
 from scripts.architecture_linter.checks.install_effective_selection import (
     GUARD_EFFECTIVE_SELECTION,
     check_effective_selection,
+)
+from scripts.architecture_linter.checks.install_entry_and_commit import (
+    GUARD_COMMIT_ORDER,
+    GUARD_ENTRY_ROUTING,
+    check_install_commit_order,
+    check_install_entry_routing,
 )
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
