@@ -612,6 +612,102 @@ def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys((approval.identity, approval.key)))
 
 
+class ApprovalSpecError(ValueError):
+    """A CLI spec names no single installed package, so no store key is derived."""
+
+
+def canonical_approval_spec(spec: str, lockfile: Any, *, selected_key: str | None = None) -> str:
+    """Return the approval-store identity a spec names (#4189, #4245).
+
+    The single owner shared by ``apm approve``, ``apm deny``, ``apm policy
+    explain`` and the store reader. *selected_key* is the ``apm.lock.yaml``
+    row the dependency selector (``select_installed_lock_key``, the owner
+    ``apm uninstall`` and ``apm audit PACKAGE`` use) matched; its locked
+    approval identity is the store key. Without a selection, a marketplace
+    spec (``plugin@marketplace[#ref]``) resolves through the lock's recorded
+    provenance, and any other spec is already an identity spelling.
+
+    Raises:
+        ApprovalSpecError: A marketplace spec names no installed package or
+            more than one, so no store key may be derived from it.
+    """
+    from apm_cli.marketplace.resolver import parse_marketplace_ref
+
+    rows = lockfile.dependencies if lockfile is not None else {}
+    if selected_key is not None and selected_key in rows:
+        return _strip_version(locked_dependency_approval(rows[selected_key]).identity)
+    try:
+        parsed = parse_marketplace_ref(spec)
+    except ValueError as exc:
+        raise ApprovalSpecError(f"{spec}: {exc}") from exc
+    if parsed is None:
+        return spec
+    plugin, marketplace, _ref = parsed
+    matches = lockfile.marketplace_rows(marketplace, plugin) if lockfile is not None else []
+    if len(matches) != 1:
+        why = (
+            "no installed package came from" if not matches else "several installed packages match"
+        )
+        raise ApprovalSpecError(
+            f"{spec}: {why} {plugin}@{marketplace}. Name the package as "
+            "'apm approve --pending' lists it."
+        )
+    return _strip_version(locked_dependency_approval(matches[0]).identity)
+
+
+_CANONICALIZED_KEYS_NOTED: set[tuple[str, str]] = set()
+
+
+def _readable_lockfile(root: Path) -> Any:
+    """The scope's lockfile for store-key migration, or None when unreadable.
+
+    The lockfile's own reader reports a malformed or conflicted file to the
+    command that needs it; migration simply does not apply then.
+    """
+    from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+
+    try:
+        return LockFile.read(get_lockfile_path(root))
+    except (LockfileFormatError, OSError):
+        return None
+
+
+def canonicalize_store_keys(
+    grants: dict[str, Any], lockfile: Any, *, store: str, drop_raw: bool = False
+) -> dict[str, Any]:
+    """Fold store keys written as an install spec onto the package identity (#4189).
+
+    A store key spelled as an install spec (``plugin@marketplace``) applies to
+    the identity :func:`canonical_approval_spec` resolves: a deny merges its
+    types, an allow never overrides an identity grant. Each mapping is
+    announced once.
+    """
+    result = dict(grants)
+    for key, value in grants.items():
+        try:
+            canonical = canonical_approval_spec(key, lockfile)
+        except ApprovalSpecError:
+            continue
+        if canonical == key:
+            continue
+        existing = result.get(canonical)
+        if isinstance(existing, dict) and isinstance(value, dict) and store.endswith("deny"):
+            result[canonical] = {**value, **existing}
+        else:
+            result.setdefault(canonical, value)
+        if drop_raw:
+            result.pop(key, None)
+        if (key, canonical) not in _CANONICALIZED_KEYS_NOTED:
+            _CANONICALIZED_KEYS_NOTED.add((key, canonical))
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(
+                f"{store} entry '{key}' names an install spec; it applies to {canonical}. "
+                "The next apm approve or apm deny rewrites it under that identity."
+            )
+    return result
+
+
 def dependency_approval_key(dependency_ref: Any) -> str:
     """Return the trust key for a resolved dependency reference.
 
@@ -800,14 +896,24 @@ def _is_interactive() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
-def trust_remedy(package: str, recommend: Collection[str] = ()) -> str:
+def trust_remedy(package: str, recommend: Collection[str] = (), *, user_scope: bool = False) -> str:
     """One remediation line for parked executables.
 
     Offers ``apm approve --recommended`` only when the org policy declares an
-    ``executables.recommend`` set; otherwise that command finds nothing.
+    ``executables.recommend`` set; otherwise that command finds nothing. A
+    user-scope install names the ``-g`` commands (#4154).
     """
-    bulk = "Trust the org-vetted set: apm approve --recommended  |  " if recommend else ""
-    return f"{bulk}Trust one: apm approve {package}  |  Inspect: apm policy explain {package}"
+    from apm_cli.security.trust import approve_command, explain_command
+
+    bulk = (
+        f"Trust the org-vetted set: {approve_command('--recommended', user_scope=user_scope)}  |  "
+        if recommend
+        else ""
+    )
+    return (
+        f"{bulk}Trust one: {approve_command(package, user_scope=user_scope)}  |  "
+        f"Inspect: {explain_command(package, user_scope=user_scope)}"
+    )
 
 
 def prompt_executable_approval(
@@ -1258,6 +1364,7 @@ def exec_trust_context_for_project(
         project_data=project_data,
         migrate_user_legacy=migrate_user_legacy,
         include_user=include_user,
+        lockfile=_readable_lockfile(manifest_path.parent),
     )
     if logger is not None:
         from .trust import warn_content_blind_grants_once
@@ -1744,6 +1851,7 @@ def build_exec_trust_context(
     project_data: dict[str, Any] | None,
     migrate_user_legacy: bool = True,
     include_user: bool = True,
+    lockfile: Any | None = None,
 ) -> ExecTrustContext:
     """Assemble an :class:`ExecTrustContext` from org / project / user inputs.
 
@@ -1759,12 +1867,22 @@ def build_exec_trust_context(
     """
     data = project_data or {}
     project_raw_allow, project_raw_deny, _alias = parse_project_executables(data)
-    project_allow, project_items = split_item_grants(project_raw_allow)
-    project_deny = _deny_types(project_raw_deny)
     # ``apm audit`` never reads personal consent: CI and laptops must agree.
     user_raw_allow, user_raw_deny = (
         load_user_executables(migrate_legacy=migrate_user_legacy) if include_user else ({}, {})
     )
+    if lockfile is not None:
+        project_raw_allow, project_raw_deny, user_raw_allow, user_raw_deny = (
+            canonicalize_store_keys(grants, lockfile, store=store)
+            for grants, store in (
+                (project_raw_allow, "executables.allow"),
+                (project_raw_deny, "executables.deny"),
+                (user_raw_allow, "user executables.allow"),
+                (user_raw_deny, "user executables.deny"),
+            )
+        )
+    project_allow, project_items = split_item_grants(project_raw_allow)
+    project_deny = _deny_types(project_raw_deny)
     user_allow, user_items = split_item_grants(user_raw_allow)
     user_deny = _deny_types(user_raw_deny)
 

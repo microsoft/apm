@@ -3,11 +3,13 @@
 A hermetic git world (URL-rewritten local remotes) installs a direct git
 dependency, its transitive git dependency, a marketplace entry that resolves
 to git, and a user-scope (``-g``) git dependency. Every git-sourced lockfile
-entry carries a ``content_hash``.
+entry carries a ``content_hash`` in the ``sha256:<64 hex>`` envelope, and
+``audit --ci`` and ``install --frozen`` reach the same verdict on that lock.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -30,9 +32,10 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
-    pytest.mark.promise("P-OWN-package-content-hash"),
+    pytest.mark.promise("P-OWN-package-content-hash", "req-lk-015", "req-lk-016", "P-INV-I3"),
 ]
 
+_ENVELOPE = re.compile(r"sha256:[0-9a-f]{64}")
 _SKILL = "---\nname: {name}\ndescription: {name} skill\n---\n# {name}\n"
 
 
@@ -118,7 +121,21 @@ def test_every_git_lock_entry_records_a_content_hash(tmp_path: Path, apm_binary_
         for scope, kinds in by_scope.items()
         for kind, entries in kinds.items()
         for name, entry in entries.items()
-        for field in ("resolved_commit", "content_hash")
-        if not entry.get(field)
+        for field, valid in (
+            ("resolved_commit", bool(entry.get("resolved_commit"))),
+            ("content_hash", bool(_ENVELOPE.fullmatch(str(entry.get("content_hash") or "")))),
+        )
+        if not valid
     ]
     assert unrecorded == [], unrecorded
+
+    audit = _run(scenario, consumer.root, ("audit", "--ci", "--no-policy"), "hashes-audit-ci")
+    frozen = _run(
+        scenario,
+        consumer.root,
+        ("install", "--frozen", "--target", "copilot", "--no-policy"),
+        "hashes-frozen",
+    )
+    assert (audit.returncode, frozen.returncode) == (0, 0), (
+        audit.stdout + audit.stderr + frozen.stdout + frozen.stderr
+    )

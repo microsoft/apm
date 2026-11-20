@@ -83,8 +83,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/update.py", 516, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 672, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 674, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 676, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 678, '"--dry-run"'),
     ),
     "prune": (
         Ev("src/apm_cli/commands/prune.py", 77, '"--dry-run"'),
@@ -104,8 +104,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "bundle-install": (Ev(_INSTALL, 1239, "detect_local_bundle"),),
     "mcp-install": (Ev(_INSTALL, 959, '"--mcp"'), Ev(_INSTALL, 891, '"--target"')),
     "approve-deny": (
-        Ev(_APPROVE, 125, 'argument("packages"'),
-        Ev(_APPROVE, 208, 'argument("packages"'),
+        Ev(_APPROVE, 201, 'argument("packages"'),
+        Ev(_APPROVE, 296, 'argument("packages"'),
     ),
     "audit": (
         Ev("src/apm_cli/commands/audit.py", 1371, 'argument("package"'),
@@ -147,10 +147,10 @@ USER_SCOPE_OPS = frozenset(
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 923, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 481, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 680, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 684, '"--global"'),
     "compile": Ev(_COMPILE, 1388, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 102, '"--global"'),
-    "approve-deny": Ev(_APPROVE, 140, '"--user"'),
+    "approve-deny": Ev(_APPROVE, 216, '"--user"'),
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 166, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 84, "def prune(ctx, dry_run)"),
@@ -166,7 +166,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "the executable gate governs only executable primitives; a plain file next to a "
         "revoked executable must survive; an org policy dependency deny removes it",
         (
-            Ev(_APPROVE, 155, "hooks, MCP, LSP, bin, canvas"),
+            Ev(_APPROVE, 240, "hooks, MCP, LSP, bin, canvas"),
             Ev("src/apm_cli/policy/install_preflight.py", 218, "Install blocked by org policy"),
         ),
     ),
@@ -234,7 +234,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
-        (Ev(_APPROVE, 175, "if list_decisions:"), Ev(_APPROVE, 179, "if pending:")),
+        (Ev(_APPROVE, 262, "if list_decisions:"), Ev(_APPROVE, 266, "if pending:")),
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",

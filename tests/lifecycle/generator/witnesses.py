@@ -106,7 +106,7 @@ def machine_cells() -> list[MachineCell]:
             assignment = _lock_assignment(key)
             if assignment:
                 witness = SCOPE_LOCK_SPINE.format(scope=scope)
-                tracking = test_m_scope_lock.KNOWN_T4.get(key)
+                tracking = getattr(test_m_scope_lock, "KNOWN_T4", {}).get(key)
                 cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
     return cells
 

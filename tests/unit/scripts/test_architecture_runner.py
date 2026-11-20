@@ -630,6 +630,8 @@ contracts-tooling-source-replacements
 contracts-tooling-strip-charset
 contracts-tooling-update-plan-recorded-ref
 install-deployment-approval-outcome-routing
+install-deployment-approval-store-identity
+install-deployment-approve-command
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
 install-deployment-bundle-admission-owner
@@ -738,6 +740,7 @@ marketplace-integrations-locked-evidence
 marketplace-integrations-metadata-enrichment
 marketplace-integrations-native-registration
 marketplace-integrations-output-path
+marketplace-integrations-pack-credential-files
 marketplace-integrations-pack-plugin-manifests
 marketplace-integrations-package-construction
 marketplace-integrations-package-format-precedence
@@ -816,6 +819,7 @@ transport-platform-egress-route-policy
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
+transport-platform-github-credential-class
 transport-platform-github-throttle
 transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
