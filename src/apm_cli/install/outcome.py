@@ -184,6 +184,10 @@ def stop_before_integration(ctx: InstallContext, diagnostics: object) -> Install
     failed result; one reported only to the console (a local path that is not
     a package) raises, as a failure found during integration would.
     """
+    from .prior_copy import restore_all
+
+    # Copies set aside for a re-download are never verified now (#4353).
+    restore_all(ctx)
     ctx.diagnostics = diagnostics
     result = result_from_install_context(ctx)
     if result.disposition is InstallDisposition.FAILED:

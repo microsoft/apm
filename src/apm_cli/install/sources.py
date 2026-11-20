@@ -939,10 +939,10 @@ class FreshDependencySource(DependencySource):
 
         except DirectDependencyError:
             # A refused fetch leaves apm_modules as it was (#4353).
-            prior_copy.restore(ctx, dep_key, install_path)
+            prior_copy.restore(ctx, dep_key)
             raise
         except Exception as e:
-            prior_copy.restore(ctx, dep_key, install_path)
+            prior_copy.restore(ctx, dep_key)
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             # task_id may not exist if progress.add_task failed; guard it.
             try:  # noqa: SIM105

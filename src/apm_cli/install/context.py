@@ -132,7 +132,7 @@ class InstallContext:
     # ------------------------------------------------------------------
     pre_download_results: dict[str, Any] = field(default_factory=dict)  # download
     # Prior apm_modules copies set aside until the re-download verifies (#4353).
-    prior_copies: dict[str, Path] = field(default_factory=dict)
+    prior_copies: dict[str, tuple[Path, Path]] = field(default_factory=dict)
     pre_downloaded_keys: set[str] = field(default_factory=set)  # download
 
     # ------------------------------------------------------------------
