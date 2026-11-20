@@ -1855,18 +1855,20 @@ class TestCompileWarningOnMissingApplyTo:
 class TestResolveCompileTarget:
     """Tests for _resolve_compile_target() multi-target list mapping."""
 
-    def test_none_returns_none(self):
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, None),
+            ("claude", "claude"),
+            ("vscode", "vscode"),
+            ("all", "all"),
+            ("copilot", "vscode"),
+        ],
+    )
+    def test_scalar_target_resolution(self, value, expected):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(None) is None
-
-    def test_single_string_passthrough(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target("claude") == "claude"
-        assert _resolve_compile_target("vscode") == "vscode"
-        assert _resolve_compile_target("all") == "all"
-        assert _resolve_compile_target("copilot") == "vscode"
+        assert _resolve_compile_target(value) == expected
 
     def test_list_claude_and_copilot_returns_full_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target

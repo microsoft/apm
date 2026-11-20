@@ -1,7 +1,9 @@
 {
  "partition": "unit/compilation+commands",
  "steps_done": [
-  0
+  0,
+  1,
+  2
  ],
  "folds": {
   "tests/unit/commands/test_pack_phase3.py::TestPackCmdFlags::test_help_text_includes_all_key_flags": "tests/unit/commands/test_pack_cli_surface.py::TestPackCmdFlags::test_help_text_includes_all_key_flags",
@@ -9,10 +11,34 @@
   "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCleanupOrphanedFiles::test_all_hand_authored_reports_zero_removed": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCleanupOrphanedFiles::test_all_hand_authored_reports_zero_removed",
   "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCleanupOrphanedFiles::test_hand_authored_not_deleted": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCleanupOrphanedFiles::test_hand_authored_file_skipped_silently",
   "tests/unit/compilation/test_distributed_compiler_phase3.py::TestCompilationResult::test_defaults": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestCompilationResult::test_defaults",
-  "tests/unit/compilation/test_distributed_compiler_phase3.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned"
+  "tests/unit/compilation/test_distributed_compiler_phase3.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned": "tests/unit/compilation/test_distributed_compiler_hermetic.py::TestFindOrphanedAgentsFiles::test_hand_authored_file_not_orphaned",
+  "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_local_flag_returns_local": "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_local_source_returns_local",
+  "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_lockfile_source_local_returns_local": "tests/unit/commands/test_deps_cli_cli_surface.py::TestDepsListSourceLabel::test_local_source_returns_local",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_no_double_dash_returns_full_argv_empty_command": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_splits_correctly": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_at_end_gives_empty_command": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_double_dash_at_start_gives_empty_clean": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_empty_argv_returns_empty": "tests/unit/commands/test_install_context_and_resolution.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_empty_deps_returns_empty_set": "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_no_parseable_deps_returns_empty_set",
+  "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_unknown_type_is_skipped": "tests/unit/commands/test_install_context_and_resolution.py::TestCheckPackageConflicts::test_no_parseable_deps_returns_empty_set",
+  "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_empty_dict_returns_false": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_info_only_returns_false": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_warning_returns_true": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_critical_returns_true": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_mixed_info_and_critical": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_multiple_files_with_info_only": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_empty_findings_returns_immediately": "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_nothing_rendered_without_visible_rows",
+  "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_info_filtered_in_non_verbose_mode": "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_nothing_rendered_without_visible_rows",
+  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_none_returns_none": "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_scalar_target_resolution",
+  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_single_string_passthrough": "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_scalar_target_resolution"
  },
  "decisions": [
-  "step0: the 6 nodes unmapped after 011445baa/08030d1b4 each have a same-named or same-scenario survivor in the kept module whose assertions are a superset (pack: exact share line and extra help flags; distributed: same asserts on a markerless fixture constant, plus suppressed_empty_paths default)"
+  "step0: the 6 nodes unmapped after 011445baa/08030d1b4 each have a same-named or same-scenario survivor in the kept module whose assertions are a superset (pack: exact share line and extra help flags; distributed: same asserts on a markerless fixture constant, plus suppressed_empty_paths default)",
+  "step1: --report-equal-copies lists no copy in tests/unit/compilation or tests/unit/commands; nothing to delete",
+  "step2: all 8 same-body groups touching scope paired a pure-logic unit test with a twin under tests/integration (outside scope); folded the unit copies into parametrized tests in the same unit class so behavior stays in the unit lane and the integration twins are left untouched",
+  "step2: TestRenderFindingsTable empty/info cases now assert nothing is echoed or printed instead of only not raising; TestFormatTargetLabel none case now also covers label sources"
  ],
- "counts_left": {}
+ "counts_left": {
+  "same_body_groups": 0
+ }
 }

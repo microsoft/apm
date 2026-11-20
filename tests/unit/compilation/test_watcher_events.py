@@ -101,10 +101,14 @@ class TestFormatTargetLabel:
         assert label is not None
         assert "CLAUDE.md" in label
 
-    def test_none_target_returns_none(self) -> None:
-        """None effective_target → returns None."""
-        result = _format_target_label(None, None, None)
-        assert result is None
+    @pytest.mark.parametrize(
+        ("user_label", "config_label"),
+        [(None, None), (["claude", "cursor"], ["claude"])],
+        ids=["no-labels", "with-labels"],
+    )
+    def test_none_target_returns_none(self, user_label, config_label) -> None:
+        """None effective_target returns None whatever the label sources."""
+        assert _format_target_label(None, user_label, config_label) is None
 
     def test_string_target_returns_description(self) -> None:
         """A single-string target returns its description label."""

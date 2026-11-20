@@ -77,36 +77,31 @@ class TestGetInvocationArgv:
 
 
 class TestSplitArgvAtDoubleDash:
-    def test_no_double_dash_returns_full_argv_empty_command(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(["apm", "install", "owner/repo"])
-        assert clean == ["apm", "install", "owner/repo"]
-        assert cmd == ()
-
-    def test_double_dash_splits_correctly(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(
-            ["apm", "install", "--mcp", "foo", "--", "npx", "-y", "srv"]
-        )
-        assert clean == ["apm", "install", "--mcp", "foo"]
-        assert cmd == ("npx", "-y", "srv")
-
-    def test_double_dash_at_end_gives_empty_command(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(["apm", "install", "--"])
-        assert clean == ["apm", "install"]
-        assert cmd == ()
-
-    def test_double_dash_at_start_gives_empty_clean(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(["--", "npx", "server"])
-        assert clean == []
-        assert cmd == ("npx", "server")
+    @pytest.mark.parametrize(
+        ("argv", "expected_clean", "expected_cmd"),
+        [
+            (["apm", "install", "owner/repo"], ["apm", "install", "owner/repo"], ()),
+            (
+                ["apm", "install", "--mcp", "foo", "--", "npx", "-y", "srv"],
+                ["apm", "install", "--mcp", "foo"],
+                ("npx", "-y", "srv"),
+            ),
+            (["apm", "install", "--"], ["apm", "install"], ()),
+            (["--", "npx", "server"], [], ("npx", "server")),
+            ([], [], ()),
+        ],
+        ids=["no-double-dash", "splits", "at-end", "at-start", "empty"],
+    )
+    def test_splits_argv_at_double_dash(
+        self, argv: list[str], expected_clean: list[str], expected_cmd: tuple
+    ) -> None:
+        clean, cmd = _split_argv_at_double_dash(argv)
+        assert clean == expected_clean
+        assert cmd == expected_cmd
 
     def test_command_tuple_is_tuple_type(self) -> None:
         _, cmd = _split_argv_at_double_dash(["a", "--", "b"])
         assert isinstance(cmd, tuple)
-
-    def test_empty_argv_returns_empty(self) -> None:
-        clean, cmd = _split_argv_at_double_dash([])
-        assert clean == []
-        assert cmd == ()
 
 
 # ---------------------------------------------------------------------------
@@ -115,9 +110,9 @@ class TestSplitArgvAtDoubleDash:
 
 
 class TestCheckPackageConflicts:
-    def test_empty_deps_returns_empty_set(self) -> None:
-        result = _check_package_conflicts([])
-        assert result == set()
+    @pytest.mark.parametrize("deps", [[], [42, None, 3.14]], ids=["empty", "unknown-types"])
+    def test_no_parseable_deps_returns_empty_set(self, deps: list) -> None:
+        assert _check_package_conflicts(deps) == set()
 
     def test_string_dep_adds_identity(self) -> None:
         with patch("apm_cli.install.package_selection.DependencyReference") as mock_cls:
@@ -139,10 +134,6 @@ class TestCheckPackageConflicts:
         with patch("apm_cli.install.package_selection.DependencyReference") as mock_cls:
             mock_cls.parse.side_effect = ValueError("bad format")
             result = _check_package_conflicts(["bad-format"])
-        assert result == set()
-
-    def test_unknown_type_is_skipped(self) -> None:
-        result = _check_package_conflicts([42, None, 3.14])
         assert result == set()
 
     def test_multiple_deps_returns_all_identities(self) -> None:

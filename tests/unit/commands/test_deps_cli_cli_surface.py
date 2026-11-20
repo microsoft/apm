@@ -18,6 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.commands.deps.cli import (
     _add_tree_children,
     _build_dep_tree,
@@ -95,13 +97,9 @@ def _make_pkg_dict(
 
 
 class TestDepsListSourceLabel:
-    def test_local_flag_returns_local(self) -> None:
-        result = _deps_list_source_label(None, is_local=True)
-        assert result == "local"
-
-    def test_lockfile_source_local_returns_local(self) -> None:
-        result = _deps_list_source_label(None, lockfile_source="local")
-        assert result == "local"
+    @pytest.mark.parametrize("kwargs", [{"is_local": True}, {"lockfile_source": "local"}])
+    def test_local_source_returns_local(self, kwargs: dict) -> None:
+        assert _deps_list_source_label(None, **kwargs) == "local"
 
     def test_azure_devops_hostname_returns_azure_devops(self) -> None:
         with patch("apm_cli.utils.github_host.is_azure_devops_hostname", return_value=True):

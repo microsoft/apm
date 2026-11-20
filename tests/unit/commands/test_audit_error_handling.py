@@ -176,33 +176,26 @@ class TestScanSingleFile:
 
 
 class TestHasActionableFindings:
-    def test_empty_dict_returns_false(self) -> None:
-        assert _has_actionable_findings({}) is False
-
-    def test_info_only_returns_false(self) -> None:
-        findings = {"file.md": [_make_finding("info")]}
-        assert _has_actionable_findings(findings) is False
-
-    def test_warning_returns_true(self) -> None:
-        findings = {"file.md": [_make_finding("warning")]}
-        assert _has_actionable_findings(findings) is True
-
-    def test_critical_returns_true(self) -> None:
-        findings = {"file.md": [_make_finding("critical")]}
-        assert _has_actionable_findings(findings) is True
-
-    def test_mixed_info_and_critical(self) -> None:
+    @pytest.mark.parametrize(
+        ("severities_by_file", "expected"),
+        [
+            ({}, False),
+            ({"file.md": ["info"]}, False),
+            ({"file.md": ["warning"]}, True),
+            ({"file.md": ["critical"]}, True),
+            ({"file.md": ["info", "critical"]}, True),
+            ({"a.md": ["info"], "b.md": ["info"]}, False),
+        ],
+        ids=["empty", "info-only", "warning", "critical", "mixed", "multi-file-info"],
+    )
+    def test_actionable_when_any_finding_is_not_info(
+        self, severities_by_file: dict[str, list[str]], expected: bool
+    ) -> None:
         findings = {
-            "file.md": [_make_finding("info"), _make_finding("critical")],
+            path: [_make_finding(severity) for severity in severities]
+            for path, severities in severities_by_file.items()
         }
-        assert _has_actionable_findings(findings) is True
-
-    def test_multiple_files_with_info_only(self) -> None:
-        findings = {
-            "a.md": [_make_finding("info")],
-            "b.md": [_make_finding("info")],
-        }
-        assert _has_actionable_findings(findings) is False
+        assert _has_actionable_findings(findings) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -211,15 +204,15 @@ class TestHasActionableFindings:
 
 
 class TestRenderFindingsTable:
-    def test_empty_findings_returns_immediately(self) -> None:
-        """No output path; empty findings should not raise."""
-        _render_findings_table({})
-
-    def test_info_filtered_in_non_verbose_mode(self) -> None:
-        """Info findings are filtered out when verbose=False."""
-        findings = {"file.md": [_make_finding("info")]}
-        # Should not raise even if no findings remain after filter
-        _render_findings_table(findings, verbose=False)
+    @pytest.mark.parametrize("severities", [[], ["info"]], ids=["empty", "info-non-verbose"])
+    def test_nothing_rendered_without_visible_rows(self, severities: list[str]) -> None:
+        findings = {"file.md": [_make_finding(s) for s in severities]} if severities else {}
+        console = MagicMock()
+        with patch("apm_cli.commands.audit._get_console", return_value=console):
+            with patch("apm_cli.commands.audit._rich_echo") as mock_echo:
+                _render_findings_table(findings, verbose=False)
+        mock_echo.assert_not_called()
+        console.print.assert_not_called()
 
     def test_info_included_in_verbose_mode(self) -> None:
         """Info findings pass through filter in verbose mode."""
