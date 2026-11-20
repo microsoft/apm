@@ -1,8 +1,9 @@
 """Report native target files a failed install leaves on disk.
 
-``InstallTransaction`` restores ``apm.yml`` and ``apm_modules`` staging only.
-Native target integrations run outside it, so a failure after integration
-leaves those files in place. This module names them truthfully instead of
+``InstallTransaction`` restores ``apm.yml`` and ``apm_modules`` staging, and
+restores native target files only while the install-time audit can block
+(``install/deploy_snapshot.py``). Otherwise native target integrations run
+outside it, so a failure after integration leaves those files in place. This module names them truthfully instead of
 letting the failure read as a full rollback (#3525). It never deletes,
 restores, or records ownership of any file.
 """

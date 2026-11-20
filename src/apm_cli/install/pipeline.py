@@ -864,6 +864,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             return stop_before_integration(ctx, diagnostics)
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
+        transaction.snapshot_deploy_targets(ctx)
         materialization_session = _run_integration_phase(ctx)
 
         # A direct dependency failing integration fails the install; transitive ones continue.
@@ -925,10 +926,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         if not lockfile_only:
             from .phases import audit as _audit_phase
 
-            try:
-                _run_phase("audit", _audit_phase, ctx)
-            except PolicyViolationError:
-                raise
+            _run_phase("audit", _audit_phase, ctx)
+        transaction.release_deploy_targets()
 
         # ------------------------------------------------------------------
         # Phase: Native GitHub Copilot Agent Plugin registration (#2703).

@@ -12,6 +12,9 @@ owner of the checks that guard both commit points:
 
 A failing check raises; :class:`~apm_cli.install.transaction.InstallTransaction`
 then restores ``apm.yml`` and ``apm_modules`` staging, so nothing is committed.
+The install-time content audit must scan deployed bytes, so it runs after
+deploy; while it can block, the transaction snapshots the deploy paths before
+integration and restores them if the install fails before the audit passes.
 """
 
 from __future__ import annotations

@@ -8,7 +8,10 @@ deployed files are committed. The commit gate runs before the first
 integrator write and on the staged lockfile before its writer scope commits
 it (#4086); merged MCP policy is enforced
 from a closed list of sites; the frozen pre-deploy check runs before the
-pipeline; ``InstallTransaction`` has one definition.
+pipeline; ``InstallTransaction`` has one definition. While the install-time
+audit can block after deploy, only the transaction snapshots the deploy
+targets: before the integrate phase, released only after the audit, and
+restored by its rollback.
 """
 
 from __future__ import annotations
@@ -63,6 +66,7 @@ _PIPELINE_CALL = re.compile(r"\brun_install_pipeline\(")
 _ENTRY_CALL = re.compile(r"\b_install_apm_dependencies\(")
 _POLICY_PREFLIGHT = re.compile(r"\brun_policy_preflight\b")
 _TRANSACTION_CLASS = re.compile(r"^class InstallTransaction\b")
+_SNAPSHOT_CAPTURE = re.compile(r"\bcapture_audit_gated_snapshot\(")
 
 
 def _source_lines(provider: FactsProvider, path: str) -> tuple[str, ...]:
@@ -154,6 +158,52 @@ def _ordered(facts: object, first: str, then: str) -> bool:
     return first_line is not None and then_line is not None and first_line < then_line
 
 
+def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[Violation]:
+    """The audit-gated deploy snapshot is taken and restored only by the transaction."""
+    rule_id = GUARD_COMMIT_ORDER
+    pipeline = loaded[_PIPELINE]
+    found: list[Violation] = []
+    if not (
+        _ordered(
+            pipeline,
+            "transaction.snapshot_deploy_targets(ctx)",
+            "materialization_session = _run_integration_phase(ctx)",
+        )
+        and _ordered(pipeline, '_run_phase("audit"', "transaction.release_deploy_targets()")
+        and _ordered(
+            pipeline, "transaction.release_deploy_targets()", '_run_phase("copilot_plugins"'
+        )
+    ):
+        found.append(
+            _summary(
+                rule_id,
+                _PIPELINE,
+                "the transaction snapshots deploy targets before the integrate phase "
+                "and releases them only after the install-time audit",
+            )
+        )
+    transaction_text = "\n".join(_lines(loaded[_TRANSACTION]))
+    if not all(
+        needle in transaction_text
+        for needle in (
+            "self._deploy_snapshot = capture_audit_gated_snapshot(ctx)",
+            "self._restore_deploy_targets()",
+        )
+    ):
+        found.append(
+            _summary(rule_id, _TRANSACTION, "InstallTransaction owns the deploy snapshot rollback")
+        )
+    found += _closed_list_violations(
+        provider,
+        rule_id,
+        _SNAPSHOT_CAPTURE,
+        frozenset({_TRANSACTION}),
+        "only InstallTransaction captures the audit-gated deploy snapshot",
+        skip_def="capture_audit_gated_snapshot",
+    )
+    return found
+
+
 def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every install check completes before the lockfile and deployed files commit."""
     rule_id = GUARD_COMMIT_ORDER
@@ -196,6 +246,7 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
         found.append(
             _summary(rule_id, _SERVICE, "the frozen pre-deploy check must run before the pipeline")
         )
+    found += _deploy_snapshot_violations(provider, loaded)
     gate_text = "\n".join(_lines(loaded[_COMMIT_GATE]))
     if not all(
         needle in gate_text

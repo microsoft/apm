@@ -256,7 +256,7 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     ),
     "src/apm_cli/security/executables.py": 'return get_apm_home() / "approvals.yml"',
     "src/apm_cli/core/deployment_ledger.py": (
-        'self.state_path = apm_home / "deployment-receipts" / f"{key}.json"'
+        'state_path = get_apm_home() / "deployment-receipts" / f"{key}.json"'
     ),
 }
 
