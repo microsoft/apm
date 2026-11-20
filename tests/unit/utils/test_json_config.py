@@ -12,6 +12,8 @@ import pytest
 
 from apm_cli.utils.json_config import write_json_config
 
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-json-config-writer")]
+
 _APM = {"command": "apm-srv"}
 
 

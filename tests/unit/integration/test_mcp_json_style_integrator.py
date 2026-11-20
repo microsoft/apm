@@ -19,7 +19,7 @@ import pytest
 from apm_cli.integration.mcp_integrator import _clean_claude_config, _clean_json_mcp_config
 from apm_cli.utils.json_config import write_json_config
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-package-launcher")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-json-config-writer")]
 
 _E_ACUTE = "\u00e9"
 
