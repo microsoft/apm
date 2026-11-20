@@ -89,7 +89,53 @@
     },
     "dependency-identity-materialization": {
       "architecture_owner": "dependency-identity-materialization",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_114",
+          "reason": "At every call site old is a LockedDependency (never None), and _display_name ignores dep_key whenever locked is not None, so passing None for the key cannot change the label."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_140",
+          "reason": "At every call site old is a LockedDependency (never None), and _display_name ignores dep_key whenever locked is not None, so passing None for the key cannot change the label."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_168",
+          "reason": "At every call site old is a LockedDependency (never None), and _display_name ignores dep_key whenever locked is not None, so passing None for the key cannot change the label."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_189",
+          "reason": "At every call site old is a LockedDependency (never None), and _display_name ignores dep_key whenever locked is not None, so passing None for the key cannot change the label."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_197",
+          "reason": "Every PlanEntry action is one of the four keys of _ACTION_ORDER, so the get() default (99, 100, None or missing) is never used in the sort key."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_199",
+          "reason": "Every PlanEntry action is one of the four keys of _ACTION_ORDER, so the get() default (99, 100, None or missing) is never used in the sort key."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_200",
+          "reason": "Every PlanEntry action is one of the four keys of _ACTION_ORDER, so the get() default (99, 100, None or missing) is never used in the sort key."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_33",
+          "reason": "resolved_deps are DependencyReference instances, which always define source, so dropping the getattr default cannot raise or change the comparison."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.plan.build_update_plan__mutmut_53",
+          "reason": "old is a LockedDependency, which always defines resolved_tag, so dropping the getattr default cannot raise or change the truth test."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,
@@ -236,7 +282,13 @@
     },
     "executable-trust-context": {
       "architecture_owner": "executable-trust-context",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.security.executables._deny_glob_match__mutmut_15",
+          "reason": "A pattern is empty after rstrip('/') exactly when it consists only of slashes, which is exactly when lstrip('/') empties it, so the filter keeps the same patterns."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,
@@ -260,6 +312,7 @@
         }
       ],
       "test_seams": [
+        "tests/unit/security/test_exec_trust_context_owner.py",
         "tests/unit/security/test_resolve_exec_decision.py",
         "tests/unit/security/test_executables.py",
         "tests/unit/security/test_exec_vocab_unification.py"
@@ -350,7 +403,13 @@
     },
     "install-outcome": {
       "architecture_owner": "install-outcome",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.install.outcome.diagnostic_error_count__mutmut_6",
+          "reason": "Without the 0 default, getattr returns None and int(None) raises TypeError, which the except branch already maps to the same 0."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,

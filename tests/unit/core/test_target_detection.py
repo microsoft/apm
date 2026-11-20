@@ -1355,3 +1355,12 @@ class TestDetectTargetGrokBuild:
         desc = get_target_description("grok-build")
         assert ".grok/" in desc
         assert desc != "unknown target"
+
+
+def test_normalize_target_list_resolves_aliases_and_dedupes_in_order() -> None:
+    assert normalize_target_list(
+        ["codex", "agy", "vscode", "claude", "agents", "copilot", "codex"]
+    ) == ["codex", "antigravity", "copilot", "claude"]
+    assert normalize_target_list(("gemini",)) == ["gemini"]
+    assert normalize_target_list("agents") == ["copilot"]
+    assert normalize_target_list(None) is None

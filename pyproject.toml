@@ -208,6 +208,7 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/core/test_bundle_row_scope.py",
     "tests/unit/utils/test_atomic_io.py",
     "tests/unit/core/test_target_detection.py",
+    "tests/unit/security/test_exec_trust_context_owner.py",
     "tests/unit/security/test_resolve_exec_decision.py",
     "tests/unit/security/test_executables.py",
     "tests/unit/security/test_exec_vocab_unification.py",

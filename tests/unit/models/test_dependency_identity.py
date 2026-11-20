@@ -74,6 +74,8 @@ def test_build_dependency_unique_key_table(kwargs: dict, expected: str) -> None:
     ("kwargs", "expected"),
     [
         ({}, "Owner/Repo"),
+        ({"local_path": "./A"}, "Owner/Repo"),
+        ({"virtual_path": "skills/x"}, "Owner/Repo"),
         ({"is_local": True, "local_path": "./A"}, "./A"),
         ({"is_local": True, "local_path": None}, "Owner/Repo"),
         ({"is_local": False, "local_path": "./A"}, "Owner/Repo"),

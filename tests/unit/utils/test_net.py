@@ -17,6 +17,14 @@ from apm_cli.utils.net import is_loopback_host, parse_host_address
         ("127.0.0.1.", ipaddress.IPv4Address("127.0.0.1")),
         ("example.com", None),
         (None, None),
+        # Integer encodings: the full IPv4 range is accepted, nothing beyond it.
+        ("0", ipaddress.IPv4Address("0.0.0.0")),
+        ("4294967295", ipaddress.IPv4Address("255.255.255.255")),
+        ("4294967296", None),
+        ("0x100000000", None),
+        # Only trailing dots are stripped, never other trailing characters.
+        ("0x7f00000X", None),
+        (" . ", None),
     ],
 )
 def test_parse_host_address(
