@@ -119,6 +119,8 @@ class DeploymentIntent:
     """Values a declared target this run did not process still governs."""
     completed_reintegration: CompletedReintegration | None = None
     verified_absent_values: frozenset[str] = frozenset()
+    retained_values: frozenset[str] = frozenset()
+    """Values this run declared but skipped, kept or refused: never stale (#4230)."""
 
 
 @dataclass(frozen=True)
@@ -394,6 +396,7 @@ class DeploymentReconciler:
             intent.verified_absent_values
             - completed.current_values
             - intent.unprocessed_claims
+            - intent.retained_values
             - successful_by_value.keys()
             - failed_values
         )
@@ -532,7 +535,7 @@ class DeploymentReconciler:
         ``CODEX_HOME``).
         A row of a known target dropped from the declared set is stale too.
         """
-        if not intent.authoritative_targets:
+        if not intent.authoritative_targets or record.locator.value in intent.retained_values:
             return False
         target = record.locator.target
         if target in intent.active_targets:

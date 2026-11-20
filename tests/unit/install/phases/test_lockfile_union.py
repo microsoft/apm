@@ -404,6 +404,59 @@ class TestCurrentInstallGovernance:
         assert hashes == {alpha_only: prior_hash}
         assert alpha_path.read_text(encoding="utf-8") == "user edit"
 
+    @pytest.mark.parametrize("retained", [True, False])
+    def test_row_this_run_retained_is_never_stale(self, tmp_path, retained):
+        """#4230: a value the run skipped keeps its row and file; the control is removed."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        alpha_only = ".agents/skills/alpha-only/SKILL.md"
+        alpha_path = tmp_path / alpha_only
+        alpha_path.parent.mkdir(parents=True)
+        alpha_path.write_text("original", encoding="utf-8")
+        original_hash = compute_file_hash(alpha_path)
+        locator = DeploymentLocator(
+            kind=LocatorKind.PROJECT_RELATIVE,
+            target="copilot",
+            value=alpha_only,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                locator.key: DeploymentRecord(
+                    locator=locator,
+                    owners=("alpha",),
+                    active_owner="alpha",
+                    content_hash=original_hash,
+                )
+            }
+        )
+
+        files, hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="owner/pkg",
+            current_files=[],
+            current_hashes={},
+            prior_files=[alpha_only],
+            prior_hashes={alpha_only: original_hash},
+            active_targets=[_known("copilot")],
+            declared_targets=[_known("copilot")],
+            diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
+            prior_ledger=ledger,
+            current_run_trusted=True,
+            retained_values=frozenset({alpha_only}) if retained else frozenset(),
+        )
+
+        if retained:
+            assert files == [alpha_only]
+            assert hashes == {alpha_only: original_hash}
+            assert alpha_path.read_text(encoding="utf-8") == "original"
+        else:
+            assert files == []
+            assert not alpha_path.exists()
+
     def test_generic_agents_row_is_preserved_when_current_run_failed(self, tmp_path):
         """An integration error is not permission to contract an existing row."""
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block

@@ -88,13 +88,11 @@ def run(ctx: InstallContext) -> None:
 
     # Members this run skipped keep their prior rows and hashes (#4230).
     _kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))
-    _current_files = sorted({*ctx.local_deployed_files, *_kept})
+    _current_files = sorted(ctx.local_deployed_files)
     _current_hashes = _hash_deployed(
         ctx.local_deployed_files,
         ctx.project_root,
     )
-    _prior_hashes = _persist_lock.local_deployed_file_hashes
-    _current_hashes.update({path: _prior_hashes[path] for path in _kept if path in _prior_hashes})
     _ghost_count = 0
 
     def _log_local_ghost_drop(path: str) -> None:
@@ -130,6 +128,7 @@ def run(ctx: InstallContext) -> None:
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
         current_run_trusted=not _local_had_errors,
+        retained_values=frozenset(_kept),
         include_ledger=True,
         user_scope=is_user_scope(getattr(ctx, "scope", None)),
     )

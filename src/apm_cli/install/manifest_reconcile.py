@@ -590,8 +590,12 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     generic_governed_values: frozenset[str] = frozenset(),
     user_scope: bool = False,
     completed_reintegration: CompletedReintegration | None = None,
+    retained_values: frozenset[str] = frozenset(),
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
+
+    *retained_values* are prior values this run skipped, kept or refused
+    (``phases.cleanup.kept_prior_values``); they are never stale (#4230).
 
     When *apply_disk_deletion* is ``False`` (``apm lock`` / ``lockfile_only``)
     the block is reconciled without touching the working tree: every path that
@@ -646,6 +650,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
             generic_governed_values=generic_governed_values,
             completed_reintegration=completed_reintegration,
             verified_absent_values=verified_absent,
+            retained_values=retained_values,
         ),
         project_root=project_root,
         diagnostics=diagnostics,
