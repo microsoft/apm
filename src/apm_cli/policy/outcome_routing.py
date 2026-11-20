@@ -167,6 +167,10 @@ def classify_discovery_outcome(
                 "project apm.yml has policy.fetch_failure_default=block "
                 f"(source={source})" + (f". {hint}" if hint else "")
             )
+            # Every fail-closed refusal names its one-off way out, whatever the outcome.
+            reason += (" " if reason.endswith(".") else ". ") + (
+                "Rerun with --no-policy to bypass org policy for this one command."
+            )
         return DiscoveryRoute(
             outcome,
             route,
