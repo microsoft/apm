@@ -235,7 +235,9 @@ def test_frozen_fails_on_edit_of_every_primitive_type(
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env, expect=1)
     text = output(frozen)
     assert f"{relative}: expected sha256:" in text, text
-    assert "nothing was deployed" in text and "apm install --force" in text, text
+    # The tip deletes the edited file first, true for every kind (RA-009).
+    assert "nothing was deployed" in text and "Delete the edited" in text, text
+    assert "apm export-patch" in text, text
     assert edited.read_bytes() == b"Edited.\n"
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
 

@@ -857,7 +857,12 @@ class InstallService:
                 item.sentence()
                 for item in edited_file_remediations(drift.path for drift in drifted)
             )
-            tip = f"Tip: nothing was deployed. {advice}"
+            from apm_cli.core.remediation import LOCAL_EDITS_EXPORT
+
+            tip = (
+                f"Tip: nothing was deployed. {advice} To keep the edits, "
+                f"{LOCAL_EDITS_EXPORT.clause()} first."
+            )
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
             reasons=[
