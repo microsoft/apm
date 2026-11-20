@@ -937,7 +937,7 @@ def test_renaming_a_local_path_keeps_other_bundle_provenance() -> None:
     lockfile.local_deployed_files = [authored]
     lockfile.local_deployed_file_hashes = {authored: "sha256:authored"}
     DeploymentLedgerCodec.record_local_bundle_files(
-        lockfile, [bundled], {bundled: f"sha256:{'b' * 64}"}
+        lockfile, [bundled], {bundled: f"sha256:{'b' * 64}"}, scope=InstallScope.PROJECT
     )
 
     DeploymentLedgerCodec.rename_local_deployed_path(
@@ -961,7 +961,9 @@ def test_legacy_owner_provenance_is_scoped_to_the_owner_files() -> None:
             deployed_file_hashes={dependency_path: "sha256:dep"},
         )
     )
-    DeploymentLedgerCodec.record_local_bundle_files(existing, [bundled], {bundled: bundle_hash})
+    DeploymentLedgerCodec.record_local_bundle_files(
+        existing, [bundled], {bundled: bundle_hash}, scope=InstallScope.PROJECT
+    )
     stale = _locator(dependency_path, target="copilot")
     provenance = DeploymentLedger(
         records={
@@ -1024,6 +1026,7 @@ def test_local_bundle_provenance_round_trips_beside_authored_local_files() -> No
         lockfile,
         [bundled],
         {bundled: f"sha256:{'b' * 64}"},
+        scope=InstallScope.PROJECT,
     )
     rebuilt = LockFile.from_yaml(lockfile.to_yaml())
 
@@ -1054,6 +1057,7 @@ def test_local_bundle_provenance_survives_canonical_ledger_rebuilds() -> None:
             bundled: f"sha256:{'a' * 64}",
             sibling: f"sha256:{'c' * 64}",
         },
+        scope=InstallScope.PROJECT,
     )
 
     dependency = LockedDependency(
@@ -1109,7 +1113,9 @@ def test_local_bundle_provenance_rejects_missing_or_malformed_hashes() -> None:
     lockfile = LockFile()
 
     with pytest.raises(ValueError, match="requires a canonical sha256"):
-        DeploymentLedgerCodec.record_local_bundle_files(lockfile, [bundled], {})
+        DeploymentLedgerCodec.record_local_bundle_files(
+            lockfile, [bundled], {}, scope=InstallScope.PROJECT
+        )
 
     locator = _locator(bundled, target="agents")
     lockfile.deployment_ledger = DeploymentLedger(
@@ -1356,7 +1362,7 @@ class TestMcpHashCarryForward:
         )
         if bundle:
             DeploymentLedgerCodec.record_local_bundle_files(
-                lockfile, ["old.md"], {"old.md": _HASH_B}
+                lockfile, ["old.md"], {"old.md": _HASH_B}, scope=InstallScope.PROJECT
             )
         else:
             lockfile.local_deployed_files = ["old.md"]

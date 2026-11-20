@@ -22,6 +22,7 @@ from apm_cli.integration.skill_adoption import (
     is_skill_dir_identical_to_source,
     render_skill_markdown,
     skill_tree_baselines,
+    tree_equals_install_output,
 )
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
@@ -1300,34 +1301,39 @@ class SkillIntegrator(BaseIntegrator):
                 continue
             seen_skill_dirs.add(resolved)
 
+            from apm_cli.models.apm_package import PackageType as _PackageType
+
+            native_ignore = _build_deployable_copy_ignore(
+                skip_bin=skip_bin,
+                source_plan=source_plan,
+                exclude_apm=True,
+                exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
+            )
             rel_path = deployed_path_entry(target_skill_dir, project_root, [target])
             session_owned = resolved in self._native_skill_session_owners
             target_existed = skill_dir_has_content(target_skill_dir)
-            if target_existed and self.check_collision(
-                target_skill_dir,
-                rel_path,
-                {rel_path} if session_owned else collision_managed,
-                force,
-                diagnostics=diagnostics,
+            owned = {rel_path} if session_owned else collision_managed
+            # A would-be collision equal to this install's output is adopted (#3994).
+            may_adopt = target_existed and not force and rel_path not in owned
+            unchanged = may_adopt and tree_equals_install_output(
+                self, package_path, target_skill_dir, native_ignore
+            )
+            collides = target_existed and not unchanged
+            if collides and self.check_collision(
+                target_skill_dir, rel_path, owned, force, diagnostics=diagnostics
             ):
                 self._skill_can_complete = False
                 continue
-
-            from apm_cli.models.apm_package import PackageType as _PackageType
 
             copied = self._copy_skill_bundle(
                 package_path,
                 target_skill_dir,
                 project_root,
-                ignore=_build_deployable_copy_ignore(
-                    skip_bin=skip_bin,
-                    source_plan=source_plan,
-                    exclude_apm=True,
-                    exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
-                ),
+                ignore=native_ignore,
                 managed_files=collision_managed,
                 force=force,
                 diagnostics=diagnostics,
+                unchanged=unchanged,
             )
             if target_skill_dir / "SKILL.md" in copied:
                 all_target_paths.append(target_skill_dir)
@@ -1654,7 +1660,8 @@ class SkillIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import PackageType as _PackageType
 
         if package_info.package_type is _PackageType.MARKETPLACE_PLUGIN:
-            if skip_bin:
+            if skip_bin and (package_path / "bin").is_dir():
+                # A refusal is reportable only for a plugin that ships bin/.
                 bin_skip_reason = bin_skip_reason_override or "not_approved"
             else:
                 bin_paths, bin_skip_reason = self._deploy_plugin_bin(

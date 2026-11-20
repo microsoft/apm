@@ -382,6 +382,26 @@ class TestGetTargetDescription:
         assert "AGENTS.md" in desc
         assert ".opencode/" in desc
 
+    def test_project_skill_dirs_match_the_target_profiles(self):
+        """Compile names the skills dir install deploys to, never a legacy one (#3994)."""
+        import re
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        for name, profile in KNOWN_TARGETS.items():
+            if (
+                "skills" not in profile.primitives
+                or profile.primitives["skills"].subdir != "skills"
+            ):
+                continue
+            try:
+                desc = get_target_description(name)
+            except KeyError:
+                continue
+            # Project paths only: '$HERMES_HOME/skills/' and '~/...' are global roots.
+            named = set(re.findall(r"(?<![$~/\w])(\.[\w-]+/skills)/", desc))
+            assert named <= {profile.skills_rel_root}, (name, named, profile.skills_rel_root)
+
     def test_kiro_description_includes_mcp_config_path(self):
         """Description for kiro target names its MCP config path."""
         desc = get_target_description("kiro")

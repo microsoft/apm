@@ -39,10 +39,13 @@ def test_skill_preflight_boundary(mutation: str) -> None:
         ("deployment_plan or prepare_package_deployment(", "deployment_plan or rogue_plan("),
         ("target_selection = deployment_plan.target_selection", "target_selection = rogue"),
         ("PackageDeploymentPlan(selection)", "PackageDeploymentPlan(rogue)"),
-        ("PackageDeploymentPlan(selection, approvals", "PackageDeploymentPlan(rogue, approvals"),
         (
-            "    return PackageDeploymentPlan(selection, approvals",
-            "    selection.targets.append(rogue)\n    return PackageDeploymentPlan(selection, approvals",
+            "PackageDeploymentPlan(\n        selection, approvals",
+            "PackageDeploymentPlan(\n        rogue, approvals",
+        ),
+        (
+            "    return PackageDeploymentPlan(\n        selection, approvals",
+            "    selection.targets.append(rogue)\n    return PackageDeploymentPlan(\n        selection, approvals",
         ),
         (
             "from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment",
@@ -83,7 +86,7 @@ def test_prepared_plan_cannot_bypass_canonical_target_authorization(old: str, ne
         ),
         (
             "marketplace-integrations-codex-native-lifecycle",
-            "native_plugin_root=codex_native.source_root if codex_native else None,",
+            "native_plugin_root=native_plugin.source_root if native_plugin else None,",
             "unadmitted_plugin_root=None,",
         ),
     ],

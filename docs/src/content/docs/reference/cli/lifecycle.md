@@ -14,7 +14,7 @@ Project-source scripts (`apm.yml` `lifecycle:`) are **skipped by default** until
 explicitly trusted, preventing arbitrary command execution on clone.
 
 For the full conceptual guide, schema reference, and security model, see
-[Lifecycle Scripts](../../../enterprise/lifecycle-scripts/).
+[Lifecycle Scripts](../../../enterprise/control-executables/#lifecycle-scripts).
 
 ## Synopsis
 
@@ -157,5 +157,5 @@ apm lifecycle untrust
 - Credential-pattern environment variables (TOKEN, SECRET, PAT, KEY, etc.) are
   blocked from HTTP header expansion unless listed in `allowedEnvVars`.
 
-See [Lifecycle Scripts - Security](../../../enterprise/lifecycle-scripts/#security-considerations)
+See [Lifecycle Scripts - Security](../../../enterprise/control-executables/#lifecycle-scripts)
 and [Security model](../../../enterprise/security/) for the full security model.

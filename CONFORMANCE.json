@@ -301,10 +301,19 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 3,
+      "test_count": 12,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[bare64]",
-        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[envelope]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-bare64-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-fresh]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[version4-bare64-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[version4-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[version4-fresh]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_adds_only_version_4_to_the_0_1_60_contract",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[3-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[4-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[4-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reader_tolerates_bare_hex_hash"
       ]
     },
@@ -374,8 +383,13 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 3,
+      "test_count": 8,
       "tests": [
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[malformed-config]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[malformed-sidecar]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[non-object-sidecar]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[orphaned]",
+        "tests/spec_conformance/test_claude_cleanup_roots.py::test_native_transition_preserves_retained_target_hook_state[owned]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_cursor_target_merge_hook_state_reconciled_fail_safe",
         "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_target_merge_hook_state_reconciled_fail_safe"
@@ -801,7 +815,7 @@
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_native_activation_requires_documented_part_a_qualification"
       ],
       "waivers": [
-        "No APM route natively activates under sec.8.5.11 yet; the conformance statement disclosure lands with the Claude user-scope route (#3290)."
+        "The Claude user-scope route (#3290) qualifies on its human runtime witness; its conformance-statement disclosure follows that witness."
       ]
     },
     {
@@ -809,13 +823,11 @@
       "id": "req-na-002",
       "keyword": "MUST",
       "section": "8.5.11",
-      "status": "skipped",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lockfile_drives_deployment_of_the_approved_plugin_root"
-      ],
-      "waivers": [
-        "Deployment to .agents/plugins is implemented by the Claude user-scope route (#3290) and the project-scope route for Claude and Copilot (#3921)."
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lock_drives_deployment_of_exactly_the_plugin_root",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_root_digest_matches_the_known_answer_vector"
       ]
     },
     {
@@ -823,13 +835,10 @@
       "id": "req-na-003",
       "keyword": "MUST",
       "section": "8.5.11",
-      "status": "skipped",
+      "status": "active",
       "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_uses_only_documented_activation_entries"
-      ],
-      "waivers": [
-        "Settings-only declaration is implemented by the Claude user-scope route (#3290) and the shared settings writer for Copilot (#3921)."
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli"
       ]
     },
     {
@@ -838,13 +847,21 @@
       "keyword": "MUST",
       "oracle": "tests/fixtures/spec-conformance/native-activation/req-na-004.json",
       "section": "8.5.11",
-      "status": "skipped",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 12,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile"
-      ],
-      "waivers": [
-        "Lock-derived settings ownership is implemented by the Claude user-scope route (#3290), which runs against the native-activation/req-na-004.json oracle."
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_no_receipt_and_removal_only_of_what_the_previous_lock_produced",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[add-and-remove]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-conflict]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-moved]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-renamed]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[explicit-false-kept]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[false-kept-on-removal]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[first-activation]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[manual-key-kept]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[previous-lock-missing]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[project-scope-relative]",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[settings-unparseable]"
       ]
     },
     {
@@ -852,13 +869,11 @@
       "id": "req-na-005",
       "keyword": "MUST",
       "section": "8.5.11",
-      "status": "skipped",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_approval_digest_binds_paths_and_bytes_but_not_the_executable_bit",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_enable_requires_content_bound_approval"
-      ],
-      "waivers": [
-        "Content-bound enablement is implemented by the Claude user-scope route (#3290); this profile does not adopt proposed amendment 0.1.64."
       ]
     },
     {
@@ -880,13 +895,10 @@
       "id": "req-na-007",
       "keyword": "MUST",
       "section": "8.5.11",
-      "status": "skipped",
+      "status": "active",
       "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_project_and_scope"
-      ],
-      "waivers": [
-        "Per-scope marketplace naming is implemented by the Claude user-scope route (#3290) and the project-scope route (#3921)."
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding"
       ]
     },
     {
@@ -1094,11 +1106,13 @@
       "keyword": "MUST",
       "section": "6.3.1",
       "status": "active",
-      "test_count": 3,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_qualified_patterns_match_effective_host",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
-        "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics"
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ]
     },
     {
@@ -1312,8 +1326,9 @@
       "keyword": "MUST",
       "section": "4.8.1",
       "status": "active",
-      "test_count": 5,
+      "test_count": 6,
       "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[changed-source]",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[missing-baseline]",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[missing-source]",
@@ -2101,8 +2116,8 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 106,
-      "skipped": 8,
+      "active": 111,
+      "skipped": 3,
       "unbound": 0,
       "xfail": 0
     },

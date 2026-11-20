@@ -33,7 +33,7 @@
     {
       "id": "mcp-target-selection-precedence",
       "decision": "MCP target-selection precedence",
-      "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes)",
+      "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes; mcp_dependency_runtimes narrows each dependency by its targets: for writes, claim pruning and --frozen claims)",
       "selectors": ["src/apm_cli/integration/mcp_integrator_install.py"],
       "guards": ["hooks-integrations-mcp-target-selection"]
     },
@@ -65,7 +65,7 @@
     },
     {
       "id": "mcp-declaration-scope",
-      "decision": "Root vs dependency MCP declaration scope and dependency-bound intentional omission evidence",
+      "decision": "Root vs dependency MCP declaration scope, receipt-bound local-bundle baseline (the set audit MCP policy judges), and dependency-bound intentional omission evidence",
       "owner": "integration/mcp_config_view.py (CurrentMcpConfigView)",
       "selectors": ["src/apm_cli/integration/mcp_config_view.py"],
       "guards": ["hooks-integrations-mcp-declaration-scope", "hooks-integrations-mcp-omission-evidence"]

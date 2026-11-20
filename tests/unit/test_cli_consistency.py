@@ -89,6 +89,9 @@ def test_audit_help_describes_security_and_integrity_modes():
         "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations"
     ) in help_text
     assert "Scan installed packages for hidden Unicode characters" not in result.output
+    # Policy checks are GA; only the external-scanner flags stay experimental (#3994).
+    policy_help = help_text.split("--policy", 1)[1].split("--no-policy", 1)[0]
+    assert "[experimental]" not in policy_help
 
 
 def test_experimental_subcommand_help_is_specific():

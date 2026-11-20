@@ -33,13 +33,21 @@ def test_native_replay_owner_rules_pass() -> None:
         (REPLAY, "agent_plugin_detection=native_detection", "agent_plugin_detection=None"),
         (REPLAY, "read_only=True", "read_only=False"),
         (REPLAY, "with native_registration_scope(targets):", "with native_registration_scope([]):"),
-        (REPLAY, 'if result.get("native_plugin"):', "if False:"),
+        (
+            REPLAY,
+            'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
+            "if False:",
+        ),
         (
             ADMISSION,
-            "expected_hash = compute_package_hash(replay_path)",
-            "expected_hash = compute_package_hash(source)",
+            "expected_hash = compute_package_hash(replay_path, framed=lock_dep.content_hash_framed)",
+            "expected_hash = compute_package_hash(source, framed=lock_dep.content_hash_framed)",
         ),
-        (ADMISSION, "verify_locked_package(candidate, expected_hash, carried)", "True"),
+        (
+            ADMISSION,
+            "candidate, expected_hash, carried, framed=lock_dep.content_hash_framed",
+            "candidate, source, carried, framed=lock_dep.content_hash_framed",
+        ),
     ],
 )
 def test_native_replay_owner_bypass_is_rejected(path: str, before: str, after: str) -> None:

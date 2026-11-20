@@ -1,0 +1,176 @@
+---
+title: Create a package
+description: Turn a git repository into a package other teams install by tag. Write one skill, release v1.0.0 and install it from a second repository.
+---
+
+import { Steps, FileTree, LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+Use this page when you have a skill, an instruction or an agent other teams keep
+copying, and you want them to depend on it instead. By the end, a second
+repository installs your package at `v1.0.0` and records the exact commit in its
+lockfile.
+
+**You need:** APM ([install it](../../getting-started/installation/)), and an
+empty repository you can push to, cloned locally. This page calls it
+`you/my-skills`; use your own owner and name.
+
+<Steps>
+
+1. **Make the repository a package.** From the root of your clone:
+
+   ```bash frame="terminal"
+   apm init -y
+   ```
+
+   This writes `apm.yml`, the manifest. For an author it names the package
+   (`name`, `version`, `description`, `author`) and lists its own dependencies.
+   Leave `targets:` commented out in a package you publish: a package's
+   `targets:` limits which harnesses its consumers get it for, so a Codex-only
+   consumer would skip a package that declares Copilot and Claude Code. A harness
+   is the agent tool that reads the files: `.github/` for GitHub Copilot,
+   `.claude/` for Claude Code.
+   `includes: auto` lets APM install and pack everything you author under
+   `.apm/`.
+
+2. **Add a skill.** A skill is a folder with a `SKILL.md` file; the harness reads
+   its `description` and loads the skill when a request matches.
+
+   ```markdown title=".apm/skills/review/SKILL.md"
+   ---
+   name: review
+   description: Review a diff against the team's checklist. Use when the user asks for a code review or says "review my changes".
+   ---
+
+   # Review
+
+   1. Check that every changed code path has a test.
+   2. Flag names that do not say what the code does.
+   3. List findings as Blocking, Should fix or Nit, with file and line.
+   ```
+
+   `name` must match the folder name. [Write skills, instructions and
+   hooks](../write-primitives/) covers every other kind of file.
+
+3. **Install it into your own repository.**
+
+   ```bash frame="terminal"
+   apm install --target copilot,claude
+   ```
+
+   `--target` picks the harnesses for this run only, without writing them into
+   `apm.yml`.
+
+   ```text frame="none"
+   [i] Targets: claude, copilot  (source: --target flag)
+     [+] <project root> (local)
+     |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
+   [i] Added apm_modules/ to .gitignore
+   ...
+   [*] Installed 1 APM dependency in 0.6s.
+   ```
+
+   APM treats your own `.apm/` folder as a package and writes the skill where each
+   harness reads it: `.agents/skills/` for Copilot, `.claude/skills/` for Claude
+   Code. Open either tool in this repository and try the skill before you ship it.
+
+4. **Check the files before you release.**
+
+   ```bash frame="terminal"
+   apm audit
+   ```
+
+   ```text frame="none"
+   [+] Replayed 1 package(s)
+   [+] No drift detected
+
+   [*] 2 file(s) scanned -- no issues found
+   ```
+
+   `apm audit` compares the deployed files with the lockfile and scans them for
+   hidden Unicode characters, the kind that can carry instructions a reviewer
+   cannot see. A finding here would also show up for every consumer.
+
+5. **Commit, tag and push.**
+
+   ```bash frame="terminal"
+   git add apm.yml apm.lock.yaml .gitignore .apm/
+   git commit -m "Add review skill"
+   git tag -a v1.0.0 -m "v1.0.0"
+   git push --follow-tags
+   ```
+
+   The tag is the release. Consumers resolve `v1.0.0` to this commit. Keep
+   `version:` in `apm.yml` equal to the tag; consumers see it in their lockfile.
+
+6. **Install it from another repository.** In a separate consumer repository
+   that has an `apm.yml`:
+
+   ```bash frame="terminal"
+   apm install you/my-skills#v1.0.0
+   ```
+
+   For a consumer that targets Copilot and Claude Code, the skill lands in
+   `.agents/skills/review/` and `.claude/skills/review/`. Its `apm.lock.yaml` records the tag, the commit SHA
+   and a SHA-256 hash for each file.
+
+7. **List the versions you have published.**
+
+   ```bash frame="terminal"
+   apm view you/my-skills versions
+   ```
+
+   APM lists the repository's tags and branches with their commits; `v1.0.0`
+   appears as a tag.
+
+</Steps>
+
+## What a package holds
+
+APM reads primitives (its word for skills, instructions, agents, prompts, hooks
+and the rest) from `.apm/`, one folder per kind:
+
+<FileTree>
+- apm.yml name, version, targets, dependencies
+- apm.lock.yaml
+- .apm/
+  - skills/
+    - review/
+      - SKILL.md
+      - references/ optional files the skill loads
+  - instructions/
+    - python.instructions.md
+  - agents/
+    - reviewer.agent.md
+  - prompts/
+    - release-notes.prompt.md
+  - hooks/
+    - format-on-save.json
+</FileTree>
+
+Commit `apm.yml`, `apm.lock.yaml` and `.apm/`. The deployed folders (`.agents/`,
+`.claude/`, `.github/`) are output for your own use; consumers install from
+`.apm/`, not from them.
+
+## Other package shapes
+
+`apm.yml` with `.apm/` is the recommended shape, because it carries version,
+dependencies and every primitive kind. APM also installs repositories that have
+no `apm.yml`:
+
+- **A skill repository**: `SKILL.md` at the root, or `skills/<name>/SKILL.md` for
+  several skills.
+- **A plugin repository**: a `plugin.json` with `skills/`, `agents/` and
+  `commands/` folders. See [Build a plugin](../build-a-plugin/).
+- **A single file**: consumers can install one `.instructions.md`,
+  `.prompt.md` or `.agent.md` from your repository by its path.
+
+Add `apm.yml` to any of these when your package needs its own dependencies.
+[Package types](../../reference/package-types/) lists every layout and which one
+wins when several are present.
+
+## Next
+
+<CardGrid>
+  <LinkCard title="Test a package locally" description="Install your working copy into a consumer before you tag." href="../test-packages/" />
+  <LinkCard title="Release a version" description="Ship v1.1.0 and let consumers update on their schedule." href="../release-a-version/" />
+</CardGrid>

@@ -242,6 +242,11 @@ def enrich_lockfile_for_pack(
     if isinstance(data, dict):
         data.pop("local_deployed_files", None)
         data.pop("local_deployed_file_hashes", None)
+        # The bundle lock is a new artifact: its generator is the packer, so a
+        # consumer older than this APM is warned (#3962).
+        from apm_cli.deps.lockfile import installed_apm_version
+
+        data["apm_version"] = installed_apm_version()
 
     # Build the pack: metadata section (after filtering so we know if mapping
     # occurred).

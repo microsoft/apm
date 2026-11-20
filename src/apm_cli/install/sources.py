@@ -40,11 +40,13 @@ from apm_cli.install.registry_wiring import (
     resolver_last_registry_resolution,
 )
 from apm_cli.install.source_helpers import (
+    content_hash_mismatch_hint,
     ensure_carried_licenses_match,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
-    supply_chain_mismatch_hint,
+    record_package_digests,
+    update_accepts_new_content,
 )
 from apm_cli.install.source_helpers import (
     format_package_type_label as _format_package_type_label,
@@ -132,6 +134,7 @@ class LocalDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.install.phases.local_content import _copy_local_package
+        from apm_cli.install.source_helpers import package_digests
         from apm_cli.models.apm_package import (
             APMPackage,
             GitReferenceType,
@@ -140,7 +143,6 @@ class LocalDependencySource(DependencySource):
             ResolvedReference,
         )
         from apm_cli.models.validation import validate_apm_package
-        from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
         dep_ref = self.dep_ref
@@ -220,9 +222,8 @@ class LocalDependencySource(DependencySource):
         if logger:
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
-        # Capture the validated copy before manifest synthesis or integration
-        # transforms it. Frozen preflight hashes this same materialization.
-        local_content_hash = _compute_hash(install_path)
+        # Hash the validated copy before synthesis or integration, as frozen preflight does.
+        local_digests = package_digests(ctx, install_path)
         materialize_marketplace_manifest(dep_ref, install_path)
         validation = validate_apm_package(
             install_path,
@@ -284,7 +285,7 @@ class LocalDependencySource(DependencySource):
             )
         )
         if install_path.is_dir():
-            ctx.package_hashes[dep_key] = local_content_hash
+            record_package_digests(ctx, dep_key, local_digests)
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
@@ -863,19 +864,16 @@ class FreshDependencySource(DependencySource):
             )
             _carried_paths = record_carried_package_hash(ctx, dep_key, install_path, package_info)
 
-            # Supply-chain protection: verify content hash on fresh
-            # downloads when the lockfile already records a hash.
-            # Skip when ``ctx.expected_hash_change_deps`` marks this dep
-            # (set by resolve.py's BFS callback and _resolve_download_strategy
-            # when branch-ref drift or the v<=0.12.2 self-heal forces a
-            # re-download whose hash is legitimately expected to differ from
-            # the lockfile record).
-            # Thread-safety: resolve phase completes before integrate runs,
-            # so the set is stable here.  integrate.py's own .add() is
-            # idempotent (set semantics) and runs single-threaded.
+            # Supply-chain protection: verify content hash on fresh downloads
+            # when the lockfile records one, unless an update moved the commit
+            # or ``ctx.expected_hash_change_deps`` marks this dep (resolve.py's
+            # BFS callback and _resolve_download_strategy set it when branch-ref
+            # drift or the v<=0.12.2 self-heal makes a hash change expected).
+            # Thread-safety: the set is stable once resolve completes, and
+            # integrate.py's own .add() is idempotent and single-threaded.
             _expected_hash_deps = ctx.expected_hash_change_deps
             if (
-                not ctx.update_refs
+                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)
                 and dep_key not in _expected_hash_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash
@@ -899,9 +897,11 @@ class FreshDependencySource(DependencySource):
                             f"Content hash mismatch for {dep_key}: "
                             f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
                             "The downloaded content differs from the lockfile record. "
-                            + supply_chain_mismatch_hint(ctx, dep_key)
+                            + content_hash_mismatch_hint(ctx, dep_key)
                         )
-            ensure_carried_licenses_match(ctx, dep_key, install_path, dep_locked_chk)
+            ensure_carried_licenses_match(
+                ctx, dep_key, install_path, dep_locked_chk, resolved_commit
+            )
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value

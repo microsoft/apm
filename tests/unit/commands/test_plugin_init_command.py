@@ -11,6 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -46,6 +47,10 @@ class TestPluginInitCommand:
                 assert "apm install --dev" in result.output
                 assert "apm pack --format agent-plugin" in result.output
                 assert "apm pack --format claude-plugin" in result.output
+                # Both advertised formats pack the fresh scaffold as is (#3994).
+                for fmt in ("agent-plugin", "claude-plugin"):
+                    packed = self.runner.invoke(cli, ["pack", "--format", fmt, "-o", f"out-{fmt}"])
+                    assert packed.exit_code == 0, packed.output
                 assert "apm pack --plugin" not in result.output
                 # Consumer-only hints absent in plugin mode
                 assert "apm marketplace init" not in result.output
@@ -343,6 +348,20 @@ class TestInitDeprecationWarnings:
                 os.chdir(self.original_dir)
 
 
+def test_claude_only_plugin_scaffold_advertises_only_working_formats(tmp_path, monkeypatch):
+    """Every pack command a Claude-only scaffold advertises succeeds (#3994)."""
+    project = tmp_path / "claude-plugin-demo"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["plugin", "init", "--yes", "--target", "claude"])
+    assert result.exit_code == 0, result.output
+    assert "apm pack --format agent-plugin" not in result.output
+    assert "apm pack --format claude-plugin" in result.output
+    packed = runner.invoke(cli, ["pack", "--format", "claude-plugin"])
+    assert packed.exit_code == 0, packed.output
+
+
 class TestInitConsumerNextSteps:
     """Consumer-mode ``apm init`` teaches the noun-verb namespace."""
 
@@ -367,8 +386,26 @@ class TestInitConsumerNextSteps:
                 result = self.runner.invoke(cli, ["init", "--yes"])
                 assert result.exit_code == 0, result.output
                 assert "apm install" in result.output
-                assert "apm run" in result.output
+                # Experimental 'apm run' is not a next step (#3994).
+                assert "apm run" not in result.output
                 assert "apm plugin init" in result.output
                 assert "apm marketplace init" in result.output
+            finally:
+                os.chdir(self.original_dir)
+
+    @pytest.mark.parametrize(("marker", "expect_flag"), [(None, True), (".claude", False)])
+    def test_install_step_names_a_harness_only_when_none_resolves(
+        self, marker, expect_flag, monkeypatch
+    ):
+        """A markerless project's install hint carries -t, or it exits 2 (#3994)."""
+        monkeypatch.setattr("apm_cli.config.get_install_target", lambda **_kw: None)
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                if marker:
+                    Path(tmp, marker).mkdir()
+                result = self.runner.invoke(cli, ["init", "--yes"])
+                assert result.exit_code == 0, result.output
+                assert ("apm install <owner>/<repo> -t <harness>" in result.output) is expect_flag
             finally:
                 os.chdir(self.original_dir)

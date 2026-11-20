@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from yaml import YAMLError
 
+from apm_cli.adapters.client._remote_shapes import harness_label
 from apm_cli.core.apm_yml import (
     ConflictingTargetsError,
     EmptyTargetsListError,
@@ -28,6 +29,7 @@ from apm_cli.install.errors import (
     MCPNativeConflictError,
     RequiredIntegrationError,
 )
+from apm_cli.integration.mcp_user_scope_runtimes import user_scope_runtime_labels
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.yaml_io import load_yaml
@@ -60,7 +62,7 @@ class _PrevalidatedRegistryServers(dict[str, dict]):
 
 
 CHOOSING_MCP_REGISTRY_DOCS_URL = (
-    "https://microsoft.github.io/apm/consumer/choosing-an-mcp-registry/"
+    "https://microsoft.github.io/apm/consumer/install-mcp-servers/#choosing-an-mcp-registry"
 )
 
 # Precedence layers a direct ``apm install --mcp NAME`` can resolve from. The
@@ -394,7 +396,7 @@ def _install_registry_group(  # noqa: PLR0913
                     console.print(f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep}")
                     console.print(
                         f"|     +- {action_text} for "
-                        f"{', '.join([rt.title() for rt in target_runtimes])}..."
+                        f"{', '.join([harness_label(rt) for rt in target_runtimes])}..."
                     )
                 else:
                     logger.progress(
@@ -528,9 +530,11 @@ def _install_registry_group(  # noqa: PLR0913
                         label = "updated" if is_update else "configured"
                         console.print(
                             f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep} -> "
-                            f"{', '.join([rt.title() for rt in successful_runtimes])}"
+                            f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
                             f" [dim]({label})[/dim]"
                         )
+                        if not user_scope:
+                            _print_user_wide_configs(console, successful_runtimes)
                     configured_count += 1
                     if is_update:
                         successful_updates.add(dep)
@@ -589,10 +593,8 @@ def _skip_unsupported_remote_transport(
         unsupported_remote_transport,
     )
     from apm_cli.factory import ClientFactory
-    from apm_cli.install.mcp.ownership import (
-        is_frozen_unrecorded_mcp_pair,
-        managed_unsupported_connection,
-    )
+    from apm_cli.install.mcp.native_runtimes import retire_runtime_claim
+    from apm_cli.install.mcp.ownership import is_frozen_unrecorded_mcp_pair
 
     try:
         client = ClientFactory.create_client(
@@ -608,22 +610,16 @@ def _skip_unsupported_remote_transport(
             raise frozen_services_error([frozen_unrecorded_reason("MCP", name, runtime)])
         return False
     skip_unsupported_remote(client, name, transport, warn=logger.warning)
-    claims = (managed_target_servers or {}).get(runtime, set())
-    if name not in claims:
-        return True
-    key = managed_unsupported_connection(
+    retire_runtime_claim(
         client,
+        runtime,
         name,
-        requested_info=server_info if registry_info else None,
+        server_info if registry_info else None,
+        logger,
         stored_config=stored_config,
-        native_hash=(native_hashes or {}).get(runtime, {}).get(name),
+        managed_target_servers=managed_target_servers,
+        native_hashes=native_hashes,
     )
-    if key is not None:
-        _remove_native_entry(client, key, logger)
-    # Reached only after a successful removal (cleanup failures raise).
-    claims.discard(name)
-    if native_hashes is not None:
-        native_hashes.get(runtime, {}).pop(name, None)
     return True
 
 
@@ -1062,70 +1058,6 @@ def _declared_manifest_target_runtimes(
     return list(projected or ()), True
 
 
-def partition_user_scope_runtimes(
-    target_runtimes: list[str],
-) -> tuple[list[str], list[str]]:
-    """Partition runtime names by their adapter's user-scope capability."""
-    from apm_cli.factory import ClientFactory
-
-    supported: list[str] = []
-    skipped: list[str] = []
-    for runtime in target_runtimes:
-        try:
-            client = ClientFactory.create_client(runtime)
-        except ValueError:
-            skipped.append(runtime)
-            continue
-        destination = supported if client.supports_user_scope else skipped
-        destination.append(runtime)
-    return supported, skipped
-
-
-def unavailable_user_scope_targets_message(
-    target_decision: EffectiveTargetDecision,
-    scoped_targets: list[str] | None,
-    skipped_targets: list[str],
-) -> str:
-    """Render recovery that distinguishes disabled from workspace-only targets."""
-    original_targets = set(target_decision.runtime_targets or [])
-    disabled_targets = original_targets - set(scoped_targets or [])
-    experimental_hint = "enable selected experimental targets, " if disabled_targets else ""
-    rendered_targets = ", ".join(sorted(original_targets or set(skipped_targets)))
-    return (
-        "Selected targets are unavailable for user-scope MCP installation "
-        f"({rendered_targets}; source: {target_decision.source}); "
-        f"{experimental_hint}choose a global-capable --target or omit --global"
-    )
-
-
-def discover_user_scope_mcp_runtimes(
-    project_root: Path,
-    *,
-    exclude: str | None = None,
-) -> tuple[list[str], list[str]]:
-    """Discover installed MCP runtimes and partition them for user scope."""
-    discovered = _discover_installed_runtimes(project_root, user_scope=True)
-    discovered = filter_excluded_mcp_runtimes(discovered, exclude)
-    return partition_user_scope_runtimes(discovered)
-
-
-def filter_excluded_mcp_runtimes(
-    target_runtimes: list[str],
-    exclude: str | None,
-) -> list[str]:
-    """Apply one canonical runtime exclusion, including target aliases."""
-    if not exclude:
-        return list(target_runtimes)
-    exclusions = {exclude}
-    try:
-        from apm_cli.core.target_detection import EffectiveTargetDecision
-
-        exclusions.update(EffectiveTargetDecision(exclude, "--exclude").runtime_equivalents or ())
-    except KeyError:
-        pass
-    return [runtime for runtime in target_runtimes if runtime not in exclusions]
-
-
 def _resolve_target_runtimes(
     runtime: str | None,
     exclude: str | None,
@@ -1296,18 +1228,9 @@ def _resolve_target_runtimes(
     # Exclusion narrows every selected source, including explicit CLI choices.
     # Apply it before progress output so the message names the narrowed set.
     if exclude:
-        exclusions = {exclude}
-        try:
-            from apm_cli.core.target_detection import EffectiveTargetDecision
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
-            exclusions.update(
-                EffectiveTargetDecision(exclude, "--exclude").runtime_equivalents or ()
-            )
-        except KeyError:
-            pass
-        target_runtimes = [
-            candidate for candidate in target_runtimes if candidate not in exclusions
-        ]
+        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)
         # Invalid manifests continue to the shared gate for canonical rendering.
         if not target_runtimes and selection_source is not _TargetSelectionSource.INVALID_MANIFEST:
             logger.warning(
@@ -1408,11 +1331,65 @@ def _resolve_target_runtimes(
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, JetBrains Copilot)"
+                "No runtimes support user-scope MCP installation "
+                f"(supported: {', '.join(user_scope_runtime_labels())})"
             )
             return None
 
     return target_runtimes
+
+
+def _print_user_wide_configs(console: Any, runtimes: list[str]) -> None:
+    """Name config files a project install wrote outside each harness's own dir.
+
+    Root ``.mcp.json`` (Copilot, Claude Code; the 0.37 Copilot move) and
+    user-wide files (Windsurf has no workspace config) are named once (#3994).
+    """
+    from apm_cli.factory import ClientFactory
+
+    shared = [rt for rt in runtimes if ClientFactory.project_destination_is_root_mcp_json(rt)]
+    if shared:
+        console.print(
+            f"|     +- wrote: .mcp.json ({', '.join(harness_label(rt) for rt in shared)})",
+            markup=False,
+            highlight=False,
+        )
+    for rt in runtimes:
+        path = ClientFactory.user_wide_config_display(rt)
+        if path:
+            console.print(
+                f"|     +- user-wide: {path} (all {harness_label(rt)} workspaces)",
+                markup=False,
+                highlight=False,
+            )
+
+
+def _declared_mcp_targets(dep: Any) -> list[str] | None:
+    declared = getattr(dep, "targets", None)
+    return list(declared) if isinstance(declared, (list, tuple)) and declared else None
+
+
+def mcp_dependency_runtimes(dep: Any, target_runtimes: list[str]) -> list[str]:
+    """Narrow the run's runtimes to a dependency's ``targets:``; never widen them."""
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.models.dependency.subsets import canonical_target_name
+
+    declared = _declared_mcp_targets(dep)
+    if declared is None:
+        return list(target_runtimes)
+    admitted = set(EffectiveTargetDecision(declared, "dependencies.mcp").runtime_equivalents)
+    return [rt for rt in target_runtimes if rt in admitted or canonical_target_name(rt) in declared]
+
+
+def mcp_servers_for_runtime(mcp_deps: list, runtime: str, *, named_only: bool = False) -> set[str]:
+    """Declared servers *runtime* receives; ``named_only`` keeps those whose targets name it."""
+    return {
+        dep.name if hasattr(dep, "name") else dep
+        for dep in mcp_deps
+        if (isinstance(dep, str) or hasattr(dep, "name"))
+        and (_declared_mcp_targets(dep) is not None or not named_only)
+        and mcp_dependency_runtimes(dep, [runtime])
+    }
 
 
 def _install_self_defined_deps(
@@ -1438,6 +1415,10 @@ def _install_self_defined_deps(
     Returns the number of servers newly configured or updated.
     """
     from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.install.mcp.native_runtimes import (
+        native_runtimes_of,
+        retire_native_runtime_claims,
+    )
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         claim_shared_destination,
@@ -1454,6 +1435,20 @@ def _install_self_defined_deps(
     native_conflicts: list[str] = []
     if written_connections is None:
         written_connections = set()
+    retire_native_runtime_claims(
+        [dep for dep in self_defined_deps if native_runtimes_of(dep)],
+        target_runtimes,
+        logger,
+        project_root=project_root,
+        user_scope=user_scope,
+        stored_mcp_configs=stored_mcp_configs,
+        managed_target_servers=managed_target_servers,
+        native_hashes=native_hashes,
+    )
+    # Runtimes that load a server natively from its plugin never get APM's copy.
+    self_defined_deps = [
+        dep for dep in self_defined_deps if not set(target_runtimes) <= native_runtimes_of(dep)
+    ]
     protected_clients = native_comparison_clients(
         target_runtimes, project_root=project_root, user_scope=user_scope
     )
@@ -1523,7 +1518,7 @@ def _install_self_defined_deps(
                 f"[dim](self-defined, {transport_label})[/dim]"
             )
             console.print(
-                f"|     +- {action_text} for {', '.join([rt.title() for rt in target_runtimes])}..."
+                f"|     +- {action_text} for {', '.join([harness_label(rt) for rt in target_runtimes])}..."
             )
         else:
             logger.progress(
@@ -1533,6 +1528,8 @@ def _install_self_defined_deps(
         successful_runtimes: list[str] = []
         failed_runtimes: list[str] = []
         for rt in target_runtimes:
+            if rt in native_runtimes_of(dep):
+                continue
             if _skip_unsupported_remote_transport(
                 rt,
                 dep.name,
@@ -1674,9 +1671,11 @@ def _install_self_defined_deps(
                 label = "updated" if is_update else "configured"
                 console.print(
                     f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
-                    f"{', '.join([rt.title() for rt in successful_runtimes])}"
+                    f"{', '.join([harness_label(rt) for rt in successful_runtimes])}"
                     f" [dim]({label})[/dim]"
                 )
+                if not user_scope:
+                    _print_user_wide_configs(console, successful_runtimes)
             configured_count += 1
             if is_update:
                 successful_updates.add(dep.name)
@@ -1899,16 +1898,17 @@ def run_mcp_install(  # noqa: PLR0913
             active_runtimes=active_targets,
             user_scope=user_scope,
         )
-        current_names = {
-            dep.name if hasattr(dep, "name") else dep
-            for dep in mcp_deps
-            if isinstance(dep, str) or hasattr(dep, "name")
-        }
+        from apm_cli.install.mcp.ownership import transfer_deselected_shared_claims
+
+        selected = {target: mcp_servers_for_runtime(mcp_deps, target) for target in active_targets}
+        transfer_deselected_shared_claims(
+            managed_target_servers, native_hashes, selected=selected, user_scope=user_scope
+        )
         for target in list(managed_target_servers):
             if target not in active_targets:
                 del managed_target_servers[target]
             else:
-                managed_target_servers[target].intersection_update(current_names)
+                managed_target_servers[target] &= selected[target]
         for target in target_runtimes:
             managed_target_servers.setdefault(target, set())
 
@@ -1944,6 +1944,19 @@ def run_mcp_install(  # noqa: PLR0913
                 symbol="check",
             )
 
+    dep_runtimes = {id(dep): mcp_dependency_runtimes(dep, target_runtimes) for dep in mcp_deps}
+    scoped_out: set[int] = set()
+    for dep in mcp_deps:
+        declared = _declared_mcp_targets(dep)
+        if declared is not None and not dep_runtimes[id(dep)]:
+            scoped_out.add(id(dep))
+            # Logged inline: an MCP-only run that changes nothing never
+            # renders the diagnostics summary, which would hide the skip.
+            logger.warning(
+                f"{dep.name}: MCP server targets [{', '.join(declared)}] do not overlap "
+                f"active install targets [{', '.join(target_runtimes)}]; skipping"
+            )
+
     # Use the new registry operations module for better server detection
     configured_count = 0
     written_connections: set[tuple[str, str]] = set()
@@ -1958,14 +1971,13 @@ def run_mcp_install(  # noqa: PLR0913
             # resolved against the correct registry endpoint.
             # Plain strings (backward-compat) and deps with registry=None go to
             # the default group (key=None).  Only str values trigger routing.
-            registry_groups: builtins.dict[str | None, list] = {}
+            registry_groups: builtins.dict[tuple, list] = {}
             for dep in registry_deps:
-                key = _registry_group_key(dep)
-                if key not in registry_groups:
-                    registry_groups[key] = []
-                registry_groups[key].append(dep)
+                key = (tuple(dep_runtimes[id(dep)]), _registry_group_key(dep))
+                if id(dep) not in scoped_out:
+                    registry_groups.setdefault(key, []).append(dep)
 
-            for group_registry_url, group_deps_list in registry_groups.items():
+            for (group_runtimes, group_registry_url), group_deps_list in registry_groups.items():
                 group_dep_names = [
                     dep.name if hasattr(dep, "name") else dep for dep in group_deps_list
                 ]
@@ -1993,7 +2005,7 @@ def run_mcp_install(  # noqa: PLR0913
                         group_dep_names=group_dep_names,
                         group_dep_map=group_dep_map,
                         group_deps=group_deps_list,
-                        target_runtimes=target_runtimes,
+                        target_runtimes=list(group_runtimes),
                         stored_mcp_configs=stored_mcp_configs,
                         servers_to_update=servers_to_update,
                         successful_updates=successful_updates,
@@ -2017,11 +2029,15 @@ def run_mcp_install(  # noqa: PLR0913
             raise RuntimeError("Registry operations module required for MCP installation")  # noqa: B904
 
     # --- Self-defined deps (registry: false) ---
-    if self_defined_deps:
+    self_defined_groups: builtins.dict[tuple, list] = {}
+    for dep in self_defined_deps:
+        if id(dep) not in scoped_out:
+            self_defined_groups.setdefault(tuple(dep_runtimes[id(dep)]), []).append(dep)
+    for group_runtimes, group_self_defined in self_defined_groups.items():
         try:
             configured_count += _install_self_defined_deps(
-                self_defined_deps=self_defined_deps,
-                target_runtimes=target_runtimes,
+                self_defined_deps=group_self_defined,
+                target_runtimes=list(group_runtimes),
                 stored_mcp_configs=stored_mcp_configs,
                 servers_to_update=servers_to_update,
                 successful_updates=successful_updates,

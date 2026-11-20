@@ -228,7 +228,7 @@ def test_carried_copies_keep_the_legacy_package_content_hash(tmp_path: Path) -> 
 
     assert compute_package_hash(target) != legacy_hash
     assert compute_package_hash(target, exclude=carried) == legacy_hash
-    assert verify_package_hash(target, legacy_hash, exclude=carried)
+    assert verify_package_hash(target, legacy_hash, exclude=carried, framed=True)
     assert carried_copies_intact(target, records)
     (target / "skills" / "inner" / "LICENSE").write_bytes(b"tampered\n")
     assert not carried_copies_intact(target, records)

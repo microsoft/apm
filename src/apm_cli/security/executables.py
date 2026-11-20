@@ -20,6 +20,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -619,6 +620,27 @@ def local_bundle_approval_key(
     return f"{package_id}#{artifact_version}@{digest}"
 
 
+def local_bundle_approval_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
+    """Name the manifest whose ``executables.allow`` approves *approval_key*.
+
+    Grants come from the scope's manifest: the project ``apm.yml``, or the
+    user manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads.
+    """
+    from apm_cli.core.scope import InstallScope, get_manifest_path
+
+    target = (
+        f"the user manifest {get_manifest_path(InstallScope.USER)}" if user_scope else "apm.yml"
+    )
+    return (
+        f"To approve this exact local bundle, add to {target}:\n"
+        "executables:\n"
+        "  allow:\n"
+        f'    "{approval_key}":\n'
+        f"      {exec_type}: true\n"
+        "Then rerun the install."
+    )
+
+
 # -------------------------------------------------------------------
 # Package scanning
 # -------------------------------------------------------------------
@@ -757,12 +779,23 @@ def _is_interactive() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
+def trust_remedy(package: str, recommend: Collection[str] = ()) -> str:
+    """One remediation line for parked executables.
+
+    Offers ``apm approve --recommended`` only when the org policy declares an
+    ``executables.recommend`` set; otherwise that command finds nothing.
+    """
+    bulk = "Trust the org-vetted set: apm approve --recommended  |  " if recommend else ""
+    return f"{bulk}Trust one: apm approve {package}  |  Inspect: apm policy explain {package}"
+
+
 def prompt_executable_approval(
     declarations: list[ExecutableDeclaration],
     *,
     allow_executables: dict[str, dict[str, bool]] | None = None,
     trust_all: bool = False,
     no_executables: bool = False,
+    recommend: Collection[str] = (),
 ) -> dict[str, dict[str, bool]]:
     """Run the interactive approval flow for packages with executables.
 
@@ -814,12 +847,7 @@ def prompt_executable_approval(
             provenance = "(transitive)" if decl.is_transitive else "(direct)"
             _rich_echo(f"  {decl.package_key} {provenance}: {decl.summary_line()}")
         _rich_echo("")
-        _rich_info(
-            "Trust the org-vetted set: apm approve --recommended  |  "
-            "Trust one: apm approve <package>  |  "
-            "Inspect: apm policy explain <package>",
-            symbol="info",
-        )
+        _rich_info(trust_remedy("<package>", recommend), symbol="info")
         sys.exit(1)
 
     # Interactive: prompt per-package
@@ -1175,12 +1203,10 @@ def resolve_project_exec_allow_map(
     allow_map, resolved = executable_context
     if resolved:
         return allow_map
-    policy = None
-    if not no_policy:
-        from apm_cli.policy.discovery import discover_policy_with_chain
-
-        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
     from apm_cli.core.scope import manifest_root
+    from apm_cli.policy.outcome_routing import resolve_trust_policy
+
+    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)
 
     return effective_exec_map_for_project(
         manifest_root(project_root, user_scope=user_scope),

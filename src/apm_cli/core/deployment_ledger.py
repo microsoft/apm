@@ -8,7 +8,7 @@ import os
 import sys
 import uuid
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -535,6 +535,33 @@ def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
         )
 
 
+def trusted_receipt_baselines(
+    project_root: Path,
+    scope: InstallScope,
+    lockfile: LockFile | None,
+    paths: Sequence[Path],
+    targets: Sequence[TargetProfile],
+) -> dict[Path, str]:
+    """Read-only: map each path to the hash this installation last wrote there.
+
+    Only trusted receipts count (current ownership, bound installation).
+    Invalid receipt state yields nothing; nothing is written or promoted.
+    """
+    try:
+        session = DeploymentMaterializationSession(project_root, scope, lockfile)
+    except (OSError, ValueError):
+        return {}
+    baselines: dict[Path, str] = {}
+    for path in paths:
+        try:
+            baseline = session.baseline(path, targets)
+        except (OSError, ValueError):
+            continue
+        if baseline is not None:
+            baselines[path] = baseline
+    return baselines
+
+
 class DeploymentLedgerCodec:
     """Translate canonical deployment records to and from lockfile views."""
 
@@ -851,7 +878,9 @@ class DeploymentLedgerCodec:
         prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
         preferred: dict[str, DeploymentLocator] = {}
+        bundle_sources: tuple[DeploymentLedger, ...] = (prior_ledger,)
         if provenance is not None:
+            bundle_sources = (prior_ledger, provenance)
             owned = set(files)
             provenance_bundles = DeploymentLedgerCodec.local_bundle_values(provenance) & owned
             # Malformed provenance is dropped, as a rebuild without it would.
@@ -878,6 +907,7 @@ class DeploymentLedgerCodec:
             prior_bundle_paths,
             prior_ledger=prior_ledger,
             preferred_locators=preferred,
+            bundle_scopes=DeploymentLedgerCodec._bundle_scopes(bundle_sources),
         )
 
     @staticmethod
@@ -936,11 +966,16 @@ class DeploymentLedgerCodec:
         files: list[str],
         hashes: dict[str, str],
         *,
+        scope: InstallScope,
         staged: Collection[str] = (),
         staged_hashes: Mapping[str, str] | None = None,
         staged_fallback_hashes: Mapping[str, str] | None = None,
     ) -> None:
         """Persist imperative bundle files without making them replayable source.
+
+        *scope* is the install scope that deployed *files*; their rows record
+        it, so a user-scope bundle keeps ``scope: user`` (#3995). It has no
+        default: the owner never guesses a scope.
 
         *staged* is compile input under ``apm_modules/<slug>/.apm/`` (#3705):
         it is recorded in ``local_staged_files`` and never claimed. Every prior
@@ -978,9 +1013,11 @@ class DeploymentLedgerCodec:
             merged_hashes,
         )
 
+        scope_value = scope.value
         DeploymentLedgerCodec._mark_local_bundle_paths(
             lockfile,
             prior_bundle_paths.union(files),
+            scopes=dict.fromkeys(files, scope_value),
         )
         lockfile.local_staged_files = sorted(
             set(lockfile.local_staged_files).union(staged, retired_paths)
@@ -1205,8 +1242,17 @@ class DeploymentLedgerCodec:
         *,
         prior_ledger: DeploymentLedger | None = None,
         preferred_locators: dict[str, DeploymentLocator] | None = None,
+        bundle_scopes: Mapping[str, str] | None = None,
     ) -> None:
-        """Rebuild compatibility rows and restore surviving bundle provenance."""
+        """Rebuild compatibility rows and restore surviving bundle provenance.
+
+        A surviving bundle row keeps the scope its unambiguous prior claim
+        recorded (*bundle_scopes*, default: from *prior_ledger*); the path
+        prefix alone cannot tell a user-scope ``.claude/`` path from a project
+        one (#3995).
+        """
+        if bundle_scopes is None and prior_ledger is not None:
+            bundle_scopes = DeploymentLedgerCodec._bundle_scopes((prior_ledger,))
         lockfile.deployment_ledger = DeploymentLedger(records={})
         lockfile._deployments_present = False
         lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
@@ -1268,26 +1314,65 @@ class DeploymentLedgerCodec:
                 records[preserved.locator.key] = preserved
             lockfile.deployment_ledger = DeploymentLedger(records=records)
         surviving_paths = prior_bundle_paths.intersection(lockfile.local_deployed_files)
-        DeploymentLedgerCodec._mark_local_bundle_paths(lockfile, surviving_paths)
+        DeploymentLedgerCodec._mark_local_bundle_paths(
+            lockfile,
+            surviving_paths,
+            scopes={
+                path: scope
+                for path, scope in (bundle_scopes or {}).items()
+                if path in surviving_paths
+            },
+        )
+
+    @staticmethod
+    def _bundle_scopes(sources: Sequence[DeploymentLedger]) -> dict[str, str]:
+        """Return the recorded scope of each bundle claim, from the first source holding it.
+
+        A value claimed with more than one scope in one source is ambiguous
+        and is left to the rebuild's own scope.
+        """
+        scopes: dict[str, str] = {}
+        for source in sources:
+            found: dict[str, set[str]] = {}
+            for record in source.records.values():
+                if record.active_owner == _LOCAL_BUNDLE_OWNER:
+                    value = DeploymentLedgerCodec.legacy_value(record.locator)
+                    found.setdefault(value, set()).add(record.locator.scope)
+            for value, values in found.items():
+                if len(values) == 1:
+                    scopes.setdefault(value, next(iter(values)))
+        return scopes
 
     @staticmethod
     def _mark_local_bundle_paths(
         lockfile: LockFile,
         bundle_paths: frozenset[str],
+        *,
+        scopes: Mapping[str, str] | None = None,
     ) -> None:
-        """Mark existing ledger rows as hash-audited imperative bundle output."""
+        """Mark existing ledger rows as hash-audited imperative bundle output.
+
+        *scopes* records the install scope of a path's bundle claim.
+        """
         if not bundle_paths:
             return
         records = dict(lockfile.deployment_ledger.records)
         marked_paths: set[str] = set()
-        for key, record in records.items():
+        for key, record in list(records.items()):
             path = DeploymentLedgerCodec.legacy_value(record.locator)
             if path not in bundle_paths:
                 continue
             _require_local_bundle_hash(path, record.content_hash)
             owners = tuple(owner for owner in record.owners if owner != _LOCAL_BUNDLE_OWNER)
-            records[key] = DeploymentRecord(
-                locator=record.locator,
+            scope = (scopes or {}).get(path, record.locator.scope)
+            locator = (
+                record.locator
+                if scope == record.locator.scope
+                else replace(record.locator, scope=scope)
+            )
+            del records[key]
+            records[locator.key] = DeploymentRecord(
+                locator=locator,
                 owners=(*owners, _LOCAL_BUNDLE_OWNER),
                 active_owner=_LOCAL_BUNDLE_OWNER,
                 content_hash=record.content_hash,
