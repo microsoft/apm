@@ -167,7 +167,7 @@ security:
 
 | Field | Default | Behavior |
 |-------|---------|----------|
-| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle with cached policy but no embedded `apm.lock.yaml` fails closed; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs never fetch policy from the network. Logical OR on inheritance. |
+| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle without an embedded `apm.lock.yaml` fails closed under this setting; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs resolve org policy as package installs do. Logical OR on inheritance. |
 | `audit.fail_on_drift` | `false` | When `true`, a bare `apm audit` exits non-zero when workspace content drifts from the lockfile (default-off keeps drift advisory at exit 0). Only changes the exit code; `apm audit --ci` already gates on drift. Logical OR on inheritance. |
 
 Canonical deployment ownership is an always-on integrity boundary, not a

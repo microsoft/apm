@@ -124,9 +124,9 @@ Build a bundle on a connected machine, carry it across, and install it.
    APM checks every file against the bundle's hashes and rejects symlinks, unlisted
    files and mismatches before deploying. The hashes travel inside the bundle, so they
    catch corruption, not a bundle someone rebuilt: carry it over a channel you trust. `apm install` does not edit `apm.yml`; it records the
-   deployed files in `apm.lock.yaml`. It never downloads a policy: a policy already in
-   the local cache is applied, and `security.integrity.require_hashes: true` refuses
-   bundles without hashes.
+   deployed files in `apm.lock.yaml`. Org policy resolves as for a package install; on
+   a disconnected machine the fetch fails and `policy.fetch_failure_default` decides.
+   `security.integrity.require_hashes: true` refuses bundles without hashes.
 
 To enforce org policy on a disconnected CI runner, vendor the policy file and pass it
 explicitly. An explicit source that fails to load fails the check:

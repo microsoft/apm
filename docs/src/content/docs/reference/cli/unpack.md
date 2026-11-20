@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::caution[Deprecated]
-`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the only deploy path for legacy `--format apm` tarballs (see [Behavior](#behavior)).
+`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the deploy path for legacy `--format apm` tarballs without executable content (see [Behavior](#behavior)).
 :::
 
 ## Synopsis
@@ -78,7 +78,7 @@ apm unpack bundle.zip --force
 
 ## Behavior
 
-- **Bundle formats.** `apm install` deploys only plugin-format bundles. Legacy `--format apm` tarballs (whole-project bundles produced by older `apm pack` invocations) are deployed via `apm unpack` and have no equivalent `install` path. `apm unpack` refuses a plugin-format bundle (root `plugin.json`) and points to `apm install`.
+- **Bundle formats.** `apm install` deploys only plugin-format bundles. Legacy `--format apm` tarballs (whole-project bundles produced by older `apm pack` invocations) are deployed via `apm unpack`, except executable content (see the caution above), and have no equivalent `install` path. `apm unpack` refuses a plugin-format bundle (root `plugin.json`) and points to `apm install`.
 - **Additive writes only.** Files not listed in the bundle's lockfile are left alone; the bundle never deletes project files.
 - **Overwrite on collision.** When a bundle file shares a path with a local file, the bundle file wins.
 - **Managed destinations only.** Every `deployed_files` entry must land under a known integration directory (`.github/`, `.claude/`, `.agents/`, ...) of the output directory, with no symlinked path component. Any other entry fails the unpack before a file is written. Bundle paths that run through a symlink are skipped.
@@ -86,7 +86,7 @@ apm unpack bundle.zip --force
 - **Verification.** By default, every entry in the bundle's `deployed_files` must exist inside the archive. `--skip-verify` disables this check; missing files are then reported as skipped.
 - **Target mismatch warning.** If the bundle was packed for a different harness target than the output project's detected target, `apm unpack` warns and -- with `--verbose` -- suggests the `apm pack --target` command the publisher should run.
 - **Lockfile is metadata.** The bundle's `apm.lock.yaml` is read for verification and target metadata but is never written to the output directory.
-- **Exit codes.** `0` on success (including `--dry-run`); `1` on missing bundle, invalid bundle, or critical security findings without `--force`.
+- **Exit codes.** `0` on success (including `--dry-run`); `1` on missing bundle, invalid bundle, executable content (`--force` does not override this), or critical security findings without `--force`.
 
 ## Related
 
