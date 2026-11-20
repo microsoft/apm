@@ -2435,6 +2435,22 @@
       ]
     },
     {
+      "issue": 4228,
+      "fixed_in": "Unreleased",
+      "summary": "apm update carried a marketplace dependency's recorded provenance forward on the lockfile's word: a tampered or cleared discovered_via, marketplace_plugin_name, source_url or source_digest survived a no-change update. Update now re-verifies every marketplace row against its registered catalog, restores the catalog origin and digest, and fails closed on an unknown alias, missing plugin, rebound origin or incomplete provenance.",
+      "failure_modes": [
+        "reference",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "lockfile.frozen_preserves_bytes"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_update_provenance_lifecycle.py::test_update_restores_or_refuses_altered_marketplace_provenance"
+      ]
+    },
+    {
       "issue": 4229,
       "fixed_in": "Unreleased",
       "summary": "After a checkout or worktree switch, install refused or kept a deployed skill whose bytes equal its link-rewritten render, because a receipt written under another checkout's lock still decided the baseline.",

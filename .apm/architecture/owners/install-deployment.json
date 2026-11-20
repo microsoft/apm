@@ -353,7 +353,7 @@
         "src/apm_cli/install/phases/_redownload.py",
         "src/apm_cli/install/phases/lockfile_cache_pins.py"
       ],
-      "guards": ["install-deployment-locked-copy-validity", "install-deployment-update-content-integrity", "install-deployment-update-registry-integrity"]
+      "guards": ["install-deployment-locked-copy-validity", "install-deployment-update-content-integrity", "install-deployment-update-registry-integrity", "install-deployment-update-marketplace-provenance"]
     },
     {
       "id": "package-content-hash",

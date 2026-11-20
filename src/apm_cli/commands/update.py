@@ -453,6 +453,23 @@ def _handle_service_only_update(
     return True
 
 
+def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
+    """Re-verify locked marketplace provenance before planning; fail closed (#4228)."""
+    from apm_cli.marketplace.catalog_origin import reverify_locked_provenance
+    from apm_cli.marketplace.errors import MarketplaceError
+
+    try:
+        restored = reverify_locked_provenance(lockfile)
+    except MarketplaceError as exc:
+        _rich_error(str(exc), symbol="error")
+        sys.exit(1)
+    for row in restored:
+        logger.info(f"Restored marketplace provenance for {row} from its catalog.")
+    if restored and not dry_run:
+        lockfile.write(lock_path)
+    return lockfile
+
+
 @click.command(
     name="update",
     help="Refresh APM dependencies to the latest matching refs",
@@ -898,7 +915,7 @@ def _run_dep_update_locked(
     _modules_dir = get_modules_dir(scope)
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
-    _existing_lock = LockFile.read(_lock_path)
+    _existing_lock = _reverified_lock(LockFile.read(_lock_path), _lock_path, logger, dry_run)
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,

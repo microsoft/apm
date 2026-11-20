@@ -19,6 +19,8 @@
 
 from __future__ import annotations
 
+import re
+
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
     _first_line_re,
@@ -33,6 +35,7 @@ from scripts.architecture_linter.models import Violation
 
 GUARD_TRUST_POLICY_OUTCOME = "install-deployment-trust-policy-outcome"
 GUARD_UPDATE_CONTENT_INTEGRITY = "install-deployment-update-content-integrity"
+GUARD_UPDATE_MARKETPLACE_PROVENANCE = "install-deployment-update-marketplace-provenance"
 GUARD_UPDATE_REGISTRY_INTEGRITY = "install-deployment-update-registry-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
 GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
@@ -532,5 +535,56 @@ def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ..
                 _PACK_COMMAND,
                 "apm unpack must hold the lifecycle lock (serialized_lifecycle_unless)",
             )
+        )
+    return tuple(findings)
+
+
+_UPDATE = "src/apm_cli/commands/update.py"
+_CATALOG_ORIGIN = "src/apm_cli/marketplace/catalog_origin.py"
+_PROVENANCE_REQUIRED = {
+    _UPDATE: ("_existing_lock = _reverified_lock(LockFile.read(_lock_path)",),
+    _CATALOG_ORIGIN: (
+        "def reverify_locked_provenance(",
+        "require_locked_row_origin(dep)",
+        "resolution = resolve_marketplace_plugin(plugin, alias)",
+    ),
+}
+# Lock catalog provenance is written by the lockfile phase and the origin owner only.
+_PROVENANCE_WRITERS = frozenset({"src/apm_cli/install/phases/lockfile.py", _CATALOG_ORIGIN})
+_PROVENANCE_WRITE = re.compile(r"\.(source_url|source_digest) = ")
+
+
+def check_update_marketplace_provenance(provider: FactsProvider) -> tuple[Violation, ...]:
+    """``apm update`` re-verifies locked marketplace provenance through one owner (#4228)."""
+    findings: list[Violation] = []
+    for path, needles in _PROVENANCE_REQUIRED.items():
+        facts, failures = _facts_for(provider, path, GUARD_UPDATE_MARKETPLACE_PROVENANCE)
+        findings.extend(failures)
+        if failures:
+            continue
+        missing = [needle for needle in needles if not _present(facts, needle)]
+        if missing:
+            findings.append(
+                _summary(
+                    GUARD_UPDATE_MARKETPLACE_PROVENANCE,
+                    path,
+                    "Marketplace provenance re-verification is missing: " + ", ".join(missing),
+                )
+            )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path in _PROVENANCE_WRITERS:
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_UPDATE_MARKETPLACE_PROVENANCE)
+        if failures:
+            continue
+        findings.extend(
+            violation(
+                GUARD_UPDATE_MARKETPLACE_PROVENANCE,
+                path,
+                "Write lock source_url/source_digest through marketplace.catalog_origin",
+                line=number,
+            )
+            for number, line in enumerate(_lines(facts), start=1)
+            if _PROVENANCE_WRITE.search(line)
         )
     return tuple(findings)

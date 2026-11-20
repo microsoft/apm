@@ -179,6 +179,7 @@ from scripts.architecture_linter.checks.install_trust_integrity import (
     GUARD_TRUST_POLICY_OUTCOME,
     GUARD_UNPACK_EXECUTABLES,
     GUARD_UPDATE_CONTENT_INTEGRITY,
+    GUARD_UPDATE_MARKETPLACE_PROVENANCE,
     GUARD_UPDATE_REGISTRY_INTEGRITY,
     check_bundle_admission_owner,
     check_bundle_user_scope_root,
@@ -186,6 +187,7 @@ from scripts.architecture_linter.checks.install_trust_integrity import (
     check_trust_policy_outcome,
     check_unpack_executable_refusal,
     check_update_content_integrity,
+    check_update_marketplace_provenance,
     check_update_registry_integrity,
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
@@ -248,6 +250,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_UPDATE_REGISTRY_INTEGRITY,
         "apm update verifies an unchanged registry version against its locked hash.",
         check_update_registry_integrity,
+    ),
+    _rule(
+        GUARD_UPDATE_MARKETPLACE_PROVENANCE,
+        "apm update re-verifies locked marketplace provenance against its catalog.",
+        check_update_marketplace_provenance,
     ),
     _rule(
         GUARD_BUNDLE_USER_SCOPE_ROOT,
