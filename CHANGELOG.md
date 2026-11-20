@@ -24,10 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g` installs a dependency's transitive relative local paths (`../sibling`, `./sub`), anchored on the declaring package, and any transitive local dependency that cannot be resolved now fails the install with exit 1 instead of being dropped silently. (closes #4153, #4138)
 - `apm update` (including `-g`) no longer reports `1 updated` and rewrites files on every run for a dependency declared without a ref; it reports a change only when the default branch moves. (closes #4166, #4138)
 - `apm install` and `apm prune` remove deployment receipts under `~/.apm/deployment-receipts/` whose project directory no longer exists. (closes #4176, #4138)
+- Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 
 ### Fixed
 
+- Registry archives get the same archive limits for every accepted format, and every entry is validated before anything is written. (closes #4235, #4266)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)
 - Internal: unit tests no longer inherit console routing, config or environment left by an earlier test on the same worker; a per-test leak detector fails the test that leaks. (#4226)

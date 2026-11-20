@@ -13,7 +13,8 @@
       "tests/unit/install/test_mcp_registry_module.py": 6,
       "tests/unit/registry/test_resolver.py": 2,
       "tests/unit/registry/test_resolver_e2e_http.py": 1
-    }
+    },
+    "AQ005_global_patch_through_namespace": {}
   },
   "schema_version": 1
 }
