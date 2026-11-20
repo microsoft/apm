@@ -436,15 +436,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "approve-org-policy-warning-twice",
         "I9",
         "#4178",
-        # 'apm approve <package>' prints it twice; '--recommended' prints it once.
-        lambda args, _scenario: _command_name(args) == "approve" and "--recommended" not in args,
-        r"\[!\] (Org policy not applied|Using stale cached org policy)",
-        output=r"^\[!\] (Org policy not applied|Using stale cached org policy)",
-    ),
-    KnownOutputCell(
-        "approve-org-policy-warning-twice",
-        "I9",
-        "#4178",
         _runs("approve"),
         r"\[!\] (Org policy not applied|Using stale cached org policy)",
         # Only runs that print the same warning line twice (a single warning is correct).
@@ -553,12 +544,83 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
     KnownOutputCell(
+        "install-echoes-non-ascii-path",
+        "I6",
+        "#4330",
+        _runs("install"),
+        r"stdout has characters outside printable ASCII",
+        output=r"[^\x00-\x7f]",
+    ),
+    KnownOutputCell(
+        "uninstall-duplicate-declaration-lines",
+        "I9",
+        "#4331",
+        _runs("uninstall"),
+        r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
+        output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "install-adapter-unreadable-config-warning-twice",
+        "I9",
+        "#4332",
+        _runs("install"),
+        r"stderr repeats a line: 'WARNING apm_cli\.adapters\.client\.\w+ Could not read",
+        output=r"as a JSON object -- skipping config write",
+    ),
+    KnownOutputCell(
+        "update-deny-all-lifecycle-notice-repeats",
+        "I9",
+        "#4333",
+        _runs("update"),
+        r"Lifecycle scripts suppressed by org policy",
+        output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "install-verbose-diagnostics-repeat",
+        "I9",
+        "#4334",
+        _runs("install", "--verbose"),
+        r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
+        output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "install-hook-summary-line-twice",
+        "I9",
+        "#4336",
+        _runs("install"),
+        r"repeats a line: '\|   \w+: runs ",
+        # Not the per-target shape #4243 owns.
+        output=(
+            r"\A(?!.*(?:^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, "
+            r"\.windsurf/hooks\.json$|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n"
+            r"  \|   Hook file integrated: ))"
+            r".*^\s*(\|   \w+: runs [^\n]*)$.*^\s*\1$"
+        ),
+    ),
+    KnownOutputCell(
+        "install-frozen-parked-mcp-notice-per-phase",
+        "I9",
+        "#4299",
+        _runs("install", "--frozen"),
+        r"Parked MCP server",
+        output=r"^\s*(\[!\] Parked MCP server [^\n]*)$.*^\s*\1$",
+    ),
+    KnownOutputCell(
+        "pack-plugin-manifest-notes-twice",
+        "I9",
+        "#4291",
+        _runs("pack"),
+        r"repeats a diagnostic: '(\[i\]'|\[!\] Secrets withheld from plugin\.json)",
+        output=r"^\s*(\[i\]|\[!\] Secrets withheld from plugin\.json[^\n]*)\s*$.*^\s*\1\s*$",
+    ),
+    KnownOutputCell(
         "install-frozen-trust-notice-repeats",
         "I9",
         "#4256",
         _runs("install", "--frozen"),
         r"Trusting direct dependency MCP",
-        output=r"^\[i\] Trusting direct dependency MCP",
+        # Only runs that print the same trust notice twice (one notice is correct).
+        output=r"^(\[i\] Trusting direct dependency MCP[^\n]*)$.*^\1$",
     ),
 )
 
