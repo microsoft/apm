@@ -63,11 +63,12 @@
     },
     {
       "id": "cached-policy-shape",
-      "decision": "Cached policy shape and the APM_POLICY_DISABLE switch reader",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
+      "decision": "Cached policy shape, that a cached policy document is verified against its recorded fingerprint and the project policy.hash pin before any command uses it (#4218), and the APM_POLICY_DISABLE switch reader",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; _read_cache_entry with _cached_policy_matches, the only policy cache reader; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
       "selectors": ["src/apm_cli/policy/discovery.py"],
       "guards": [
         "contracts-tooling-cached-policy-shape",
+        "install-deployment-policy-cache-pin",
         "install-deployment-policy-disable-switch-owner"
       ]
     },

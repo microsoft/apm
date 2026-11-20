@@ -102,6 +102,10 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
     _GUARD_PACKAGE_TARGET,
     check_package_target_authorization,
 )
+from scripts.architecture_linter.checks.install_policy_cache_pin import (
+    GUARD_POLICY_CACHE_PIN,
+    check_policy_cache_pin,
+)
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_policy_outcome_routing import (
     GUARD_POLICY_FIELD_TYPES,
@@ -197,6 +201,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_POLICY_FIELD_TYPES,
         "A wrongly typed policy field is a malformed policy, never a parser crash.",
         check_policy_field_types,
+    ),
+    _rule(
+        GUARD_POLICY_CACHE_PIN,
+        "A cached org policy is verified against its record before use, in one reader.",
+        check_policy_cache_pin,
     ),
     _rule(
         GUARD_TRUST_POLICY_OUTCOME,

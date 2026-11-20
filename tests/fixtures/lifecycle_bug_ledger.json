@@ -607,6 +607,17 @@
         "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
         "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
       ]
+    },
+    {
+      "issue": 4218,
+      "fixed_in": "Unreleased",
+      "summary": "Cached org policy content is verified against the record written with it before any command uses it: an altered cached policy document is not applied, and the policy is fetched again and checked against the project policy.hash pin.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_cache_pin_lifecycle.py::test_altered_cached_policy_is_not_applied",
+        "tests/unit/policy/test_cache_merged_effective.py::test_altered_cached_policy_document_is_ignored"
+      ]
     }
   ],
   "lifecycle_contracts": [

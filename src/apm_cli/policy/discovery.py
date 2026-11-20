@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -1880,6 +1881,16 @@ def _detect_garbage(
     return None  # Not garbage -- proceed with normal parsing
 
 
+def _cached_policy_matches(serialized: str, meta: dict) -> bool:
+    """Whether a cached policy document is the one its metadata recorded."""
+    recorded = meta.get("fingerprint")
+    return (
+        isinstance(recorded, str)
+        and bool(recorded)
+        and hmac.compare_digest(recorded, _policy_fingerprint(serialized))
+    )
+
+
 def _read_cache_entry(
     repo_ref: str,
     project_root: Path,
@@ -1942,9 +1953,16 @@ def _read_cache_entry(
             if raw_bytes_hash.lower() != expected_norm:
                 return None
 
+        # The cached document must be the one this entry recorded (#4218):
+        # content that no longer matches its fingerprint is never applied, so
+        # the caller fetches again and verifies the pin on fresh bytes.
+        serialized = policy_file.read_text(encoding="utf-8")
+        if not _cached_policy_matches(serialized, meta):
+            return None
+
         # The sidecar preserves warnings from the authored cold input. Parser
         # warnings from canonical cache YAML are intentionally not user-facing.
-        policy, _warnings = load_policy(policy_file)
+        policy, _warnings = load_policy(serialized)
         effective_ttl = policy.cache.ttl if ttl is None else ttl
         cached_warnings = meta.get("warnings", [])
         if not isinstance(cached_warnings, list):

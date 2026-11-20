@@ -1529,5 +1529,20 @@ def test_extends_only_leaf_resolves_strict_parent(tmp_path: Path) -> None:
     assert transport.call_count == 2
 
 
+def test_altered_cached_policy_document_is_ignored(tmp_path: Path) -> None:
+    """#4218: a cached document that no longer matches its record is never applied."""
+    repo_ref = "contoso/.github"
+    pin = "sha256:" + "a" * 64
+    _write_cache(repo_ref, ApmPolicy(name="org"), tmp_path, raw_bytes_hash=pin)
+    assert _read_cache_entry(repo_ref, tmp_path, expected_hash=pin) is not None
+
+    document = _get_cache_dir(tmp_path) / f"{_cache_key(repo_ref)}.yml"
+    altered = document.read_text(encoding="utf-8") + "dependencies:\n  deny: [contoso/pkg-a]\n"
+    document.write_text(altered, encoding="utf-8")
+
+    assert _read_cache_entry(repo_ref, tmp_path, expected_hash=pin) is None
+    assert _read_cache_entry(repo_ref, tmp_path) is None
+
+
 if __name__ == "__main__":
     unittest.main()
