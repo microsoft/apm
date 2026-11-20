@@ -85,7 +85,7 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             result = _retry_on_lock(flaky, "test op", max_retries=5)
 
         assert result == "ok"
@@ -97,7 +97,7 @@ class TestRetryOnLock:
         def always_fail():
             raise exc
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), pytest.raises(OSError, match="busy"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"), pytest.raises(OSError, match="busy"):
             _retry_on_lock(always_fail, "test op", max_retries=2)
 
     def test_non_transient_error_raises_immediately(self):
@@ -127,7 +127,7 @@ class TestRetryOnLock:
             return "ok"
 
         with patch(
-            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+            "apm_cli.utils.file_ops._retry_sleep", side_effect=lambda d: sleep_calls.append(d)
         ):
             _retry_on_lock(
                 fail_three_times,
@@ -156,7 +156,7 @@ class TestRetryOnLock:
             return "ok"
 
         with patch(
-            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+            "apm_cli.utils.file_ops._retry_sleep", side_effect=lambda d: sleep_calls.append(d)
         ):
             _retry_on_lock(
                 fail_many,
@@ -187,7 +187,7 @@ class TestRetryOnLock:
             nonlocal cleanup_calls
             cleanup_calls += 1
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             _retry_on_lock(fail_once, "test", before_retry=cleanup, max_retries=3)
 
         assert cleanup_calls == 1
@@ -206,7 +206,7 @@ class TestRetryOnLock:
         def bad_cleanup():
             raise OSError("cleanup failed")
 
-        with patch("apm_cli.utils.file_ops.time.sleep"):
+        with patch("apm_cli.utils.file_ops._retry_sleep"):
             result = _retry_on_lock(
                 fail_once,
                 "test",
@@ -226,7 +226,10 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), patch.dict(os.environ, {"APM_DEBUG": "1"}):
+        with (
+            patch("apm_cli.utils.file_ops._retry_sleep"),
+            patch.dict(os.environ, {"APM_DEBUG": "1"}),
+        ):
             _retry_on_lock(
                 fail_once,
                 "SENSITIVE_PATH_SENTINEL",

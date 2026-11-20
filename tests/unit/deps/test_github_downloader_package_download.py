@@ -603,7 +603,7 @@ class TestTrySparseCheckout:
         ok_result = MagicMock(returncode=0)
 
         with (
-            patch("apm_cli.deps.github_downloader.subprocess.run", return_value=ok_result),
+            patch("subprocess.run", return_value=ok_result),
             patch(
                 "apm_cli.utils.git_env.init_git_remote_worktree",
                 side_effect=lambda _path, _url, env, **_kw: env,

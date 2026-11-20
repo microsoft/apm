@@ -356,7 +356,6 @@
 "tests/unit/install/test_services.py": 0.5,
 "tests/unit/install/test_services_branches.py": 0.66,
 "tests/unit/install/test_services_hook_scope.py": 0.09,
-"tests/unit/install/test_services_phase3.py": 0.79,
 "tests/unit/install/test_services_rendering.py": 0.45,
 "tests/unit/install/test_short_sha.py": 0.12,
 "tests/unit/install/test_skill_completion_receipt.py": 0.04,
