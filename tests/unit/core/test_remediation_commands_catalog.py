@@ -47,6 +47,10 @@ _NETWORK = "runs against the network or a real installer"
 _OUTSIDE = "advised by a command outside the executed command families"
 
 COMPONENT_ONLY: dict[str, str] = {
+    "bundle-hooks-unchecked": (
+        "needs target resolution to fail mid-prune; tests/unit/test_prune_command.py "
+        "drives that branch"
+    ),
     "agent-plugin-bundle-consumer": _OUTSIDE,
     "auth-token-unexported": _NETWORK,
     "bundle-target-mismatch": _OUTSIDE,

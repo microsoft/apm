@@ -203,6 +203,7 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[crlf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[lf]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_mcp_validation_fails_before_durable_mutation",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-project]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-user]",
@@ -218,7 +219,7 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 32,
+      "test_count": 33,
       "tests": [
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-http]",
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-stdio]",
@@ -243,6 +244,7 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[crlf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[lf]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_mcp_validation_fails_before_durable_mutation",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-project]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-user]",
@@ -556,6 +558,27 @@
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[independent-recovery]",
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[manifest]",
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[relocation]"
+      ]
+    },
+    {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-lk-024",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion"
       ]
     },
     {
@@ -2299,16 +2322,24 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp"
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]"
       ],
       "conformance_class": "consumer",
       "id": "req-sc-009",
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 6,
+      "test_count": 10,
       "tests": [
         "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval",
         "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-install-hooks]",
         "tests/spec_conformance/test_user_scope_executable_gate_reqs.py::test_user_scope_install_fails_closed_on_user_manifest_block[listed-approved-mcp-admission]",
@@ -2376,14 +2407,23 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[gate-wins]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[non-tty-default-deny]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[opt-in]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[opt-out]"
+      ],
       "conformance_class": "consumer",
       "id": "req-sc-014",
       "keyword": "MUST",
       "section": "10.15",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 5,
       "tests": [
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[gate-wins]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[non-tty-default-deny]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[opt-in]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_bin_consent_composes_after_the_gate[opt-out]",
         "tests/spec_conformance/test_manifest_reqs.py::test_bin_deployment_defaults_to_deny_in_non_interactive_context"
       ]
     },
@@ -2791,9 +2831,9 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 71,
+      "active": 73,
       "skipped": 3,
-      "text-only": 40,
+      "text-only": 39,
       "unbound": 0,
       "xfail": 0
     },
@@ -2819,5 +2859,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 148
+  "total_requirements": 149
 }

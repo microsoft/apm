@@ -94,8 +94,8 @@ def bundle_deploy_relative_path(
     known_deploy_prefixes: frozenset[str],
     *,
     target: TargetProfile | None = None,
-    hooks_approved: bool = True,
-    canvas_approved: bool = True,
+    hooks_approved: bool,
+    canvas_approved: bool,
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root.
 
@@ -108,7 +108,9 @@ def bundle_deploy_relative_path(
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
-    if _unapproved_executable_kind(deploy_rel, hooks_approved, canvas_approved):
+    if _unapproved_executable_kind(
+        deploy_rel, hooks_approved=hooks_approved, canvas_approved=canvas_approved
+    ):
         return None
     return _lower_to_target(deploy_rel, target)
 
@@ -119,8 +121,8 @@ def bundle_deploy_skip_warning(
     known_deploy_prefixes: frozenset[str],
     *,
     target: TargetProfile | None = None,
-    hooks_approved: bool = True,
-    canvas_approved: bool = True,
+    hooks_approved: bool,
+    canvas_approved: bool,
 ) -> str | None:
     """Return an explicit warning for a deliberately skipped bundle path."""
     validate_path_segments(rel_path, context="bundle deploy path")
@@ -129,7 +131,9 @@ def bundle_deploy_skip_warning(
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
-    if kind := _unapproved_executable_kind(deploy_rel, hooks_approved, canvas_approved):
+    if kind := _unapproved_executable_kind(
+        deploy_rel, hooks_approved=hooks_approved, canvas_approved=canvas_approved
+    ):
         return (
             f"Skipped packed bundle {kind} file {rel_path!r}: {kind} from this bundle "
             "is not approved for its exact content. Run 'apm policy explain' "
@@ -191,7 +195,7 @@ def _deploy_relative_candidate(
 
 
 def _unapproved_executable_kind(
-    deploy_rel: str, hooks_approved: bool, canvas_approved: bool
+    deploy_rel: str, *, hooks_approved: bool, canvas_approved: bool
 ) -> str | None:
     """Return the executable kind of a target-relative path that lacks approval."""
     from ..bundle.plugin_layout import PLUGIN_LAYOUT

@@ -1829,8 +1829,13 @@ def resolve_audit_targets(
     *,
     user_scope: bool = False,
     lockfile: LockFile | None = None,
+    include_recorded: bool = False,
 ) -> list[TargetProfile]:
-    """Resolve read-only audit profiles through target and deployment owners."""
+    """Resolve read-only audit profiles through target and deployment owners.
+
+    *include_recorded* adds the targets the lock recorded to a declared
+    manifest target set, so a render covers targets the manifest just dropped.
+    """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import get_workspace_deploy_root
     from apm_cli.core.target_detection import (
@@ -1849,8 +1854,11 @@ def resolve_audit_targets(
         if lock is not None
         else ()
     )
+    manifest_target = read_manifest_target(project_root)
+    if include_recorded and manifest_target and recorded:
+        manifest_target = sorted({*manifest_target, *recorded})
     decision = resolve_audit_target_decision(
-        manifest_target=read_manifest_target(project_root),
+        manifest_target=manifest_target,
         recorded_targets=recorded,
     )
     for name in decision.canonical_targets or ():

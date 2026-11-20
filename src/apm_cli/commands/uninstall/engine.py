@@ -41,6 +41,7 @@ from ...utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from ...core.deployment_ledger import DeploymentMaterializationSession
+    from ...integration.cleanup import DeploymentEvidence
 
 
 class MCPUninstallCleanupError(RuntimeError):
@@ -1351,6 +1352,8 @@ def _sync_integrations_after_uninstall(
     survivor_plan: list[tuple[DependencyReference, object]] | None = None,
     deployed_file_hashes: dict[str, str] | None = None,
     excluded_survivor_keys: frozenset[str] = frozenset(),
+    *,
+    evidence: "DeploymentEvidence | None",
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1449,14 +1452,16 @@ def _sync_integrations_after_uninstall(
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
     # their known-good merged settings (#3226).
-    from ...security.executables import resolve_project_exec_allow_map
+    from ...security.executables import closed_exec_map, resolve_project_exec_allow_map
 
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
-    _allow_executables = None
-    if target_survivor_plan:
-        _allow_executables = resolve_project_exec_allow_map(
+    _allow_executables = (
+        resolve_project_exec_allow_map(
             project_root, apm_package, user_scope=user_scope, logger=logger
         )
+        if target_survivor_plan
+        else closed_exec_map(None)
+    )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only
@@ -1507,6 +1512,7 @@ def _sync_integrations_after_uninstall(
                 apm_package,
                 project_root,
                 managed_files=_managed_subset,
+                evidence=evidence,
             )
             counts[_entry.counter_key] += result.get("files_removed", 0)
 
@@ -1558,6 +1564,7 @@ def _sync_integrations_after_uninstall(
                 managed_files=_buckets["skills"] if _buckets else None,
                 targets=_sync_targets,
                 removed_paths=removed_skill_paths,
+                evidence=evidence,
             )
         finally:
             DeploymentMaterializationSession.retire_removed(
@@ -1609,6 +1616,7 @@ def _sync_integrations_after_uninstall(
         managed_files=_buckets["hooks"] if _buckets else None,
         managed_file_hashes=deployed_file_hashes,
         targets=_resolved_targets,
+        evidence=evidence,
     )
     counts["hooks"] = result.get("files_removed", 0)
     unsafe_hook_paths = result.get("unsafe_paths", [])

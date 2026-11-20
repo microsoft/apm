@@ -588,6 +588,11 @@ LOCKFILE_STATE_UNRECONCILED = _entry(
     "resync the lockfile state",
     then="retry",
 )
+BUNDLE_HOOKS_UNCHECKED = _entry(
+    "bundle-hooks-unchecked",
+    "apm install",
+    "re-check the local bundle hooks once target resolution succeeds",
+)
 PRUNE_INCOMPLETE = _entry(
     "prune-incomplete",
     "apm prune",

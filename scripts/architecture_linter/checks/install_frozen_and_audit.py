@@ -32,6 +32,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
 from scripts.architecture_linter.checks.install_lifecycle_serialization import (
     SERIALIZED_LIFECYCLE_ROUTES,
 )
+from scripts.architecture_linter.checks.python_semantics import dotted_name
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, violation
 from scripts.architecture_linter.models import Violation
@@ -40,6 +41,7 @@ _GUARD_MCP_OWNERSHIP = "install-deployment-mcp-ownership-migration"
 
 
 _GUARD_FROZEN = "install-deployment-frozen-mutation-eligibility"
+_GUARD_FROZEN_FLAG_READER = "install-deployment-frozen-flag-reader"
 
 
 _GUARD_UNINSTALL_REACHABILITY = "install-deployment-uninstall-reachability"
@@ -219,7 +221,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         or not _body_has(mcp_prepare_body, "active_package_keys=active_package_keys,")
         or not _body_has(mcp_prepare_body, "allow_pending=allow_pending,")
         or not _present(adapter, "allow_pending_mcp=ctx.install_mode != InstallMode.MCP,")
-        or not _present(integration, "if ctx.frozen and ctx.existing_lockfile is not None:")
+        or not _present(
+            integration,
+            "if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:",
+        )
         or not _present(
             integration, "active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),"
         )
@@ -241,6 +246,166 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         )
     ]
     findings.extend(duplicates)
+    return tuple(findings)
+
+
+# ``sys.frozen`` is PyInstaller's bundled-executable marker, not the install flag.
+_FOREIGN_FROZEN_RECEIVERS = frozenset({"sys"})
+_FROZEN_FLAG = "frozen"
+# Phase seams that take the disposition: keyword-only and required, never a
+# default that fails open when a caller omits it.
+_FROZEN_DISPOSITION_CONSUMERS = (
+    ("src/apm_cli/install/phases/cleanup.py", "_run_cleanup"),
+    ("src/apm_cli/install/service_integration.py", "run_service_integrations"),
+)
+
+
+# The only non-owner functions that take a bare ``frozen`` boolean: the Click
+# option origin and the parameters the owner's disposition is passed into.
+_FROZEN_PARAMETER_SITES = frozenset(
+    {
+        ("src/apm_cli/commands/install.py", "install"),
+        ("src/apm_cli/deps/apm_resolver.py", "__init__"),
+        ("src/apm_cli/deps/immutable_requirements.py", "__init__"),
+        ("src/apm_cli/install/dry_run_plan.py", "with_resolved_dependencies"),
+        ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
+        ("src/apm_cli/install/pipeline.py", "run_install_pipeline"),
+    }
+)
+
+
+def _frozen_parameter(node: ast.AST, path: str) -> str | None:
+    """Describe a new bare ``frozen`` parameter outside the known sites, else None."""
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return None
+    arguments = node.args
+    names = [
+        arg.arg
+        for arg in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            arguments.vararg,
+            arguments.kwarg,
+        )
+        if arg is not None
+    ]
+    name = getattr(node, "name", "<lambda>")
+    if _FROZEN_FLAG in names and (path, name) not in _FROZEN_PARAMETER_SITES:
+        return f"new frozen parameter on {name}"
+    return None
+
+
+def _is_frozen_flag(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value == _FROZEN_FLAG
+
+
+def _is_frozen_target(node: ast.AST) -> bool:
+    """Return whether *node* names the install flag as an attribute or key."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == _FROZEN_FLAG and (
+            dotted_name(node.value) not in _FOREIGN_FROZEN_RECEIVERS
+        )
+    return isinstance(node, ast.Subscript) and _is_frozen_flag(node.slice)
+
+
+def _frozen_flag_read(node: ast.AST) -> str | None:
+    """Describe one read of an install ``frozen`` flag, else None.
+
+    Plain writes and deletes (``options["frozen"] = False``) are not reads;
+    an augmented assignment reads the previous value first.
+    """
+    if isinstance(node, ast.Call):
+        return _frozen_call_read(node)
+    if isinstance(node, ast.AugAssign) and _is_frozen_target(node.target):
+        return "augmented frozen read"
+    if (
+        isinstance(node, (ast.Attribute, ast.Subscript))
+        and isinstance(node.ctx, ast.Load)
+        and _is_frozen_target(node)
+    ):
+        return "raw .frozen read" if isinstance(node, ast.Attribute) else "raw ['frozen'] read"
+    if isinstance(node, ast.MatchClass) and _FROZEN_FLAG in node.kwd_attrs:
+        return "frozen= class pattern read"
+    if isinstance(node, ast.MatchMapping) and any(_is_frozen_flag(key) for key in node.keys):
+        return "{'frozen': ...} mapping pattern read"
+    return None
+
+
+def _frozen_call_read(node: ast.Call) -> str | None:
+    """Describe a call that reads the install ``frozen`` flag by name, else None."""
+    name = dotted_name(node.func).rsplit(".", 1)[-1]
+    if (
+        name in {"getattr", "hasattr"}
+        and len(node.args) >= 2
+        and _is_frozen_flag(node.args[1])
+        and dotted_name(node.args[0]) not in _FOREIGN_FROZEN_RECEIVERS
+    ):
+        return f"{name}(..., 'frozen') read"
+    if name == "attrgetter" and any(_is_frozen_flag(arg) for arg in node.args):
+        return "attrgetter('frozen') read"
+    # Only the first argument of get/pop is the key; later ones are defaults.
+    if name in {"get", "pop"} and node.args and _is_frozen_flag(node.args[0]):
+        return f"{name}('frozen') read"
+    return None
+
+
+def _requires_disposition(index: object, function: str) -> bool:
+    """Return whether *function* takes ``frozen_disposition`` keyword-only, no default."""
+    for node in getattr(index, "nodes", ()):
+        if isinstance(node, ast.FunctionDef) and node.name == function:
+            arguments = node.args
+            return any(
+                arg.arg == "frozen_disposition" and default is None
+                for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+            )
+    return False
+
+
+def check_frozen_flag_reader(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Only InstallService reads the install ``frozen`` flag (closed world, #4012).
+
+    Every other module consumes ``InstallService.frozen_disposition``. There is
+    no exemption marker: a new reader must route through the owner.
+    """
+    rule_id = _GUARD_FROZEN_FLAG_READER
+    owner, failures = _facts_for(provider, _FROZEN_OWNER, rule_id)
+    if failures:
+        return tuple(failures)
+    findings: list[Violation] = []
+    if not _present_re(owner, re.compile(r"^    def frozen_disposition\(")):
+        findings.append(
+            _summary(rule_id, _FROZEN_OWNER, "InstallService must own frozen_disposition")
+        )
+    for path, function in _FROZEN_DISPOSITION_CONSUMERS:
+        _, consumer_failures = _facts_for(provider, path, rule_id)
+        findings.extend(consumer_failures)
+        if not consumer_failures and not _requires_disposition(provider.tree_index(path), function):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    f"{function} must require frozen_disposition as a keyword-only argument",
+                )
+            )
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == _FROZEN_OWNER:
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            reason = _frozen_flag_read(node) or _frozen_parameter(node, path)
+            if reason is not None:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{reason}: only InstallService.frozen_disposition reads the "
+                        "install frozen flag",
+                        line=getattr(node, "lineno", 1),
+                    )
+                )
     return tuple(findings)
 
 

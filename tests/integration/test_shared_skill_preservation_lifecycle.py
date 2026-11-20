@@ -353,12 +353,17 @@ def test_native_skill_and_legacy_plugin_share_only_member_ownership(
         json.dumps({"name": "b", "version": "1.0.0", "skills": ["./skills/s"]}),
         encoding="utf-8",
     )
+    # At user scope a Claude plugin installs intact through Claude settings
+    # (#3290), so the two packages share member ownership only where the
+    # plugin still projects loose: the Codex root.
+    target = "codex" if user_scope else "claude,codex"
+    roots = {".agents/skills/s": "codex"} if user_scope else _ROOTS
     installed = []
     for owner in (*order, order[0]):
-        scenario.install(owner)
+        scenario.install(owner, target=target)
         if owner not in installed:
             installed.append(owner)
-        scenario.assert_state(owner, tuple(installed), installed=tuple(installed))
+        scenario.assert_state(owner, tuple(installed), installed=tuple(installed), roots=roots)
     lock = load_yaml(scenario.lock_root / "apm.lock.yaml")
     assert {row["package_type"] for row in lock["dependencies"]} == {
         "claude_skill",

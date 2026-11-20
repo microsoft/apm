@@ -94,6 +94,7 @@ from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import UserHookHomeReference
 
 _log = logging.getLogger(__name__)
@@ -1867,6 +1868,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         managed_file_hashes: dict[str, str] | None = None,
         targets=None,
+        evidence: "DeploymentEvidence | None" = None,
     ) -> dict:
         """Remove APM-managed hook files.
 
@@ -1889,27 +1891,19 @@ class HookIntegrator(BaseIntegrator):
         ]
         hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import remove_stale_deployed_files
-            from apm_cli.utils.diagnostics import DiagnosticCollector
+            from apm_cli.integration.cleanup import remove_synced_files
 
-            cleanup_paths: set[str] = set()
-            for rel_path in managed_files:
-                if not (normalized := rel_path.replace("\\", "/")).startswith(hook_prefix_tuple):
-                    continue
-                cleanup_paths.add(rel_path if Path(rel_path).is_absolute() else normalized)
-
-            cleanup_diagnostics = DiagnosticCollector()
-            cleanup = remove_stale_deployed_files(
-                cleanup_paths,
+            # Deletion needs deployment evidence; None keeps every file (#3701).
+            cleanup = remove_synced_files(
+                managed_files,
                 project_root,
+                prefixes=hook_prefix_tuple,
                 dep_key="<uninstall hooks>",
                 targets=guard_targets,
-                diagnostics=cleanup_diagnostics,
+                evidence=evidence,
                 recorded_hashes=managed_file_hashes,
-                failed_path_retained=False,
                 allow_final_symlink=True,
             )
-            cleanup_diagnostics.render_summary()
             stats["files_removed"] += len(cleanup.deleted)
             retained = cleanup.retained
             if retained:
@@ -1963,7 +1957,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
         )
-        from apm_cli.security.executables import resolve_project_exec_allow_map
+        from apm_cli.security.executables import closed_exec_map, resolve_project_exec_allow_map
 
         from .targets import resolve_targets
 
@@ -1985,11 +1979,11 @@ class HookIntegrator(BaseIntegrator):
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
         )
-        allow_map = None
-        if survivor_plan:
-            allow_map = resolve_project_exec_allow_map(
-                project_root, apm_package, user_scope=user_scope
-            )
+        allow_map = (
+            resolve_project_exec_allow_map(project_root, apm_package, user_scope=user_scope)
+            if survivor_plan
+            else closed_exec_map(None)
+        )
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(

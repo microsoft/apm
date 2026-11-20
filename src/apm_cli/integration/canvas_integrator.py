@@ -47,6 +47,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
 
 #: Entry file that marks a directory under ``.apm/extensions/`` as a canvas.
@@ -275,6 +276,7 @@ class CanvasIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed canvas files for a single *target*.
 
@@ -292,6 +294,7 @@ class CanvasIntegrator(BaseIntegrator):
             managed_files,
             prefix=prefix,
             targets=[target],
+            evidence=evidence,
         )
         # Remove the now-empty .github/extensions/<name>/ directories left
         # behind once their files are gone.

@@ -21,6 +21,8 @@ from apm_cli.integration.command_integrator import (
     CommandIntegrator,
     _extract_input_names,
 )
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _to_bundle(d: dict) -> IntegratorBundle:
@@ -533,6 +535,7 @@ class TestIntegratePackagePrimitivesTargetGating:
                 force=False,
                 diagnostics=diagnostics,
                 integrators=_to_bundle(integrators),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_not_called()
@@ -564,6 +567,7 @@ class TestIntegratePackagePrimitivesTargetGating:
                 force=False,
                 diagnostics=diagnostics,
                 integrators=_to_bundle(integrators),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -594,6 +598,7 @@ class TestIntegratePackagePrimitivesTargetGating:
                 force=False,
                 diagnostics=diagnostics,
                 integrators=_to_bundle(integrators),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -654,6 +659,7 @@ class TestCursorCommandEndToEnd:
             force=False,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
         assert result["commands"] == 1
@@ -811,6 +817,7 @@ class TestInputToArgumentsEndToEnd:
             force=False,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
         assert result["commands"] == 1
@@ -1443,6 +1450,7 @@ class TestCursorCommandIntegration:
             None,
             temp_project,
             managed_files=managed,
+            evidence=receipted_evidence(temp_project),
         )
 
         assert result["files_removed"] == 1
