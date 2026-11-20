@@ -131,7 +131,7 @@ class TestUpdateConfigV2(_ProjectFixture):
         original = {"mcp": {"servers": {}}}
         self.write_config(original)
 
-        with patch("apm_cli.adapters.client.opencode._rich_warning") as warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as warn:
             self.assertFalse(self.adapter.update_config({"pkg": LOCAL_ENTRY}, enabled="yes"))
 
         self.assertEqual(self.read_config(), original)

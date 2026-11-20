@@ -89,7 +89,7 @@ class TestMarketplaceAdd:
         result = runner.invoke(marketplace, ["add", "acme/catalog", "--name", "team"])
         assert result.exit_code == 1
         flat = " ".join(result.output.split())
-        assert "rerun this 'apm marketplace add' command" in flat
+        assert "then run 'apm marketplace add <source>' to register the marketplace" in flat
         assert "marketplace update" not in flat
         mock_add.assert_not_called()
 
@@ -886,7 +886,7 @@ class TestSearch:
 
         result = runner.invoke(search, ["security"])
         assert result.exit_code != 0
-        assert "QUERY@MARKETPLACE" in result.output
+        assert "<query>@<marketplace>" in result.output
 
     @pytest.mark.parametrize("expression", ["security", "@skills"])
     def test_search_format_hint_names_real_command(self, runner, expression):

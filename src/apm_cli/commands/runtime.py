@@ -5,6 +5,10 @@ import sys
 
 import click
 
+from apm_cli.core.remediation import (
+    RUNTIME_MISSING,
+)
+
 from ..core.command_logger import CommandLogger
 from ..install.locking import serialized_lifecycle
 from ..runtime.registry import runtime_names
@@ -65,11 +69,11 @@ def list():  # noqa: F811
         runtimes = manager.list_runtimes()
 
         try:
-            from rich.table import Table  # type: ignore
+            from apm_cli.utils.console import new_table
 
             console = _get_console()
             # Create a nice table for runtimes
-            table = Table(
+            table = new_table(
                 title=" Available Runtimes",
                 show_header=True,
                 header_style="bold cyan",
@@ -169,7 +173,7 @@ def status():
 Active runtime: {available_runtime if available_runtime else "None available"}"""
 
             if not available_runtime:
-                status_content += f"\n\n{STATUS_SYMBOLS['info']} Run 'apm runtime setup copilot' to install the primary runtime"
+                status_content += f"\n\n{STATUS_SYMBOLS['info']} {RUNTIME_MISSING.sentence()}"
 
             _rich_panel(status_content, title=" Runtime Status", style="cyan")
 
@@ -184,7 +188,7 @@ Active runtime: {available_runtime if available_runtime else "None available"}""
                 logger.success(f"Active runtime: {available_runtime}")
             else:
                 logger.error("No runtimes available")
-                logger.progress("Run 'apm runtime setup copilot' to install the primary runtime")
+                logger.progress(RUNTIME_MISSING.sentence())
 
     except Exception as e:
         logger.error(f"Error checking runtime status: {e}")

@@ -945,7 +945,7 @@ class TestSearchCmd:
 
         result = runner.invoke(search, ["just-a-query"])
         assert result.exit_code != 0
-        assert "QUERY@MARKETPLACE" in result.output
+        assert "<query>@<marketplace>" in result.output
 
     def test_empty_query_exits_1(self, runner: CliRunner) -> None:
         from apm_cli.commands.marketplace import search

@@ -114,6 +114,26 @@ def new_console(**kwargs: Any) -> Any:
     return _ascii_console(rich_console.Console, **kwargs)
 
 
+_UNSET: Any = object()
+
+
+def new_table(*args: Any, box: Any = _UNSET, **kwargs: Any) -> Any:
+    """Return a new Rich table drawn with the ASCII box (#4089).
+
+    The one constructor for Rich tables in APM; ``args``/``kwargs`` pass
+    through to ``rich.table.Table``. ``box`` may only be ``None`` (no box) or
+    an ASCII box, so a table stays ASCII on any console that renders it.
+    """
+    from rich import box as rich_box
+    from rich.table import Table as RichTable
+
+    if box is _UNSET:
+        box = rich_box.ASCII
+    elif box is not None and not box.ascii:
+        raise ValueError("new_table() draws ASCII boxes only; pass box=None or an ASCII box")
+    return RichTable(*args, box=box, **kwargs)
+
+
 # Thread-safe console singleton ------------------------------------------------
 _console_instance: Any | None = None
 _console_lock = threading.Lock()
@@ -300,7 +320,7 @@ def _create_files_table(files_data: list, title: str = "Files") -> Any | None:
         return None
 
     try:
-        table = Table(title=title, show_header=True, header_style="bold cyan")
+        table = new_table(title=title, show_header=True, header_style="bold cyan")
         table.add_column("File", style="bold white")
         table.add_column("Description", style="white")
 

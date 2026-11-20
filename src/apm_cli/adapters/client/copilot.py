@@ -10,14 +10,12 @@ import os
 from pathlib import Path
 from typing import ClassVar
 
-import click
-
+from ...core.command_logger import library_logger
 from ...core.token_manager import GitHubTokenManager
 from ...mcp_transport import canonical_remote_transport
 from ...models.dependency.mcp import TrustedEnvLiteral
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from ...utils.console import _rich_warning
 from ...utils.github_host import is_github_hostname, unambiguous_https_hostname
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
@@ -190,7 +188,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             bool: True if successful, False otherwise.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         try:
@@ -213,7 +211,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             return True
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            library_logger().error(f"Error configuring MCP server: {e}")
             return False
 
     def _begin_env_tracking(self, server_url, server_name, server_info=None) -> object:
@@ -360,7 +358,7 @@ class CopilotClientAdapter(MCPClientAdapter):
         def _emit_separator_once():
             nonlocal emitted_any
             if not emitted_any:
-                click.echo("")
+                library_logger().blank_line()
                 emitted_any = True
 
         if cls._security_upgraded_keys:
@@ -369,7 +367,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             noun = "variable" if count == 1 else "variables"
             affected = ", ".join(visible)
             _emit_separator_once()
-            _rich_warning(
+            library_logger().warning(
                 f"Security improvement: {count} environment {noun} previously stored as "
                 f"plaintext in {cls._runtime_config_label} are now resolved at runtime.\n"
                 f"    Affected: {affected}\n"
@@ -391,7 +389,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             count = len(sorted_unset)
             noun = "variable" if count == 1 else "variables"
             _emit_separator_once()
-            _rich_warning(
+            library_logger().warning(
                 f"{cls._client_label} will resolve {count} environment {noun} at runtime "
                 f"that {'is' if count == 1 else 'are'} not currently set: "
                 f"{', '.join(sorted_unset)}.\n"
@@ -410,7 +408,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             count = len(servers)
             noun = "server" if count == 1 else "servers"
             _emit_separator_once()
-            _rich_warning(
+            library_logger().warning(
                 f"Deprecated: <VAR> placeholder syntax used in {count} {noun} "
                 f"({', '.join(servers)}). Migrate to ${{VAR}} in apm.yml. "
                 f"<VAR> support will be removed in v1.0.",

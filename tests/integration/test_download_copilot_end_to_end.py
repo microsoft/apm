@@ -2159,7 +2159,7 @@ class TestEmitInstallRunSummary:
     ) -> None:
         """Warning emitted when env vars referenced by config are not set."""
         CopilotClientAdapter._unset_env_keys_by_server = {"my-server": ["UNSET_VAR_XYZ_9999"]}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_called()
         call_args = mock_warn.call_args_list
@@ -2169,7 +2169,7 @@ class TestEmitInstallRunSummary:
     def test_legacy_angle_deprecation_emitted(self, capsys: pytest.CaptureFixture) -> None:
         """Deprecation warning emitted for legacy <VAR> usage."""
         CopilotClientAdapter._legacy_angle_offenders_by_server = {"legacy-server": {"OLD_TOKEN"}}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_called()
         call_args_str = " ".join(str(c) for c in mock_warn.call_args_list)
@@ -2178,7 +2178,7 @@ class TestEmitInstallRunSummary:
     def test_security_upgrade_warning_emitted(self) -> None:
         """Security upgrade warning emitted when keys were previously baked."""
         CopilotClientAdapter._security_upgraded_keys = {"BAKED_SECRET"}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_called()
         call_args_str = " ".join(str(c) for c in mock_warn.call_args_list)

@@ -64,9 +64,10 @@ apm audit --ci
 
 ```text frame="none"
 ...
-| [x]      | content-integrity        | 1 file(s) with hash drift -- run 'apm install' after       |
-|          |                          | deleting the drifted files (plain install keeps local      |
-|          |                          | edits)                                                     |
+| [x]      | content-integrity        | 1 file(s) with hash drift -- delete the edited skill       |
+|          |                          | files, then run 'apm install' to restore the locked        |
+|          |                          | content (a plain 'apm install' refuses to overwrite an     |
+|          |                          | edited skill), then commit the result                      |
 | [x]      | drift                    | drift detected: 1 file(s):                                 |
 |          |                          | .claude/skills/style-checker/SKILL.md                      |
 ...
@@ -77,11 +78,10 @@ apm audit --ci
   modified (1):
     - .claude/skills/style-checker/SKILL.md  [microsoft/apm-sample-package]
 
-  [i] 1 local edit(s) to managed files; run 'apm export-patch' to export them as upstream patches before the next install overwrites them
-  [i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
+  [i] Delete the edited skill files, then run 'apm install' to restore the locked content (a plain 'apm install' refuses to overwrite an edited skill), then commit the result.
 ```
 
-Plain `apm install` keeps a hand-edited file and warns, so restore it the way the hint says. For files a local bundle deployed, delete them and reinstall that bundle with `apm install <bundle-path>`. `apm audit --ci` exits 1 on drift. Plain `apm audit` reports the same drift and exits 0,
+What a plain `apm install` does to a hand-edited file depends on its kind. It refuses to overwrite an edited skill. It overwrites edited instructions, agents, prompts, commands and rules, and prints a `[!]` warning that names them. Deleting the file and rerunning `apm install` restores every kind; to keep an edit, run `apm export-patch` first. For files a local bundle deployed, delete them and reinstall that bundle with `apm install <bundle-path>`. `apm audit --ci` exits 1 on drift. Plain `apm audit` reports the same drift and exits 0,
 unless the org policy sets `security.audit.fail_on_drift: true`. `apm install --frozen`
 also fails, before writing anything, when a deployed file differs from its locked hash.
 

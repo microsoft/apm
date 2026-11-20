@@ -11,10 +11,11 @@ APM version renders them differently).
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.remediation import Remediation
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.context import InstallContext
     from apm_cli.install.drift import DriftFinding
@@ -22,45 +23,56 @@ if TYPE_CHECKING:
 _SELF_KEY = "."
 
 
-def local_edit_hint(count: int, *, installing: bool = False) -> str:
-    """Return the one-line hint pointing at ``apm export-patch``."""
-    noun = f"{count} local edit(s) to managed files"
-    if installing:
-        return (
-            f"{noun} may be overwritten by this install; next time, run "
-            "'apm export-patch' first to export them as upstream patches"
-        )
-    return (
-        f"{noun}; run 'apm export-patch' to export them as upstream patches "
-        "before the next install overwrites them"
-    )
+def install_keeps_edit(path: str) -> bool:
+    """Whether a plain ``apm install`` keeps a local edit to managed *path* (RA-009).
 
-
-def restore_locked_content_hint(subject: str, *, bundle: bool = False) -> str:
-    """Return the hint naming the commands that restore edited managed files.
-
-    A plain ``apm install`` can keep a local edit to a managed file, so it is
-    not a restore command on its own. Files a local bundle deployed are not
-    redeployed by ``apm install`` at all; only reinstalling the bundle
-    restores them (#3994).
+    The skill integrator refuses to overwrite a modified skill file, so an
+    edited skill survives a plain install. Every other primitive kind
+    (instructions, agents, prompts, commands, rules) is overwritten with the
+    locked content.
     """
-    if bundle:
-        return (
-            f"To restore the locked content, delete {subject} and reinstall the bundle "
-            "that deployed them ('apm install <bundle-path>'), then commit the result"
-        )
+    return "skills" in PurePosixPath(path).parts
+
+
+def local_edit_hint(count: int) -> str:
+    """Return the audit hint for *count* edits the next ``apm install`` overwrites."""
     return (
-        f"To restore the locked content, delete {subject} and rerun 'apm install', "
-        "then commit the result ('apm install --force' also restores them, but "
-        "overwrites every local edit and deploys despite critical security findings)"
+        f"{count} local edit(s) to managed files that the next 'apm install' overwrites; "
+        "run 'apm export-patch' first to export them as upstream patches"
     )
 
 
-def restore_drifted_files_remedy(*, bundle: bool = False) -> str:
-    """Return the audit remedy clause for files whose bytes drifted from the lock."""
+def overwrite_notice(paths: Collection[str]) -> str:
+    """Return the warning for edited files this install is about to overwrite."""
+    shown = ", ".join(sorted(paths)[:5])
+    more = f" (+{len(paths) - 5} more)" if len(paths) > 5 else ""
+    return (
+        f"This install overwrites {len(paths)} locally edited managed file(s): {shown}{more}. "
+        "To keep such edits, run 'apm export-patch' before installing"
+    )
+
+
+def edited_file_remediations(
+    paths: Iterable[str], *, bundle: bool = False
+) -> tuple[Remediation, ...]:
+    """Return the remediations that restore the locked content of edited *paths*.
+
+    Delete-then-install restores every kind; the promise states what a plain
+    ``apm install`` does to that kind (RA-009): it overwrites edited
+    non-skill files and refuses to overwrite an edited skill. Files a local
+    bundle deployed are only restored by reinstalling that bundle (#3994).
+    """
+    from apm_cli.core import remediation
+
     if bundle:
-        return "'apm install <bundle-path>' after deleting the drifted bundle files"
-    return "'apm install' after deleting the drifted files (plain install keeps local edits)"
+        return (remediation.RESTORE_BUNDLE_EDITED.bind(subject="the edited bundle files"),)
+    kinds = {install_keeps_edit(path) for path in paths}
+    found: list[Remediation] = []
+    if False in kinds:
+        found.append(remediation.RESTORE_EDITED_OVERWRITE.bind(subject="the edited files"))
+    if True in kinds:
+        found.append(remediation.RESTORE_EDITED_SKILL.bind(subject="the edited skill files"))
+    return tuple(found)
 
 
 def rendering_change_hint(count: int) -> str:
@@ -140,13 +152,45 @@ def count_exportable_findings(
     *,
     unedited: Collection[str] = (),
 ) -> int:
-    """Count ``modified`` drift findings that are upstream-package local edits."""
+    """Count ``modified`` upstream-package local edits a plain install overwrites."""
     return sum(
         1
         for finding in findings
         if finding.kind == "modified"
         and finding.path not in unedited
+        and not install_keeps_edit(finding.path)
         and is_upstream_package(finding.package, lockfile)
+    )
+
+
+def local_edit_paths(
+    project_root: Path,
+    lockfile: LockFile | None,
+    dependency_keys: Collection[str],
+) -> list[str]:
+    """Return managed files of upstream *dependency_keys* edited since deployment.
+
+    Read-only. A file counts when it still exists in the project and its
+    content hash differs from the hash recorded at deployment. Files
+    without a recorded hash, symlinks, and paths escaping the project are
+    ignored.
+    """
+    if lockfile is None or not dependency_keys:
+        return []
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    remote_keys = [key for key in dependency_keys if key and is_upstream_package(key, lockfile)]
+    if not remote_keys:
+        return []
+
+    snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, remote_keys)
+    resolved_root = project_root.resolve()
+    return sorted(
+        rel_path
+        for rel_path, recorded in snapshot.hashes.items()
+        if not rel_path.endswith("/")
+        and _differs_from_recorded(project_root / rel_path, resolved_root, recorded)
     )
 
 
@@ -155,38 +199,17 @@ def count_local_edits(
     lockfile: LockFile | None,
     dependency_keys: Collection[str],
 ) -> int:
-    """Count managed files of upstream *dependency_keys* edited since deployment.
-
-    Read-only. A file counts when it still exists in the project and its
-    content hash differs from the hash recorded at deployment. Files
-    without a recorded hash, symlinks, and paths escaping the project are
-    ignored.
-    """
-    if lockfile is None or not dependency_keys:
-        return 0
-
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
-    remote_keys = [key for key in dependency_keys if key and is_upstream_package(key, lockfile)]
-    if not remote_keys:
-        return 0
-
-    snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, remote_keys)
-    resolved_root = project_root.resolve()
-    count = 0
-    for rel_path, recorded in snapshot.hashes.items():
-        if rel_path.endswith("/"):
-            continue
-        if _differs_from_recorded(project_root / rel_path, resolved_root, recorded):
-            count += 1
-    return count
+    """Count managed files of upstream *dependency_keys* edited since deployment."""
+    return len(local_edit_paths(project_root, lockfile, dependency_keys))
 
 
 def hint_local_edits_before_install(ctx: InstallContext, lockfile: LockFile | None) -> None:
-    """Show the export-patch hint once before a project install re-syncs files.
+    """Warn, naming the files, before a project install overwrites local edits.
 
-    Skipped for dry runs, lockfile-only resolution and user-scope installs,
-    which do not overwrite project files. Never blocks the install.
+    Losing an edit is never info-level (RA-009). Edited skills are kept by
+    the install and reported by the skill integrator, so they are not
+    listed. Skipped for dry runs, lockfile-only resolution and user-scope
+    installs, which do not overwrite project files. Never blocks the install.
     """
     from apm_cli.core.scope import InstallScope
 
@@ -199,9 +222,13 @@ def hint_local_edits_before_install(ctx: InstallContext, lockfile: LockFile | No
     ):
         return
     keys = {dep.get_unique_key() for dep in ctx.deps_to_install}
-    edited = count_local_edits(ctx.project_root, lockfile, keys)
-    if edited:
-        ctx.logger.info(local_edit_hint(edited, installing=True))
+    overwritten = [
+        path
+        for path in local_edit_paths(ctx.project_root, lockfile, keys)
+        if not install_keeps_edit(path)
+    ]
+    if overwritten:
+        ctx.logger.warning(overwrite_notice(overwritten))
 
 
 def unedited_apm_output(

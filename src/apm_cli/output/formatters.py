@@ -3,12 +3,10 @@
 from pathlib import Path
 
 try:
-    from rich import box
     from rich.panel import Panel
-    from rich.table import Table
     from rich.text import Text
 
-    from apm_cli.utils.console import new_console
+    from apm_cli.utils.console import new_console, new_table
 
     RICH_AVAILABLE = True
 except ImportError:
@@ -277,7 +275,7 @@ class CompilationFormatter:
 
         if self.use_color and RICH_AVAILABLE:
             # Create a Rich table for professional display
-            table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE_HEAD)
+            table = new_table(show_header=True, header_style="bold cyan")
             table.add_column("Pattern", style="white", width=25)
             table.add_column("Source", style="yellow", width=20)
             table.add_column("Coverage", style="dim", width=10)
@@ -517,11 +515,10 @@ class CompilationFormatter:
 
         if self.use_color and RICH_AVAILABLE:
             # Coverage-First Strategy Table
-            strategy_table = Table(
+            strategy_table = new_table(
                 title="Three-Tier Coverage-First Strategy",
                 show_header=True,
                 header_style="bold cyan",
-                box=box.SIMPLE_HEAD,
             )
             strategy_table.add_column("Pattern", style="white", width=25)
             strategy_table.add_column("Source", style="yellow", width=15)
@@ -574,11 +571,10 @@ class CompilationFormatter:
             lines.append("")
 
             # Hierarchical Coverage Analysis Table
-            coverage_table = Table(
+            coverage_table = new_table(
                 title="Hierarchical Coverage Analysis",
                 show_header=True,
                 header_style="bold cyan",
-                box=box.SIMPLE_HEAD,
             )
             coverage_table.add_column("Pattern", style="white", width=25)
             coverage_table.add_column("Matching Files", style="yellow", width=15)
@@ -676,7 +672,7 @@ hierarchical inheritance. Coverage takes priority over efficiency."""
 
         # Create metrics table
         if self.use_color and RICH_AVAILABLE:
-            table = Table(box=box.SIMPLE)
+            table = new_table()
             table.add_column("Metric", style="white", width=20)
             table.add_column("Value", style="white", width=12)
             table.add_column("Assessment", style="blue", width=35)

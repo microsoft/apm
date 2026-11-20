@@ -19,6 +19,8 @@ from typing import Any
 
 import click
 
+from apm_cli.utils.console import new_table
+
 from ..core.command_logger import CommandLogger
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..policy.discovery import (
@@ -35,12 +37,6 @@ from ..utils.console import (
     _rich_error,
     _rich_panel,
 )
-
-try:
-    from rich.table import Table
-except ImportError:  # pragma: no cover - Rich is a hard dep but stay defensive
-    Table = None  # type: ignore[assignment]
-
 
 # -- Helpers --------------------------------------------------------
 
@@ -249,9 +245,9 @@ def _render_table(report: dict[str, Any]) -> None:
     ]
 
     console = _get_console()
-    if RICH_AVAILABLE and Table is not None and console is not None:
+    if RICH_AVAILABLE and console is not None:
         try:
-            table = Table(
+            table = new_table(
                 title="APM Policy Status",
                 show_header=True,
                 header_style="bold cyan",

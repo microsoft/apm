@@ -8,6 +8,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import click
 
+from apm_cli.core.remediation import (
+    DEPENDENCIES_NOT_INSTALLED,
+    DEPENDENCY_UNPLACED,
+    DEPS_UPDATE_DEPRECATED,
+    ORPHANED_PACKAGES_PRUNE,
+)
 from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_unless
 
 # Import existing APM components
@@ -549,7 +555,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
     if installed_packages is None:
         logger.progress(f"No APM dependencies installed ({scope_label} scope)")
-        logger.verbose_detail("Run 'apm install' to install dependencies from apm.yml")
+        logger.verbose_detail(DEPENDENCIES_NOT_INSTALLED.sentence())
         return
 
     if not installed_packages:
@@ -564,9 +570,9 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
     # Display packages in table format
     if has_rich:
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title=(
                 f" Insecure APM Dependencies ({scope_label})"
                 if insecure_only
@@ -613,7 +619,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
+            logger.info(ORPHANED_PACKAGES_PRUNE.sentence())
     else:
         # Fallback text table
         if insecure_only:
@@ -660,7 +666,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
+            logger.info(ORPHANED_PACKAGES_PRUNE.sentence())
 
     _report_native_plugins(apm_dir, logger)
 
@@ -928,7 +934,7 @@ def tree(global_):
                         display = _dep_display_name(dep)
                         branch = root_tree.add(
                             f"[yellow]{display} (could not place in tree; "
-                            "run apm install to resolve)[/yellow]"
+                            f"{DEPENDENCY_UNPLACED.clause()})[/yellow]"
                         )
                         _add_tree_children(branch, dep.get_unique_key(), children_map)
                 console.print(root_tree)
@@ -950,7 +956,7 @@ def tree(global_):
                         click.echo(
                             f"{prefix}{_dep_display_name(dep)} "
                             "(could not place in tree; "
-                            "run apm install to resolve)"
+                            f"{DEPENDENCY_UNPLACED.clause()})"
                         )
                         sub_prefix = "    " if is_last else "|   "
                         _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
@@ -1109,7 +1115,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # of this command. Kept working for one release; removed in the next
     # breaking release.
     _rich_warning(
-        "'apm deps update' is deprecated; use 'apm update' instead. "
+        f"'apm deps update' is deprecated. {DEPS_UPDATE_DEPRECATED.sentence()} "
         "'apm update' now supports -g/--global, [PACKAGES]..., --force, "
         "--parallel-downloads, --target, and --legacy-skill-paths, plus an "
         "interactive plan, --dry-run, and --yes.",
@@ -1260,7 +1266,7 @@ def info(package: str):
 
     if not apm_modules_path.exists():
         logger.error("No apm_modules/ directory found")
-        logger.progress("Run 'apm install' to install dependencies first")
+        logger.progress(DEPENDENCIES_NOT_INSTALLED.sentence())
         sys.exit(1)
 
     package_path = resolve_package_path(package, apm_modules_path, logger)

@@ -11,11 +11,11 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import InlineTable, Item, String, Table
 
+from ...core.command_logger import library_logger
 from ...mcp_transport import canonical_remote_transport
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_success, _rich_warning
 from ...utils.net import is_loopback_host
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
@@ -321,7 +321,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 return tomlkit.load(config_file)
         except (TOMLKitError, UnicodeDecodeError) as exc:
             _log.debug("Failed to parse Codex config at %s", config_path, exc_info=True)
-            _rich_warning(
+            library_logger().warning(
                 f"Could not read or parse {config_path}: {exc} "
                 "-- skipping config write to avoid data loss; inspect the file "
                 "or delete it to reset Codex configuration",
@@ -358,7 +358,7 @@ class CodexClientAdapter(MCPClientAdapter):
             bool: True if successful, False otherwise.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         try:
@@ -388,15 +388,11 @@ class CodexClientAdapter(MCPClientAdapter):
             if not self.update_config({config_key: server_config}):
                 return False
             self.written_mcp_hashes[server_url] = fingerprint
-
-            _rich_success(
-                f"Configured MCP server '{config_key}' for Codex CLI",
-                symbol="success",
-            )
+            # The integrator's install tree reports success once (#3994, #4089).
             return True
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            library_logger().error(f"Error configuring MCP server: {e}")
             return False
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -495,7 +491,7 @@ class CodexClientAdapter(MCPClientAdapter):
 
             remote_url = (remote.get("url") or "").strip()
             if not remote_url:
-                _rich_warning(
+                library_logger().warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote entry "
                     "has an empty url. Set `url:` to the server's streamable-http endpoint.",
                     symbol="warning",
@@ -514,7 +510,7 @@ class CodexClientAdapter(MCPClientAdapter):
             # certs -- so loopback http is allowed. Any other non-https host is
             # still rejected to avoid cleartext bearer tokens in transit.
             if scheme != "https" and not insecure_loopback:
-                _rich_warning(
+                library_logger().warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
                     f"must use https:// (got {scheme or 'no scheme'}). "
                     "Plain http is allowed for loopback addresses only.",
@@ -550,7 +546,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if unsupported_headers:
                 safe_headers = ", ".join(ascii(name)[1:-1] for name in unsupported_headers)
                 safe_server = ascii(server_name)[1:-1]
-                _rich_warning(
+                library_logger().warning(
                     f"Skipping header(s) {safe_headers} of MCP server "
                     f"'{safe_server}' for Codex CLI: Codex reads a header from the "
                     "environment only when the value is exactly ${VAR} or, for "
@@ -753,7 +749,7 @@ class CodexClientAdapter(MCPClientAdapter):
         ]
         if not keys:
             return
-        _rich_warning(
+        library_logger().warning(
             f"Codex cannot forward env {_ascii_names(keys)} for server "
             f"'{_ascii_names([server_name])}' by "
             "reference, so APM resolved them at install time and wrote the values to "

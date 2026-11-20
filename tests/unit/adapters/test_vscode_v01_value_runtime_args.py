@@ -556,13 +556,14 @@ class TestRenderedDockerLauncher(unittest.TestCase):
         ]
 
     def test_unresolvable_package_declines_target_configuration(self):
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as warning:
+        with patch("apm_cli.core.null_logger._rich_warning") as warning:
             config = _config(V01_VALUE_PACKAGE)
         self.assertEqual(config, {})
         warning.assert_called_once_with(
             "Could not resolve required container run option "
             f"'workdir' for '{IMAGE}'; target configuration was not changed. "
-            "Set the required registry runtime variables and rerun 'apm install'."
+            "Set the required registry runtime variables and rerun 'apm install'.",
+            symbol="warning",
         )
 
     def test_secret_runtime_input_ids_do_not_collapse_distinct_variable_names(self):
@@ -603,7 +604,7 @@ class TestRenderedDockerLauncher(unittest.TestCase):
             _config(package, runtime_vars={"access_token": "registry-secret"})
 
     def test_package_without_runtime_args_keeps_the_synthesized_launcher(self):
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as warning:
+        with patch("apm_cli.core.null_logger._rich_warning") as warning:
             config = _config({"name": IMAGE, "registry_name": "oci", "runtime_hint": "docker"})
         self.assertEqual(config.get("args"), FALLBACK_ARGS)
         warning.assert_not_called()

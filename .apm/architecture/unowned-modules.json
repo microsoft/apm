@@ -107,7 +107,6 @@
     "src/apm_cli/core/conflict_detector.py",
     "src/apm_cli/core/docker_args.py",
     "src/apm_cli/core/errors.py",
-    "src/apm_cli/core/experimental.py",
     "src/apm_cli/core/install_audit.py",
     "src/apm_cli/core/null_logger.py",
     "src/apm_cli/core/operations.py",

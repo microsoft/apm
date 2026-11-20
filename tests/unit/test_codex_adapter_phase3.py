@@ -151,7 +151,7 @@ class TestGetCurrentConfig:
         config_file = codex_dir / "config.toml"
         config_file.write_text("this is ::: not valid toml !!!", encoding="utf-8")
         adapter = _make_adapter(project_root=tmp_path)
-        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warning:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warning:
             result = adapter.get_current_config()
         assert result is None
         warning = mock_warning.call_args.args[0]
@@ -164,7 +164,7 @@ class TestGetCurrentConfig:
         config_file.write_bytes(b"\xff")
         adapter = _make_adapter(project_root=tmp_path)
 
-        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warning:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warning:
             result = adapter.get_current_config()
 
         assert result is None
@@ -357,7 +357,7 @@ class TestConfigureMcpServer:
         }
         with (
             patch.object(adapter, "_fetch_server_info", return_value=server_info),
-            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+            patch("apm_cli.core.null_logger._rich_warning") as warning,
         ):
             assert adapter.configure_mcp_server("owner/http-public-server") is False
         assert "topsecret" not in warning.call_args.args[0]
@@ -1027,7 +1027,7 @@ class TestForwardedStdioEnvScope:
         server = _raw_stdio_server(TOKEN="${OTHER}", AUTH="Bearer <OTHER>", PLAIN="x")
         with (
             patch.dict(os.environ, {"OTHER": "example-token"}),
-            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+            patch("apm_cli.core.null_logger._rich_warning") as warning,
         ):
             adapter._format_server_config(server)
         assert warning.call_count == 1
@@ -1042,7 +1042,7 @@ class TestForwardedStdioEnvScope:
         adapter = _make_adapter(project_root=tmp_path, user_scope=True)
         with (
             patch.dict(os.environ, {"OTHER": "example-token"}),
-            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+            patch("apm_cli.core.null_logger._rich_warning") as warning,
         ):
             adapter._format_server_config(_raw_stdio_server(TOKEN="${OTHER}"))
         warning.assert_not_called()
@@ -1051,14 +1051,14 @@ class TestForwardedStdioEnvScope:
         adapter = _make_adapter(project_root=tmp_path)
         with (
             patch.dict(os.environ, {"OTHER": "example-token"}),
-            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+            patch("apm_cli.core.null_logger._rich_warning") as warning,
         ):
             adapter.render_server_config(_raw_stdio_server(TOKEN="${OTHER}"))
         warning.assert_not_called()
 
     def test_forwarded_reference_does_not_warn(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
-        with patch("apm_cli.adapters.client.codex._rich_warning") as warning:
+        with patch("apm_cli.core.null_logger._rich_warning") as warning:
             adapter._format_server_config(_raw_stdio_server(TOKEN="${TOKEN}", B="${env:B}"))
         warning.assert_not_called()
 

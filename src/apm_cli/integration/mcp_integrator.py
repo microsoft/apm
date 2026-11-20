@@ -56,6 +56,7 @@ from apm_cli.utils.yaml_io import load_yaml, yaml_to_str
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.integration.mcp_integrator_install import ResolvedMcpTargets
 
 _log = logging.getLogger(__name__)
 
@@ -1717,6 +1718,7 @@ class MCPIntegrator:
         prevalidated_registry_servers: builtins.dict[str, builtins.dict] | None = None,
         fail_on_write_error: bool = False,
         native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
+        resolved_targets: ResolvedMcpTargets | None = None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -1744,24 +1746,28 @@ class MCPIntegrator:
         Returns:
             Number of MCP servers newly configured or updated.
         """
+        from apm_cli.core.command_logger import library_output
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
-        return run_mcp_install(
-            mcp_deps,
-            runtime=runtime,
-            exclude=exclude,
-            verbose=verbose,
-            apm_config=apm_config,
-            stored_mcp_configs=stored_mcp_configs,
-            project_root=project_root,
-            user_scope=user_scope,
-            explicit_target=explicit_target,
-            target_decision=target_decision,
-            logger=logger,
-            diagnostics=diagnostics,
-            scope=scope,
-            managed_target_servers=managed_target_servers,
-            prevalidated_registry_servers=prevalidated_registry_servers,
-            fail_on_write_error=fail_on_write_error,
-            native_hashes=native_hashes,
-        )
+        # Client adapters emit through the command's logger (#4089).
+        with library_output(logger):
+            return run_mcp_install(
+                mcp_deps,
+                runtime=runtime,
+                exclude=exclude,
+                verbose=verbose,
+                apm_config=apm_config,
+                stored_mcp_configs=stored_mcp_configs,
+                project_root=project_root,
+                user_scope=user_scope,
+                explicit_target=explicit_target,
+                target_decision=target_decision,
+                logger=logger,
+                diagnostics=diagnostics,
+                scope=scope,
+                managed_target_servers=managed_target_servers,
+                prevalidated_registry_servers=prevalidated_registry_servers,
+                fail_on_write_error=fail_on_write_error,
+                native_hashes=native_hashes,
+                resolved_targets=resolved_targets,
+            )

@@ -165,14 +165,11 @@ the author and target harness remain responsible for compliance.
   `skills/`, `agents/`, or `commands/` exist at the project root and `.apm/`
   does not, warns that they remain packable. `apm init` does not create
   `.apm/` automatically.
-- **agentrc suggestion:** when no agent instruction files are found
-  (`.github/copilot-instructions.md`, `AGENTS.md`, `.github/instructions/`),
-  the Next Steps panel suggests generating agent instructions:
-  - `agentrc` in PATH: prepends `Generate agent instructions: agentrc init`
-    as the first next step.
-  - `agentrc` not in PATH: prints a tip line with a link to
-    `https://github.com/microsoft/agentrc`.
-  - Instructions already exist: no mention (suppressed entirely).
+- **agentrc suggestion:** when `agentrc` is in PATH and no agent instruction
+  files are found (`.github/copilot-instructions.md`, `AGENTS.md`,
+  `.github/instructions/`), the Next Steps panel adds
+  `Generate agent instructions: agentrc init` after the install step.
+  Otherwise there is no mention.
 - **Exit codes:** `0` on success or a declined plain-init prompt; `1` on invalid
   project name, empty `--version`, refused discovery apply, declined discovery consent,
   an existing legacy target with no `targets:` equivalent on a non-interactive re-init,

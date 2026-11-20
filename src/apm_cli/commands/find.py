@@ -7,6 +7,10 @@ from pathlib import Path, PurePosixPath
 
 import click
 
+from apm_cli.core.remediation import (
+    LOCKFILE_MISSING,
+)
+
 from ..constants import APM_LOCK_FILENAME
 from ..deps.lockfile import LockedDependency, LockFile
 from ..deps.why_walker import compute_why
@@ -185,7 +189,7 @@ def find(ctx: click.Context, file_path: str, show_source: bool, show_path: bool)
 
     if not lockfile_path.exists():
         _rich_error(
-            f"No lockfile found at {_APM_LOCK_YAML}. Run 'apm install' first.",
+            f"No lockfile found at {_APM_LOCK_YAML}. {LOCKFILE_MISSING.sentence()}",
             symbol="error",
             err=True,
         )

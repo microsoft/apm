@@ -53,6 +53,8 @@ from urllib.parse import quote
 
 import click
 
+from apm_cli.core.remediation import AUTH_TOKEN_UNEXPORTED
+
 from ..core.command_logger import CommandLogger
 
 # Scopes the token-creation page is prefilled with, per host class.
@@ -427,7 +429,8 @@ def run_auth(
         logger.success("Token accepted. Add it to your environment:", symbol="check")
         logger.tree_item(f"  export {env_var}='<the token you just pasted>'")
         logger.progress(
-            'Or re-run as: eval "$(apm auth ' + host + ' --export)"',
+            f"Or {AUTH_TOKEN_UNEXPORTED.bind(host=host).clause()}: "
+            f'eval "$({AUTH_TOKEN_UNEXPORTED.bind(host=host).command})"',
             symbol="info",
         )
     return 0

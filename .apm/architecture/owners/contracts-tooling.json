@@ -2,6 +2,13 @@
   "version": 1,
   "owners": [
     {
+      "id": "remediation-advice",
+      "decision": "User-facing remediation advice: the command to run and the reported state it clears",
+      "owner": "core/remediation.py (Remediation catalog and renderers)",
+      "selectors": ["src/apm_cli/core/remediation.py"],
+      "guards": ["contracts-tooling-remediation-advice", "contracts-tooling-remediation-drift-kinds"]
+    },
+    {
       "id": "human-scope-evidence",
       "decision": "Trusted governance roster and immutable issue-scope record interpretation; evidence never grants automated permission",
       "owner": "scripts/governance/authority.cjs",

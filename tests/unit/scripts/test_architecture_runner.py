@@ -621,6 +621,8 @@ contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
+contracts-tooling-remediation-advice
+contracts-tooling-remediation-drift-kinds
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
@@ -761,7 +763,9 @@ registry_delegation.build_id_verification
 registry_delegation.command_machine_output
 registry_delegation.compile_inventory_authority
 registry_delegation.compiled_output_writes
+registry_delegation.console_construction
 registry_delegation.diagnostic_ascii_owner
+registry_delegation.experimental_flags
 registry_delegation.experimental_target_hints
 registry_delegation.harness_user_root_resolution
 registry_delegation.host_backend_dispatch

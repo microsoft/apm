@@ -45,13 +45,24 @@
     },
     {
       "id": "user-facing-output-diagnostics",
-      "decision": "User-facing output / diagnostics",
-      "owner": "CommandLogger / console owner",
-      "selectors": [
-        "src/apm_cli/core/command_logger.py",
-        "src/apm_cli/utils/console.py"
-      ],
+      "decision": "User-facing output / diagnostics, including MCP client adapters and the safe MCP installer, which emit through CommandLogger",
+      "owner": "core/command_logger.py (CommandLogger, library_output, library_logger)",
+      "selectors": ["src/apm_cli/core/command_logger.py"],
       "guards": ["registry-delegation-output-diagnostics"]
+    },
+    {
+      "id": "console-construction",
+      "decision": "Rich Console and Table construction: every console and table comes from one ASCII-rendering factory",
+      "owner": "utils/console.py (new_console, new_table, _get_console)",
+      "selectors": ["src/apm_cli/utils/console.py"],
+      "guards": ["registry-delegation-console-construction"]
+    },
+    {
+      "id": "experimental-flag-registry",
+      "decision": "Experimental flags: every registered flag has a runtime reader; experimental-only notices stay verbose; GA help is not marked experimental",
+      "owner": "core/experimental.py (FLAGS, is_enabled)",
+      "selectors": ["src/apm_cli/core/experimental.py"],
+      "guards": ["registry-delegation-experimental-flags"]
     },
     {
       "id": "compiled-output-writes",
