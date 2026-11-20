@@ -4722,8 +4722,8 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
             id="mcp-install-raw-selection",
         ),
         pytest.param(
-            "src/apm_cli/install/local_bundle_handler.py",
-            "effective_target=deployment_decision.canonical_targets,",
+            "src/apm_cli/install/bundle_admission.py",
+            "effective_target=target_decision.canonical_targets,",
             "effective_target=[resolved.name for resolved in targets],",
             id="local-bundle-raw-names",
         ),
