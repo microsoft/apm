@@ -2363,6 +2363,16 @@
       ]
     },
     {
+      "issue": 4115,
+      "fixed_in": "0.37.0",
+      "summary": "PERF-H2: the PR Windows gate ran only windows_compat unit tests while main push ran the full Windows unit suite, so Windows-only unit regressions passed PR checks and turned main red (11 of 21 red main pushes, 2026-11-05..19).",
+      "failure_modes": ["portability", "observation"],
+      "properties": ["portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/quality/test_ci_topology.py::test_pr_windows_gate_runs_every_windows_unit_node"
+      ]
+    },
+    {
       "issue": 4116,
       "fixed_in": "Unreleased",
       "summary": "PERF-H1, PERF-H9: the declared merge_group gate (full integration, binary build, release validation, global coverage floor) gated no merge after 2026-09-09 while merge-gate.yml and the workflow comments still described it as live; regressions outside lifecycle smoke surfaced only in the nightly.",
@@ -2379,6 +2389,49 @@
         "tests/quality/test_ci_topology.py::test_global_coverage_floor_gates_the_merge",
         "tests/quality/test_ci_topology.py::test_merge_queue_freshness_alarm_is_scheduled",
         "tests/unit/scripts/test_merge_queue_freshness.py::test_bypassed_queue_names_last_run_and_commits_since_it"
+      ]
+    },
+    {
+      "issue": 4118,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H5: apm --help imported every command module and GitPython (767 modules, spawning git version); verbs now load lazily under an installed-CLI import budget with help output and exit codes unchanged.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_cli_startup_import_budget.py::test_installed_cli_startup_stays_within_import_budget",
+        "tests/unit/test_cli_lazy_dispatch.py::test_root_help_from_stubs_matches_resolved_commands",
+        "tests/unit/test_cli_lazy_dispatch.py::test_lazy_stub_short_help_matches_resolved_command"
+      ]
+    },
+    {
+      "issue": 4119,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H6: every architecture-linter mutation case re-walked the inventory and re-parsed the repository, so the owner mutation matrix cost about 29 s per case; a session cache now parses each file content once with identical findings.",
+      "failure_modes": [
+        "cache"
+      ],
+      "properties": [
+        "portability.byte_deterministic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_per_group",
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_parses_each_file_content_at_most_once_over_full_matrix",
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix"
+      ]
+    },
+    {
+      "issue": 4120,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H8: every CI shard collected (imported) its whole test roots and then deselected the other shards' tests, so each shard and each xdist worker paid the full collection; shards now collect only their own explicit test file lists.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/quality/test_ci_topology.py::test_shard_file_lists_match_full_collection",
+        "tests/quality/test_ci_topology.py::test_windows_unit_shard_file_lists_match_full_collection"
       ]
     },
     {
@@ -3151,7 +3204,10 @@
         "tests/unit/integration/test_cleanup_helper.py::test_member_this_install_kept_is_retained_despite_evidence",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_removed_from_source_is_still_cleaned",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members",
-        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_skipped_as_modified_is_never_stale"
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_skipped_as_modified_is_never_stale",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_edit_variants_never_lose_bytes",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_discarded_deploy_then_source_edit_installs",
+        "tests/unit/install/phases/test_lockfile_union.py::TestCurrentInstallGovernance::test_row_this_run_retained_is_never_stale"
       ]
     },
     {
@@ -3341,6 +3397,56 @@
       ]
     },
     {
+      "issue": 4288,
+      "fixed_in": "Unreleased",
+      "summary": "An MCP server that fails for two runtimes prints one failure line per runtime, each naming the runtime, instead of identical lines.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_failure_line_runtime_lifecycle.py::test_mcp_failure_line_names_each_runtime"
+      ]
+    },
+    {
+      "issue": 4289,
+      "fixed_in": "Unreleased",
+      "summary": "A legacy MCP entry left in a config file that two targets share (Claude Code and Copilot CLI read .mcp.json) is reported once per file.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_slashed_server_cleanup_lifecycle.py::test_removing_slashed_server_keeps_user_and_declared_short_name_entries"
+      ]
+    },
+    {
+      "issue": 4290,
+      "fixed_in": "Unreleased",
+      "summary": "install --verbose reports each Azure DevOps auth-chain step once per command, not once per clone attempt.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_ado_verbose_auth_trace_lifecycle.py::test_verbose_ado_auth_steps_print_once"
+      ]
+    },
+    {
+      "issue": 4291,
+      "fixed_in": "Unreleased",
+      "summary": "apm pack shows each plugin-manifest note (servers left out, secrets withheld) once per command, not once per manifest it builds.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_pack_mcp_ownership_lifecycle.py::test_pack_output_is_identical_before_and_after_install"
+      ]
+    },
+    {
+      "issue": 4307,
+      "fixed_in": "Unreleased",
+      "summary": "install lists a policy violation reported by two phases once, and the warning count counts distinct violations.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_install_enforcement_lifecycle.py::test_warn_policy_installs_and_reports_every_violation"
+      ]
+    },
+    {
       "issue": 4314,
       "fixed_in": "Unreleased",
       "summary": "PROXY_REGISTRY_TOKEN travels over http:// only to a loopback or private network host, or with the explicit PROXY_REGISTRY_ALLOW_HTTP=1 opt-in; otherwise it is not sent and a [!] line names the URL and the opt-in.",
@@ -3352,6 +3458,28 @@
         "tests/unit/test_artifactory_support.py::TestRegistryConfig::test_http_url_sends_the_token_only_to_a_local_network_host",
         "tests/integration/test_proxy_registry_http_token_lifecycle.py::test_public_http_proxy_gets_no_token_and_the_cli_says_why",
         "tests/integration/test_proxy_registry_http_token_lifecycle.py::test_private_or_opted_in_http_proxy_gets_the_token"
+      ]
+    },
+    {
+      "issue": 4320,
+      "fixed_in": "Unreleased",
+      "summary": "A registry MCP install in CI or E2E mode prints no bare 'environment detected' line per server.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_registry_install_ci_notice_lifecycle.py::test_registry_install_prints_no_bare_environment_notice",
+        "tests/unit/install/test_mcp_optional_inputs.py::test_noninteractive_registry_defaults_print_no_bare_environment_notice"
+      ]
+    },
+    {
+      "issue": 4322,
+      "fixed_in": "Unreleased",
+      "summary": "A partly successful marketplace install records ref pins only for requested packages that install, and the not-found diagnostic names every credential source tried, in order, without values.",
+      "failure_modes": ["transaction", "observation"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_mixed_success_marketplace_install_pins_only_the_installed_plugin",
+        "tests/unit/core/test_auth_validation.py::TestDescribeCredentialTried::test_names_secondary_sources_tried_in_order_without_values"
       ]
     },
     {

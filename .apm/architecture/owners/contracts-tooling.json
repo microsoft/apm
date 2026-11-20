@@ -10,17 +10,25 @@
     },
     {
       "id": "ci-validation-topology",
-      "decision": "Merge-time validation topology: which merge_group jobs produce every merge-gate.yml merge_group EXPECTED_CHECKS name, how ci-integration.yml shards the merge-time integration corpus, and the alarm that fails when main moves without a merge_group run",
-      "owner": ".github/workflows/merge-gate.yml (merge_group EXPECTED_CHECKS) + .github/workflows/ci-integration.yml (merge-time lanes via the scripts/ci_sharding.py planner) + .github/workflows/merge-queue-freshness.yml with scripts/merge_queue_freshness.py (freshness alarm); closed-world guard in tests/quality/test_ci_topology.py",
+      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs; each sharded CI job's explicit per-shard test file list (scripts/ci_sharding.py shard_test_files), checked against a full collect on the same SHA; and merge-time validation topology: which merge_group jobs produce every merge-gate.yml merge_group EXPECTED_CHECKS name, how ci-integration.yml shards the merge-time integration corpus, and the alarm that fails when main moves without a merge_group run",
+      "owner": "scripts/ci_selections.py (SELECTIONS) + scripts/ci_sharding.py (shard_test_files) + .github/workflows/merge-gate.yml (merge_group EXPECTED_CHECKS) + .github/workflows/ci-integration.yml (merge-time lanes via the scripts/ci_sharding.py planner) + .github/workflows/merge-queue-freshness.yml with scripts/merge_queue_freshness.py (freshness alarm); closed-world guard in tests/quality/test_ci_topology.py",
       "selectors": [
+        ".github/workflows/build-release.yml",
         ".github/workflows/ci-integration.yml",
+        ".github/workflows/ci.yml",
         ".github/workflows/merge-gate.yml",
         ".github/workflows/merge-queue-freshness.yml",
+        "scripts/architecture_linter/checks/contracts_ci_shard_file_lists.py",
+        "scripts/architecture_linter/checks/contracts_ci_topology.py",
+        "scripts/ci_selections.py",
+        "scripts/ci_sharding.py",
         "scripts/merge_queue_freshness.py"
       ],
       "guards": [
         "contracts-tooling-ci-merge-queue-freshness",
-        "contracts-tooling-ci-merge-time-topology"
+        "contracts-tooling-ci-merge-time-topology",
+        "contracts-tooling-ci-shard-file-lists",
+        "contracts-tooling-ci-validation-topology"
       ]
     },
     {
@@ -157,6 +165,20 @@
         "contracts-tooling-lockfile-timestamp-constructor",
         "contracts-tooling-lockfile-timestamp-fallback",
         "marketplace-integrations-locked-association"
+      ]
+    },
+    {
+      "id": "architecture-linter-performance",
+      "decision": "Session-scoped reuse of the architecture linter inventory, owner registry and content-keyed file facts; findings identical with and without reuse",
+      "owner": "scripts/architecture_linter/session_cache.py (LinterSession) consumed by facts.py FactsProvider.file_facts and runner.py _run",
+      "selectors": [
+        "scripts/architecture_linter/facts.py",
+        "scripts/architecture_linter/runner.py",
+        "scripts/architecture_linter/session_cache.py"
+      ],
+      "guards": [
+        "contracts-tooling-linter-cache-content-key",
+        "contracts-tooling-linter-cache-parse-once"
       ]
     },
     {

@@ -119,6 +119,9 @@ class _World:
             robust_rmtree(self.isolated.cache_root)
         self.isolated.cache_root.mkdir(parents=True)
 
+    def restore_source(self) -> None:
+        shutil.move(str(self.package.origin) + ".gone", str(self.package.origin))
+
     def clone(self) -> Path:
         clone = self.isolated.work_root / "fresh-clone"
         _git(
@@ -254,17 +257,68 @@ def test_pre_receipt_uninstall(tmp_path: Path, apm_binary_path: Path, source: st
         world.make_source_unreachable()
 
     if source == "unavailable":
+        before = _snapshot(clone)
         output = world.apm(clone, "uninstall", _DEP, expect=1)
-        assert "Resolve or remove the listed files, then retry uninstall." in output, output
+        assert "Uninstall refused" in output, output
         for relative in _DEPLOYED:
-            assert (clone / relative).is_file(), relative
-            assert relative in output, output
-        assert _DEP in json.dumps(load_yaml(clone / "apm.yml"))
+            assert f"{relative}: {_NO_EVIDENCE}" in output, output
+        assert _snapshot(clone) == before
         return
 
     world.apm(clone, "uninstall", _DEP)
     for relative in (*_DEPLOYED, _DROPPED, _EDITED):
         assert not (clone / relative).exists(), relative
+
+
+def _snapshot(root: Path) -> dict[str, bytes]:
+    """Every file under *root* except git metadata, with its bytes."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and ".git" not in path.relative_to(root).parts
+    }
+
+
+def test_uninstall_refusal_changes_nothing_and_its_remedy_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Without deletion evidence uninstall exits 1 and changes nothing (#3701).
+
+    The refusal names every file and why, and prints runnable remedies. The
+    remedy is executed as printed: move the edited file aside, install once
+    with access to the source, then uninstall; the user's edit survives.
+    """
+    world = _world(tmp_path, apm_binary_path)
+    clone = world.clone()
+    world.apm(clone, "install", "--no-policy")
+    assert world.receipts.is_dir()
+    user_bytes = b"---\napplyTo: '**'\n---\n# Mine now.\n"
+    (clone / _INSTRUCTION).write_bytes(user_bytes)
+    world.evict_machine_state()
+    world.make_source_unreachable()
+    robust_rmtree(clone / "apm_modules")
+    before = _snapshot(clone)
+
+    refused = world.apm(clone, "uninstall", _DEP, expect=1)
+    assert _snapshot(clone) == before, "a refused uninstall must change nothing"
+    assert "Uninstall refused" in refused, refused
+    for relative in _DEPLOYED:
+        assert f"{relative}: {_NO_EVIDENCE}" in refused, refused
+    assert "Move aside any listed file that holds your edits" in refused, refused
+    assert "once with access to the package source" in refused, refused
+    assert "move each listed file aside or delete it" in refused, refused
+
+    # Remedy (a), executed as printed: move the edited file aside, install once
+    # with the source reachable, then uninstall.
+    aside = world.isolated.work_root / "mine.instructions.md"
+    shutil.move(str(clone / _INSTRUCTION), aside)
+    world.restore_source()
+    world.apm(clone, "install", "--no-policy")
+    world.apm(clone, "uninstall", _DEP)
+    assert aside.read_bytes() == user_bytes
+    for relative in _DEPLOYED:
+        assert not (clone / relative).exists(), relative
+    assert _DEP not in json.dumps(load_yaml(clone / "apm.yml"))
 
 
 def test_prune_on_receipt_less_clone_renders_before_removing_sources(
@@ -352,17 +406,18 @@ def test_cowork_row_removed_only_with_valid_provenance(
         skill.write_bytes(b"---\nname: demo\ndescription: Demo\n---\nMine now.\n")
     before = skill.read_bytes()
 
-    output = world.apm(cwd, "uninstall", "-g", "test/cowork-kit")
+    output = world.apm(
+        cwd, "uninstall", "-g", "test/cowork-kit", expect=0 if provenance == "receipt" else 1
+    )
 
     if provenance == "receipt":
         assert not skill.exists()
         return
     # The drift replay renders no experimental external target, so a cowork
-    # row without a matching receipt has no evidence and is kept, named.
+    # row without a matching receipt has no evidence: uninstall refuses and
+    # changes nothing, naming the file.
     assert skill.read_bytes() == before
-    expected = (
-        "file has been edited since APM deployed it" if provenance == "edited" else _NO_EVIDENCE
-    )
+    expected = "edited since APM deployed it" if provenance == "edited" else _NO_EVIDENCE
     assert "cowork://skills/demo/SKILL.md" in output and expected in output, output
 
 

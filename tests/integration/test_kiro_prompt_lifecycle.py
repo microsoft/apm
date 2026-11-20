@@ -208,16 +208,16 @@ def test_kiro_prompt_installed_lifecycle(
     manifest_before = (state_root / "apm.yml").read_bytes()
     claims_before = {record["value"] for record in lock()["deployments"]}
     owner = records[".kiro/prompts/review.md"]["owners"][0]
+    before = snapshot()
     removal = run("uninstall", *scope, owner, expected_returncode=1)
-    assert "Retained user-edited file" in removal.stdout
+    text = " ".join(removal.stdout.split())
+    assert "Uninstall refused" in text, text
+    assert ".kiro/prompts/edited.md: edited since APM deployed it" in text, text
+    # Without deletion evidence nothing changes (#3701).
     assert (state_root / "apm.yml").read_bytes() == manifest_before
-    # The refusal drops already-removed files from the lockfile (#3656).
-    claims = {record["value"] for record in lock()["deployments"]}
-    assert ".kiro/prompts/edited.md" in claims and claims < claims_before
-    assert all((target_root.parent / value).exists() for value in claims if "://" not in value)
-    assert not deployed.exists()
-    assert not (target_root / "agents/reviewer.md").exists()
-    assert not (target_root / "steering/style.md").exists()
+    assert {record["value"] for record in lock()["deployments"]} == claims_before
+    assert snapshot() == before
+    assert deployed.exists()
     assert user_file.read_text() == "USER_PROMPT\n"
     assert collision.read_text() == "USER_COLLISION\n"
     assert edited.read_text() == "USER_EDITED_MANAGED_PROMPT\n"

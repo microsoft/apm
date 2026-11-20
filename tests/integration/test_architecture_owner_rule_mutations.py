@@ -21,6 +21,9 @@ Design notes:
 * Exactly one rule executes per case, so an unrelated startup problem cannot be
   mistaken for teeth: the assertion is a `Violation` carrying that rule's ID,
   never a bare non-zero exit code.
+* Every run in this module shares one session-scoped linter cache
+  (`linter_session`): the tree is walked and each file content parsed once,
+  and each case's override is applied on top.
 * Mutations must stay surgical.  A syntax error, an unreadable file, or a
   deleted module would trip almost any rule for the wrong reason, so
   `test_owner_guard_mutation_is_surgical_and_meaningful` rejects those shapes
@@ -30,6 +33,7 @@ Design notes:
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -40,6 +44,7 @@ from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
+from scripts.architecture_linter.session_cache import LinterSession, linter_session
 from tests.utils.xdist_shared import shared_session_value, sources_digest
 
 pytestmark = [
@@ -49,6 +54,13 @@ pytestmark = [
 ROOT = Path(__file__).resolve().parents[2]
 OWNERS_DIR = ROOT / ".apm/architecture/owners"
 ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm/architecture")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _shared_linter_session() -> Iterator[LinterSession]:
+    """Share one inventory and one parse per file content across this module (#4119)."""
+    with linter_session() as session:
+        yield session
 
 
 @pytest.mark.parametrize(
@@ -1540,6 +1552,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The guard stops failing when merge_group waits for a check no merge_group job produces.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-ci-shard-file-lists",
+        rule_id="contracts-tooling-ci-shard-file-lists",
+        path="tests/quality/test_ci_topology.py",
+        old="assert not dropped, (",
+        new="assert dropped or not dropped, (",
+        intent="The shard drift guard stops failing when a file list drops a selected test.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-ci-validation-topology",
+        rule_id="contracts-tooling-ci-validation-topology",
+        path=".github/workflows/ci.yml",
+        old="uv run --frozen python -m scripts.ci_selections windows-unit",
+        new="uv run --frozen python -m pytest -m windows_compat tests/unit",
+        intent="The PR Windows gate falls back to its own windows_compat-only unit selection.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-compile-inventory",
         rule_id="registry_delegation.compile_inventory_authority",
         path="src/apm_cli/compilation/inventory.py",
@@ -1605,6 +1633,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    runner = build_runner_from_context(verbose=verbose, project_root=project_root, events=(event,))",
         new="    runner = LifecycleScriptRunner(scripts=matching, verbose=verbose, project_root=project_root)",
         intent="lifecycle test --execute fires scripts the script gate would withhold.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-linter-cache-content-key",
+        rule_id="contracts-tooling-linter-cache-content-key",
+        path="scripts/architecture_linter/session_cache.py",
+        old="return (relative_path, content_digest(text), self.linter_digest, token)",
+        new="return (relative_path, relative_path, self.linter_digest, token)",
+        intent="Session facts ignore source content, so an override reuses stale facts.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-linter-cache-parse-once",
+        rule_id="contracts-tooling-linter-cache-parse-once",
+        path="scripts/architecture_linter/facts.py",
+        old="reused = self.session.lookup_facts(key)",
+        new="reused = None",
+        intent="The facts provider skips the session and re-parses content it already built.",
     ),
     MutationCase(
         guard_id="contracts-tooling-local-path-anchor",
@@ -2876,6 +2920,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def has_valid_build_id(content: str) -> bool:",
         new="def _has_valid_build_id_removed(content: str) -> bool:",
         intent="The Build ID owner loses its canonical verification entry point.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-cli-startup-import-budget",
+        rule_id="registry_delegation.cli_startup_imports",
+        path="src/apm_cli/cli.py",
+        old="from apm_cli.version_output import print_version\n",
+        new=(
+            "from apm_cli.version_output import print_version\n"
+            "from apm_cli.commands.install import install\n"
+        ),
+        intent="CLI startup eagerly imports a command module again (and GitPython with it).",
     ),
     MutationCase(
         guard_id="registry-delegation-compiled-output-writes",
@@ -6269,3 +6324,40 @@ def test_direct_mcp_entry_reaches_install_service_stage(path: str, old: str, new
     assert report.failures == ()
     assert {violation.rule_id for violation in report.violations} == {rule_id}
     assert any(violation.path == path for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/post_deps_local.py",
+            "        retained_values=frozenset(_kept),\n",
+            "        retained_values=frozenset(),\n",
+            id="local-content-deleter",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "                retained_values=frozenset(kept_prior_values(self.ctx, prior_files)),\n",
+            "                retained_values=frozenset(),\n",
+            id="lock-persistence-deleter",
+        ),
+        pytest.param(
+            "src/apm_cli/core/deployment_state.py",
+            "        if not intent.authoritative_targets or record.locator.value in intent.retained_values:\n",
+            "        if not intent.authoritative_targets:\n",
+            id="reconciler-stale-rule",
+        ),
+    ],
+)
+def test_every_stale_deleter_consumes_the_skip_set(
+    path: str, original: str, replacement: str
+) -> None:
+    """No deleter computes staleness without the run's skip set (#4230)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-cleanup-retains-kept-members"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)

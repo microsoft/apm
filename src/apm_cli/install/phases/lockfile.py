@@ -316,7 +316,7 @@ class LockfileBuilder:
         #1716). See :mod:`apm_cli.install.manifest_reconcile`.
         """
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block
-        from apm_cli.install.phases.cleanup import deployment_evidence
+        from apm_cli.install.phases.cleanup import deployment_evidence, kept_prior_values
         from apm_cli.install.phases.targets import declared_target_profiles
 
         existing = self.ctx.existing_lockfile
@@ -412,6 +412,7 @@ class LockfileBuilder:
                 apply_disk_deletion=not lockfile_only,
                 user_scope=is_user_scope(getattr(self.ctx, "scope", None)),
                 completed_reintegration=completed,
+                retained_values=frozenset(kept_prior_values(self.ctx, prior_files)),
             )
             if not files and completed is None:
                 # Nothing this install governs and nothing to carry forward;

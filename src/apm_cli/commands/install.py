@@ -137,6 +137,7 @@ from apm_cli.install.validation import (
     _validate_package_exists,
 )
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
+from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.policy.outcome_routing import discover_trust_policy
@@ -266,6 +267,8 @@ def _resolve_package_references(
 
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
+    # Marketplace ref pins each requested package staged while it resolved.
+    pins_by_package: dict[str, frozenset] = {}
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
     validated_packages = []
@@ -314,6 +317,7 @@ def _resolve_package_references(
                     if existing_lockfile is None:
                         existing_lockfile = _scoped_lockfile(scope)
                     require_locked_catalog_origin(marketplace_name, plugin_name, existing_lockfile)
+                    pins_before = staged_ref_pin_keys()
                     resolution = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,
@@ -322,6 +326,7 @@ def _resolve_package_references(
                         warning_handler=warning_handler,
                     )
                     canonical_str, _resolved_plugin = resolution
+                    pins_by_package[canonical_str] = staged_ref_pin_keys() - pins_before
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
                     # #1326: refuse before any outbound validation probe.
@@ -514,6 +519,10 @@ def _resolve_package_references(
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
+
+    # A package that will not install records no ref pin (#4322).
+    for rejected, _reason in invalid_outcomes:
+        withdraw_ref_pins(pins_by_package.get(rejected, frozenset()))
 
     return (
         valid_outcomes,

@@ -23689,34 +23689,34 @@
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:764"
+    "src/apm_cli/install/manifest_reconcile.py:766"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:170"
+    "src/apm_cli/commands/pack.py:171"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:36",
-    "src/apm_cli/commands/pack.py:37"
+    "src/apm_cli/commands/pack.py:37",
+    "src/apm_cli/commands/pack.py:38"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:959"
+    "src/apm_cli/commands/install.py:969"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1239",
-    "src/apm_cli/commands/install.py:1003",
-    "src/apm_cli/commands/install.py:977",
+    "src/apm_cli/commands/install.py:1249",
+    "src/apm_cli/commands/install.py:1013",
+    "src/apm_cli/commands/install.py:987",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:701",
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "5703068cd5dd865e0136ca46863ba2d0f03a2ff9358731293f327fc4513eb7ee"
+ "sha256": "03a0cffcd93800b64d10a624f3a78295c46af24feb2fb707029e502ab9d1ff08"
 }

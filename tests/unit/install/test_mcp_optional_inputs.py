@@ -161,3 +161,22 @@ def test_vscode_reinstall_preserves_user_edited_optional_env(tmp_path) -> None:
 
     assert server["env"] == {"CONTEXT7_API_KEY": "${env:CONTEXT7_API_KEY}"}
     assert config.get("inputs", []) == []
+
+
+@pytest.mark.parametrize("env_name", ["CI", "APM_E2E_TESTS"])
+def test_noninteractive_registry_defaults_print_no_bare_environment_notice(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], env_name: str
+) -> None:
+    """Registry defaults in CI or E2E mode print nothing per server (#4320)."""
+    for name in ("CI", "GITHUB_ACTIONS", "TRAVIS", "JENKINS_URL", "BUILDKITE", "APM_E2E_TESTS"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(env_name, "1")
+    operations = MCPServerOperations.__new__(MCPServerOperations)
+
+    for _ in range(2):
+        values = operations._prompt_for_environment_variables(
+            {"REGION": {"description": "Region", "required": True, "value": "eu"}}
+        )
+        assert values == {"REGION": "eu"}
+
+    assert capsys.readouterr().out == ""

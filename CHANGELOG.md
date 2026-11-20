@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking changes and upgrade notes
 
 - `apm install` keeps a managed file it cannot prove it deployed (no receipt, not render-equal), names it and exits 1. Files committed by APM 0.35.x or earlier (for example cursor rules, codex agents) may be refused once: move them aside and rerun `apm install`. (#4382)
+- After upgrading, `apm uninstall` needs deployment evidence for each file it deletes; without it, it changes nothing and names each file. If the source is unreachable, see the uninstall reference. (#3701)
 
 ### Changed
 
@@ -19,9 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4158)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
+- Internal: PR checks run the full Windows unit suite (3 shards), the same selection main push runs. (closes #4115, #4150)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 - Each command writes `apm.lock.yaml` at most once, and `apm compile` refuses a lockfile written by a newer APM before changing files. (closes #4086, #4255)
 - Internal: `apm install --mcp` and `apm mcp install` install and record their server through the same MCP stage as `apm install`. (#4255)
+- Faster CLI startup: `apm --help` and every verb load command modules and GitPython only when needed (`apm --help` imports 332 modules instead of 767); help text and exit codes are unchanged. (closes #4118, #4150)
+- Internal: architecture-linter mutation tests share one session cache, so each file is walked and parsed once instead of once per case; findings are unchanged. (closes #4119, #4150)
 - Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
 - Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
 - Internal: lifecycle tests share one hermetic world: nine fixture packages, local git, marketplace, MCP registry and policy services, cloned per test in milliseconds. (#4142)
@@ -29,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
 - Internal: lifecycle tests add security tables and all 25 documented user journeys, each credited only through oracle receipts. (#4156)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
+- Internal: each CI shard collects only its own test files instead of every test root, checked against a full collect on the same commit. (closes #4120, #4150)
 
 ### Fixed
 
@@ -72,6 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)
 - `PROXY_REGISTRY_TOKEN` is sent over `http://` only to loopback or private network hosts; `PROXY_REGISTRY_ALLOW_HTTP=1` now authorizes sending it to other `http://` hosts. (closes #4314, #4317)
+- `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
+- `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - `apm audit --ci`, `apm install --frozen` and `apm update` read locked git sources through one cache and reach one verdict; a refused install leaves `apm_modules` unchanged. (closes #4356, #4353, #4363, #4385)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
 - MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
@@ -126,6 +133,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
 - `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
 - A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
+- `apm install` names the runtime in each MCP failure line instead of repeating one identical line per runtime. (closes #4288, #4412)
+- `apm install` warns once about a legacy MCP entry left in a config file that two targets share. (closes #4289, #4412)
+- `apm install --verbose` reports each Azure DevOps auth step once per command, not once per clone attempt. (closes #4290, #4412)
+- `apm pack` shows each plugin-manifest note once per command. (closes #4291, #4412)
+- `apm install` lists a missing required package once in the policy warning block, and the count matches. (closes #4307, #4412)
+- `apm install` no longer prints a bare `CI environment detected` line for each registry MCP server. (closes #4320, #4412)
+- A partly successful `apm install` of marketplace plugins records ref pins only for the plugins it installs. (closes #4322, #4419)
+- The repository not-found diagnostic names every credential source tried, in order, never their values. (#4322, #4419)
 
 ## [0.37.0] - 2026-11-20
 
