@@ -229,6 +229,13 @@ def build_template(base: Path) -> World:
     azure_config = isolated.home / ".azure"
     env = shim_environment(env, base, azure_config, install_shims(base, azure_config))
     env = services.child_environment(env)
+    if os.name == "nt":
+        # Git for Windows defaults to schannel, which checks revocation and
+        # ignores GIT_SSL_CAINFO; the world's fixture CA has no revocation
+        # data ("schannel: the revocation status is unknown"). APM inherits
+        # http.sslBackend from the global config (#2545), so openssl applies.
+        with Path(env["GIT_CONFIG_GLOBAL"]).open("a", encoding="utf-8") as config:
+            config.write("[http]\n\tsslBackend = openssl\n")
     for user_root in (".copilot", ".claude", ".codex"):
         (isolated.home / user_root).mkdir()
 
