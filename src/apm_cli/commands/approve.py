@@ -124,8 +124,8 @@ def _load_store(
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
     """Load the (allow, deny) grant maps from the selected store.
 
-    Keys an older APM wrote as an install spec are rewritten under the
-    package identity when this store is next saved (#4189).
+    A key written as an install spec is stored under the package identity
+    when this store is saved (#4189).
     """
     from ..security.executables import (
         _readable_lockfile,

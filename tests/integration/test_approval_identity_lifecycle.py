@@ -3,8 +3,8 @@
 PROMISE: outcome.status_matches_state -- every spec form approve, deny and policy
 explain accept names the installed package's store identity, or the command
 exits 1 without writing; a deny by install spec retires deployed executables
-(source: issues #4189, #4245, #4246). A deny an older APM keyed by the raw
-spec is honored after upgrade and stays honored through update and --frozen.
+(source: issues #4189, #4245, #4246). A deny entry keyed by the install spec
+applies to the package and holds through update and --frozen.
 CELL: OP=approve,deny,explain,install SRC=marketplace(local catalog) PRIM=hook
 SCOPE={project, user (APM_HOME outside HOME)} GATE=executables.allow={}
 owner: executable-trust-context (security/executables.py canonical_approval_spec)
@@ -186,10 +186,10 @@ def test_deny_by_install_spec_stays_retired_through_update_and_frozen(
 
 
 @pytest.mark.parametrize("scope", ["project", "user"])
-def test_install_spec_deny_from_an_older_apm_is_honored_after_upgrade(
+def test_install_spec_keyed_store_entry_applies_to_the_package_identity(
     tmp_path: Path, apm_binary_path: Path, scope: str
 ) -> None:
-    """History: a deny an older APM keyed by the raw install spec still retires the hook."""
+    """A deny entry keyed by the install spec applies to the package identity."""
     world = _approved_and_deployed(tmp_path, apm_binary_path, scope)
     manifest = yaml.safe_load(world.manifest.read_text(encoding="utf-8"))
     types = {"hooks": True, "mcp": True, "lsp": True, "bin": True, "canvas": True}

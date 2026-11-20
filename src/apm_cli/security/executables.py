@@ -677,10 +677,10 @@ def canonicalize_store_keys(
 ) -> dict[str, Any]:
     """Fold store keys written as an install spec onto the package identity (#4189).
 
-    Older APM keyed ``apm deny plugin@marketplace`` by the raw spec, which the
-    gate never matched. Reading the store maps such a key to the identity
-    :func:`canonical_approval_spec` resolves: a deny merges its types, an
-    allow never overrides an identity grant. Each mapping is announced once.
+    A store key spelled as an install spec (``plugin@marketplace``) applies to
+    the identity :func:`canonical_approval_spec` resolves: a deny merges its
+    types, an allow never overrides an identity grant. Each mapping is
+    announced once.
     """
     result = dict(grants)
     for key, value in grants.items():

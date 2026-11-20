@@ -2363,7 +2363,7 @@
     {
       "issue": 4154,
       "fixed_in": "Unreleased",
-      "summary": "A native plugin parked at user scope could not be approved: apm approve had no -g, scanned a local plugin's source instead of the copy install gated, printed project-scope hints, and exited 0 when it approved nothing; an unapproved Codex bundle failed the install instead of parking.",
+      "summary": "A native plugin parked at user scope is approved with the printed apm approve -g command; approve reads the same unit the install gate parked; an unapproved Codex bundle parks with nothing deployed; approving a package that is not installed exits 1.",
       "failure_modes": [
         "observation",
         "outcome"
@@ -2419,7 +2419,7 @@
     {
       "issue": 4189,
       "fixed_in": "Unreleased",
-      "summary": "apm deny with a marketplace install spec keyed the deny by the raw spec instead of the installed package's identity, so it matched nothing, reported success and left the executables deployed.",
+      "summary": "apm deny resolves a marketplace install spec to the installed package's identity, keys the store by that identity, and the next install retires the package's executables; a spec that matches nothing exits 1 without writing.",
       "failure_modes": [
         "observation",
         "outcome"
@@ -2431,7 +2431,7 @@
         "tests/integration/test_approval_identity_lifecycle.py::test_approve_and_deny_by_install_spec_reach_the_installed_package",
         "tests/integration/test_approval_identity_lifecycle.py::test_unresolvable_install_spec_exits_1_without_writing",
         "tests/integration/test_approval_identity_lifecycle.py::test_deny_by_install_spec_stays_retired_through_update_and_frozen",
-        "tests/integration/test_approval_identity_lifecycle.py::test_install_spec_deny_from_an_older_apm_is_honored_after_upgrade"
+        "tests/integration/test_approval_identity_lifecycle.py::test_install_spec_keyed_store_entry_applies_to_the_package_identity"
       ]
     },
     {
@@ -2455,7 +2455,7 @@
     {
       "issue": 4245,
       "fixed_in": "Unreleased",
-      "summary": "apm approve with the marketplace spec a package was installed with reported not found and exited 0, leaving the package parked.",
+      "summary": "apm approve resolves the marketplace spec a package was installed with to that package and approves it; an unresolvable spec exits 1.",
       "failure_modes": [
         "observation",
         "outcome"
@@ -2471,7 +2471,7 @@
     {
       "issue": 4246,
       "fixed_in": "Unreleased",
-      "summary": "apm policy explain suggested approving a package the user had denied, by short name, instead of naming the deny and how to lift it.",
+      "summary": "apm policy explain names the deny entry and how to lift it for a denied package, using the package identity.",
       "failure_modes": [
         "observation"
       ],
