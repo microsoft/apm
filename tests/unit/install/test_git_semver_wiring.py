@@ -449,6 +449,7 @@ class TestDownloadStrategyReplaysLockedSemver:
     def _resolved_refs(self, ctx):
         return [call.args[0].reference for call in ctx.downloader.resolve_git_reference.mock_calls]
 
+    @pytest.mark.req("req-lk-009")
     def test_unchanged_constraint_replays_locked_tag(self, tmp_path):
         from apm_cli.install.phases.integrate import _resolve_download_strategy
 
@@ -479,6 +480,7 @@ class TestDownloadStrategyReplaysLockedSemver:
         assert ref_changed is False
         assert ctx.expected_hash_change_deps == set()
 
+    @pytest.mark.req("req-lk-009")
     @pytest.mark.parametrize(
         ("update_refs", "constraint"),
         [(True, "^1.2.0"), (False, "^1.0.0")],

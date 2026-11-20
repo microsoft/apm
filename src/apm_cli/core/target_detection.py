@@ -1073,9 +1073,10 @@ def resolve_audit_target_decision(
 
 def read_manifest_target(project_root: Path) -> list[str] | None:
     """Read audit's manifest target hint; manifest checks own parse failures."""
+    from apm_cli.core.scope import manifest_file
     from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    declaration = read_manifest_target_declaration(manifest_file(project_root), lenient=True)
     if declaration is None:
         return None
     try:

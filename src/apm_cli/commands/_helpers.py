@@ -13,6 +13,8 @@ import click
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
+from apm_cli.core.scope import manifest_file
+
 from ..agent_plugins.validation import is_valid_plugin_name as _is_valid_agent_plugin_name
 from ..constants import (
     APM_MODULES_DIR,
@@ -37,7 +39,7 @@ from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
 )
-from ..utils.console import _rich_echo, _rich_warning
+from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.git_env import get_git_executable
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.themed_console import _get_console, _rich_blank_line  # noqa: F401
@@ -233,9 +235,10 @@ def _standalone_installed_packages(
         if p in lockfile_keys:
             standalone.append(p)
             continue
-        if (apm_modules_dir / p / APM_YML_FILENAME).exists() or (
-            apm_modules_dir / p / SKILL_MD_FILENAME
-        ).is_file():
+        if (
+            manifest_file(apm_modules_dir / p).exists()
+            or (apm_modules_dir / p / SKILL_MD_FILENAME).is_file()
+        ):
             standalone.append(p)
     return standalone
 
@@ -251,7 +254,7 @@ def _check_orphaned_packages():
         List[str]: List of orphaned package names in org/repo or org/project/repo format
     """
     try:
-        if not Path(APM_YML_FILENAME).exists():
+        if not manifest_file(Path(".")).exists():
             return []
 
         apm_modules_dir = Path(APM_MODULES_DIR)
@@ -262,7 +265,7 @@ def _check_orphaned_packages():
             from ..deps.lockfile import LockFile, get_lockfile_path
             from ..models.apm_package import APMPackage
 
-            apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
             declared_deps = apm_package.get_all_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
         except Exception:
@@ -384,6 +387,18 @@ def _check_and_notify_updates():
         if os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes"):
             return
 
+        from ..deps.egress_route import EgressSurface, is_refused
+
+        if is_refused(EgressSurface.VERSION_CHECK):
+            context = click.get_current_context(silent=True)
+            if context is not None and (context.obj or {}).get("verbose"):
+                _rich_info(
+                    "Update check skipped: PROXY_REGISTRY_ONLY is set"
+                    " (run 'apm self-update --check' to check explicitly)",
+                    symbol="info",
+                )
+            return
+
         current_version = get_version()
 
         # Skip check for development versions
@@ -416,7 +431,7 @@ def _check_and_notify_updates():
 
 def _load_apm_config():
     """Load configuration from apm.yml."""
-    if Path(APM_YML_FILENAME).exists():
+    if manifest_file(Path(".")).exists():
         from ..models.manifest_io import load_manifest
 
         return load_manifest(APM_YML_FILENAME)
@@ -532,7 +547,7 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     """
     cwd = (start or Path.cwd()).resolve()
     for candidate in (cwd, *cwd.parents):
-        manifest = candidate / "apm.yml"
+        manifest = manifest_file(candidate)
         if manifest.is_file():
             return manifest
     return None

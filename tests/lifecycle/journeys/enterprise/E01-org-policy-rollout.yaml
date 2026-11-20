@@ -1,0 +1,140 @@
+# E01 Org policy rollout and CI policy gate; golden, PR tier (#4110). Schema: test_journeys.py.
+schema: 1
+id: E01
+persona: enterprise
+title: Org policy rollout and CI policy gate
+docs: [enterprise/apm-policy.mdx, reference/policy-schema.md]
+world:
+  project: empty
+  git: init
+  setup:
+    - git remote add origin https://github.com/contoso/consumer.git
+    - apm init -y --target copilot
+    - apm install microsoft/apm-sample-package#v1.0.0
+steps:
+  - n: 1
+    edit:
+      - append: apm-policy.yml
+        text: |
+          name: contoso-agent-policy
+          version: "1.0.0"
+          enforcement: warn
+          dependencies:
+            allow:
+              - "github.com/contoso/**"
+              - "github.com/microsoft/**"
+            deny:
+              - "github.com/untrusted-org/**"
+    run: [apm policy status --policy-source ./apm-policy.yml --check --json]
+    exit: 0
+    note: the draft is tested from a member repository before it is committed to contoso/.github
+    docs:
+      page: enterprise/apm-policy.mdx
+      commands: [apm policy status --policy-source ./apm-policy.yml --check --json]
+      output:
+        - "{"
+        - "  ..."
+        - '  "enforcement": "warn",'
+        - '  "outcome": "found",'
+        - '  "rule_summary": ['
+        - '    "1 dependency denies",'
+        - '    "2 dependency allow patterns"'
+        - "  ],"
+        - '  "source": "file:apm-policy.yml",'
+        - "  ..."
+        - "}"
+    files: [apm-policy.yml]
+    key_lines: ['"outcome": "found"', '"enforcement": "warn"']
+  - n: 2
+    run: [apm install --dry-run]
+    exit: 0
+    files: []
+    key_lines:
+      - "[!] Policy warning: github.com/github/awesome-copilot/skills/review-and-refactor -- not in allowed sources"
+      - "[i] Dry run completed: would install 2 APM dependencies"
+  - n: 3
+    run: [apm audit --ci --policy org]
+    exit: 0
+    docs:
+      page: enterprise/apm-policy.mdx
+      output:
+        - "..."
+        - "| [!]      | dependency-allowlist     | 1 dependency(ies) not in allow list (enforcement: warn)     |"
+        - "..."
+        - "12 check(s) passed; 1 reports violations under 'enforcement: warn' and fail once the policy switches to block."
+    key_lines: ["| [!]      | dependency-allowlist", "[+] No drift detected"]
+    forbidden_lines: ["[x]"]
+  - n: 4
+    edit:
+      - serve: contoso/.github
+        path: apm-policy.yml
+        text: |
+          name: contoso-agent-policy
+          version: "1.0.0"
+          enforcement: block
+          fetch_failure: block
+          dependencies:
+            allow:
+              - "github.com/contoso/**"
+              - "github.com/microsoft/**"
+            deny:
+              - "github.com/untrusted-org/**"
+    cold_cache: true
+    run: [apm audit --ci --policy org -f sarif -o apm.sarif]
+    files: [apm.sarif]
+    exit: 1
+    note: a fresh CI runner (no policy cache) after the admin commits enforcement block
+    docs:
+      page: enterprise/enforce-in-ci.mdx
+      fence: .github/workflows/apm.yml
+      commands: [apm audit --ci --policy org -f sarif -o apm.sarif]
+    file_lines:
+      apm.sarif: ['"ruleId": "dependency-allowlist"', '"level": "error"', "review-and-refactor: not in allowed sources"]
+  - n: 5
+    run: [apm install acme/evil-pkg]
+    exit: 1
+    files: []
+    key_lines:
+      - "[x] Policy violation: github.com/acme/evil-pkg -- not in allowed sources"
+      - Blocked by org policy at org:contoso/.github (dependency-allowlist)
+      - "[i] apm.yml restored to its previous state."
+  - n: 6
+    edit:
+      - replace: apm.yml
+        old: "includes: auto\n"
+        new: "includes: auto\npolicy:\n  fetch_failure_default: block\n"
+      - unreachable: contoso/.github
+    cold_cache: true
+    run: [apm install --frozen, apm audit --ci]
+    exit: 1
+    note: a fresh runner with no policy cache during a policy repository outage fails closed
+    files: []
+    key_lines:
+      - "[x] Install blocked: no enforceable org policy was resolved (outcome=cache_miss_fetch_fail)"
+      - "[x] Policy fetch failed: HTTP 503 fetching policy from contoso/.github (policy.fetch_failure_default=block)"
+    forbidden_lines: [proceeding without policy enforcement]
+  - n: 7
+    edit:
+      - reachable: contoso/.github
+    run: [apm audit --help, apm policy explain microsoft/apm-sample-package]
+    exit: 0
+    help_docs: reference/cli/audit.md
+    note: the --policy help ends at "policy checks." with no [experimental] tag
+    key_lines: [--policy TEXT, with --ci for policy checks.]
+    forbidden_lines: ["policy checks. [experimental]"]
+known_cells:
+  - id: e01-sarif-audit-fails-without-an-error-line
+    law: O5
+    tracking: "#4224"
+    step: 4
+    match: "exited 1 without an \\[x\\] or error line"
+  - id: e01-sarif-audit-prints-no-advice
+    law: O8
+    tracking: "#4224"
+    step: 4
+    match: "prints no 'apm ...' advice"
+  - id: e01-fetch-failure-notice-contradicts-the-block
+    law: FORBID
+    tracking: "#4180"
+    step: 6
+    match: "forbidden 'proceeding without policy enforcement' printed"

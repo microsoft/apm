@@ -1,0 +1,77 @@
+# E02 Executables approvals; nightly (#4110). Schema: test_journeys.py.
+# <pkg> is the world package lifecycle/p-exec (hook + bin + self-defined MCP
+# server), served from the world's github.com. The world's apm.yml already
+# turns the gate on (executables: {allow: {}}); step 1 writes the docs form
+# "executables: {}" and declares the package.
+schema: 1
+id: E02
+persona: enterprise
+title: Executables approvals
+docs: [reference/cli/approve.md, reference/cli/deny.md, enterprise/security.md]
+steps:
+  - n: 1
+    edit:
+      - {replace: apm.yml, old: "  apm: []\n", new: "  apm:\n  - lifecycle/p-exec#v1.0.0\n"}
+      - {replace: apm.yml, old: "executables:\n  allow: {}\n", new: "executables: {}\n"}
+    run: [apm install]
+    exit: 0
+    files: [apm.lock.yaml, .gitignore, apm_modules/]
+    key_lines:
+      - "[!] lifecycle/p-exec: hooks skipped (not approved in executables.allow). Run 'apm approve lifecycle/p-exec' to approve."
+      - "[!] 1 package(s) have executable primitives parked pending approval; install completed without deploying them."
+      - "Parked MCP server 'p-exec-mcp' (lifecycle/p-exec): executables not approved"
+    forbidden_lines: [allowExecutables, no bin/, integrated]
+  - n: 2
+    run: [apm approve --pending]
+    exit: 0
+    files: []
+    key_lines:
+      - "1 package(s) with unapproved or changed executables:"
+      - "[not approved]"
+      - "Review each definition, then run 'apm approve <package>' to pin it."
+  - n: 3
+    run: [apm approve lifecycle/p-exec, apm install]
+    exit: 0
+    files: [apm.yml, apm.lock.yaml, .github/hooks/p-exec-session.json, .mcp.json]
+    key_lines:
+      - "[+] Approved lifecycle/p-exec at these exact definitions (1 hook file, 1 MCP server, 1 bin item)"
+      - "[i] Updated apm.yml (1 approved). Run 'apm install' to deploy; commit apm.yml to share."
+      - "hook(s) integrated -> .github/hooks/"
+      - "p-exec-mcp -> Copilot CLI (configured)"
+    forbidden_lines: [hooks skipped]
+  - n: 4
+    run: [apm deny lifecycle/p-exec, apm install --frozen]
+    exit: [0, 1]
+    key_lines:
+      - "[i] Denied lifecycle/p-exec#1.0.0: 1 hook(s), 1 MCP server(s), 1 bin executable(s)"
+      - "[x] --frozen: apm.lock.yaml is out of sync with apm.yml."
+      - "the executables gate now parks it (denied)"
+    remediate:
+      - {advice: apm install}
+    rerun: [apm install --frozen]
+  - n: 5
+    run: [apm install]
+    exit: 0
+    files: [apm.lock.yaml, .github/hooks/p-exec-session.json, .mcp.json]
+    key_lines:
+      - "[!] lifecycle/p-exec: hooks skipped (denied). Run 'apm policy explain lifecycle/p-exec' to see which deny applies."
+      - "Removed stale MCP server 'p-exec-mcp' from .mcp.json"
+      - "Parked MCP server 'p-exec-mcp' (lifecycle/p-exec): denied (project-deny)"
+  - n: 6
+    run: [apm policy explain lifecycle/p-exec]
+    exit: 0
+    files: []
+    key_lines:
+      - "lifecycle/p-exec#1.0.0: 1 hook(s), 1 MCP server(s), 1 bin executable(s)"
+      - "verdict: blocked"
+      - "(layer: project-deny)"
+known_cells:
+  # The install deletes the retired hook file but never names it; it instead
+  # warns that historical claims were retained (the --verbose list names the
+  # deleted .github/hooks/p-exec-session.json as retained).
+  - id: e02-deny-retired-hook-not-announced
+    law: O6
+    tracking: "#4173"
+    step: 5
+    match: 'p-exec-session\.json changed but no output line announces it'
+

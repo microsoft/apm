@@ -1,7 +1,7 @@
 """Unit tests for auth scoping: tokens are only sent to their matching hosts.
 
 Tests cover:
-- _build_repo_url: GitHub tokens only go to GitHub hosts, not to generic hosts
+- _build_repo_url: clone URLs never embed credentials for any host
 - _clone_with_fallback: generic hosts get relaxed env (no GIT_ASKPASS etc.)
 - Object-style dependency entries (parse_from_dict, from_apm_yml)
 """
@@ -69,24 +69,26 @@ def _url_host(url: str) -> str:
 
 
 class TestBuildRepoUrlTokenScoping:
-    """Verify _build_repo_url sends GitHub tokens only to GitHub hosts."""
+    """Verify _build_repo_url never embeds credentials (they travel via git env)."""
 
-    def test_github_com_gets_token(self):
+    def test_github_com_url_never_embeds_token(self):
         dl = _make_downloader(github_token="ghp_TESTTOKEN")
         dep = _dep("https://github.com/owner/repo.git")
         url = dl._build_repo_url("owner/repo", use_ssh=False, dep_ref=dep)
-        assert "ghp_TESTTOKEN" in url
+        assert "ghp_TESTTOKEN" not in url
+        assert urlparse(url).username is None
         assert _url_host(url) == "github.com"
 
-    def test_ghe_host_gets_token(self):
+    def test_ghe_host_url_never_embeds_token(self):
         dl = _make_downloader(github_token="ghp_TESTTOKEN")
         dep = _dep("https://company.ghe.com/owner/repo.git")
         url = dl._build_repo_url("owner/repo", use_ssh=False, dep_ref=dep)
-        assert "ghp_TESTTOKEN" in url
+        assert "ghp_TESTTOKEN" not in url
+        assert urlparse(url).username is None
         assert _url_host(url) == "company.ghe.com"
 
-    def test_gitlab_https_uses_oauth2_not_x_access_token(self):
-        """GitLab PAT from GITLAB_APM_PAT is embedded as oauth2:<token>, never x-access-token."""
+    def test_gitlab_https_never_embeds_pat(self):
+        """GitLab PAT from GITLAB_APM_PAT travels via git env, never in the URL."""
         dl = _make_downloader(gitlab_token="glpat_GITLABTEST")
         dep = _dep("https://gitlab.com/acme/rules.git")
         dl.auth_resolver._cache.clear()
@@ -99,8 +101,8 @@ class TestBuildRepoUrlTokenScoping:
         ):
             url = dl._build_repo_url("acme/rules", use_ssh=False, dep_ref=dep)
         assert "x-access-token" not in url.lower()
-        assert "oauth2" in url
-        assert "glpat_GITLABTEST" in url
+        assert "oauth2" not in url
+        assert "glpat_GITLABTEST" not in url
         assert _url_host(url) == "gitlab.com"
 
     def test_gitlab_https_with_token_preserves_custom_port(self):
@@ -125,8 +127,8 @@ class TestBuildRepoUrlTokenScoping:
         parsed = urlparse(url)
         assert parsed.hostname == "gitlab.corp.example"
         assert parsed.port == 8443
-        assert parsed.username == "oauth2"
-        assert "glpat_GITLABTEST" in url
+        assert parsed.username is None
+        assert "glpat_GITLABTEST" not in url
 
     def test_gitlab_https_ignores_github_token(self):
         """GitHub module tokens must not be embedded into GitLab clone URLs."""
@@ -326,6 +328,7 @@ class TestCloneWithFallbackEnv:
         assert "ghp_TESTTOKEN" not in first_url
         assert _url_host(first_url) == "github.com"
 
+    @pytest.mark.req("req-sc-008")
     def test_insecure_http_dep_is_strict_by_default(self):
         """HTTP deps stay on HTTP unless protocol fallback is enabled."""
         dl = _make_downloader(github_token="ghp_TESTTOKEN")

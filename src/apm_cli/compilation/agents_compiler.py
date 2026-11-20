@@ -187,9 +187,9 @@ class CompilationConfig:
 
         # Try to load from apm.yml
         try:
-            from pathlib import Path
+            from ..core.scope import manifest_file
 
-            if Path("apm.yml").exists():
+            if manifest_file(Path(".")).exists():
                 from ..utils.yaml_io import load_yaml
 
                 apm_config = load_yaml("apm.yml") or {}

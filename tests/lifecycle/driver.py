@@ -35,6 +35,8 @@ _USER_SCOPE_FLAGS = {
     "approve": "--user",
     "deny": "--user",
 }
+# Groups whose scope flag belongs to the subcommand (`apm deps list --global`).
+_SCOPE_ON_SUBCOMMAND = frozenset({"deps", "lock"})
 
 OutputHook = Callable[[tuple[str, ...], CommandResult, str], None]
 OUTPUT_HOOKS: list[OutputHook] = []
@@ -84,8 +86,8 @@ def command_args(argv: str | Sequence[str], *, scope: str = "project") -> tuple[
         if flag is None:
             raise ValueError(f"apm {args[0]} has no user-scope form")
         if flag not in args and "-g" not in args:
-            # ``deps`` takes the flag on its subcommand (``apm deps list --global``).
-            args.insert(2 if args[0] == "deps" and len(args) > 1 else 1, flag)
+            nested = args[0] in _SCOPE_ON_SUBCOMMAND and len(args) > 1
+            args.insert(2 if nested and not args[1].startswith("-") else 1, flag)
     elif scope != "project":
         raise ValueError(f"unknown scope {scope!r}")
     return tuple(args)

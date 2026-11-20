@@ -1203,9 +1203,9 @@ class DependencyReference(ProviderCoordinateMixin):
         if n < 3:
             return 2
 
-        from ...deps.registry_proxy import is_enforce_only
+        from ...deps.egress_route import EgressSurface, is_proxy_only
 
-        if not is_enforce_only():
+        if not is_proxy_only(EgressSurface.SOURCE_ARCHIVE):
             return 2
 
         if any(path_segments[-1].endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
