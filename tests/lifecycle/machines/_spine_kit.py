@@ -149,6 +149,8 @@ _TRANSITION_PROPERTIES = {
 _VARIANTS = ("project", "global-canonical", "global-aliased")
 # Run-level expected cell: a preserved user edit of a managed file (see expected_cells).
 USER_EDIT_CELL = "spine-user-edit-preserved"
+# A refused --frozen install leaves the files it deployed before the refusal (#4309).
+FROZEN_UNDERRECORDING_CELL = "spine-cell-frozen-underrecording"
 
 
 def _phase_one_properties() -> frozenset[str]:
@@ -444,18 +446,29 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         the drift; ``audit_tampered`` asserts it), so only the edited file's
         hash mismatch is excused, and only while the edit is on disk.
         """
-        del op, before, result
-        if not self.skill_path.is_file() or self._managed_skill():
-            return {}
-        del after
-        relative = re.escape(self._skill_record())
-        return {
-            "I1": (
+        del before
+        cells: dict[str, tuple[ExpectedCell, ...]] = {}
+        if (
+            op.name == "install-frozen"
+            and result is not None
+            and result.returncode == 1
+            and "is deployed by this install but not recorded"
+            in " ".join((result.stdout + result.stderr).split())
+        ):
+            cells["I7"] = (
                 ExpectedCell(
-                    USER_EDIT_CELL, f"^recorded hash does not match disk: {relative}$", False
+                    FROZEN_UNDERRECORDING_CELL,
+                    r"^failed install-frozen changed durable files: .*frozen-extra",
                 ),
             )
-        }
+        if not self.skill_path.is_file() or self._managed_skill():
+            return cells
+        del after
+        relative = re.escape(self._skill_record())
+        cells["I1"] = (
+            ExpectedCell(USER_EDIT_CELL, f"^recorded hash does not match disk: {relative}$", False),
+        )
+        return cells
 
     def record_expected(self, cell_id: str) -> None:
         self.expected_seen.add(cell_id)
