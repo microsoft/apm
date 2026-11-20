@@ -511,19 +511,6 @@ class TestAPMPackageReplaceIntegration:
 
     # -- Contract gate tests (D3) ------------------------------------------
 
-    def test_replace_without_schema_rejects(self, tmp_path):
-        """``replace`` key without source-replacements-v1 ``$schema`` is rejected."""
-        from apm_cli.models.apm_package import APMPackage
-
-        manifest = self._base_manifest(replace=[])
-        with pytest.raises(ValueError, match="source-replacements-v1"):
-            APMPackage.from_mapping(
-                manifest,
-                package_path=tmp_path,
-                source_path=tmp_path,
-                warning_handler=None,
-            )
-
     def test_replace_with_working_draft_rejects(self, tmp_path):
         """Working-draft (no ``$schema``) with ``replace`` is rejected."""
         from apm_cli.models.apm_package import APMPackage

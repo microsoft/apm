@@ -122,44 +122,6 @@ def _make_dep_ref(
 # ---------------------------------------------------------------------------
 
 
-class TestMaterialization:
-    """Tests for the Materialization dataclass."""
-
-    def test_default_deltas(self) -> None:
-        from apm_cli.install.sources import Materialization
-
-        m = Materialization(
-            package_info=None,
-            install_path=Path("/some/path"),
-            dep_key="owner/repo",
-        )
-        assert m.deltas == {"installed": 1}
-
-    def test_custom_deltas(self) -> None:
-        from apm_cli.install.sources import Materialization
-
-        m = Materialization(
-            package_info=None,
-            install_path=Path("/some/path"),
-            dep_key="owner/repo",
-            deltas={"installed": 1, "unpinned": 1},
-        )
-        assert m.deltas["unpinned"] == 1
-
-    def test_install_path_stored(self) -> None:
-        from apm_cli.install.sources import Materialization
-
-        p = Path("/workspace/pkg")
-        m = Materialization(package_info=MagicMock(), install_path=p, dep_key="a/b")
-        assert m.install_path == p
-
-    def test_dep_key_stored(self) -> None:
-        from apm_cli.install.sources import Materialization
-
-        m = Materialization(package_info=None, install_path=Path("/x"), dep_key="ns/name@1.0")
-        assert m.dep_key == "ns/name@1.0"
-
-
 # ---------------------------------------------------------------------------
 # LocalDependencySource.acquire
 # ---------------------------------------------------------------------------

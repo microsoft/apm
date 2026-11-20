@@ -587,12 +587,6 @@ class TestSharedCacheCleanup:
         _, mock_cache = _run_ctx(ctx, tmp_path)
         mock_cache.cleanup.assert_called_once()
 
-    def test_shared_cache_attached_to_downloader(self, tmp_path: Path) -> None:
-        ctx = _make_ctx(tmp_path)
-        _run_ctx(ctx, tmp_path)
-        # downloader should have shared_clone_cache set
-        assert ctx.downloader is not None
-
 
 # ---------------------------------------------------------------------------
 # Verbose tree summary logging

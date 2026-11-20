@@ -1,0 +1,10 @@
+{
+  "partition": "unit/deps+install",
+  "steps_done": [1],
+  "folds": {},
+  "decisions": [
+    "D5: for cross-file equal-copy groups the copy in the *_phase3*/phase3w5 module was deleted and the behavior-named twin kept, regardless of the report's keep order (D5 equality is symmetric).",
+    "D5: 27 groups between tests/unit/install/test_services_branches.py and test_services_phase3.py left untouched: both files are owned by open pull requests."
+  ],
+  "counts_left": {}
+}
