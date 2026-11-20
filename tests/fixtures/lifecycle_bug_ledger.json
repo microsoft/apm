@@ -2418,8 +2418,8 @@
       ],
       "regression_tests": [
         "tests/integration/test_lockfile_version_monotonic_lifecycle.py::test_lockfile_version_is_kept_after_the_v2_dependency_is_removed",
-        "tests/unit/test_lockfile_v2_bump.py::TestSchemaBumpOpportunistic::test_rewrite_keeps_v2_after_the_v2_entry_is_removed",
-        "tests/unit/test_lockfile_v2_bump.py::TestSchemaBumpOpportunistic::test_v4_marker_follows_framed_content_hashes_not_the_floor"
+        "tests/unit/test_lockfile_version_floor.py::test_rewrite_keeps_v2_after_the_v2_entry_is_removed",
+        "tests/unit/test_lockfile_version_floor.py::test_v4_marker_follows_framed_content_hashes_not_the_floor"
       ]
     },
     {
