@@ -32,7 +32,7 @@ from pathlib import Path
 import yaml
 
 from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_error, _rich_success
+from ...utils.console import _rich_error
 from ...utils.yaml_io import load_yaml, yaml_to_str
 from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
@@ -248,7 +248,7 @@ class HermesClientAdapter(CopilotClientAdapter):
                 _rich_error(f"Failed to write MCP config for '{config_key}' to Hermes")
                 return False
 
-            _rich_success(f"Successfully configured MCP server '{config_key}' for Hermes")
+            # The integrator's install tree reports success once (#3994).
             return True
         except Exception:
             # Do not interpolate the exception message: registry URLs and

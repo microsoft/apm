@@ -20,6 +20,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -674,6 +675,27 @@ def local_bundle_approval_key(
     return f"{package_id}#{artifact_version}@{digest}"
 
 
+def local_bundle_approval_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
+    """Name the manifest whose ``executables.allow`` approves *approval_key*.
+
+    Grants come from the scope's manifest: the project ``apm.yml``, or the
+    user manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads.
+    """
+    from apm_cli.core.scope import InstallScope, get_manifest_path
+
+    target = (
+        f"the user manifest {get_manifest_path(InstallScope.USER)}" if user_scope else "apm.yml"
+    )
+    return (
+        f"To approve this exact local bundle, add to {target}:\n"
+        "executables:\n"
+        "  allow:\n"
+        f'    "{approval_key}":\n'
+        f"      {exec_type}: true\n"
+        "Then rerun the install."
+    )
+
+
 # -------------------------------------------------------------------
 # Package scanning
 # -------------------------------------------------------------------
@@ -812,12 +834,33 @@ def _is_interactive() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
+def trust_remedy(package: str, recommend: Collection[str] = (), *, user_scope: bool = False) -> str:
+    """One remediation line for parked executables.
+
+    Offers ``apm approve --recommended`` only when the org policy declares an
+    ``executables.recommend`` set; otherwise that command finds nothing. A
+    user-scope install names the ``-g`` commands (#4154).
+    """
+    from apm_cli.security.trust import approve_command, explain_command
+
+    bulk = (
+        f"Trust the org-vetted set: {approve_command('--recommended', user_scope=user_scope)}  |  "
+        if recommend
+        else ""
+    )
+    return (
+        f"{bulk}Trust one: {approve_command(package, user_scope=user_scope)}  |  "
+        f"Inspect: {explain_command(package, user_scope=user_scope)}"
+    )
+
+
 def prompt_executable_approval(
     declarations: list[ExecutableDeclaration],
     *,
     allow_executables: dict[str, dict[str, bool]] | None = None,
     trust_all: bool = False,
     no_executables: bool = False,
+    recommend: Collection[str] = (),
 ) -> dict[str, dict[str, bool]]:
     """Run the interactive approval flow for packages with executables.
 
@@ -869,12 +912,7 @@ def prompt_executable_approval(
             provenance = "(transitive)" if decl.is_transitive else "(direct)"
             _rich_echo(f"  {decl.package_key} {provenance}: {decl.summary_line()}")
         _rich_echo("")
-        _rich_info(
-            "Trust the org-vetted set: apm approve --recommended  |  "
-            "Trust one: apm approve <package>  |  "
-            "Inspect: apm policy explain <package>",
-            symbol="info",
-        )
+        _rich_info(trust_remedy("<package>", recommend), symbol="info")
         sys.exit(1)
 
     # Interactive: prompt per-package
@@ -1030,18 +1068,106 @@ class EffectiveExecMap(dict):
     """
 
     trust_context: ExecTrustContext | None = None
+    # Why this map authorizes every executable type of every package, when it
+    # does. Set only by :func:`authorized_exec_map`; never inferred from None.
+    authorized_by: str | None = None
 
 
-def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:
+# The project's own content (``_local``) is first-party and always trusted.
+FIRST_PARTY_PACKAGE = "_local"
+# Explicit blanket authorizations. A missing or omitted map is never one.
+AUTHORIZED_GATE_DISABLED = LAYER_GATE_DISABLED
+AUTHORIZED_REPLAY = "replay-already-authorized"
+AUTHORIZED_FIRST_PARTY = "first-party"
+_BLANKET_AUTHORIZATIONS = frozenset(
+    {AUTHORIZED_GATE_DISABLED, AUTHORIZED_REPLAY, AUTHORIZED_FIRST_PARTY}
+)
+
+
+def authorized_exec_map(reason: str) -> EffectiveExecMap:
+    """Return a map that explicitly authorizes every executable for *reason*.
+
+    ``AUTHORIZED_GATE_DISABLED``: no layer opted into the gate (no policy
+    signals), so every executable deploys. ``AUTHORIZED_REPLAY``: audit replay
+    re-derives content the install gate already authorized.
+    ``AUTHORIZED_FIRST_PARTY``: the project's own content (``_local``).
+    """
+    if reason not in _BLANKET_AUTHORIZATIONS:
+        raise ValueError(f"Unknown executable authorization: {reason!r}")
+    allow_map = EffectiveExecMap()
+    allow_map.authorized_by = reason
+    return allow_map
+
+
+def exec_map_authorizes_all(allow_map: object) -> bool:
+    """Return whether *allow_map* explicitly authorizes every executable.
+
+    ``None``, a plain dict, and an omitted map authorize nothing beyond their
+    own literal grants.
+    """
+    return isinstance(allow_map, EffectiveExecMap) and allow_map.authorized_by is not None
+
+
+def closed_exec_map(allow_map: object) -> object:
+    """Return *allow_map*, or an empty grant map when it is missing.
+
+    Item admission reads ``None`` as "gate off"; a missing map handed to it
+    becomes a gate-on map with no grants, so it admits nothing.
+    """
+    return EffectiveExecMap() if allow_map is None else allow_map
+
+
+def package_type_approved(allow_map: object, package_keys: Any, exec_type: str) -> bool:
+    """Return the package-level approval of *exec_type* for any of *package_keys*.
+
+    Pinned items are not read here; ``security/trust.py`` admits them.
+    """
+    if exec_map_authorizes_all(allow_map):
+        return True
+    if not isinstance(allow_map, dict):
+        return False
+    return any(is_package_approved(allow_map, key, exec_type) for key in package_keys)
+
+
+def package_type_approvals(allow_map: object, package_keys: Any) -> dict[str, bool]:
+    """Return :func:`package_type_approved` for every executable type."""
+    keys = tuple(package_keys)
+    return {
+        exec_type: package_type_approved(allow_map, keys, exec_type) for exec_type in ALL_EXEC_TYPES
+    }
+
+
+def compose_trust_bin(
+    bin_approved: bool,
+    trust_bin: bool | None,
+    *,
+    non_interactive: bool,
+) -> tuple[bool, str | None]:
+    """Compose the bin approval with the ``--trust-bin`` posture.
+
+    Returns ``(skip_bin, reason)``. Without the flag a non-interactive run
+    does not trust bin/ executables.
+    """
+    if not bin_approved:
+        return True, "not_approved"
+    if trust_bin is False:
+        return True, "not_trusted"
+    if trust_bin is None and non_interactive:
+        return True, "not_trusted"
+    return False, None
+
+
+def materialize_exec_map(ctx: ExecTrustContext) -> EffectiveExecMap:
     """Materialise the deny-wins effective allow-map from a trust context.
 
-    Returns ``None`` when the gate is disabled; otherwise every candidate
-    package key is run through :func:`resolve_exec_decision` and only ALLOWED
-    ``(key, exec_type)`` pairs are emitted, each also under its version-blind
-    name so the gate's exact-membership lookup matches any installed version.
+    Returns an explicit :data:`AUTHORIZED_GATE_DISABLED` map when the gate is
+    disabled; otherwise every candidate package key is run through
+    :func:`resolve_exec_decision` and only ALLOWED ``(key, exec_type)`` pairs
+    are emitted, each also under its version-blind name so the gate's
+    exact-membership lookup matches any installed version.
     """
     if not ctx.gate_enabled:
-        return None
+        return authorized_exec_map(AUTHORIZED_GATE_DISABLED)
 
     candidate_keys: set[str] = set()
     candidate_keys |= set(ctx.project_allow) | set(ctx.project_deny)
@@ -1127,14 +1253,15 @@ def build_effective_exec_map(
     policy: Any | None,
     project_data: dict[str, Any] | None,
     migrate_user_legacy: bool = True,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Materialise the deny-wins effective allow-map consumed by the install gate.
 
     This is the #1873 replacement for the legacy ``{**project, **user}``
     user-wins merge. See :func:`materialize_exec_map` for the emission rules.
 
-    Returns ``None`` when the gate is disabled (backward-compatible: every
-    executable deploys), mirroring :attr:`ExecTrustContext.gate_enabled`.
+    Returns an explicit :data:`AUTHORIZED_GATE_DISABLED` map when the gate is
+    disabled (backward-compatible: every executable deploys), mirroring
+    :attr:`ExecTrustContext.gate_enabled`.
     """
     ctx = build_exec_trust_context(
         policy=policy,
@@ -1197,7 +1324,7 @@ def effective_exec_map_for_project(
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
     migrate_user_legacy: bool = True,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Materialize the canonical trust context for one project."""
     return materialize_exec_map(
         exec_trust_context_for_project(
@@ -1218,7 +1345,7 @@ def resolve_project_exec_allow_map(
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
     logger: Any | None = None,
-) -> dict[str, dict[str, bool]] | None:
+) -> EffectiveExecMap:
     """Return the deny-wins executables map for one project command.
 
     Reuses a map the caller already resolved (``executable_context`` is
@@ -1230,12 +1357,10 @@ def resolve_project_exec_allow_map(
     allow_map, resolved = executable_context
     if resolved:
         return allow_map
-    policy = None
-    if not no_policy:
-        from apm_cli.policy.discovery import discover_policy_with_chain
-
-        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
     from apm_cli.core.scope import manifest_root
+    from apm_cli.policy.outcome_routing import resolve_trust_policy
+
+    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)
 
     return effective_exec_map_for_project(
         manifest_root(project_root, user_scope=user_scope),
@@ -1270,7 +1395,7 @@ def _filter_declared_services(
     gated: Any = None,
 ) -> list:
     """Keep root-declared services and services whose declaring package is approved."""
-    if effective_allow_execs is None or not dependencies:
+    if exec_map_authorizes_all(effective_allow_execs) or not dependencies:
         return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
@@ -1280,9 +1405,7 @@ def _filter_declared_services(
         if (
             owner is None
             or (gated is not None and not gated(dependency))
-            or any(
-                is_package_approved(effective_allow_execs, key, exec_type) for key in approval_keys
-            )
+            or package_type_approved(effective_allow_execs, approval_keys, exec_type)
         ):
             filtered.append(dependency)
             continue

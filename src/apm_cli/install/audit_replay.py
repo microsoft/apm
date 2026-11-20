@@ -153,6 +153,28 @@ def prepare_ci_audit_replay(
     )
 
 
+def _live_copies_stale(modules_dir: Path, lockfile_path: Path) -> bool:
+    """Whether any live ``apm_modules`` copy contradicts its lock row (#3964)."""
+    from apm_cli.drift import locked_copy_is_stale
+
+    try:
+        lockfile = LockFile.read(lockfile_path)
+    except (LockfileFormatError, OSError):
+        return False
+    if lockfile is None:
+        return False
+    for key, dep in lockfile.dependencies.items():
+        if key == "." or getattr(dep, "source", None) == "local":
+            continue
+        try:
+            path = dep.to_dependency_ref().get_install_path(modules_dir)
+        except (ValueError, OSError):
+            continue
+        if locked_copy_is_stale(dep, path):
+            return True
+    return False
+
+
 def resolve_ci_audit_materialization(
     project_root: Path,
     *,
@@ -161,8 +183,11 @@ def resolve_ci_audit_materialization(
 ) -> CiAuditMaterialization:
     """Decide how ``apm audit --ci`` reaches installed package materialization.
 
-    A live ``apm_modules/`` tree is used as-is. A project checkout without one
-    gets a lock-pinned scratch replay. The user workspace (``$APM_HOME``) is
+    A live ``apm_modules/`` tree is used as-is while every locked copy agrees
+    with ``apm.lock.yaml``. A project checkout without one, or whose copies
+    the copy-validity owner (``drift.locked_copy_is_stale``) contradicts, gets
+    a lock-pinned scratch replay, so audit derives expected state from the
+    lock as install does and never reads a stale copy (#3964). The user workspace (``$APM_HOME``) is
     never cold-replayed: it needs ``apm_modules/`` only when the lockfile
     records content installed there (packages or local bundle staging,
     ``LockFile.records_modules_content``). A lockfile holding only
@@ -173,13 +198,19 @@ def resolve_ci_audit_materialization(
     from apm_cli.core.scope import get_workspace_deploy_root
 
     lockfile_path = get_lockfile_path(project_root)
-    if (
-        not (project_root / APM_YML_FILENAME).exists()
-        or (project_root / APM_MODULES_DIR).exists()
-        or not lockfile_path.exists()
-    ):
+    if not (project_root / APM_YML_FILENAME).exists() or not lockfile_path.exists():
+        return CiAuditMaterialization()
+    warm = (project_root / APM_MODULES_DIR).exists()
+    if warm and not _live_copies_stale(project_root / APM_MODULES_DIR, lockfile_path):
         return CiAuditMaterialization()
     if get_workspace_deploy_root(project_root) != project_root.resolve():
+        if warm:
+            return CiAuditMaterialization(
+                error=(
+                    f"package copies in {project_root / APM_MODULES_DIR} do not match "
+                    "apm.lock.yaml; run 'apm install --global' to refresh them"
+                )
+            )
         try:
             lockfile = LockFile.read(lockfile_path)
         except (LockfileFormatError, OSError):

@@ -42,7 +42,7 @@ REWRITE_FALLBACK_HINT = (
     "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'."
 )
 _PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/consumer/manage-dependencies/#transport-selection"
+    "https://microsoft.github.io/apm/consumer/install-packages/#transport-selection"
 )
 
 

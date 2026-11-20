@@ -1,721 +1,176 @@
 ---
-title: "Security Model"
-description: "How APM handles supply chain security for AI agents — attack surface boundaries, content scanning, dependency provenance, path safety, and MCP trust."
-sidebar:
-  order: 4
+title: Agent supply chain security model
+description: What APM controls in the agent supply chain, what it does not, its permissive defaults, how to harden them, and who owns each remaining risk.
 ---
 
-This page documents APM's security posture for enterprise security reviews, compliance audits, and supply chain assessments.
+This page is for the security reviewer who has to sign off on APM. It lists every
+control APM provides, the defaults you start from, the threats each control answers,
+and what stays your responsibility. For why agent files are a supply chain at all,
+read [The agent supply chain](../../concepts/agent-supply-chain/).
+
+## The question
+
+A coding agent reads files from your repository: skills, instructions, prompts, agents,
+hooks, MCP and LSP server configuration, plugins. A harness, the agent tool that reads them
+(GitHub Copilot, Claude Code, Cursor, Codex and others), picks these files up as soon as they are on disk; there is no
+separate "run" step. Hooks and MCP servers also start processes on the developer's
+machine. So the question is: **what may land in those folders, who decided, and can you
+show it later?**
+
+## Short answer
+
+APM controls what gets installed: it declares, locks, verifies, scans and gates agent
+capabilities against an org policy, and exports an inventory. It does not control what
+runs: your harness does. APM is not a sandbox, verifies no signatures, and its lockfile
+records what arrived, not whether it deserves trust: whatever APM saw at adoption
+becomes the baseline.
+
+APM checks in two layers:
+
+1. **Built-in protection (automatic).** `apm install` blocks critical hidden-Unicode
+   findings before files reach agent folders, refuses downloads whose content hash
+   differs from the lockfile, and applies org policy. `apm compile` and `apm pack` scan
+   their output too. Zero configuration.
+2. **`apm audit` (explicit).** Reporting (SARIF, JSON, markdown), remediation
+   (`--strip`), standalone file scanning (`--file`), and the CI gate (`--ci`) that
+   replays the lockfile and re-checks policy.
+
+## The controls
+
+| Control | What APM does | What it does not do | Command |
+|---|---|---|---|
+| Declare | `apm.yml` lists every package and MCP server, once, for all harnesses | Judge whether a package is good | `apm install <pkg>` |
+| Lock | `apm.lock.yaml` records the resolved commit, a SHA-256 `content_hash` per package and a hash per deployed file; marketplace installs also record which marketplace each package came from | Vouch for the initial download | `apm install`, `apm lock` |
+| Verify | A download that differs from `content_hash` aborts the install; `--frozen` refuses a lockfile out of sync with `apm.yml` and deployed files that differ from their hashes | Verify signatures (no Sigstore, in-toto, SLSA or GPG) | `apm install --frozen` |
+| Scan | Hidden Unicode (36 character ranges, plus mid-file BOMs) at install, compile, pack and audit; critical findings block deployment | Detect malware, visible prompt injection or misleading text | `apm audit` |
+| Approve | Once the executables gate is on, hooks, MCP servers, LSP servers, `bin/` and canvas from dependencies are parked until approved | Sandbox approved code, or cover code a hook downloads at run time | `apm approve` |
+| Govern | Org policy allows or denies sources, MCP servers, transports and harnesses; inheritance tightens, never loosens; enforced at install and in `apm audit --ci` | Block anything under the default `warn`; govern user-scope (`-g`) installs | `apm audit --ci --policy org` |
+| Detect drift | Replays the lockfile in a scratch folder and diffs the working tree | Watch files between runs; judge files APM did not write | `apm audit` |
+| Inventory | CycloneDX 1.5 or SPDX 2.3 from the lockfile; `apm find` traces a file to its package | Attest anything: it is an inventory, not an attestation | `apm lock export` |
+
+## Defaults
+
+Every default is permissive so adoption does not break teams. Harden them on purpose.
+
+| Setting | Default | What happens |
+|---|---|---|
+| Policy `enforcement` | `warn` | Violations print `[!]`; installs and `apm audit --ci` still pass |
+| Policy `fetch_failure` | `warn` | If a cached policy (up to 7 days old) cannot be refreshed, APM proceeds with the cached copy. With no usable cache, APM proceeds without a policy unless the repository sets `policy.fetch_failure_default: block` |
+| Executables | Allowed | Hooks, MCP and LSP servers, `bin/` and canvas deploy until the project declares an `executables:` block (formerly `allowExecutables`) or the org policy carries a non-empty `executables:` block |
+| `security.integrity.require_hashes` | `false` | Lockfile entries without a content hash are accepted |
+
+### Hardening checklist
+
+- Org policy: `enforcement: block`, `fetch_failure: block`,
+  `security.integrity.require_hashes: true`. See [Set an org policy](../apm-policy/).
+- Each repository's `apm.yml`: `policy.fetch_failure_default: block`, so a missing or
+  unreachable policy fails closed, and optionally `policy.hash` to pin the policy bytes.
+- Executables gate on, with an organization `recommend` list. See [Control executables](../control-executables/).
+- A required pull-request check that runs `apm policy status --check`,
+  `apm install --frozen` and `apm audit --ci --policy org`. See [Gate pull requests](../enforce-in-ci/).
+- CODEOWNERS and branch protection on the repository that holds `apm-policy.yml`.
+- A review rule for workflow changes that add `--no-policy`, `APM_POLICY_DISABLE`,
+  `--force`, `--trust-transitive-mcp` or `--allow-insecure`.
 
 ## Threat model
 
-APM defends the build-time supply chain for AI agent context: prompts, instructions, skills, hooks, and MCP server declarations flowing from a git source through `apm install` into your project tree and on into supported harnesses. The defended properties are reproducibility (same install everywhere), integrity (downloaded content matches the lockfile), provenance (every dep traces to a pinned commit at a named host), and pre-deploy content safety (no hidden Unicode reaches the agent). APM does NOT sandbox MCP servers at runtime, does not do malware analysis on dependency code, does not sign packages, and does not inspect what an agent does once it has read your context.
+Each row names what an attacker wants, the control that answers it, and who owns the
+risk that remains.
 
-## The prompt supply chain is different
+| Attacker goal | Control | Residual risk owner |
+|---|---|---|
+| Change a package after you adopted it (moved tag, force-push, swapped archive) | Commit pin plus `content_hash`; a mismatching download aborts; `--frozen` in CI | You, at adoption: the lockfile trusts what it saw then |
+| Get a malicious package or version adopted | Policy allow and deny lists; lockfile diffs in pull requests; approvals for executables | Your reviewers: APM does not judge content |
+| Hide instructions in invisible characters | Hidden-Unicode scan blocks critical findings at install; `apm audit` reports and strips | Your reviewers, for visible prompt injection |
+| Run code on developer machines through hooks or MCP servers | Executables gate and approvals | The harness, which governs what runs and with which permissions |
+| Substitute a same-named package from another host (dependency confusion) | Host-qualified policy patterns such as `github.com/contoso/**`; `*.ghe.com` marketplaces refuse bare cross-repository sources | You: host-qualify allow patterns |
+| Skip the policy on a laptop | `--no-policy` and `APM_POLICY_DISABLE=1` are local; the required CI check runs anyway | You: branch protection makes the check required |
+| Weaken or spoof the org policy | Inheritance never loosens; cross-host `extends:` rejected; an incomplete chain fails closed; `policy.hash` pin | Owners of the policy repository |
+| Edit deployed agent files outside APM | Drift replay and `content-integrity` in `apm audit --ci`; `--frozen` | You, for files APM did not deploy (see `unmanaged_files` in the [policy schema](../../reference/policy-schema/#unmanaged_files)) |
+| Forge a lockfile row so cleanup deletes a file APM never wrote | A lockfile hash alone never deletes: cleanup needs a local deployment receipt or byte equality with the locked render, and keeps and names any other file | You: delete kept files by hand once reviewed |
 
-Traditional package managers install code that sits inert until a developer or CI pipeline explicitly executes it. Between `npm install` and `npm start`, there is a gap — time for `npm audit`, code review, and policy checks.
-
-**Agent configuration has no such gap.** The moment a skill, instruction, or prompt file lands in `.github/prompts/` or `.claude/agents/`, any IDE agent watching the filesystem — Copilot, Cursor, Claude Code — may already be ingesting it. There is no "execution step." File presence IS execution.
-
-This changes the security model fundamentally. APM treats package deployment as a **pre-deployment gate**: scan first, deploy only if clean.
-
-## What APM does
-
-APM is a build-time dependency manager for AI agent configuration. It performs four operations:
-
-1. **Resolves git repositories** — clones or sparse-checks-out packages from GitHub, GitLab, Azure DevOps, or other git hosts.
-2. **Deploys static files** — copies markdown, JSON, and YAML files into project directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`).
-3. **Generates compiled output** — produces `AGENTS.md`, `CLAUDE.md`, and similar files from templates and prompts.
-4. **Records a lock file** — writes `apm.lock.yaml` with exact commit SHAs for every resolved dependency.
-
-## What APM does NOT do
-
-APM has no runtime footprint. Once `apm install` or `apm compile` completes, the process exits.
-
-- **No runtime component.** APM generates files then terminates. It does not run alongside your application.
-- **No network calls after install (by default).** All network activity (git clone/fetch) occurs during dependency resolution. There are no callbacks or phone-home requests. (**Scripts exception:** opt-in [lifecycle scripts](/apm/enterprise/lifecycle-scripts/), including `pre-compile` scripts during `apm compile`, may send HTTPS POST requests, but only from policy- or user-installed script files, or project script files you have explicitly trusted -- see the [lifecycle scripts trust model](/apm/enterprise/lifecycle-scripts/#trust-model).)
-- **No arbitrary code execution (by default).** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code. (**Scripts exception:** opt-in [lifecycle scripts](/apm/enterprise/lifecycle-scripts/) may run shell commands during `apm install`, `apm update`, `apm uninstall`, and `apm compile`, but project-source scripts are skipped unless you explicitly trust them with `apm lifecycle trust`; policy and user scripts originate from sources you already control. See the [trust model](/apm/enterprise/lifecycle-scripts/#trust-model).) (**Canvas exception:** the experimental `canvas` primitive deploys executable `extension.mjs` (Node.js) code to `.github/extensions/` or `~/.copilot/extensions/`; this surface is gated by both the `canvas` experimental flag and the [executable trust gate](#executable-trust-gate) for dependency-provided canvases. See [Canvas extensions](/apm/integrations/canvas/).)
-- **No access to application data.** APM never reads databases, API responses, application state, or user data.
-- **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
-- **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
-
-## Git and GitHub CLI discovery
-
-APM resolves `git` and `gh` from explicit `PATH` directories outside the
-current repository or APM project. Project-local executables and symlinks
-resolving back into that project are excluded. On Windows, discovery also
-checks `PATHEXT` extensions such as `.EXE`, including on Python 3.11,
-without adding the current directory to the search.
-
-This check applies to APM's executable selection, not to searches performed
-internally by external tools. Keep project-controlled directories off your
-inherited `PATH`.
+:::caution[What APM does not do]
+- **No signatures.** APM verifies no package, commit or release signatures.
+- **Not an attestation.** A lockfile or SBOM is a record of what was installed.
+- **No malware or semantic scanning.** The content scan covers hidden Unicode and nothing else.
+- **Not a sandbox.** Policy decides what gets installed. The harness decides what runs
+  and with which permissions; configure it there.
+- **Project installs, not user installs.** Org policy is discovered from the repository's git remote, so
+  user-scope installs (`apm install -g`) are not governed by it.
+:::
 
 ## HTTPS transport trust
 
-APM keeps certificate verification enabled for every HTTPS request. Python-based paths verify against the operating-system trust store by default through `truststore`, so corporate roots trusted by `git` and `curl` are also trusted by `apm install`.
+APM keeps certificate verification on for every HTTPS request. Python-based paths verify
+against the operating system's trust store through `truststore`, so corporate roots that
+`git` and `curl` trust are trusted by `apm install` too.
 
-- `REQUESTS_CA_BUNDLE` takes precedence over `CURL_CA_BUNDLE`; either explicitly replaces normal Requests trust and suppresses OS/additive injection.
-- `APM_DISABLE_TRUSTSTORE=1` disables OS/additive trust without unsetting a separately configured replacement bundle.
-- `APM_EXTRA_CA_BUNDLE` adds certificate-only PEM certificates to APM's package-management HTTPS. Truststore-backed contexts retain native OS roots; the Requests fallback retains bundled `certifi` roots plus the extra certificates. Certificate and hostname verification remain enabled.
-- A selected bundle that is missing, unreadable, empty, non-regular, over 8 MiB, non-ASCII, malformed, or contains a private key fails closed with a configuration error.
-- The existing Python `llm` runtime still receives a self-contained `.pth` OS-trust bootstrap at venv setup. `APM_EXTRA_CA_BUNDLE` does not extend that bootstrap or derive Python/Node child settings.
+- `REQUESTS_CA_BUNDLE` takes precedence over `CURL_CA_BUNDLE`; either one replaces normal
+  trust and turns off the OS and additive certificates.
+- `APM_DISABLE_TRUSTSTORE=1` turns off OS and additive trust without unsetting a replacement
+  bundle you configured separately.
+- `APM_EXTRA_CA_BUNDLE` adds PEM certificates to APM's package-management HTTPS and keeps the
+  native roots. A selected bundle that is missing, unreadable, empty, over 8 MiB, malformed or
+  contains a private key fails closed.
+- The Python `llm` runtime gets its own `.pth` OS-trust bootstrap at venv setup;
+  `APM_EXTRA_CA_BUNDLE` does not extend that bootstrap.
 
-Git, Node-based Copilot, and Rust-based Codex retain their own trust configuration. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
+Git, the Node-based Copilot CLI and the Rust-based Codex CLI keep their own trust settings.
+See [SSL / TLS issues](../../troubleshooting/ssl-issues/).
 
-## Dependency provenance
+## HTTP (insecure) dependencies
 
-By default, APM resolves dependencies directly from git repositories, with no intermediary registry, proxy, or mirror unless you configure one (see [Registry security model](#registry-security-model) and [Registry Proxy & Air-gapped](../registry-proxy/)).
+APM installs `http://` git dependencies, for private mirrors and offline networks, when two
+explicit approvals are both present: `allow_insecure: true` on the dependency in `apm.yml`, and
+`apm install --allow-insecure` for the run. Transitive HTTP dependencies from another host
+also need `--allow-insecure-host HOSTNAME`. APM never sends stored git credentials over HTTP.
 
-### Exact commit pinning
+These approvals make the decision visible; they do not protect the connection. HTTP has no
+encryption or server authentication, and the initial lockfile entry comes from that same
+channel.
 
-Every resolved dependency is recorded in `apm.lock.yaml` with its full commit SHA:
-
-```yaml
-lockfile_version: "1"
-dependencies:
-  - repo_url: owner/repo
-    host: github.com
-    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
-    resolved_ref: main
-    depth: 1
-    deployed_files:
-      - .github/skills/example/skill.md
-```
-
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. When `apm.yml` itself pins a full commit SHA, only a lock row with that same `resolved_commit` satisfies it: `apm install` re-resolves the pinned commit, `apm install --frozen` refuses, and `apm audit --ci` reports a `ref-consistency` failure. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
-
-### GitHub API throttle containment
-
-For a virtual-file dependency, APM treats only an HTTP `429`, an HTTP `403`
-with `X-RateLimit-Remaining: 0`, or an HTTP `403` with a finite positive
-`Retry-After` value as an indeterminate API probe. It then makes one sparse
-Git fetch and records that fetch's exact commit SHA in the lockfile; normal
-content hashing still verifies the materialized package.
-
-The fallback does not retry the API, sleep, or use a raw-content CDN. Public
-repositories use normal non-interactive Git. Private repositories use only the
-Git environment already resolved by `AuthResolver`; no token is put in the
-repository URL or diagnostic. Authentication failures (`401`), ordinary
-authorization failures (`403`), and missing paths (`404`) remain fail-closed
-and never select this fallback.
-
-### Registry security model
-
-By default, APM resolves dependencies as git repository URLs, eliminating the centralized-registry compromise vector.
-
-The experimental `registries` feature adds REST-based package sources. When enabled:
-
-- **Byte-level reproducibility.** `resolved_hash` in `apm.lock.yaml` is a SHA-256 digest of the downloaded archive. Re-installs verify bytes against the lockfile hash before writing to disk. A mismatch **fails closed** — the install aborts before any archive contents are extracted.
-- **Token containment.** Tokens for registry auth MUST NOT appear in repo-tracked YAML files. APM hard-fails if a `token:` key is found in an `apm.yml` registry entry. Tokens belong in `APM_REGISTRY_TOKEN_<NAME>` env vars or `~/.apm/config.json`.
-- **Policy enforcement.** The `registry_source` block in `apm-policy.yml` lets platform teams mandate specific registries and block non-registry sources. Checks apply transitively.
-
-**Known limitations:**
-
-- **No package signing.** The `resolved_hash` detects corruption and post-download tampering but does not verify publisher identity. Package signing is a planned hardening item.
-- **SBOM inventory, not provenance attestations.** `apm lock export` can emit CycloneDX or SPDX from the lockfile, but this is not signed and does not include SLSA provenance.
-- **SHA-256 floor only.** The hash algorithm is fixed at SHA-256 with no upgrade path to SHA-384/512.
-
-APM provides **dependency governance**: controlled sources, locked versions, and byte-level verification of downloaded content. It does not sign packages or emit SLSA-compliant provenance. Treat installed packages with the same diligence you apply to any external dependency, and describe the guarantees as **APM dependency governance** in compliance documentation rather than as supply-chain signing or attestation.
-
-### HTTP (insecure) dependencies
-
-APM supports `http://` git dependencies for private mirrors and air-gapped
-environments, but only behind explicit approval on both the manifest and CLI
-surfaces:
-
-- `allow_insecure: true` on the dependency entry records that the project
-  intentionally permits HTTP for that dependency.
-- `apm install --allow-insecure` approves direct HTTP dependencies for the
-  current install run.
-- Transitive HTTP dependencies inherit approval only when they come from the
-  same host as an approved direct HTTP dependency. Additional transitive hosts
-  require `--allow-insecure-host HOSTNAME`.
-
-These controls make the decision visible, but they do **not** make HTTP safe:
-
-- HTTP has no transport encryption or server authentication. A machine-in-the-middle can modify repository contents or refs in transit.
-- On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
-- APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
-- `apm config set mcp-registry-url http://...` is also explicit consent to plaintext registry metadata. A machine-in-the-middle can change the MCP package configuration returned by that registry; use HTTPS outside isolated development networks.
-
-For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
+Treat insecure transport as its own CI control. `apm-policy.yml` has no dedicated
+`allow_insecure` field: `dependencies.allow` and `dependencies.deny` can name a host (see
+[dependency patterns](../../reference/policy-schema/#dependencies)) but match scheme-blind, so
+they cannot distinguish `http://` from `https://` for the same package. An allow list
+therefore does not enforce HTTPS. Reject committed `allow_insecure: true` entries in review,
+and keep `--allow-insecure` and `--allow-insecure-host` out of standard CI.
+`registry_source.allow_non_registry` is a separate source-routing control, not an
+insecure-transport setting.
 
 ## Content scanning
 
-### The threat
-
-Researchers have found hidden Unicode characters embedded in popular shared rules files. Tag characters (U+E0001–E007F) map 1:1 to invisible ASCII. Bidirectional overrides can reorder visible text. Zero-width joiners create invisible gaps. Variation selectors attach to visible characters, embedding invisible payload bytes that AST-based tools cannot detect. The Glassworm campaign (2026) exploited this mechanism to compromise repositories and VS Code extensions. LLMs tokenize all of these individually, meaning models process instructions that developers cannot see on screen.
-
-### What APM detects
-
-| Severity | Characters | Risk |
-|----------|-----------|------|
-| Critical | Tag characters (U+E0001–E007F), bidi overrides (U+202A–E, U+2066–9) | Hidden instruction embedding. Zero legitimate use in prompt files. |
-| Critical | Variation selectors 17–256 (U+E0100–E01EF) | Glassworm attack vector — invisible payload encoding. Zero legitimate use in prompt files. |
-| Warning | Zero-width spaces/joiners (U+200B–D), mid-file BOM (U+FEFF) | Common copy-paste debris, but can hide content. ZWJ inside emoji sequences is downgraded to info. |
-| Warning | Variation selectors 1–15 (U+FE00–FE0E) | CJK typography / text presentation selectors. Uncommon in prompt files. |
-| Warning | Bidi marks (U+200E–F, U+061C) | Invisible directional marks. No legitimate use in prompt files. |
-| Warning | Invisible operators (U+2061–4) | Zero-width math operators. No legitimate use in prompt files. |
-| Warning | Annotation markers (U+FFF9–B) | Interlinear annotation delimiters that can hide text. |
-| Warning | Deprecated formatting (U+206A–F) | Deprecated since Unicode 3.0, invisible. |
-| Info | Non-breaking spaces (U+00A0), unusual whitespace (U+2000–200A) | Mostly harmless, flagged for awareness. |
-| Info | Emoji presentation selector (U+FE0F) | Common with emoji, informational only. |
-
-### Pre-deployment gate
-
-During `apm install`, APM resolves the authorized targets, selected skill subset, and executable approvals, then scans only the source files selected for deployment **before** any integrator copies them to target directories. Source-only files are neither scanned nor deployed by this step:
-
-```
-download -> authorize deploy set -> scan selected files -> block or deploy -> report
-```
-
-- **Critical findings block deployment.** Nothing reaches agent-readable directories. The package remains cached in `apm_modules/owner/package/` so you can inspect and fix the reported files.
-- **Warnings are non-blocking.** Zero-width characters are flagged in the diagnostics summary. Files are deployed normally.
-- **`--force` overrides the block.** Consistent with existing collision semantics — an explicit "I know what I'm doing."
-- **Multi-package installs continue.** A blocked package doesn't stop other packages from installing. After all packages are processed, `apm install` exits with code 1 if any package was blocked — failing the CI step.
-- **Removal reconciliation uses the same gate.** During `apm uninstall`, each surviving package is scanned before its integrations are rebuilt; a hostile survivor is skipped and the command warns. During `apm prune`, a hostile hook survivor aborts hook reconciliation before cleanup, leaving the prior hook state in place and warning that reconciliation failed. Fix the reported package source, then run `apm install` to rebuild its files.
-
-### Compile and pack scanning
-
-Content scanning extends beyond install:
-
-- **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing. This is defense-in-depth for dependency sources, which were already scanned at install, and the first scan of content a `pre-compile` [lifecycle script](/apm/enterprise/lifecycle-scripts/#generating-sources-before-compile) generated, since compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
-- **`apm compile --global`** scans user-scope root context files assembled from
-  globally installed instructions before writing them. Critical findings stop
-  the write and exit with code 1. Existing hand-authored root context files are
-  skipped unless they carry APM's generated marker, so opting into global
-  compilation does not clobber user-managed `CLAUDE.md`, `AGENTS.md`, or
-  `GEMINI.md` files.
-- **`apm pack`** scans files before bundling. This catches hidden characters before a package is published, preventing authors from accidentally distributing tainted content.
-- **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../../producer/pack-a-bundle/).)
-
-### On-demand scanning
-
-`apm audit` scans deployed files or any arbitrary file, independent of the install flow:
-
-```bash
-apm audit                        # Scan installed packages and deployed files
-apm audit --file .cursorrules    # Scan any file
-apm audit --strip                # Remove hidden characters (preserves emoji)
-apm audit --strip --dry-run      # Preview what --strip would remove
-```
-
-The `--file` flag is useful for inspecting files obtained outside APM — downloaded rules files, copy-pasted instructions, or files from pull requests.
-
-`apm audit --ci` also checks membership completeness. If install replay
-produces a governed file whose normalized bytes match the project but no
-`deployed_files` entry claims it, audit reports `unrecorded` drift and fails.
-This prevents lockfile membership from shrinking silently. Shared merge-hook
-targets and sidecars remain exempt because APM merges into user-owned files
-rather than claiming them.
-
-A whole-project scan discovers **recognized primitive filenames and patterns**
-from resolved target profiles, unioned with recorded paths in `apm.lock.yaml`.
-Both paths apply the same prompt/non-prompt distinction, including shared native
-settings. Hash verification and positional `PACKAGE` scans remain
-lockfile-scoped. Source content under `.apm/` is not added by discovery;
-install-time scanning owns that surface, while recorded prompt documents remain
-covered.
-
-CI and remediation are separate commands because `--ci` and `--strip` are mutually exclusive:
-
-```bash
-apm audit --strip                 # Remove dangerous characters
-apm audit --ci --no-drift         # Verify the remediated deploy tree
-```
-
-For CI pipelines, `apm audit` supports SARIF, JSON, and Markdown output:
-
-```bash
-apm audit -f sarif -o audit.sarif      # GitHub Code Scanning
-apm audit -f json -o report.json       # Machine-readable
-apm audit -f markdown -o report.md     # Step summaries
-```
-
-See [Content scanning with `apm audit`](../../reference/cli/audit/) for usage details and exit codes.
-
-Both bare `apm audit` and `apm audit --ci` fail closed on stale canonical
-deployment owners; see
-[Baseline CI checks](../../reference/baseline-checks/#deployment-ledger-owners)
-for the boundary and remediation.
-
-Automatic audit separates discovery from prompt checks. It inventories
-recognized hook definitions, including untracked entries in shared native
-settings, but scans only documented prompt fields and prompt documents.
-Commands, executables and unrelated settings are not prompt content; hooks
-are never executed. Transcripts, history and caches are not walked.
-Unreadable or unsupported recognized content exits nonzero with incomplete
-coverage, not an unsafe-content verdict. File tracking does not establish
-entry ownership or a hash baseline. Shared/structured settings and external
-roots are not automatically rewritten by `--strip`; review them manually.
-See [Discovery and prompt coverage](../../reference/cli/audit/#discovery-and-prompt-coverage).
-
-:::tip[External scanners (Experimental)]
-`apm audit` can also ingest findings from **third-party SARIF scanners** (Semgrep, CodeQL, NVIDIA SkillSpector, etc.) so a single audit run reports both APM's native findings and external tool results. See [External scanners](../../integrations/external-scanners/) for setup.
-:::
-
-### Limitations
-
-Content scanning detects hidden Unicode characters. It does not detect:
-
-- Plain-text prompt injection (visible but malicious instructions)
-- Homoglyph substitution (visually similar characters from different scripts)
-- Semantic manipulation (subtly misleading but syntactically normal text)
-- Binary payload embedding
-
-`--strip` removes dangerous and suspicious characters (critical and warning) from deployed copies while preserving legitimate content like emoji and whitespace. Zero-width joiners inside emoji sequences (e.g. 👨‍👩‍👧) are recognized and preserved. Use `--strip --dry-run` to preview what would be removed before modifying files. Strip does not modify the source package — the next `apm install` restores them. For persistent remediation, fix the upstream package or pin to a clean commit.
-
-### Planned hardening
-
-- **Hook transparency** — display hook script contents during install so developers can review what will execute.
-
-### External scanner hardening
-
-The experimental `external-scanners` feature can invoke a third-party SARIF scanner and optionally run its LLM-powered analysis -- a subprocess plus network-egress surface, hardened as follows:
-
-- **Allowlisted args only.** `--external-args` tokens are validated against a per-adapter allowlist. Non-allowlisted flags, secret-looking flags (`--token`, `--api-key`), or paths outside the working directory are rejected fail-closed; argv is always a list (no `shell=True`).
-- **Restrict-only policy.** A project `apm-policy.yml` can `allow_args: false` to strip args but can never add argv tokens nor force LLM mode on. Only the local user opts into LLM egress.
-- **Credential hygiene.** LLM API keys are forwarded only when LLM mode is active for that run and stripped otherwise; scanner stderr is secret-redacted before surfacing.
-- **Project-vs-org trust boundary.** LLM mode sends content to a third-party API, so it requires explicit user consent and is never triggered by an untrusted project-local policy file.
-
-## Policy gates that block install
-
-`apm-policy.yml` is evaluated after dependency resolution and before target
-integration. The policy gate walks the resolved dependency graph -- including
-transitive MCP servers -- and fails the install if a dep is not in the allow
-list, falls under a deny rule, uses a forbidden source/scope, or violates a
-configured trust rule. Target-aware and integrity checks run later in the same
-transaction and roll resolution replacements back on failure. In CI,
-`apm audit --ci` runs the same baseline plus policy checks (allow/deny lists,
-target restrictions, MCP transport restrictions). Tighten-only inheritance
-(enterprise -> org -> repo) is enforced so a downstream layer can never loosen
-an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
-[Policy Reference](../policy-reference/).
-
-## Content integrity hashing
-
-APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). The error names `apm update <pkg>` to accept that package's new upstream content and re-pin it in the lockfile (the full `apm update` for a transitive dependency).
-
-Replacement packages download and pass package-shape validation in an isolated
-staging directory while the current package remains in place. APM publishes the
-staged tree only after those checks succeed, so a failed download does not
-unlink live hook scripts from the current package. Integrity and policy gates
-still run later in the install transaction and roll the replacement back on
-failure.
-
-```yaml
-# apm.lock.yaml
-dependencies:
-  - repo_url: https://github.com/acme-corp/security-baseline
-    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
-    content_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015..."
-```
-
-The hash is deterministic — computed over sorted file paths and contents, independent of filesystem metadata (timestamps, permissions). `.git/` and `__pycache__/` directories are excluded.
-
-Lock files generated before this feature omit `content_hash`. APM handles this gracefully — verification is skipped and the hash is populated on the next install.
-
-On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not via `git rev-parse`, so a poisoned `.git/config` cannot subvert the check) and compares it to the lockfile's `resolved_commit`; on mismatch the cache entry is evicted and a fresh fetch runs. Local bundles get a fourth check: every file listed in `pack.bundle_files` is SHA-256 verified, symlinks under the bundle root are rejected, and unlisted files are flagged as a tampering signal.
-
-**Lockfile cleanup authority.** A committed `apm.lock.yaml` is reviewed input: `apm install`, `apm update`, `apm prune` and `apm uninstall` delete a deployed file it lists only when the file's recorded `deployed_file_hashes` entry still matches the bytes on disk. Files without a recorded hash, or with a mismatch, are kept with a warning. A lockfile row whose recorded hash matches the bytes on disk still authorizes deletion, even for a file APM never deployed, so review lockfile changes in pull requests like code.
-
-**Marketplace entries replay their lock row.** A `{name, marketplace}` dependency names no repository in `apm.yml`; once locked, install takes its `repo_url`, `host` and `resolved_commit` from `apm.lock.yaml` without asking the catalog. A lock diff can therefore change where it comes from while `apm.yml` stays unchanged, so review those rows too. Org policy still checks the replayed source, and `apm update` resolves the catalog again. The lock row also records the marketplace's origin (its repository or `marketplace.json` URL), so `apm update` fails, naming both, if the alias now points at a different origin. Rows written before origins were recorded, local marketplaces, and a move to another path in the same repository are not checked.
-
-See the [Lock File Specification](../../reference/lockfile-spec/#drift-and-integrity) for field details.
+`apm install` scans the files it is about to deploy, before any reaches an agent folder.
+Critical findings (tag characters, bidirectional overrides, variation selectors 17-256,
+unpaired surrogates)
+block that package and the command exits 1; other packages still install. Warnings
+(zero-width characters, bidirectional marks) deploy and are reported. `--force`
+overrides a block. `apm audit` re-scans deployed files, `apm audit --file <path>` scans
+any file, and `apm audit --strip` removes hidden characters from deployed copies.
+Check names and severities: [Baseline CI checks](../../reference/baseline-checks/).
 
 ## Inventory export (SBOM)
 
-`apm lock export --format cyclonedx|spdx` serializes the lockfile into a CycloneDX 1.5 or SPDX 2.3 document. This is an inventory export, not a security attestation: it reflects exactly what `apm.lock.yaml` already recorded -- component identity (purl), recorded hashes, and the declared license -- and never re-resolves, re-hashes, or touches the network or filesystem.
-
-Component identity is a Package URL: `pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, and `pkg:generic/<name>@<content_hash>` for local primitives. Output is deterministic (components sorted by purl, pinned timestamp, stable key order), so two runs are byte-identical. Credentials embedded in a recorded URL (userinfo or query-string tokens) are scrubbed before they reach the document.
-
-APM records the license the package manifest *declares* (`license:` in `apm.yml`), validates it offline against the bundled SPDX id set, and passes it through. APM never reads or interprets `LICENSE` file text -- declared is not concluded. A not-declared license stays unknown (`NOASSERTION`), never silently upgraded. See [`apm lock export`](../../reference/cli/lock/#export-sbom-inventory) and the [`license` manifest field](../../reference/manifest-schema/#35-license) for reference.
-
-## Path security
-
-APM deploys files only to controlled subdirectories within the project root
-at project scope or within a configured, managed target root at global scope.
-
-### Path traversal prevention
-
-All deploy paths are validated before any file operation:
-
-1. **No `..` segments.** Any path containing `..` is rejected outright.
-2. **Allowed prefixes only.** Paths must start with a root owned by the active target profile. Stable examples include `.github/`, `.claude/`, `.grok/`, and `.agents/`; enabled experimental profiles can own managed roots such as `copilot-cowork/` and `copilot-app/`. In addition, the local-bundle install path stages instructions for compile-only targets under `apm_modules/<slug>/.apm/instructions/` with its own containment check (the resolved path must remain within `apm_modules/`) and `<slug>` validation rejecting traversal sequences and characters outside `[A-Za-z0-9._-]`.
-3. **Resolution containment.** The fully resolved path must remain within the
-   project root or the configured managed target root. Symlink escapes from
-   either root are rejected.
-
-A path must pass all three checks. Failure on any check prevents the file from being written.
-
-### Local bundle install trust model
-
-`apm install <bundle>` accepts a directory or `.zip` (or legacy `.tar.gz`)
-produced by `apm pack`. Bundles are imperative and bypass the dependency
-resolver and network. If the project already has a cached org policy, APM
-applies it to bundle MCP entries and the resolved target set before deployment.
-Trust boundaries:
-
-1. **`bundle_files` keys are untrusted.** They come from the bundle's own `apm.lock.yaml` and are validated for traversal sequences before any filesystem path is constructed; resolved destinations must remain within the deploy root. Unsafe entries are rejected and the install aborts.
-2. **`plugin.json` is bundle metadata, never deployed.** It is recognized case-insensitively and skipped in both the manifest-driven deploy loop and the lockfile-less fallback walk so case-folding filesystems (HFS+, NTFS) cannot smuggle a renamed file past the skip.
-3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved targets get the server in their native MCP configs (Claude and Copilot `.mcp.json` (project), Copilot `$COPILOT_HOME/mcp-config.json` (global), Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
-4. **Only primitive files deploy.** A packed file is written only when it lands in a primitive directory the target owns (for example `skills/`, `agents/`, `instructions/`, `prompts/`). Files directly under a target root, such as runtime settings or MCP configuration, and directories no primitive owns are skipped with a warning. Target hook files and plugin `hooks.json` hooks follow the [executable trust gate](#executable-trust-gate) through the bundle's content-bound approval key; approved plugin hooks register through the same hook integrator as a source install. Their hook scripts are hash-checked, but the registered hook entries are outside `apm audit` drift checks and `apm uninstall`.
-5. **Slug validation.** The bundle's `id` (used as `<slug>` for staged instructions and the install label) is rejected if it contains traversal sequences or characters outside `[A-Za-z0-9._-]`.
-
-### Symlink handling
-
-Symlinks are rejected in most APM operations. They are followed only
-during contained package materialization:
-
-- **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
-- **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
-- **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
-- **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
-- **Deploy destinations** -- install refuses when a project target root, a primitive directory (for example `.github/prompts` or `.claude/commands`), or a deploy file location is a symlink. Nothing is written through the link.
-- **MCP configuration files** that are symlinks are rejected with a warning and not parsed or written. This covers project configs such as `.mcp.json` and `.cursor/mcp.json`. The upgrade step that moves APM-written entries out of `.github/mcp.json` and `.vscode/mcp.json` skips either file when it is a symlink.
-- **Hook settings merges** -- install refuses to merge hook entries into a project settings file (for example `.claude/settings.json`) whose path runs through a symlink; neither the link nor its target is read or written.
-- **Skill cleanup** removes only skill directories the lockfile records, and never through a symlinked skills root or a symlinked skill entry. Without a lockfile, no skill directories are removed.
-- **`apm unpack`** writes bundle files only under known integration directories (`.github/`, `.claude/`, ...) of the output directory, validates every destination before the first write, and does not read bundle paths that run through a symlink.
-- **Lockfile writes** -- when the project or global `apm.lock.yaml` is a symlink, commands that write the lockfile (such as `apm lock` and `apm install`) exit non-zero with an error naming the link and its target. Neither the link nor its target is modified; `apm update`, `apm install --update` and `apm uninstall` refuse before deploying, deleting or editing anything else. Replace the link with a regular file to continue.
-- **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
-- **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
-- **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
-
-Remote Git subdirectory installs can dereference a symlink whose target is a
-tracked file in the same checked-out commit. If sparse checkout excluded that
-target, APM widens the checkout before copying the package. Generated Git
-metadata, targets outside the repository, and links that remain broken after
-widening hard-fail the install.
-
-#### Local-install symlink dereference and containment guarantee
-
-When installing a local-path dependency (`apm install /path/to/pkg`), APM
-dereferences in-package symlinks so that the staged copy in `apm_modules/`
-contains regular files, giving local and remote installs the same deployed
-output for in-package shared references.
-
-**Threat model.** A symlink inside a local package could point to a file
-outside the package root, giving a malicious package a path-traversal vector.
-APM prevents this with a per-symlink containment check (see also
-[Path traversal prevention](#path-traversal-prevention)):
-
-1. Each symlink is resolved per-file (resolve -> validate -> copy2) before that
-   symlink target is copied into the staging tree.
-2. The resolved target is verified to remain inside the package root using
-   the `ensure_path_within()` containment helper.
-3. If a symlink is broken or unresolvable, APM **hard-fails the install** with a
-   `PathTraversalError` instead of staging a dangling reference.
-4. If the resolved target escapes the package root, APM **hard-fails the
-   install** with a `PathTraversalError` and a human-readable message naming
-   the offending link. No warn-and-skip; no silent follow.
-5. Only symlinks that resolve within the package root are dereferenced and
-   copied as regular files. External symlinks are never followed.
-6. Circular directory-symlink chains are detected deterministically with an
-   explicit visited-set guard, independent of OS-level ELOOP limits.
-7. An unreadable package directory (e.g. a `PermissionError` while listing its
-   entries) hard-fails the install with a `PathTraversalError` rather than
-   leaking a bare OS error up the install stack.
-
-### Collision detection
-
-When APM deploys a file, it checks whether a file already exists at the target path:
-
-- If the file is **tracked in the managed files set** (deployed by a previous APM install), it is overwritten.
-- If a selected **skill file is untracked and differs**, APM refuses the complete selected deployment plan before native writes or manifest/lock success state. Rename the local skill or use a valid existing skill/target selection. Matching names or shared directories alone are not conflicts.
-- Other untracked primitive files retain their existing warning-and-skip behavior.
-- The `--force` flag overrides collision detection, allowing APM to overwrite untracked files. It also bypasses the critical security-scan block; it is not the routine remedy for a skill conflict.
-
-### Development dependency isolation
-
-APM separates production and development dependencies:
-
-- **Production dependencies** (`dependencies.apm`) are included in plugin bundles and shared packages.
-- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output in every bundle format (the default Claude plugin format, the explicit Agent Plugin format, and the legacy `--format apm`).
-- **Development MCP servers** in the root project's `devDependencies.mcp` are active for authoring, but the same section in a direct or transitive dependency package never propagates into the consumer's target config or provenance.
-
-This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#per-entry-fields) for field details.
-
-## Slash command deployment
-
-Several IDE-style targets expose deployed files as **slash commands** --
-typing `/foo` in the IDE invokes the file's content as an LLM prompt
-with full tool access. Across all supported
-targets (Claude Code, Cursor, OpenCode, Gemini CLI, Grok Build, Windsurf), invocation
-requires the user to type the command name; commands are not
-auto-invoked at IDE startup or on disk-write.
-
-`apm install` deploys package `.prompt.md` files to each target's
-commands directory by default when that directory exists, so packaged
-slash commands are available to the user immediately and consistently
-across targets.
-
-| Target | Commands directory | Notes |
-|--------|--------------------|-------|
-| **Claude Code** | `.claude/commands/*.md` | Deployed when `.claude/` exists. |
-| **Cursor** | `.cursor/commands/*.md` | Deployed when `.cursor/` exists. Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes. The shared command transformer keeps the Claude-compatible frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. |
-| **OpenCode** | `.opencode/commands/*.md` | Deployed when `.opencode/` exists. |
-| **Gemini CLI** | `.gemini/commands/*.toml` | Deployed when `.gemini/` exists. |
-| **Grok Build** | `.grok/commands/*.md` | Deployed when `.grok/` exists. |
-| **Windsurf** | `.windsurf/workflows/*.md` | Deployed when `.windsurf/` exists. |
-
-## Agent tool capability gate (Kiro)
-
-Kiro agent `tools` are permission-bearing. An agent that declares a value
-outside the [approved Kiro tool selectors](../../reference/targets-matrix/)
-fails closed: APM writes zero bytes for it, does not adopt an existing
-copy, and does not record it in `apm.lock.yaml` (a previously deployed copy
-is removed on reinstall). The gate is per agent and non-fatal: other agents
-still deploy, `apm install` prints a warning naming the value, and the
-command exits 0. Pipelines that need a hard failure should check install
-output for the warning.
-
-## Executable trust gate
-
-When the executable trust gate is enabled, APM blocks unapproved executable
-primitives from dependency packages: hooks, `bin/` executables, self-defined
-MCP servers (`registry: false`), LSP servers, and canvas extensions. The gate is
-opt-in for backward compatibility; a project `executables:` block or org policy
-enables it. Text primitives (skills, agents, instructions) are never gated, and
-local root `.apm/` content is always trusted. Supported runtimes may start an
-approved generated LSP command automatically after install.
-
-Trust is expressed through one noun, `executables`, across three layers, and the
-install gate and `apm audit` resolve it through a single deny-wins,
-first-match-wins ladder:
-
-```
-1. org deny_all / org deny   -> denied (absolute ceiling)
-2. user deny                 -> denied
-3. project deny              -> denied
-4. project allow             -> allowed
-5. user allow                -> allowed
-6. org recommend             -> allowed (user-overridable)
-7. (no match)                -> gated pending approval (denied but approvable)
-```
-
-- **Org** (`apm-policy.yml` `executables:`) is the ceiling on deny. It can
-  `deny_all`, `deny` packages, `require` packages be present and trusted, and
-  `recommend` a vetted set. See [executables](../../reference/policy-schema/#executables) in the policy
-  schema. Deny entries match the package identity, whatever its spelling
-  (shorthand, host-qualified, URL, or letter case on GitHub and Azure DevOps hosts), and cover
-  sub-packages below the denied path.
-- **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
-  shared with the team.
-- **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
-  authority. `apm approve --user` can grant machine-local trust when no org or
-  project deny blocks it; `apm deny --user` narrows trust on one machine.
-
-Personal consent can never widen past an org deny, and the default (rung 7) is
-**gated pending approval** -- a package with executables and no opinion anywhere
-is parked until approved, not hard-denied. This release ships no `enforce`
-mandate runtime or package signing; an org `executables.enforce` rung degrades
-to `recommend`. Local bundle hook, MCP, LSP, and canvas approvals are narrower: APM
-prints an exact `executables.allow` key containing the bundle's SHA-256 content
-digest, so another bundle that claims the same package name cannot inherit that
-consent.
-
-### Content-pinned approvals
-
-`apm approve` pins each dependency hook file and self-defined MCP server to a
-SHA-256 fingerprint of what runs: the MCP command, args, env, URL, headers and
-related fields, or the hook document plus the scripts it references. When an
-approved definition changes upstream, install parks it as `definition-changed`
-until someone reviews and re-approves it. Org, user, and project deny win
-over every grant, including pins and the one-off `--trust-transitive-mcp`
-flag, for self-defined MCP servers, hooks, and transitive MCP servers that need
-trust. A hook's run-time downloads (`npx`, `curl`) and indirectly
-loaded code are not covered. Legacy `hooks: true` / `mcp: true` grants still
-deploy any content and warn on every install. See
-[Pinned approvals](../../reference/cli/approve/#pinned-approvals) for the
-fingerprint inputs and admission order.
-
-Each locked dependency records its resolved state in the `exec_status` field of
-`apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).
-For CI, `apm install` succeeds when a required package is present-but-parked and
-prints a one-command remedy (e.g. `apm approve <pkg>`); a separate audit signal,
-`required-executable-untrusted`, hard-fails when a required package's
-executables are untrusted. Manage trust with
-[`apm approve`](../../reference/cli/approve/) and
-[`apm deny`](../../reference/cli/deny/), inspect the deciding layer for one package
-with `apm policy explain <pkg>`, and surface fleet-wide layer conflicts with
-`apm doctor`.
-
-### Per-invocation consent (--trust-bin / --no-trust-bin)
-
-For one-shot installs without changing persisted policy, `apm install` accepts
-`--trust-bin` (deploy bin/ executables silently) and `--no-trust-bin` (skip bin/
-deployment for this invocation). These flags only apply when the policy ladder
-would otherwise permit deployment -- they cannot override an org or project deny.
-In non-interactive contexts (piped output, `--frozen`) the default is
-`--no-trust-bin`. For persistent trust decisions that apply to the whole team,
-use `apm approve` or `apm deny`.
-
-## MCP server trust model
-
-APM integrates MCP (Model Context Protocol) server configurations from packages. Trust is explicit and scoped by dependency depth.
-
-For Codex remote transport requirements, see
-[stdio vs HTTP servers](../../consumer/install-mcp-servers/#stdio-vs-http-servers).
-
-### Direct registry installs at user scope
-
-`apm install -g --mcp NAME` can use an MCP registry endpoint to update
-account-wide runtime configuration. APM requires HTTPS for registry URLs from
-the environment or saved config unless `MCP_REGISTRY_ALLOW_HTTP=1` is set, and
-rejects embedded credentials, query strings, and fragments. When a non-default
-registry supplies the entry, APM saves that registry URL for reproducible
-replay, but registry metadata is not signed or content-hash verified. Treat a
-custom registry as a trusted source with access to every global runtime selected
-for the install.
-
-### Direct dependencies
-
-MCP servers declared by your direct dependencies (packages listed in your `apm.yml`) are auto-trusted. You explicitly chose to depend on these packages, so their MCP server declarations are accepted.
-
-### Transitive dependencies
-
-Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Plain registry references declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
-
-The same applies to a transitive registry reference that sets its own `registry:` URL or a configuration overlay. To allow such a server:
-
-- **Re-declare the dependency** in your own `apm.yml`, promoting it to a direct dependency.
-- **Approve it:** `apm approve <pkg>` pins the server's definition in `apm.yml`; commit it to share. A type-level `mcp: true` does not admit a transitive server.
-- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to deploy it for that run only. The flag is not saved, and `apm audit --ci` fails a lockfile that admitted a server `apm.yml` does not approve.
-
-## Token handling
-
-APM authenticates to git hosts using personal access tokens (PATs) read from environment variables.
-
-| Purpose | Environment variables (checked in order) |
-|---|---|
-| GitHub packages | `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `GH_TOKEN` |
-| Azure DevOps packages | `ADO_APM_PAT`, then Azure CLI bearer, then path-scoped `git credential fill` |
-
-- **Never stored in files.** Tokens are read from the environment at runtime. They are never written to `apm.yml`, `apm.lock.yaml`, or any generated file.
-- **Never logged.** Token values are not included in console output, error messages, or debug logs.
-- **Scoped to their git host and server identity.** A GitHub token is only sent when both the server name is on the GitHub allowlist and the remote URL hostname is a verified GitHub/Copilot host (`github.com`, `*.ghe.com`, `*.github.com`, `githubcopilot.com`, `*.githubcopilot.com`). HTTPS is required -- `http://` URLs are rejected even when the hostname matches. An Azure DevOps token is only sent to Azure DevOps. Tokens are never transmitted to any other endpoint.
-- **Injected via transient git config.** APM passes credentials with `http.extraheader` for the duration of a single git invocation; tokens are never embedded in URLs and are not visible in `ps` or process listings.
-
-For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
-
-### Credential helper reports (Azure DevOps)
-
-When the Azure DevOps chain uses a credential from `git credential fill`, APM reports the result back to your credential helper, as Git does: `git credential approve` after the request succeeded, `git credential reject` after Azure DevOps refused that credential with HTTP 401. Limits:
-
-- Only the credential the helper returned for that repository's host and path is reported, using the exact description the helper returned. `ADO_APM_PAT`, Azure CLI bearer tokens, `gh` tokens, and GitHub, GitLab, or generic hosts are never reported.
-- A 403, a sign-in redirect or page, a proxy challenge, a not-found, throttle, network, or TLS failure, or an error naming another host is never reported, so an ambiguous answer never erases a credential.
-- Each report happens at most once per host, port, and path per run. A secret that already worked on a host in this run is never rejected for another path on that host.
-- Reports are non-interactive, time out after at most 10 seconds, and never fail the command.
-
-### Azure DevOps Services AAD bearer tokens
-
-When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps Services
-(`dev.azure.com` and `*.visualstudio.com`) with a Microsoft Entra ID bearer
-token issued on demand by the Azure CLI (`az account get-access-token`).
-Azure DevOps Server hosts configured with `ADO_HOST` or `APM_ADO_HOSTS`
-are PAT then path-scoped `git credential fill` (no Azure CLI bearer).
-The Services bearer posture:
-
-- **Short-lived.** Tokens expire in roughly 60 minutes, are acquired per resolution, and are never persisted by APM.
-- **No new secrets in manifests.** Nothing is written to `apm.yml` or `apm.lock.yaml`. The token never crosses the `apm.yml`/lockfile boundary.
-- **Compatible with managed-identity / service-account-only orgs.** Works in environments where PAT creation is disabled, including WIF-backed pipelines.
-- **Same transport rules as PATs.** Bearer values are injected via `http.extraheader`, scoped to ADO hosts only, and never logged.
-
-See [Azure DevOps Services AAD bearer tokens](#azure-devops-services-aad-bearer-tokens) above for the resolution precedence and CI patterns.
-
-## Attack surface comparison
-
-| Vector | Traditional package manager | APM |
-|---|---|---|
-| Registry compromise | Attacker poisons central registry | No registry by default (git-direct). With experimental `registries`: `resolved_hash` detects tampered archives; token containment enforced; package signing not yet supported. |
-| Version substitution | Malicious version replaces legitimate one | Lock file pins exact commit SHA; content hash detects post-download tampering |
-| Post-install scripts | Arbitrary code runs after install | Dependency packages cannot run install scripts; only [lifecycle scripts](../lifecycle-scripts/) from policy, user, or explicitly trusted project sources run |
-| Typosquatting | Similar package names on registry | Dependencies are full git URLs |
-| Dependency confusion | Bare `owner/repo` resolves on an unintended host | Bare shorthand uses the declaring manifest's default host (its `default_host`, else `GITHUB_HOST`, else `github.com`), so a dependency's `apm.yml` decides where its own bare deps resolve; write `host/owner/repo` for other hosts and enforce hosts with [host-qualified](../policy-reference/#host-qualified-patterns) allow patterns. The same `owner/repo` from two hosts in one install fails before download, naming both; `*.ghe.com` marketplaces refuse bare cross-repo sources |
-| Build-time injection | Malicious build steps execute | No build step — files are copied |
-| Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
-| Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](../policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
-
-## Recommended hardening
-
-For an org standardizing on APM:
-
-- Require `GITHUB_APM_PAT` / `ADO_APM_PAT` from a secret store, never developer dotfiles; scope tokens read-only on source repos.
-- Wire `apm audit --ci -f sarif -o audit.sarif` into branch protection and upload SARIF to GitHub code scanning.
-- Publish an `apm-policy.yml` from your `<org>/.github` repo with an allow list and an MCP transport restriction. See [Governance Guide](../governance-guide/).
-- Require signed commits on the source repos APM pulls from -- this is where the trust chain bottoms out.
-- Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](../registry-proxy/).
-- Treat insecure transport as a separate CI control. `apm-policy.yml` has no
-  dedicated `allow_insecure` field: `dependencies.allow` and
-  `dependencies.deny` can name a host (see
-  [Host-qualified patterns](../policy-reference/#host-qualified-patterns)) but
-  match scheme-blind, so they cannot distinguish `http://` from `https://` for
-  the same package. Reject committed
-  `allow_insecure: true` entries and prohibit `--allow-insecure` and
-  `--allow-insecure-host` in standard CI; review both explicit gates for any
-  air-gapped exception. `registry_source.allow_non_registry` is a separate
-  source-routing control, not an insecure-transport setting.
-- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- Cursor, and Claude Code and Copilot in the shared project `.mcp.json`, preserve explicitly authored static values, while env-var references stay native runtime references. APM does not detect whether a static value is sensitive. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
-
-A restrictive dependency policy is still valuable, but it is identity-based,
-not transport-aware:
-
-```yaml
-# apm-policy.yml
-name: contoso-security
-version: "1.0"
-enforcement: block
-
-dependencies:
-  allow:
-    - "contoso/approved-agent-config"
-    - "microsoft/*"
-```
-
-This example blocks every unlisted package identity regardless of transport; it
-does **not** enforce HTTPS for the two allowed patterns. See the
-[HTTP dependency two-gate model](#http-insecure-dependencies),
-[dependency pattern matching](../policy-reference/#pattern-matching), and the
-[`registry_source` policy](../../reference/policy-schema/#registry_source) for
-the three distinct controls.
-
-## Frequently asked questions
-
-### Can a package embed hidden instructions?
-
-APM scans every authorized deployable source file for the hidden Unicode
-categories listed above before copying it. Critical tag characters and bidi
-overrides block deployment unless `--force` is used; warning-class findings do
-not. Source-only files are not deployed by this step. Use `apm audit` to scan
-other files, including those obtained outside APM.
-
-### How do I audit what APM installed?
-
-The `apm.lock.yaml` file records every dependency (with exact commit SHA) and every file deployed. It is a plain YAML file suitable for automated policy checks, diff review, and compliance tooling. See the [Governance Guide](../governance-guide/) for audit workflows.
-
-### Is the APM binary signed?
-
-APM is distributed as a PyPI package (`apm-cli`) and as pre-built binaries attached to GitHub Releases under the `microsoft` organization. Both distribution channels use GitHub Actions workflows with pinned dependencies and are auditable through the public repository.
-
-### Where is the source code?
-
-APM-owned software, bundled agent primitives, code examples and the
-software-facing OpenAPM specification are licensed under
-[Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE).
-General documentation is licensed under
+`apm lock export --format cyclonedx|spdx` serializes what `apm.lock.yaml` already
+recorded. It never re-resolves, re-hashes or touches the network. Licenses are the
+`license:` each package declares in its `apm.yml`, validated against SPDX identifiers;
+APM never reads `LICENSE` files, and an undeclared license is `NOASSERTION` in SPDX and
+omitted in CycloneDX. Each component carries a package URL, such as
+`pkg:github/<owner>/<repo>@<commit>`, and the lockfile's SHA-256 content hash; SPDX output
+sets `filesAnalyzed: false` because it lists packages, not files. See
+[Inventory and drift](../drift-detection/).
+
+## Source and license
+
+APM is developed in the open at
+[github.com/microsoft/apm](https://github.com/microsoft/apm); the source, build pipeline
+and release process are public. APM-owned software, bundled agent primitives, code
+examples and the software-facing OpenAPM specification are licensed under
+[Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE). General documentation
+is licensed under
 [CC-BY-4.0](https://github.com/microsoft/apm/blob/main/LICENSE-DOCS).
-[LICENSING.md](https://github.com/microsoft/apm/blob/main/LICENSING.md)
-defines the scope and exclusions; Markdown agent primitives are software,
-not general documentation.
-Third-party material retains its applicable license; attribution and the
-historical MIT notice are preserved in
-[NOTICE](https://github.com/microsoft/apm/blob/main/NOTICE). Previously published
-MIT releases are unchanged. Downstream redistributors should review the applicable
-terms and retain licenses and notices when updating. The generated NOTICE covers
-direct Python runtime dependencies, not the complete transitive, vendored, native,
-website or build-tool inventory. A successful NOTICE drift check does not establish
-complete dependency-license compliance.
-
-APM is hosted on GitHub under the `microsoft` organization. The full source code,
-build pipeline, and release process are publicly auditable.
+[LICENSING.md](https://github.com/microsoft/apm/blob/main/LICENSING.md) defines the
+scope and exclusions; Markdown agent primitives are software, not general documentation.
+Third-party material retains its license; attribution and the historical MIT notice are
+in [NOTICE](https://github.com/microsoft/apm/blob/main/NOTICE). APM collects no
+telemetry.

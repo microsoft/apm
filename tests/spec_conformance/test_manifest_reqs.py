@@ -1220,7 +1220,7 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
         EffectiveTargetDecision,
         resolve_manifest_target_decision,
     )
-    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from apm_cli.integration.mcp_user_scope_runtimes import partition_user_scope_runtimes
 
     project = tmp_path / "project"
     project.mkdir()
@@ -1294,7 +1294,7 @@ def test_declared_user_mcp_targets_install_without_project_signals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bind declared user capabilities to real global CLI configuration writes."""
-    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from apm_cli.integration.mcp_user_scope_runtimes import partition_user_scope_runtimes
     from tests.integration.test_global_cursor_opencode_mcp import (
         test_global_package_install_and_uninstall_preserve_foreign_servers as _run_user_scope_contract,
     )

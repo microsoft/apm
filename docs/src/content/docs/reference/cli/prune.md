@@ -63,7 +63,10 @@ Neither a surviving lock entry nor an `.apm-pin` cache marker is required.
 
 `apm prune` removes the orphan's directory under `apm_modules/`, cleans up its
 owned harness deployments using the protections below, removes its entry from
-`apm.lock.yaml`, and cleans up empty parent directories.
+`apm.lock.yaml`, and cleans up empty parent directories. A deployed file is
+deleted only with evidence that APM wrote its current bytes: a local deployment
+receipt, or byte equality with the locked version's render, taken before the
+package directory is removed. Files without evidence are kept with a warning.
 
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
@@ -190,4 +193,4 @@ confirm the resulting state.
 - [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
 - [`apm deps list`](../deps/#apm-deps-list) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
-- [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where
+- [Package anatomy](../../../producer/create-a-package/) -- what gets deployed where

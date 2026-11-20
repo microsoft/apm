@@ -489,6 +489,25 @@ class TestRunMcpIntegrationPolicyBlock:
         mock_mcp.update_lockfile.assert_not_called()
 
     @patch(_PATCH_TARGET)
+    def test_server_only_claude_loads_natively_skips_the_loose_preflight(self, mock_mcp):
+        """#3290: native admission already vetted it; APM writes it nowhere."""
+        mock_mcp.install.return_value = 0
+        mock_mcp.get_server_names.return_value = set()
+        native = MCPDependency(
+            name="io.github.untrusted/evil-transitive",
+            transport="stdio",
+            native_runtimes=frozenset({"claude"}),
+        )
+
+        with patch(
+            "apm_cli.policy.install_preflight.discover_policy_with_chain",
+            return_value=self._fetch_result(),
+        ):
+            run_mcp_integration(**_base_kwargs(mcp_deps=[native], runtime="claude"))
+            with pytest.raises(PolicyBlockError):
+                run_mcp_integration(**_base_kwargs(mcp_deps=[native], runtime="copilot"))
+
+    @patch(_PATCH_TARGET)
     def test_policy_block_hint_names_direct_dependency_from_view(self, mock_mcp):
         """#3835 review: the merged-set preflight hints the direct apm.yml
         entry the view traced, not the declaring package's display name."""

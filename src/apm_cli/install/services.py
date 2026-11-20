@@ -29,6 +29,8 @@ from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_err
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .project_package import build_project_local_package_info
+from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
+from .target_warnings import log_canvas_skip as _log_canvas_skip
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -124,59 +126,38 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def _log_canvas_skip(
-    package_name: str, package_info: Any, logger: InstallLogger | None, user_scope: bool = False
-) -> None:
-    """Warn about skipped canvas extensions when the package ships them."""
-    _install = Path(package_info.install_path)
-    extensions_root = _install / ".apm" / "extensions"
-    try:
-        has_canvas = extensions_root.is_dir() and any(
-            (d / "extension.mjs").is_file() for d in extensions_root.iterdir() if d.is_dir()
-        )
-    except OSError:
-        has_canvas = False
-    if not has_canvas:
-        return
-    _pkg_label = package_name or getattr(package_info, "name", "unknown")
-    if logger:
-        from apm_cli.security.trust import approve_command
-
-        logger.warning(
-            f"{_pkg_label}: canvas extension(s) skipped (not approved in executables.allow). "
-            f"Run '{approve_command(_pkg_label, user_scope=user_scope)}' to approve.",
-            symbol="warning",
-        )
-
-
-def _warn_target_reconcile_failure(
-    diagnostics: DiagnosticCollector,
-    package_name: str,
-    reconcile_stats: dict,
-    message: str = "Could not fully reconcile hooks excluded by target restrictions",
-) -> None:
-    if not reconcile_stats.get("errors", 0):
-        return
-    failed_targets = reconcile_stats.get("failed_targets") or ["unknown"]
-    failed_paths = reconcile_stats.get("failed_paths") or ["unknown"]
-    if not isinstance(failed_targets, list):
-        failed_targets = ["unknown"]
-    if not isinstance(failed_paths, list):
-        failed_paths = ["unknown"]
-    diagnostics.warn(
-        message,
-        package=package_name,
-        detail=(
-            f"targets: [{', '.join(failed_targets)}]; "
-            f"configs: [{', '.join(failed_paths)}]; run apm install again"
-        ),
-    )
-
-
 def _targets_explicitly_requested(ctx: InstallContext | None) -> bool:
     """Return True only when the active targets came from ``--target``."""
     decision = getattr(ctx, "target_decision", None)
     return getattr(decision, "source", None) == "--target flag"
+
+
+def _check_native_claude_transition(
+    reconcile_package_targets: Any,
+    package_info: Any,
+    project_root: Path,
+    targets: list[Any],
+    package: str,
+) -> None:
+    """Refuse native activation over retained or unreadable loose hook state."""
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+
+    if not callable(reconcile_package_targets):
+        return
+    reconcile_stats = reconcile_package_targets(
+        package_info,
+        project_root,
+        targets,
+        dry_run=True,
+    )
+    if reconcile_stats.get("errors") or reconcile_stats.get("files_removed"):
+        failed = ", ".join(reconcile_stats.get("failed_paths", []))
+        recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
+        if not reconcile_stats.get("errors"):
+            recovery = f"Run: apm uninstall --global {package} && apm install --global {package}"
+        raise ClaudeNativePluginError(
+            f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
+        )
 
 
 def integrate_package_primitives(  # noqa: PLR0913
@@ -201,6 +182,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     dep_target_subset: list[str] | None = None,
     trust_bin: bool | None = None,
     bin_skip_reason_override: str | None = None,
+    native_claude_user_scope: bool = False,
     deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
@@ -217,10 +199,11 @@ def integrate_package_primitives(  # noqa: PLR0913
     (Amendment 6) is emitted once per install run for packages that
     contain non-skill primitives when the cowork target is active.
 
-    When *allow_executables* is provided, executable primitives (hooks,
-    bin/, MCP servers, canvas extensions) are only deployed for packages
-    whose key appears in the dict with the matching type set to ``True``.
-    Local project content (``package_name == "_local"``) is always trusted.
+    Executable primitives (hooks, bin/, MCP servers, canvas extensions) are
+    only deployed for packages the trust owner approves in
+    *allow_executables*; an omitted (``None``) map approves nothing, and only
+    an explicit ``authorized_exec_map`` approves everything. Local project
+    content (``package_name == "_local"``) is always trusted.
 
     When *trust_bin* is ``False`` (``--no-trust-bin``), bin/ deployment
     is skipped with reason ``"not_trusted"`` only when ``allowExecutables``
@@ -237,6 +220,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     """
     enforce_agent_plugin_deployment_boundary(package_info)
 
+    from apm_cli.core.deployment_ledger import recorded_writes
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope
@@ -285,6 +269,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         trust_bin=trust_bin,
         bin_skip_reason_override=bin_skip_reason_override,
         read_only=scratch_root is not None,
+        native_claude_user_scope=native_claude_user_scope,
     )
     target_selection = deployment_plan.target_selection
     targets = list(target_selection.targets)
@@ -324,6 +309,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 
     codex_native = deployment_plan.codex_native
+    native_claude_plugin = deployment_plan.claude_native
+    native_target_names = {native_claude_plugin.target_name} if native_claude_plugin else set()
     # Compatibility-only Codex data is opaque to every loose target adapter.
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan
@@ -366,7 +353,14 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
-    warn_unsupported_primitives(package_info, package_name, targets, ctx, diagnostics, logger)
+    warn_unsupported_primitives(
+        package_info,
+        package_name,
+        projection_targets,
+        ctx,
+        diagnostics,
+        logger,
+    )
 
     def _log_integration(msg):
         if logger:
@@ -424,6 +418,21 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+    if native_claude_plugin is not None:
+        result["native_plugin"] = True
+        result["native_claude_plugin"] = True
+        _check_native_claude_transition(
+            reconcile_package_targets,
+            package_info,
+            project_root,
+            [target for target in targets if target.name in native_target_names],
+            package_name,
+        )
+        if not projection_targets:
+            from apm_cli.claude_plugins.admission import queue_native_claude
+
+            queue_native_claude(ctx, package_name, native_claude_plugin, diagnostics)
+            return result
 
     if codex_native is not None:
         _rc = (
@@ -462,15 +471,18 @@ def integrate_package_primitives(  # noqa: PLR0913
         # gate when is_first_party=False (defence-in-depth: a malicious dep
         # named _local must not bypass canvas trust via the name alone).
         if _prim_name == "canvas" and not is_first_party:
-            if allow_executables is None:
-                _dep_canvas_ok = True
-            else:
-                from apm_cli.install.exec_gate import resolve_package_key as _rpk
-                from apm_cli.security.executables import EXEC_TYPE_CANVAS, is_package_approved
+            from apm_cli.install.exec_gate import resolve_package_key as _rpk
+            from apm_cli.security.executables import (
+                EXEC_TYPE_CANVAS,
+                exec_map_authorizes_all,
+                package_type_approved,
+            )
 
-                _dep_canvas_ok = is_package_approved(
-                    allow_executables, _rpk(package_info, package_name), EXEC_TYPE_CANVAS
-                ) or is_package_approved(allow_executables, package_name, EXEC_TYPE_CANVAS)
+            _dep_canvas_ok = exec_map_authorizes_all(allow_executables) or package_type_approved(
+                allow_executables,
+                (_rpk(package_info, package_name), package_name),
+                EXEC_TYPE_CANVAS,
+            )
             if not _dep_canvas_ok:
                 _log_canvas_skip(package_name, package_info, logger, is_user_scope(scope))
                 continue
@@ -522,12 +534,10 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["trust_canvas"] = True
                 _call_kwargs["is_first_party"] = is_first_party
                 _call_kwargs["package_name"] = package_name
-            _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target,
-                package_info,
-                project_root,
-                **_call_kwargs,
-            )
+            with recorded_writes(integrators.skill, _integrator, [_target], package_info):
+                _int_result = getattr(_integrator, _entry.integrate_method)(
+                    _target, package_info, project_root, **_call_kwargs
+                )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
@@ -588,12 +598,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         # still appears and the count is truthful.
         _files = _info["files"]
         _adopted = _info["adopted"]
+        _noun = _info["label"].removesuffix("s") if (_files or _adopted) == 1 else _info["label"]
         if _files > 0:
-            _verb_phrase = f"{_files} {_info['label']} integrated"
+            _verb_phrase = f"{_files} {_noun} integrated"
             if _adopted > 0:
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
-            _verb_phrase = f"{_adopted} {_info['label']} adopted"
+            _verb_phrase = f"{_adopted} {_noun} adopted"
         if _expansion:
             _log_integration(f"  |-- {_verb_phrase}:")
             for line in _expansion:
@@ -615,22 +626,23 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
-    skill_result = integrators.skill.integrate_package_skill(
-        package_info,
-        project_root,
-        diagnostics=diagnostics,
-        managed_files=managed_files,
-        force=force,
-        targets=projection_targets,
-        skill_subset=skill_subset,
-        skill_pairing=skill_pairing,
-        scope=scope,
-        policy=policy,
-        skip_bin=_skip_bin,
-        bin_skip_reason_override=_bin_skip_reason_override,
-        trust_bin=trust_bin,
-        source_plan=source_plan,
-    )
+    with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
+        skill_result = integrators.skill.integrate_package_skill(
+            package_info,
+            project_root,
+            diagnostics=diagnostics,
+            managed_files=managed_files,
+            force=force,
+            targets=projection_targets,
+            skill_subset=skill_subset,
+            skill_pairing=skill_pairing,
+            scope=scope,
+            policy=policy,
+            skip_bin=_skip_bin,
+            bin_skip_reason_override=_bin_skip_reason_override,
+            trust_bin=trust_bin,
+            source_plan=source_plan,
+        )
     _skill_target_paths = _skill_summary_paths(
         skill_result.target_paths, project_root, targets
     ) or ["skills/"]
@@ -694,6 +706,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
+    from apm_cli.claude_plugins.admission import queue_native_claude
+
+    queue_native_claude(ctx, package_name, native_claude_plugin, diagnostics)
     return result
 
 
@@ -740,6 +755,7 @@ def integrate_local_content(  # noqa: PLR0913
     same shape as ``integrate_package_primitives()``.
     """
     from ..integration.canvas_integrator import CanvasIntegrator
+    from ..security.executables import AUTHORIZED_FIRST_PARTY, authorized_exec_map
     from .package_resolution import effective_dependency_selection
 
     if source_root is None:
@@ -771,6 +787,7 @@ def integrate_local_content(  # noqa: PLR0913
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,
+        allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),
     )
 
 
@@ -830,7 +847,7 @@ def integrate_local_bundle(
         logger: Install-flow logger.
         scope: ``InstallScope`` (project vs user) for downstream consumers.
         alias: Slug override from ``--as``.
-        allow_executables: Effective executable approvals, or ``None`` when disabled.
+        allow_executables: Effective executable approvals; ``None`` approves nothing.
         approval_key: Exact local-bundle content identity for executable approval.
         create_config: Whether config reads may create the user config file.
 
@@ -923,30 +940,19 @@ def integrate_local_bundle(
     # verbatim WITHOUT routing through ``CanvasIntegrator``, so the
     # experimental feature flag and the allowExecutables gate must be
     # checked explicitly here.  When the canvas feature flag is OFF, drop
-    # paths silently (no-op; canvas type does not exist yet).  When ON,
-    # check allowExecutables: if no enforcement block is present (None)
-    # canvas deploys freely; otherwise the bundle slug must be approved for
-    # the ``canvas`` exec type.
+    # paths silently (no-op; canvas type does not exist yet).  When ON, the
+    # trust owner approves canvas for the exact bundle content (an explicit
+    # gate-disabled map approves it; a missing map approves nothing).
     from ..core.experimental import is_enabled
     from ..integration.canvas_integrator import is_canvas_bundle_path
+    from ..security.executables import EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS, package_type_approved
 
+    _bundle_keys = () if approval_key is None else (approval_key,)
     _canvas_enabled = is_enabled("canvas", create_config=create_config)
-    if _canvas_enabled:
-        from ..security.executables import EXEC_TYPE_CANVAS, is_package_approved
-
-        _canvas_approved_bundle = allow_executables is None or (
-            approval_key is not None
-            and is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)
-        )
-    else:
-        _canvas_approved_bundle = False
-
-    from ..security.executables import EXEC_TYPE_HOOKS
-    from ..security.executables import is_package_approved as _is_approved
-
-    _hooks_approved_bundle = allow_executables is None or (
-        approval_key is not None and _is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)
+    _canvas_approved_bundle = _canvas_enabled and package_type_approved(
+        allow_executables, _bundle_keys, EXEC_TYPE_CANVAS
     )
+    _hooks_approved_bundle = package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)
 
     if not (_canvas_enabled and _canvas_approved_bundle):
         _blocked = sorted(r for r in pack_files if is_canvas_bundle_path(r))
@@ -956,16 +962,15 @@ def integrate_local_bundle(
             if _canvas_enabled:
                 # Canvas feature on but not approved: block and surface message.
                 skipped += len(_blocked)
+                from ..security.executables import local_bundle_approval_hint
+
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
                     "and are not approved for this exact bundle content. "
-                    "Add this to apm.yml:\n"
-                    "executables:\n"
-                    "  allow:\n"
-                    f'    "{approval_key}":\n'
-                    "      canvas: true\n"
-                    "Then rerun the install."
+                    + local_bundle_approval_hint(
+                        str(approval_key), "canvas", user_scope=scope is InstallScope.USER
+                    )
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message=_msg, package=str(slug))

@@ -10,6 +10,7 @@ from apm_cli.install import services
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.skill_support import SkillIntegrationResult
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 
 def make_package_info(install_path: Path) -> MagicMock:
@@ -201,6 +202,7 @@ def invoke_integrate(
                 command=integrators["command_integrator"],
                 hook=integrators["hook_integrator"],
             ),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
     return result, integrators, diagnostics, logger
 
@@ -377,6 +379,7 @@ class TestIntegratePackagePrimitives:
                 package_name="warning-pkg",
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert ctx.cowork_nonsupported_warned is True
@@ -516,7 +519,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert result["commands"] == 1
-        assert tree_messages(logger) == ["  |-- 1 commands integrated -> .github/commands/"]
+        assert tree_messages(logger) == ["  |-- 1 command integrated -> .github/commands/"]
 
     def test_multi_target_dispatch_entries_are_skipped(self, tmp_path: Path) -> None:
         target = make_target(primitives={"prompts": make_mapping(subdir="prompts")})
@@ -801,7 +804,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert tree_messages(logger) == [
-            "  |-- 1 commands integrated -> copilot-app/workflows/",
+            "  |-- 1 command integrated -> copilot-app/workflows/",
             "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab",
         ]
 
@@ -825,7 +828,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert tree_messages(logger) == [
-            "  |-- 1 commands adopted -> copilot-app/workflows/",
+            "  |-- 1 command adopted -> copilot-app/workflows/",
             "  |-- (files unchanged)",
         ]
 
@@ -874,6 +877,7 @@ class TestIntegratePackagePrimitives:
                 package_name="override-name",
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert "override-name" in diagnostics.warn.call_args.args[0]
@@ -910,6 +914,7 @@ class TestIntegratePackagePrimitives:
                 package_name="",
                 logger=MagicMock(),
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert "pkg-info-name" in diagnostics.warn.call_args.args[0]
@@ -928,7 +933,7 @@ class TestIntegratePackagePrimitives:
             logger=MagicMock(),
         )
 
-        assert tree_messages(logger) == ["  |-- 1 prompts integrated -> .github/prompts/"]
+        assert tree_messages(logger) == ["  |-- 1 prompt integrated -> .github/prompts/"]
 
     def test_deployed_path_entry_called_for_each_target_path(self, tmp_path: Path) -> None:
         target_paths = [tmp_path / "a", tmp_path / "b"]

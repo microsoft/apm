@@ -45,6 +45,7 @@ from ..utils.http_credentials import (
     origin_root,
 )
 from .errors import (
+    MarketplaceEgressRefusedError,
     MarketplaceError,
     MarketplaceFetchError,
     MarketplaceFreshnessError,
@@ -1101,13 +1102,18 @@ def fetch_raw(
     if proxy_bytes is not None:
         return proxy_bytes
 
-    from ..deps.registry_proxy import RegistryConfig
+    from ..deps.registry_proxy import RegistryConfig, is_enforce_only
 
     cfg = RegistryConfig.from_env()
-    if cfg is not None and cfg.enforce_only:
+    if (cfg is not None and cfg.enforce_only) or is_enforce_only():
         raise MarketplaceError(
             f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
-            "PROXY_REGISTRY_ONLY blocks the GitHub fallback after a proxy miss"
+            "PROXY_REGISTRY_ONLY blocks the direct GitHub fetch"
+            + (
+                " after a proxy miss"
+                if cfg is not None
+                else "; set PROXY_REGISTRY_URL or unset PROXY_REGISTRY_ONLY"
+            )
         )
 
     from ..core.auth import AuthResolver
@@ -1146,6 +1152,28 @@ def fetch_raw(
         raise MarketplaceError(f"fetching {owner}/{repo}/{file_path}@{ref}: {exc}") from exc
 
 
+def _refuse_direct_egress(source_name: str, what: str) -> None:
+    """Refuse a direct catalog fetch when ``PROXY_REGISTRY_ONLY`` is set.
+
+    Registry-only mode sanctions no direct egress. Only github/gitlab
+    catalogs route through ``PROXY_REGISTRY_URL``; every other remote kind,
+    and any kind without a configured proxy, would go direct.
+    """
+    from ..deps.registry_proxy import is_enforce_only
+
+    if is_enforce_only():
+        # Drop any query string: a signed catalog URL must not reach CI logs.
+        what = re.sub(r"\?\S*", "", what)
+        raise MarketplaceEgressRefusedError(
+            source_name,
+            f"PROXY_REGISTRY_ONLY is set: refusing direct fetch of {what}",
+            retry_hint=(
+                "Register a GitHub or GitLab marketplace and set PROXY_REGISTRY_URL "
+                "to route it through your proxy, or unset PROXY_REGISTRY_ONLY."
+            ),
+        )
+
+
 def _fetch_file(
     source: MarketplaceSource,
     file_path: str,
@@ -1176,6 +1204,7 @@ def _fetch_file(
 
         cfg = RegistryConfig.from_env()
         if cfg is not None and cfg.enforce_only:
+            # The proxy answered for this path: a miss is "not found".
             logger.debug(
                 "PROXY_REGISTRY_ONLY blocks direct fetch for %s/%s %s",
                 source.owner,
@@ -1183,6 +1212,9 @@ def _fetch_file(
                 file_path,
             )
             return None
+    if kind != "local":
+        # No proxy route: git, ado and url kinds, or no PROXY_REGISTRY_URL.
+        _refuse_direct_egress(source.name, f"{file_path} from {source.display_source}")
 
     host_info = None
     if kind in ("github", "gitlab"):
@@ -1307,6 +1339,7 @@ def fetch_marketplace(
     # Fetch from source
     try:
         if source.kind == "url":
+            _refuse_direct_egress(source.name, source.display_source)
             stale_meta = _read_stale_meta(cache_name) or {}
             result = _fetch_url_direct(
                 source.url,
@@ -1370,6 +1403,8 @@ def fetch_marketplace(
             _write_cache(cache_name, data)
         return manifest
     except MarketplaceFetchError as exc:
+        if isinstance(exc, MarketplaceEgressRefusedError):
+            raise
         if strict:
             raise MarketplaceFreshnessError(source.name, exc.reason or str(exc)) from exc
         # Stale-while-revalidate (API kinds only): serve expired cache on network error

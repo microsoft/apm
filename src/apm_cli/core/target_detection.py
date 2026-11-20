@@ -23,7 +23,7 @@ family for Copilot is still spelled "vscode".
 """
 
 import warnings
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
@@ -410,14 +410,14 @@ def get_target_description(target: UserTargetType) -> str:
         "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
         "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
-        "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
-        "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "cursor": ".cursor/agents/ + .agents/skills/ + .cursor/rules/",
+        "gemini": "GEMINI.md + .gemini/commands/ + .agents/skills/ + .gemini/settings.json (MCP/hooks)",
         "grok-bot": "agent-data/workflows/ (project) or ~/agent-data/workflows/ (--global) -- skills only, explicit --target only",
         "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
-        "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
+        "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .agents/skills/",
         "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
@@ -632,7 +632,9 @@ def parse_target_field(
             )
 
     # ---- deprecation warning for legacy "agents" alias (once per call) ----
-    if "agents" in raw_parts:
+    # Only a CLI token is a flag; a manifest value (``source_path`` set) is
+    # warned once by the manifest owner with manifest wording (C5a, #3967).
+    if "agents" in raw_parts and source_path is None:
         _agents_alias_detected = True
         warnings.warn(
             "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
@@ -873,12 +875,21 @@ def canonical_policy_target_name(value: str | None) -> str | None:
     return names[0] if names else None
 
 
+# Provenance label of a decision taken from the manifest's ``targets:``.
+MANIFEST_TARGET_SOURCE = "apm.yml"
+
+
 @dataclass(frozen=True)
 class EffectiveTargetDecision:
     """One install-time target decision shared by package, MCP, and LSP phases."""
 
     value: str | list[str] | None
     source: str
+
+    @property
+    def from_manifest(self) -> bool:
+        """True when the manifest's own ``targets:`` made this decision."""
+        return self.source == MANIFEST_TARGET_SOURCE
 
     @cached_property
     def canonical_targets(self) -> tuple[str, ...] | None:
@@ -984,7 +995,7 @@ def resolve_effective_target_decision(
         return EffectiveTargetDecision(explicit_target, "--target flag")
 
     if manifest_target:
-        return EffectiveTargetDecision(manifest_target, "apm.yml")
+        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
 
     from apm_cli.config import get_install_target
 
@@ -1021,6 +1032,30 @@ def resolve_package_target_decision(
     )
 
 
+def resolve_deployment_target_decision(
+    *,
+    manifest_target: str | list[str] | None,
+    recorded_targets: tuple[str, ...],
+    fallback: Callable[[], EffectiveTargetDecision] | None = None,
+) -> EffectiveTargetDecision:
+    """Reconcile current manifest intent with an existing deployment's recorded targets.
+
+    Shared by commands that act on what APM already deployed (``apm audit``,
+    uninstall-time LSP reconciliation): the manifest's ``targets:`` wins, as
+    it does for install, then the targets the lockfile records. A saved
+    install default and harness autodetection never retarget an existing
+    deployment; *fallback* (default: unrestricted ``auto-detect``) runs only
+    when nothing is declared or recorded.
+    """
+    if manifest_target:
+        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
+    if recorded_targets:
+        return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
+    if fallback is not None:
+        return fallback()
+    return EffectiveTargetDecision(None, "auto-detect")
+
+
 def resolve_audit_target_decision(
     *,
     manifest_target: str | list[str] | None,
@@ -1031,11 +1066,9 @@ def resolve_audit_target_decision(
     A saved install default is not a request to retarget an existing deployment.
     Without declared or recorded intent, preserve audit's discovery fallback.
     """
-    if manifest_target:
-        return EffectiveTargetDecision(manifest_target, "apm.yml")
-    if recorded_targets:
-        return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
-    return EffectiveTargetDecision(None, "auto-detect")
+    return resolve_deployment_target_decision(
+        manifest_target=manifest_target, recorded_targets=recorded_targets
+    )
 
 
 def read_manifest_target(project_root: Path) -> list[str] | None:

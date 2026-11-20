@@ -237,10 +237,11 @@ def locked_marketplace_replay(
     ``apm update`` / ``--refresh`` (*update_refs*) is ``update``; both
     resolve through the marketplace.
 
-    ``catalog-metadata`` keeps today's behavior for one case: catalog entries
-    may define MCP or LSP servers inline, and the lock cannot rebuild that
-    metadata, so a row whose package owns locked servers replays only while
-    its materialized copy under *modules_dir* exists.
+    ``catalog-metadata`` covers one case: catalog entries may define MCP or
+    LSP servers inline, and the lock cannot rebuild that metadata, so a row
+    whose package owns locked servers replays only while its materialized
+    copy under *modules_dir* exists. A cold copy reads the catalog for that
+    metadata only; :func:`catalog_metadata_refusal` keeps the lock's pin.
     """
     if update_refs:
         return MarketplaceReplay(MARKETPLACE_UPDATE)
@@ -267,6 +268,38 @@ def frozen_marketplace_refusal(decision: MarketplaceReplay) -> ValueError | None
         "--frozen replays marketplace dependencies from apm.lock.yaml only, and "
         "no locked entry matches this declaration. Run 'apm install' without "
         "--frozen, then commit apm.lock.yaml"
+    )
+
+
+def catalog_metadata_refusal(
+    dep_ref: DependencyReference,
+    resolved: DependencyReference,
+    lockfile: LockFile | None,
+) -> ValueError | None:
+    """Refuse a ``catalog-metadata`` re-read whose catalog no longer pins the lock row.
+
+    The catalog is read only for the server definitions the lock cannot
+    rebuild; the locked commit still pins the download. A catalog that now
+    selects another source or ref would silently re-pin the package, so only
+    ``apm update`` may move it.
+    """
+    locked_dep = locked_marketplace_row(dep_ref, lockfile)
+    if (
+        locked_dep is not None
+        and resolved.get_unique_key() == locked_dep.get_unique_key()
+        and not detect_ref_change(resolved, locked_dep)
+    ):
+        return None
+    locked = (
+        f"{locked_dep.get_unique_key()}#{locked_dep.resolved_ref or locked_dep.resolved_commit}"
+        if locked_dep is not None
+        else "another selection"
+    )
+    current = f"{resolved.get_unique_key()}#{resolved.reference or 'HEAD'}"
+    return ValueError(
+        f"the catalog now selects {current}, but apm.lock.yaml pins {locked}. "
+        "Catalog edits do not change what installs; run "
+        f"'apm update {dep_ref.get_display_name()}' to move to the catalog's selection"
     )
 
 
@@ -522,6 +555,11 @@ def locked_copy_proof(
     return None
 
 
+def locked_copy_holds_commit(locked_dep: Any, package_path: Path) -> bool:
+    """Whether a cached copy proves the locked commit for replay (marker admitted)."""
+    return locked_copy_proof(locked_dep, package_path, trust_marker=True) is not None
+
+
 def locked_copy_is_stale(locked_dep: Any, package_path: Path) -> bool:
     """Return whether an existing copy contradicts what *locked_dep* records.
 
@@ -564,50 +602,6 @@ def _refetches_mutable_ref_during_resolution(dep_ref: DependencyReference) -> bo
 # ---------------------------------------------------------------------------
 
 
-def detect_orphans(
-    existing_lockfile: LockFile | None,
-    intended_dep_keys: builtins.set,
-    *,
-    only_packages: builtins.list,
-    logger=None,
-) -> builtins.set:
-    """Return the set of deployed file paths whose owning package left the manifest.
-
-    Only relevant for *full* installs (``only_packages`` is empty/None).
-    Partial installs (``apm install <pkg>``) preserve all existing lockfile
-    entries unchanged.
-
-    Args:
-        existing_lockfile: The lockfile from the previous install, or ``None``
-                           on first install.
-        intended_dep_keys: Set of unique dependency keys for packages declared
-                           in the updated manifest.
-        only_packages: When non-empty this is a partial install — return an
-                       empty set so no cleanup is performed.
-
-    Returns:
-        A set of workspace-relative path strings that belong to packages which
-        are no longer in the manifest.  The caller is responsible for actually
-        removing the files.
-    """
-    from apm_cli.deps.lockfile import _SELF_KEY
-
-    orphaned: builtins.set = builtins.set()
-    if only_packages or not existing_lockfile:
-        return orphaned
-    for dep_key, dep in existing_lockfile.dependencies.items():
-        # The synthesized self-entry (key ".") holds the project's own
-        # includes:auto content, which the real install always re-deploys
-        # (never removes). It can never appear in the manifest-derived
-        # intended set, so skip it to avoid over-counting self-includes as
-        # removals in the dry-run preview.
-        if dep_key == _SELF_KEY:
-            continue
-        if dep_key not in intended_dep_keys:
-            orphaned.update(dep.deployed_files)
-    return orphaned
-
-
 # ---------------------------------------------------------------------------
 # File-level stale detection (intra-package)
 # ---------------------------------------------------------------------------
@@ -619,7 +613,7 @@ def detect_stale_files(
 ) -> builtins.set:
     """Return the set of paths that were deployed previously but are no longer produced.
 
-    Complements :func:`detect_orphans`, which operates at the *package* level
+    Complements the orphan owner (``install/orphans.py``), which operates at the *package* level
     (a whole package left the manifest).  This helper operates at the *file*
     level *inside* a still-present package: if a package renamed or removed a
     file between installs, the now-unused path is flagged as stale.

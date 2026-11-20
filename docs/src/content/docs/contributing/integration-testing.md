@@ -38,7 +38,7 @@ APM uses a tiered approach to integration testing:
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
 - **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: three shards each retain a hard 10-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
+- **Duration**: four shards each retain a hard 15-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
 - **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks every shard result independently and fails if any is missing, skipped, cancelled, or failed.
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
 - **Sharding**: `scripts.ci_sharding` balances the shards by the measured durations in `.github/ci-durations/linux-x86_64.json` while keeping each module and composite `xdist_group` intact. The shards are disjoint and their union is the unchanged required selection.
@@ -47,7 +47,8 @@ APM uses a tiered approach to integration testing:
 - **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
 - **Source and ownership fixtures**: downloader stubs must return real `PackageInfo` and `ResolvedReference` values and materialize each package at the requested path, including staging directories. Native MCP cleanup tests must generate managed baselines through the real writer, then prove both authorized removal and unchanged bytes on unverifiable or foreign entries. Keep successful transitive-service, frozen replay, and exact-byte assertions; a mock-error exit is not success.
 - **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
-- **Generated lifecycle model**: `test_generated_lifecycle_state_machine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, and prune sequences against the real CLI. The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Its mandatory and generated project, global-canonical, and global-aliased replays verify that ordinary reinstall preserves edited skill bytes and their original deployment hashes. After prune removes ownership, ordinary install must refuse the retained user file without changing its bytes or durable state. Deliberate repair uses existing `install --force` consent, then checks exact source bytes, installed lock state, and a clean audit. Every transition captures complete project and user roots, and mutating commands must stay inside reviewed write sets. It stays in the merge-group family until hosted runtime supports promotion to the bounded PR-time smoke set.
+- **Generated lifecycle model**: `test_generated_lifecycle_state_machine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, and prune sequences against the real CLI. The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Its mandatory and generated project, global-canonical, and global-aliased replays verify that ordinary reinstall preserves edited skill bytes and their original deployment hashes. After prune removes ownership, ordinary install must refuse the retained user file without changing its bytes or durable state. Deliberate repair uses existing `install --force` consent, then checks exact source bytes, installed lock state, and a clean audit. The mandatory spine replays once per world, inside the first generated example; later examples restore that post-spine world in place. Every transition captures complete project and user roots, and mutating commands must stay inside reviewed write sets. It stays in the merge-group family until hosted runtime supports promotion to the bounded PR-time smoke set.
+- **GATE state machine**: `test_generated_gate_state_machine.py` drives `python -m apm_cli.cli` through declare, approve, deny, revoke, org-policy tightening, install, `install --frozen`, update, uninstall, prune and `audit --ci` for hook, LSP and native-plugin content, at project scope and at user scope with `APM_HOME` outside `HOME`. After every step `check_cross_cutting` (`tests/utils/lifecycle_oracle.py`) checks lock/deployed agreement, idempotence, frozen/audit agreement, gate monotonicity (relative to the model: after each successful mutating step nothing is deployed that current approvals and policy do not allow), write sets, ASCII output, failure atomicity, exit codes and duplicated output. A cell that fails on `main` is a strict expected failure naming its tracking issue. Every step emits a `cell:` event; the mandatory spine must cover `tests/quality/gate_cell_obligations.json`, and a recorded mutant that skips the approval check must fail the machine. PR shards run 4 derandomized examples per scope; `.github/workflows/gate-machine-nightly.yml` explores 25 fresh examples per scope (`APM_GATE_MAX_EXAMPLES=25`).
 - **Frozen under-recording**: the required smoke scenario and the generated model's mandatory project replay add a local skill without refreshing the lockfile, require frozen refusal with unchanged lockfile bytes, repair with ordinary install, and verify two byte-stable frozen replays. The scenario uses `ApmLifecycleRunner` in an isolated environment. It does not promise filesystem rollback: the new skill is deployed before refusal.
 - **Frozen local dependencies**: `test_frozen_local_path_lifecycle.py` uses the selected installed CLI to check direct and transitive source changes before deployment, including portable identities for packages inside the consumer project. It covers a fresh consumer with a separate empty cache, unchanged lock and managed bytes on refusal, preserved unrelated cache content, and recovery by restoring the source or explicitly accepting it with a normal install. This is separate from the root project's under-recording scenario above.
 - **Known gap**: a late lockfile replacement failure can leave target files on the newly declared target while retaining the prior lockfile. The required lifecycle suite bounds that blast radius and proves the next install converges; expanding the install transaction is a separate design decision recorded in the ledger.
@@ -259,6 +260,9 @@ uv run pytest tests/integration -m requires_github_token -v
 APM_E2E_TESTS=1 APM_BINARY_PATH="$(command -v apm)" \
   uv run --extra dev pytest -q \
   tests/integration/test_generated_lifecycle_state_machine.py
+
+# Run the GATE state machine (python -m apm_cli.cli; no binary needed)
+uv run --extra dev pytest -q tests/integration/test_generated_gate_state_machine.py
 ```
 
 ### Hermetic lifecycle fixtures
@@ -507,7 +511,7 @@ skill. The local fixture covers both an independent skill and a separately
 installed skill from the plugin; the network-backed case uses the same assertions.
 Cleanup wording is not the lifecycle contract.
 
-Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker. The ten-minute whole-job limit includes setup and cleanup; `--durations=20` reports slow cases without changing selection or assertions.
+Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker. The 15-minute whole-job limit includes setup and cleanup; `--durations=20` reports slow cases without changing selection or assertions.
 Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.
@@ -558,13 +562,13 @@ pytest collection; they are not lists of tests to run.
 - **Network lane** (Linux x86_64): `requires_github_token or
   requires_network_integration`, re-running only failed tests up to twice.
 - **Windows**: `scripts/windows/test-integration.ps1`.
-- **macOS**: still one job per architecture. Apple Silicon runs the unit suite
-  plus `lifecycle_smoke or windows_compat or platform_sensitive`; Intel runs
-  `windows_compat or platform_sensitive`. Mark OS-, filesystem- or
+- **macOS**: Intel is one job running `windows_compat or platform_sensitive`.
+  Apple Silicon runs the unit suite in its own job, in parallel with the build
+  job that runs `lifecycle_smoke or windows_compat or platform_sensitive`. Mark OS-, filesystem- or
   shell-sensitive integration tests `platform_sensitive`.
 
 `create-release` requires a pushed tag and every release-bound lane. Only a
-promoted tag may skip integration.
+promoted tag may skip integration and the Apple Silicon unit job.
 
 The existing unprivileged `PR Binary Smoke (Linux)` job also runs
 `tests/integration/test_audit_workspace_identity_lifecycle.py` against its built

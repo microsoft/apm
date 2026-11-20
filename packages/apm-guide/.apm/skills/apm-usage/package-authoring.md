@@ -432,7 +432,8 @@ An unrecognized string (or a special token like `UNLICENSED` or
 and emitted in the SBOM as a named license. Authoring never blocks on a
 license value.
 
-If you omit `license:`, `apm pack` and `apm publish` print an actionable
+`apm plugin init` scaffolds a commented `# license: MIT` line in `apm.yml`;
+APM never picks a license for you. If you omit `license:`, `apm pack` and `apm publish` print an actionable
 warning (`No 'license:' field in apm.yml; the SBOM will record NOASSERTION
 for this package. Add a 'license:' field ...`). The SBOM still exports
 correctly -- the component just records NOASSERTION (genuinely unknown).
@@ -1020,8 +1021,8 @@ Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
 
 `apm marketplace init` appends a `marketplace:` block to the project's
 `apm.yml`, scaffolding `apm.yml` if it is missing. It does NOT scaffold a
-standalone `marketplace.yml`. `apm init --marketplace` is deprecated; use
-`apm marketplace init` for a brand-new marketplace project too.
+standalone `marketplace.yml`. `apm init --marketplace` was removed in 0.37;
+use `apm marketplace init` for a brand-new marketplace project too.
 
 ### apm.yml `marketplace:` block
 

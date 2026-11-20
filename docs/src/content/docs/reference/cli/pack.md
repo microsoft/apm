@@ -20,7 +20,7 @@ apm pack [OPTIONS]
 - `targets:` (or deprecated singular `target:`) field containing `claude`, `copilot`, or `codex` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
 
-The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time. In the default Claude plugin format, a project with no `apm.lock.yaml` (for example `dependencies: {}` with only local primitives) still gets an embedded lockfile with an empty dependency list and the full `bundle_files` manifest. `--format agent-plugin` and `--format apm` require the project lockfile.
+The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time. In the default Claude plugin format, a project with no `apm.lock.yaml` (for example `dependencies: {}` with only local primitives) still gets an embedded lockfile with an empty dependency list and the full `bundle_files` manifest. `--format agent-plugin` needs the lockfile only when `apm.yml` declares dependencies, so a fresh `apm plugin init` scaffold packs as is; `--format apm` requires the project lockfile.
 
 Bundles are target-agnostic. The consumer's project decides where files land at install time -- the bundle carries no harness binding. Flags whose scope does not match the detected outputs are silent no-ops, not errors, so the same `apm pack` invocation works in CI across projects that produce only a bundle, only a marketplace, or both.
 
@@ -40,7 +40,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
 | `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
 | `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
-| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Includes `metadata_enrichment.certifiable` and per-package outcomes. |
+| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Includes `metadata_enrichment.certifiable`, per-package outcomes, and `bundle` (`path` and `files` of the built bundle; `null` when no bundle was built). |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
 | `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output in memory and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. Exits `4` for drift or uncertifiable remote Claude metadata. It automatically suppresses normal pack writes. |
@@ -175,7 +175,7 @@ A Claude Code plugin directory under `--output`. Contains:
   - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
   - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
 - A merged `hooks.json` from the producer's own hooks. When present, root `plugin.json` and `.claude-plugin/plugin.json` declare `"hooks": "./hooks.json"` for native Claude discovery. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
-- Referenced first-party hook scripts and selected sibling assets, with plugin-root command paths rewritten to their packed locations. A `./` script reference is resolved as `apm install` resolves it (hook file directory first, then package root) and anchored on the installed plugin root, for example `"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`, so it runs from any working directory. Missing, excluded, symlinked, escaping or collision-displaced resources fail before replacing an existing bundle. Packing never executes scripts; see [Hook resources in Claude plugin bundles](../../../producer/pack-a-bundle/#hook-resources-in-claude-plugin-bundles).
+- Referenced first-party hook scripts and selected sibling assets, with plugin-root command paths rewritten to their packed locations. A `./` script reference is resolved as `apm install` resolves it (hook file directory first, then package root) and anchored on the installed plugin root, for example `"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fmt.sh"`, so it runs from any working directory. Missing, excluded, symlinked, escaping or collision-displaced resources fail before replacing an existing bundle. Packing never executes scripts; see [Hook resources in Claude plugin bundles](../../../producer/build-a-plugin/).
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 
@@ -200,7 +200,7 @@ legacy Claude client format.
 LSP configuration gets its own guidance in the same error, since neither bundle format carries it: configure LSP servers directly in the target client instead.
 
 :::note[Installing what you packed]
-Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it without locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer loads the projection live; older clients may create private copies outside APM ownership. Non-Copilot targets remain outside this native route -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
+Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it without locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer loads the projection live; older clients may create private copies outside APM ownership. Non-Copilot targets remain outside this native route -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/install-plugins/).
 :::
 
 ### APM bundle (`--format apm`)
@@ -283,7 +283,7 @@ Use `targets: [claude, copilot, codex]` instead to emit all three manifests from
 
 The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). Per-ecosystem differences:
 
-- **Claude:** includes `mcpServers` from the self-defined (`registry: false`) MCP servers in `apm.yml` and the servers you wrote in `.mcp.json`, after credential stripping. `apm.yml` servers are read from `apm.yml`, never from the copy `apm install` writes to `.mcp.json`, so the output is the same before and after `apm install`. Other servers `apm install` manages in `.mcp.json` (recorded in `apm.lock.yaml` for a runtime that writes that file, such as a dependency's servers) are left out with a warning.
+- **Claude:** includes `mcpServers` from the self-defined (`registry: false`) MCP servers in `apm.yml` (except those whose `targets:` leave out `claude`) and the servers you wrote in `.mcp.json`, after credential stripping. `apm.yml` servers are read from `apm.yml`, never from the copy `apm install` writes to `.mcp.json`, so the output is the same before and after `apm install`. Other servers `apm install` manages in `.mcp.json` (recorded in `apm.lock.yaml` for a runtime that writes that file, such as a dependency's servers) are left out with a warning.
 - **Copilot:** omits `mcpServers`.
 - **Codex:** writes the [Codex compatibility manifest](https://developers.openai.com/plugins/deploy/submission#manifest-fields). It adds `"skills": "./skills/"` when a root `skills/` directory exists and `"mcpServers": "./.mcp.json"` when a root `.mcp.json` exists (symlinks are skipped) and holds no server that `apm install` manages. `apm install` writes your `apm.yml` MCP servers to that file, credentials included, so once it holds any of them the file is not referenced, and `apm pack` warns if it also holds servers you wrote. Skills under `.apm/skills/` and MCP servers declared in `apm.yml` are not referenced, so keep Codex-visible content at the package root. Codex reads that file directly, so no MCP server data is copied and no credentials are stripped or rewritten. No `interface` block is generated, and Codex does not derive one from this manifest, so the plugin has no Codex listing presentation metadata (display name, descriptions, developer). Codex expects `version`, `description`, and `author`; `apm pack` warns when `apm.yml` lacks any of them, and when `name` does not start with a letter or digit or uses characters other than letters, digits, `.`, `_` and `-` (`apm install -g --target codex` rejects such names).
 
@@ -312,7 +312,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 - **Newer lockfiles fail closed.** If `apm.lock.yaml` was written by a newer APM, `apm pack` refuses before writing, names both versions, and tells you how to upgrade.
 - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
 - **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
-- **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.
+- **Share line.** On success, `apm pack` prints the command a consumer runs: `Share with: apm install ./build/<bundle>` for the default Claude plugin bundle, `apm unpack ./build/<bundle>` (deprecated) for `--format apm`, and, for `--format agent-plugin`, adding the bundle path under `dependencies.apm` in the consumer's `apm.yml` and running `apm install --target copilot`.
 - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
 - **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses with a deprecation warning. Use `--marketplace=` to filter which formats are built in a given invocation.
 - **JSON mode.** `--json` makes `apm pack` machine-friendly: stdout is a single JSON object, all human-readable logs move to stderr. Combine with `--marketplace=` for selective CI matrix builds.
@@ -332,6 +332,6 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 
 - [`apm unpack`](../unpack/) -- inverse, deprecated; prefer `apm install <bundle>`.
 - [`apm install`](../install/) -- consumer side; installs a packed bundle directory, `.zip`, or `.tar.gz`.
-- [Pack a bundle (producer guide)](../../../producer/pack-a-bundle/) -- task-oriented walkthrough.
+- [Pack a bundle (producer guide)](../../../producer/build-a-plugin/) -- task-oriented walkthrough.
 - [Publish to a marketplace](../../../producer/publish-to-a-marketplace/) -- end-to-end marketplace flow.
 - [Lockfile spec](../../lockfile-spec/) -- `pack:` metadata and `bundle_files` schema.

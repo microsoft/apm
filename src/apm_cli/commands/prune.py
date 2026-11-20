@@ -14,37 +14,21 @@ from ..core.scope import InstallScope
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
-from ..deps.reachability import retained_lock_keys
 from ..install.locking import serialized_lifecycle_unless
+from ..install.orphans import (
+    InstalledPaths,
+    OrphanOperation,
+    ReachabilityProbe,
+    decide_orphan_removal,
+)
+from ..install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ..integration.base_integrator import BaseIntegrator
-from ..integration.cleanup import remove_stale_deployed_files
-from ..models.apm_package import APMPackage
+from ..integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
+from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
-from ._helpers import (
-    _build_expected_install_paths,
-    _find_orphaned_packages,
-    _scan_installed_packages,
-)
+from ._helpers import _scan_installed_packages
 from .uninstall.lockfile_state import lockfile_has_persisted_state
-
-
-def _lock_keys_by_install_path(
-    lockfile: LockFile,
-    apm_modules_dir: Path,
-) -> dict[str, tuple[str, ...]]:
-    """Index canonical lock keys by their host-blind installed path."""
-    grouped: dict[str, list[str]] = {}
-    for dep_key, dependency in sorted(lockfile.dependencies.items()):
-        if dep_key == ".":
-            continue
-        install_path = dependency.to_dependency_ref().get_install_path(apm_modules_dir)
-        try:
-            relative_path = install_path.relative_to(apm_modules_dir).as_posix()
-        except ValueError:
-            continue
-        grouped.setdefault(relative_path, []).append(dep_key)
-    return {path: tuple(keys) for path, keys in grouped.items()}
 
 
 def _preflight_prune_survivors(
@@ -116,14 +100,39 @@ def prune(ctx, dry_run):
 
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+        except Exception as e:
+            logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
+            sys.exit(1)
+
+        # Runs before the lockfile is read: retiring a revoked bundle's hooks
+        # rewrites apm.lock.yaml, and prune must not write a stale copy back.
+        # A re-check that cannot resolve targets writes nothing; package
+        # removal still proceeds, as with hook reconciliation below. Any other
+        # re-check failure (policy, lockfile, integrator) fails closed.
+        from ..install.local_bundle_hook_trust import (
+            BundleHookTargetsUnresolved,
+            reconcile_scope_bundle_hooks,
+        )
+
+        try:
+            reconcile_scope_bundle_hooks(
+                InstallScope.PROJECT, apm_package, logger=logger, dry_run=dry_run
+            )
+        except BundleHookTargetsUnresolved as e:
+            logger.warning(
+                f"Local bundle hooks were NOT re-checked: target resolution failed ({e}). "
+                "Run 'apm install' to re-check them."
+            )
+        except Exception as e:
+            logger.error(f"Local bundle hook re-check failed: {e}")
+            sys.exit(1)
+
+        try:
             declared_deps = apm_package.get_all_apm_dependencies()
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)
             lockfile = LockFile.read(lockfile_path)
-            expected_installed = _build_expected_install_paths(
-                declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
-            )
-        except (MaterializationPathCollisionError, LockfileFormatError) as e:
+        except LockfileFormatError as e:
             logger.error(str(e))
             sys.exit(1)
         except Exception as e:
@@ -133,30 +142,35 @@ def prune(ctx, dry_run):
         installed_packages = (
             _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
         )
-        expected_lock_keys = {dependency.get_unique_key() for dependency in declared_deps}
-        if lockfile is not None:
-            expected_lock_keys |= retained_lock_keys(
-                lockfile, project_root, apm_modules_dir, declared_deps
+        try:
+            decision = decide_orphan_removal(
+                operation=OrphanOperation.PRUNE,
+                roots=(),
+                candidate_universe=lockfile,
+                installed_paths=InstalledPaths(
+                    root=apm_modules_dir, packages=frozenset(installed_packages)
+                ),
+                resolved_keys=None,
+                intended=declared_deps,
+                materialized=None,
+                reachability=ReachabilityProbe(
+                    project_root=project_root,
+                    apm_modules_dir=apm_modules_dir,
+                    direct_refs=tuple(declared_deps),
+                    dev_refs=(),
+                ),
+                deployment_claims=None,
             )
-        lock_keys_by_path = (
-            _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
-        )
-        orphaned_paths = set(
-            _find_orphaned_packages(
-                set(installed_packages) | set(lock_keys_by_path), expected_installed
-            )
-        )
-        orphaned_packages = sorted(set(installed_packages) & orphaned_paths)
-        retained_packages = set(installed_packages) - orphaned_paths
-        for package in sorted(retained_packages - expected_installed):
+        except MaterializationPathCollisionError as e:
+            logger.error(str(e))
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
+            sys.exit(1)
+        orphaned_packages = list(decision.removed_paths)
+        for package in decision.retained_paths:
             logger.progress(f"Retained {package}: required package content.")
-        missing_orphaned_keys = sorted(
-            dep_key
-            for relative_path, dep_keys in lock_keys_by_path.items()
-            if relative_path not in orphaned_paths or not (apm_modules_dir / relative_path).exists()
-            for dep_key in dep_keys
-            if dep_key not in expected_lock_keys
-        )
+        missing_orphaned_keys = list(decision.stale_keys)
         deployment_ledger = (
             DeploymentLedgerCodec.from_lockfile(lockfile) if lockfile is not None else None
         )
@@ -191,13 +205,7 @@ def prune(ctx, dry_run):
             _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
             return
 
-        planned_pruned_keys = set(missing_orphaned_keys)
-        for orphaned_package in orphaned_packages:
-            planned_pruned_keys.update(
-                key
-                for key in lock_keys_by_path.get(orphaned_package, ())
-                if key not in expected_lock_keys
-            )
+        planned_pruned_keys = set(decision.removed_keys)
         if planned_pruned_keys and not dry_run:
             _preflight_prune_survivors(
                 apm_package,
@@ -255,12 +263,32 @@ def prune(ctx, dry_run):
                     removed_owners = set(violation.invalid_owners)
                     if violation.invalid_active_owner is not None:
                         removed_owners.add(violation.invalid_active_owner)
+                    locator = violation.locator
+                    # Name the path and target; the composite ledger key is internal (#3994).
                     logger.dry_run_notice(
-                        f"repair {violation.locator.key} "
-                        f"(remove owner(s): {', '.join(sorted(removed_owners))})"
+                        f"repair {locator.value} ({locator.target}): "
+                        f"remove owner(s) {', '.join(sorted(removed_owners))}"
                     )
+                    logger.verbose_detail(f"    ledger key: {locator.key}")
             logger.success("Dry run complete - no changes made")
             return
+
+        # Deletion evidence (#3701): receipts, or the locked render, which is
+        # materialized now while the orphaned package sources still exist.
+        deletion_evidence = DeploymentEvidence.collect(
+            project_root,
+            user_scope=False,
+            lockfile=lockfile,
+            lockfile_root=project_root,
+            diagnostics=logger.diagnostics,
+        )
+        if lockfile is not None:
+            deletion_evidence.prepare(
+                path
+                for key in planned_pruned_keys
+                if key in lockfile.dependencies
+                for path in lockfile.dependencies[key].deployed_files
+            )
 
         removed_count = 0
         failed_count = 0
@@ -268,6 +296,9 @@ def prune(ctx, dry_run):
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
+        compile_inputs = snapshot_compile_inputs(
+            project_root, package_target_selection(apm_package), apm_modules_dir
+        )
         for org_repo_name in orphaned_packages:
             path_parts = org_repo_name.split("/")
             pkg_path = apm_modules_dir.joinpath(*path_parts)
@@ -276,11 +307,7 @@ def prune(ctx, dry_run):
                 logger.progress(f"Removed {org_repo_name}")
                 removed_count += 1
                 removed_packages.append(org_repo_name)
-                for dep_key in (
-                    key
-                    for key in lock_keys_by_path.get(org_repo_name, ())
-                    if key not in expected_lock_keys
-                ):
+                for dep_key in decision.path_keys[org_repo_name]:
                     if dep_key not in pruned_key_set:
                         pruned_keys.append(dep_key)
                         pruned_key_set.add(dep_key)
@@ -323,6 +350,7 @@ def prune(ctx, dry_run):
                     dep_key=dep_key,
                     targets=None,
                     diagnostics=logger.diagnostics,
+                    evidence=deletion_evidence,
                     recorded_hashes=hashes,
                     failed_path_retained=False,
                 )
@@ -421,6 +449,8 @@ def prune(ctx, dry_run):
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
                     "stale -- run 'apm install' to rebuild hook configuration."
                 )
+
+        hint_compile_after_removal(compile_inputs, apm_modules_dir, logger)
 
         if failed_count:
             logger.error(

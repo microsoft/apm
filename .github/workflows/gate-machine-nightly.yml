@@ -1,0 +1,116 @@
+name: GATE State Machine Nightly
+
+# M-GATE nightly exploration (#4031). The PR lifecycle shards run the GATE
+# state machine with 4 derandomized examples per scope; this workflow explores
+# 25 fresh examples per scope through `python -m apm_cli.cli`. A failure opens
+# (or updates) one tracking issue; the next green run closes it. Hypothesis
+# prints a @reproduce_failure blob for every falsifying example.
+
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-machine-nightly
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  gate-machine:
+    name: GATE State Machine (25 examples per scope)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Explore GATE sequences
+        env:
+          APM_GATE_MAX_EXAMPLES: "25"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 2 --durations=10 -k sequences tests/integration/test_generated_gate_state_machine.py
+
+  signal:
+    name: GATE Nightly Signal
+    needs: [gate-machine]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RESULT: ${{ needs.gate-machine.result }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const MARKER = '<!-- apm-gate-machine-nightly -->';
+            const LABEL = 'ci/gate-machine-nightly';
+            const { owner, repo } = context.repo;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const failed = process.env.RESULT !== 'success';
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: LABEL });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner, repo, name: LABEL, color: 'D93F0B',
+                description: 'Nightly GATE state machine signal',
+              });
+            }
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: LABEL, per_page: 100,
+            });
+            const issue = open.find((item) => !item.pull_request && (item.body || '').includes(MARKER));
+            if (failed) {
+              const body = [
+                MARKER,
+                'The nightly GATE state machine run is failing.',
+                '',
+                `- Run: [${context.runNumber}](${runUrl})`,
+                `- Head SHA: \`${context.sha}\``,
+                `- Result: ${process.env.RESULT}`,
+                '',
+                'The run log prints a `@reproduce_failure` blob for each falsifying example.',
+              ].join('\n');
+              if (issue) {
+                await github.rest.issues.update({ owner, repo, issue_number: issue.number, body });
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number, body: `Still failing: ${runUrl}`,
+                });
+              } else {
+                await github.rest.issues.create({
+                  owner, repo, title: '[ci] Nightly GATE state machine is failing', body, labels: [LABEL],
+                });
+              }
+            } else if (issue) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number, body: `Recovered: ${runUrl}`,
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'completed',
+              });
+            }

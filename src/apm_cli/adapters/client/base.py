@@ -347,6 +347,11 @@ class MCPClientAdapter(ABC):
     # so that ``apm install --global`` can install MCP servers to them.
     supports_user_scope: bool = False
 
+    # Display path of a user-wide config that even a project install writes,
+    # because the runtime has no workspace MCP config (Windsurf). Install
+    # output names it so the account-wide effect is never silent (#3994).
+    user_wide_config_display: str | None = None
+
     # Whether the target runtime resolves ``${VAR}`` placeholders from the
     # host environment at server-start time. Adapters that opt in (Copilot
     # CLI) emit placeholders verbatim so secrets never touch disk; legacy

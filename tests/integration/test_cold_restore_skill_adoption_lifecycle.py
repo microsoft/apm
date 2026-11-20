@@ -184,8 +184,13 @@ def test_fresh_clone_with_edited_skill_fails_closed(
         result = restore.runner.run(command, cwd=clone, env=restore.env)
         assert result.returncode != 0, result.stdout + result.stderr
         output = " ".join((result.stdout + result.stderr).split())
-        assert _REFUSAL in output, output
-        assert _GUIDANCE in output, output
+        if frozen:
+            # The deployed-hash gate refuses before any write (#3994).
+            assert "deployed files do not match the hashes" in output, output
+            assert "nothing was deployed" in output, output
+        else:
+            assert _REFUSAL in output, output
+            assert _GUIDANCE in output, output
         assert "stale files cleaned" not in result.stdout
         assert edited.read_text(encoding="ascii") == "Local edits.\n"
         assert (clone / "apm.lock.yaml").read_bytes() == lock_before

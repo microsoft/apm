@@ -569,6 +569,36 @@ def _target_deprecation_wiring(
     return findings
 
 
+# Raw apm.yml readers pass the manifest path so the deprecated-key warnings fire
+# (#3965). Only callers parsing a config an APMPackage reader already loaded
+# (and so already warned for) may omit it.
+_PATHLESS_RESTRICTION_READERS = frozenset(
+    {
+        "src/apm_cli/integration/mcp_integrator_install.py",
+        "src/apm_cli/integration/mcp_integrator.py",
+    }
+)
+
+
+def _pathless_restriction_reads(rule_id: str, path: str, index) -> list[Violation]:
+    if path in _PATHLESS_RESTRICTION_READERS:
+        return []
+    return [
+        violation(
+            rule_id,
+            path,
+            "manifest_target_restriction needs the manifest path so deprecated "
+            "target keys warn (#3965)",
+            line=node.lineno,
+        )
+        for node in index.nodes
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None))
+        == "manifest_target_restriction"
+        and len(node.args) + len(node.keywords) < 2
+    ]
+
+
 def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
     """Package manifest targets are read only through the declaration owner.
 
@@ -596,6 +626,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
         index = provider.tree_index(path)
         if index is None:
             continue
+        findings.extend(_pathless_restriction_reads(rule_id, path, index))
         for node in index.nodes:
             reason = _raw_target_read(node, path)
             if reason is None:
@@ -842,6 +873,7 @@ def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation
     for name, owner in (
         ("resolve_audit_targets", profile_owner),
         ("resolve_audit_target_decision", _EFFECTIVE_TARGET_OWNER),
+        ("resolve_deployment_target_decision", _EFFECTIVE_TARGET_OWNER),
     ):
         definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
         findings.extend(failures)
@@ -1008,7 +1040,37 @@ def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
         *_doctor_status_findings(provider, rule_id),
         *_target_error_status_findings(provider, rule_id),
         *_policy_discovery_output_findings(provider, rule_id),
+        *_rich_console_construction_findings(provider, rule_id),
     )
+
+
+_CONSOLE_OWNER = "src/apm_cli/utils/console.py"
+_RICH_CONSOLE_IMPORT = re.compile(r"^\s*from\s+rich\.console\s+import\b.*\bConsole\b")
+_RICH_CONSOLE_CALL = re.compile(r"(?<![\w.])(?:rich\.console\.)?Console\(")
+
+
+def _rich_console_construction_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Rich consoles come from utils/console.py so tables and panels stay ASCII (#3994)."""
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        if path == _CONSOLE_OWNER:
+            continue
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "build Rich consoles with apm_cli.utils.console.new_console() or "
+                "_get_console(); a direct rich Console renders Unicode boxes",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _RICH_CONSOLE_IMPORT.search(line) or _RICH_CONSOLE_CALL.search(line)
+        )
+    return findings
 
 
 def _target_error_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:

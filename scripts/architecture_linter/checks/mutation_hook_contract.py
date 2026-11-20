@@ -545,7 +545,7 @@ def _nhc_validation_before_write(provider: FactsProvider, rule_id: str) -> tuple
     if failures:
         return failures
     validation_line = _last_line_matching(facts, "if not validation.valid:")
-    write_line = _last_line_matching(facts, 'with open(target_path, "w"')
+    write_line = _last_line_matching(facts, "write_text_lf(target_path, json.dumps(rewritten")
     continue_line = (
         _first_line_after(facts, "continue", after=validation_line)
         if validation_line is not None
@@ -1012,7 +1012,10 @@ def _nhc_local_bundle_markers(
     )
     findings.extend(
         _require(
-            _has_fixed(consumer, "return local_bundle_hook_source_marker(bundle_id)"),
+            _has_fixed(
+                consumer,
+                "return local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
+            ),
             rule_id,
             _HOOK_INTEGRATOR,
             "HookIntegrator must mark local-bundle hooks through hook_ownership.py",

@@ -17,6 +17,7 @@ import tomlkit
 
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import DeploymentLedger
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
@@ -67,6 +68,7 @@ _GLOBAL_AUDIT_RULES = frozenset(
         "deployment-ledger-owners",
         "drift",
         "includes-consent",
+        "local-bundle-hooks",
         "lockfile-exists",
         "no-orphaned-packages",
         "ref-consistency",
@@ -146,8 +148,17 @@ def _assert_skill_receipt(
     assert data["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
     assert data["scope"] == scope
     ledger = DeploymentLedgerCodec.from_rows(data["records"])
-    assert len(ledger.records) == len(expected)
     assert set(data["destinations"]) == set(data["bindings"]) == set(ledger.records)
+    # Other file primitives carry receipts too (#3701); check the skill members.
+    skill_roots = {path.resolve().parent.parent for path in expected.values()}
+    ledger = DeploymentLedger(
+        {
+            key: row
+            for key, row in ledger.records.items()
+            if Path(data["destinations"][key]).parent.parent in skill_roots
+        }
+    )
+    assert len(ledger.records) == len(expected)
     assert {
         row.locator.target: Path(data["destinations"][key]) for key, row in ledger.records.items()
     } == {target: path.resolve() for target, path in expected.items()}
@@ -2187,6 +2198,72 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
         assert_unchanged(before_rejection, ArtifactSnapshot.capture(consumer.root))
 
 
+@pytest.mark.parametrize("carried_cache", ["intact", "edited"])
+def test_required_partial_install_promotes_carried_rows_only_from_verified_bytes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    carried_cache: str,
+) -> None:
+    """Hash framing hardening: a partial install re-hashes untouched rows from verified bytes."""
+    scenario = _new_scenario(tmp_path / f"partial-promotion-{carried_cache}", apm_binary_path)
+    # A package named on the command line is validated before install. On
+    # github.com that is a REST probe, which never sees the fixture's Git URL
+    # rewrite; a generic Git host is probed with git ls-remote, which does.
+    published = {}
+    for name in ("framing-first", "framing-second"):
+        package = scenario.sources.create(name)
+        scenario.sources.add_skill(package, name, _skill(name))
+        repository = scenario.repositories.create(name, source_tree=package.root)
+        commit = scenario.repositories.commit(repository, message=f"seed {name}")
+        remote_url = f"https://git.fixture.invalid/{_OWNER}/{name}"
+        published[name] = (
+            repository,
+            remote_url,
+            {"git": remote_url, "ref": commit.sha, "alias": name},
+        )
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        tuple((repository, url) for repository, url, _ in published.values())
+    )
+    consumer = scenario.consumers.create(
+        "partial-promotion-consumer",
+        dependencies=tuple(dependency for _, _, dependency in published.values()),
+        targets=("claude",),
+    )
+    _run_success(
+        scenario, consumer, _INSTALL_ARGS, environment=environment, scenario_id="partial-seed"
+    )
+    lock_path = consumer.root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    assert lock_document["lockfile_version"] == "4"
+    caches = {
+        name: consumer.root / "apm_modules" / name for name in ("framing-first", "framing-second")
+    }
+    lock_document["lockfile_version"] = "1"
+    for row in lock_document["dependencies"]:
+        row["content_hash"] = compute_package_hash(caches[row["alias"]], framed=False)
+    dump_yaml(lock_document, lock_path)
+    carried_skill = next(caches["framing-second"].rglob("SKILL.md"))
+    if carried_cache == "edited":
+        carried_skill.write_text("edited after install\n", encoding="utf-8")
+    before = lock_path.read_bytes()
+
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, published["framing-first"][1]),
+        environment=environment,
+        scenario_id=f"partial-install-{carried_cache}",
+    )
+
+    if carried_cache == "edited":
+        assert lock_path.read_bytes() == before
+        return
+    rows = {row["alias"]: row for row in load_yaml(lock_path)["dependencies"]}
+    assert load_yaml(lock_path)["lockfile_version"] == "4"
+    assert rows["framing-second"]["content_hash"] == compute_package_hash(caches["framing-second"])
+    assert rows["framing-first"]["content_hash"] == compute_package_hash(caches["framing-first"])
+
+
 def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -2237,10 +2314,12 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
     assert receipt.is_file()
     receipt.unlink()
-    # APM 0.28 used the same tree-hash algorithm but did not write the
+    # APM 0.28 wrote lockfile version 1 with the legacy tree stream and no
     # parser-owned receipt, so hashing this receipt-less cache is its exact hash.
-    legacy_content_hash = compute_package_hash(cached_package)
+    legacy_content_hash = compute_package_hash(cached_package, framed=False)
     assert legacy_content_hash != current_content_hash
+    assert lock_document["lockfile_version"] == "4"
+    lock_document["lockfile_version"] = "1"
     lock_document["apm_version"] = "0.28.0"
     locked_dependency["content_hash"] = legacy_content_hash
     locked_dependency["package_type"] = "marketplace_plugin"
@@ -2278,6 +2357,7 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
         == installed.file(".agents/skills/legacy-hash/SKILL.md").content
     )
     assert upgraded_dependency.content_hash == current_content_hash
+    assert load_yaml(lock_path)["lockfile_version"] == "4"
     assert upgraded_dependency.package_type == "marketplace_plugin"
     assert upgraded_dependency.deployed_files == prior_deployed_files
     assert upgraded_dependency.deployed_file_hashes == prior_deployed_hashes
@@ -2766,7 +2846,9 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
                     deployed_instruction,
                 }
             },
-            tree_prefixes={"project": {"apm_modules"}},
+            # The survivor rebuild rewrites the shared instruction, so its local
+            # deployment receipt is updated in the existing store (#3701).
+            tree_prefixes={"project": {"apm_modules"}, "user": {".apm/deployment-receipts"}},
         )
         assert not installed_sources[f"_local/{parent_name}"].exists()
         manifest_dependencies = (
@@ -2996,7 +3078,8 @@ def _exercise_global_revision_commands(
         command_cwd=manifest_path.parent,
         expected_returncode=1,
     )
-    assert "is not tracked by any installed package" in " ".join(found.stdout.split()), (
+    # apm find keeps stdout for package names; errors go to stderr (#3994).
+    assert "is not tracked by any installed package" in " ".join(found.stderr.split()), (
         _result_evidence(found)
     )
     _assert_same_state(installed, capture())

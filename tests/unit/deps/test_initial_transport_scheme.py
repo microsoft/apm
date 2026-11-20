@@ -97,7 +97,7 @@ def test_custom_port_warning_preserves_text_and_docs_link(schemes: tuple[str, st
     assert (parsed.scheme, parsed.hostname, parsed.path, parsed.fragment) == (
         "https",
         "microsoft.github.io",
-        "/apm/consumer/manage-dependencies/",
+        "/apm/consumer/install-packages/",
         "transport-selection",
     )
 

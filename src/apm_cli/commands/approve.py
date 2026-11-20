@@ -246,7 +246,9 @@ def approve_cmd(
             return
 
         if not packages:
-            _rich_error("Specify at least one package, or use --pending / --all / --recommended.")
+            logger.refusal(
+                "Specify at least one package, or use --pending / --all / --recommended."
+            )
             sys.exit(1)
 
         packages = _canonical_specs(manifest, packages)
@@ -364,7 +366,13 @@ def explain_decision(package: str, *, logger: CommandLogger, global_scope: bool 
         return
 
     if not ctx.gate_enabled:
-        _rich_info(f"{decl.package_key}: gate disabled -- all executables deploy.", symbol="info")
+        # The executables gate is one layer; org policy can still block the package (#3994).
+        _rich_info(
+            f"{decl.package_key}: executable-trust gate disabled -- its executables "
+            "need no approval. Org policy can still block the package; "
+            "'apm audit --ci' reports org-policy violations.",
+            symbol="info",
+        )
         return
 
     _rich_echo(f"{decl.package_key}: {decl.summary_line()}")
@@ -448,7 +456,8 @@ def _list_decisions(manifest: Path, *, logger: CommandLogger) -> None:
 
     if not ctx.gate_enabled:
         _rich_info(
-            "Executable-trust gate disabled -- all executables deploy. "
+            "Executable-trust gate disabled -- executables need no approval "
+            "(org policy still applies). "
             "Add an `executables:` block to apm.yml to enable it.",
             symbol="info",
         )
@@ -522,6 +531,34 @@ def _find_declaration(
         if found:
             return found[0]
     return None
+
+
+def _not_found_message(declarations: Sequence[ExecutableDeclaration], pkg: str) -> str:
+    """Name the ported package a port-less name almost matched (#3967).
+
+    Grants never fall back across ports, so the message points at the exact
+    key to use instead of guessing.
+    """
+    from dataclasses import replace
+
+    from ..models.dependency.reference import DependencyReference
+
+    try:
+        wanted = DependencyReference.parse(pkg).get_unique_key()
+    except ValueError:
+        return f"{pkg}: not found in installed packages"
+    ported = []
+    for decl in declarations:
+        try:
+            ref = DependencyReference.parse(decl.package_key)
+        except ValueError:
+            continue
+        if ref.port is not None and replace(ref, port=None).get_unique_key() == wanted:
+            ported.append(decl.package_key)
+    if not ported:
+        return f"{pkg}: not found in installed packages"
+    keys = " or ".join(f"'apm approve {key}'" for key in sorted(ported))
+    return f"{pkg}: not found in installed packages; it is installed with a port, run {keys}"
 
 
 def _find_matching_key(grant_map: dict[str, dict[str, bool]], pkg: str) -> str | None:
@@ -648,7 +685,7 @@ def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
         _rich_error(f"{pkg}: approve the installed package by identity, not a ref: {command}")
         return
     review = approve_command("--pending", user_scope=user_scope)
-    _rich_error(f"{pkg}: not found in installed packages. Review: {review}")
+    _rich_error(f"{_not_found_message(declarations, pkg)}. Review: {review}")
 
 
 def _identity(decl: ExecutableDeclaration) -> str:
@@ -854,8 +891,23 @@ def _record_and_save(
     recorded: list[ExecutableDeclaration] = []
     cleared: list[str] = []
     refused = 0
+    # Bulk approval is eligible only where no layer denies (#3957): an org or
+    # other-store deny is skipped with its reason and no allow is written.
+    layer_denied = (
+        {id(decl): layer for decl, layer in _still_denied(manifest, declarations, logger=logger)}
+        if bulk
+        else {}
+    )
     for decl in declarations:
         denied = _same_store_denies(deny, decl)
+        if bulk and not denied and id(decl) in layer_denied:
+            layer = layer_denied[id(decl)]
+            _rich_info(
+                f"Skipped {_identity(decl)}: denied ({layer}). "
+                f"Lift the deny: {_lift_deny_hint(layer, _identity(decl))}",
+                symbol="info",
+            )
+            continue
         if denied and bulk:
             _rich_info(
                 f"Skipped {_identity(decl)}: denied in {_store_label(user_scope)}. "
@@ -1007,11 +1059,20 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
     ]
 
 
-def _is_native_plugin(package_type: str | None, package_dir: Path) -> bool:
-    """A plugin a harness loads intact: an Agent Plugin or a Codex bundle."""
+def _is_native_plugin(
+    package_type: str | None, package_dir: Path, *, user_scope: bool = False
+) -> bool:
+    """A plugin a harness loads intact: an Agent Plugin, a Codex bundle, or a
+    Claude plugin under the user-scope native route (#3290)."""
     if package_type == "agent_plugin":
         return True
-    return (package_dir / ".codex-plugin" / "plugin.json").is_file()
+    if (package_dir / ".codex-plugin" / "plugin.json").is_file():
+        return True
+    return (
+        user_scope
+        and package_type in (None, "marketplace_plugin")
+        and (package_dir / ".claude-plugin" / "plugin.json").is_file()
+    )
 
 
 def scan_installed_executable_packages(manifest: Path) -> list:
@@ -1030,6 +1091,9 @@ def scan_installed_executable_packages(manifest: Path) -> list:
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
+    from ..core.scope import InstallScope, get_apm_dir
+
+    user_scope = manifest.parent.resolve() == get_apm_dir(InstallScope.USER).resolve()
 
     if not apm_modules.is_dir():
         return results
@@ -1086,7 +1150,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 parent_name=locked.resolved_by if locked.depth > 1 else None,
                 original_identity=approval.original_identity,
             )
-            native = _is_native_plugin(locked.package_type, package_dir)
+            native = _is_native_plugin(locked.package_type, package_dir, user_scope=user_scope)
             if native:
                 declaration = native_declaration(declaration, package_dir)
             if declaration.has_executables:
@@ -1132,7 +1196,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 version,
                 manifest_data=manifest_data,
             )
-            native = _is_native_plugin(None, pkg_dir)
+            native = _is_native_plugin(None, pkg_dir, user_scope=user_scope)
             if native:
                 decl = native_declaration(decl, pkg_dir)
             if decl.has_executables:

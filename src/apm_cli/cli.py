@@ -74,8 +74,7 @@ _CLI_EPILOG = (
     "  apm outdated                   See what's drifted from upstream\n"
     "  apm update                     Refresh refs and rewrite the lockfile\n"
     "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
-    "  apm doctor                     Diagnose environment problems\n"
-    "  apm run <script>               Execute a script from apm.yml"
+    "  apm doctor                     Diagnose environment problems"
 )
 
 
@@ -153,7 +152,7 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "unpack",
         "apm_cli.commands.pack",
         "unpack_cmd",
-        "[Deprecated] Extract an APM bundle into the current project. Use 'apm install <bundle-path>' instead -- this command will be removed in a future release.",
+        "[Deprecated] Extract an APM bundle into the current project. Reads only '--format apm' bundles; install plugin bundles (the default) with 'apm install <bundle-path>'. This command will be removed in a future release.",
     ),
     (
         "update",

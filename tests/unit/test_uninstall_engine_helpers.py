@@ -17,7 +17,6 @@ import pytest
 
 from apm_cli.commands.uninstall.engine import (
     MCPUninstallCleanupError,
-    _build_children_index,
     _cleanup_stale_mcp,
     _cleanup_transitive_orphans,
     _dry_run_uninstall,
@@ -26,6 +25,7 @@ from apm_cli.commands.uninstall.engine import (
     _validate_uninstall_packages,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.orphans import _build_children_index
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.path_security import safe_rmtree as real_safe_rmtree
@@ -458,6 +458,8 @@ class TestDryRunUninstall:
             resolved_commit="abc123",
         )
         lockfile.add_dependency(orphan)
+        # The preview decides like the real run, which needs installed packages.
+        (tmp_path / "apm_modules").mkdir()
 
         logger = _make_logger()
 
@@ -717,7 +719,9 @@ class TestCleanupStaleMcp:
         with (
             patch(
                 "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-                return_value=SimpleNamespace(dependencies=[], configs={}, provenance={}),
+                return_value=SimpleNamespace(
+                    dependencies=[], configs={}, provenance={}, bundle_owned=frozenset()
+                ),
             ),
             patch(
                 "apm_cli.utils.atomic_io._replace_atomic_file",

@@ -135,7 +135,10 @@ def _graph_declares_trusted_lsp(ctx: "InstallContext") -> bool:
         if graph is not None
         else ctx.deps_to_install
     )
-    allow_map = None
+    from apm_cli.security.executables import closed_exec_map
+
+    # Resolved once, on the first package that declares LSP servers.
+    allow_map = closed_exec_map(None)
     allow_resolved = False
     for dep_ref in dependencies:
         manifest = dep_ref.get_install_path(ctx.apm_modules_dir) / "apm.yml"
@@ -190,6 +193,11 @@ def _target_server_sets(lockfile: "LockFile") -> dict[str, set[str]]:
     if not isinstance(target_servers, dict):
         return {}
     return {runtime: set(server_names) for runtime, server_names in target_servers.items()}
+
+
+def recorded_lsp_targets(lockfile: "LockFile") -> tuple[str, ...]:
+    """Return the LSP targets *lockfile* records APM writing servers to."""
+    return tuple(sorted(name for name, servers in _target_server_sets(lockfile).items() if servers))
 
 
 def package_lsp_owner(resolved_by: str) -> str:
@@ -346,6 +354,13 @@ def run_owned_lsp_integration(
     return count
 
 
+def has_recorded_lsp_state(lockfile: "LockFile | None") -> bool:
+    """Return whether *lockfile* records LSP servers APM may need to reconcile."""
+    return lockfile is not None and bool(
+        lockfile.lsp_servers or lockfile.lsp_target_servers or lockfile.lsp_config_provenance
+    )
+
+
 def reconcile_lsp_after_uninstall(
     *,
     apm_package: "APMPackage",
@@ -357,9 +372,7 @@ def reconcile_lsp_after_uninstall(
     logger,
 ) -> bool:
     """Recompute trusted LSP state from every surviving declaration."""
-    if lockfile is None or not (
-        lockfile.lsp_servers or lockfile.lsp_target_servers or lockfile.lsp_config_provenance
-    ):
+    if not has_recorded_lsp_state(lockfile):
         return False
     if apm_package is None:
         raise ValueError("Cannot reconcile existing LSP state without a valid project manifest")
@@ -370,15 +383,27 @@ def reconcile_lsp_after_uninstall(
         dict(lockfile.lsp_config_provenance),
     )
     from apm_cli.core.scope import InstallScope
-    from apm_cli.core.target_detection import resolve_package_target_decision
-    from apm_cli.models.apm_package import canonical_package_target_config
+    from apm_cli.core.target_detection import (
+        resolve_deployment_target_decision,
+        resolve_package_target_decision,
+    )
+    from apm_cli.models.apm_package import (
+        canonical_package_target_config,
+        package_target_selection,
+    )
 
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    target_decision = resolve_package_target_decision(
-        project_root,
-        package=apm_package,
-        explicit_target=None,
-        user_scope=user_scope,
+    # Survivors stay where APM recorded writing them (#4059): a saved default
+    # or harness detection decides only when the lock records no LSP target.
+    target_decision = resolve_deployment_target_decision(
+        manifest_target=package_target_selection(apm_package),
+        recorded_targets=recorded_lsp_targets(lockfile),
+        fallback=lambda: resolve_package_target_decision(
+            project_root,
+            package=apm_package,
+            explicit_target=None,
+            user_scope=user_scope,
+        ),
     )
     apm_config = {"scripts": apm_package.scripts or {}}
     apm_config.update(canonical_package_target_config(apm_package))
@@ -421,7 +446,7 @@ class PreparedLspIntegration:
             require_lsp_capable_target(self.target_runtimes)
 
 
-def prepare_lsp_integration(
+def prepare_lsp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
     apm_modules_path: Path,
@@ -438,6 +463,7 @@ def prepare_lsp_integration(
     diagnostics: "DiagnosticCollector | None" = None,
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
+    claude_native_keys: frozenset[str] = frozenset(),
 ) -> PreparedLspIntegration:
     """Collect trusted declarations once before native-service reconciliation."""
     from apm_cli.integration.lsp_integrator import LSPIntegrator
@@ -456,6 +482,7 @@ def prepare_lsp_integration(
             apm_modules_path,
             lock_path,
             diagnostics=diagnostics,
+            claude_native_keys=claude_native_keys,
         )
         if transitive_lsp:
             logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")

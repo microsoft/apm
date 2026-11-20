@@ -26,7 +26,6 @@ from functools import cache, lru_cache
 from pathlib import Path
 
 import pytest
-import rich
 
 from tests.utils.hermetic_packaged_sample import (
     HermeticPackagedSample,
@@ -51,37 +50,6 @@ def _integration_process_cwd_guard():
     except (FileNotFoundError, OSError):
         os.chdir(_REPO_ROOT)
     yield
-
-
-@pytest.fixture(autouse=True)
-def _reset_console_state():
-    """Reset APM and Rich console singletons before and after each test.
-
-    Several commands (e.g. ``pack --json``) call
-    ``set_console_stderr(True)`` to route rich/click output to stderr.
-    If a test exercises such a command and the function never reaches
-    its cleanup path, ``_console_stderr`` stays ``True`` and later
-    tests see empty stdout because ``click.echo(..., err=True)``
-    silently diverts output.
-
-    Tests that initialize Rich's process-global console while its
-    ``Console`` class is patched can also leave a ``MagicMock`` clock
-    behind. Rich progress then compares mock timestamps in later tests.
-
-    This fixture resets both singletons before and after each test so an
-    xdist worker cannot carry console state across test boundaries.
-    """
-    from apm_cli.utils.console import _reset_console
-
-    # ``rich._console`` is Rich's process-global default console (the one
-    # ``rich.get_console()``/``rich.print`` lazily create). Nulling it forces
-    # a fresh real console next call. The attribute has lived at this name
-    # since Rich 10.0; the project pins ``rich>=13.0.0`` (verified on 15.x).
-    _reset_console()
-    rich._console = None
-    yield
-    _reset_console()
-    rich._console = None
     try:
         os.getcwd()
     except (FileNotFoundError, OSError):
@@ -319,6 +287,33 @@ def pytest_itemcollected(item: pytest.Item) -> None:
     """
     if item.path.name.startswith("test_architecture_"):
         item.add_marker(pytest.mark.architecture_contract)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Write the GATE cells this process visited (#4031) for the coverage check.
+
+    Each xdist worker writes its own ``visited-<worker>.json`` under
+    ``build/gate-cells/`` (or ``$APM_GATE_CELLS_DIR``); the quality check reads
+    their union.
+    """
+    del exitstatus
+    kit = sys.modules.get("tests.integration._gate_machine_kit")
+    if kit is None or not kit.VISITED_CELLS:
+        return
+    import json
+
+    directory = Path(
+        os.environ.get("APM_GATE_CELLS_DIR") or session.config.rootpath / "build" / "gate-cells"
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    import uuid
+
+    # Unique per process: shard artifacts merge into one directory.
+    worker = f"{os.environ.get('PYTEST_XDIST_WORKER', 'main')}-{uuid.uuid4().hex[:8]}"
+    visited = {"cells": sorted(kit.VISITED_CELLS), "spines": sorted(kit.COMPLETED_SPINES)}
+    (directory / f"visited-{worker}.json").write_text(
+        json.dumps(visited, indent=1) + "\n", encoding="ascii"
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

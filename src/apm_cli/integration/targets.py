@@ -798,8 +798,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # AntigravityClientAdapter), NOT settings.json.
     # Antigravity has no TOML command surface (legacy Gemini commands
     # convert to skills upstream), so there is no commands primitive.
-    # User scope: skills -> ~/.gemini/antigravity-cli/skills/; MCP ->
-    # ~/.gemini/config/mcp_config.json (handled by the adapter).
+    # User scope: skills -> ~/.gemini/config/skills/ (read by the
+    # Antigravity App, CLI and IDE); MCP -> ~/.gemini/config/mcp_config.json
+    # (handled by the adapter). Skills recorded under the retired
+    # ~/.gemini/antigravity-cli/ root are cleaned up as stale managed files.
     # Instructions/hooks are not offered at user scope because Antigravity
     # spreads them across heterogeneous ~/.gemini/ subdirs.
     # Compile family is "agents" (emits AGENTS.md, not GEMINI.md).
@@ -824,7 +826,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=True,
         detect_by_dir=False,
         user_supported="partial",
-        user_root_dir=".gemini/antigravity-cli",
+        user_root_dir=".gemini/config",
         unsupported_user_primitives=("instructions", "hooks"),
         hooks_config_display=".agents/hooks.json",
     ),
@@ -1826,8 +1828,13 @@ def resolve_audit_targets(
     *,
     user_scope: bool = False,
     lockfile: LockFile | None = None,
+    include_recorded: bool = False,
 ) -> list[TargetProfile]:
-    """Resolve read-only audit profiles through target and deployment owners."""
+    """Resolve read-only audit profiles through target and deployment owners.
+
+    *include_recorded* adds the targets the lock recorded to a declared
+    manifest target set, so a render covers targets the manifest just dropped.
+    """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import get_workspace_deploy_root
     from apm_cli.core.target_detection import (
@@ -1846,8 +1853,11 @@ def resolve_audit_targets(
         if lock is not None
         else ()
     )
+    manifest_target = read_manifest_target(project_root)
+    if include_recorded and manifest_target and recorded:
+        manifest_target = sorted({*manifest_target, *recorded})
     decision = resolve_audit_target_decision(
-        manifest_target=read_manifest_target(project_root),
+        manifest_target=manifest_target,
         recorded_targets=recorded,
     )
     for name in decision.canonical_targets or ():

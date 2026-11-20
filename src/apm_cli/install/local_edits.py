@@ -36,6 +36,33 @@ def local_edit_hint(count: int, *, installing: bool = False) -> str:
     )
 
 
+def restore_locked_content_hint(subject: str, *, bundle: bool = False) -> str:
+    """Return the hint naming the commands that restore edited managed files.
+
+    A plain ``apm install`` can keep a local edit to a managed file, so it is
+    not a restore command on its own. Files a local bundle deployed are not
+    redeployed by ``apm install`` at all; only reinstalling the bundle
+    restores them (#3994).
+    """
+    if bundle:
+        return (
+            f"To restore the locked content, delete {subject} and reinstall the bundle "
+            "that deployed them ('apm install <bundle-path>'), then commit the result"
+        )
+    return (
+        f"To restore the locked content, delete {subject} and rerun 'apm install', "
+        "then commit the result ('apm install --force' also restores them, but "
+        "overwrites every local edit and deploys despite critical security findings)"
+    )
+
+
+def restore_drifted_files_remedy(*, bundle: bool = False) -> str:
+    """Return the audit remedy clause for files whose bytes drifted from the lock."""
+    if bundle:
+        return "'apm install <bundle-path>' after deleting the drifted bundle files"
+    return "'apm install' after deleting the drifted files (plain install keeps local edits)"
+
+
 def rendering_change_hint(count: int) -> str:
     """Return the hint for drift whose on-disk bytes still match apm.lock.yaml."""
     return (
@@ -175,3 +202,33 @@ def hint_local_edits_before_install(ctx: InstallContext, lockfile: LockFile | No
     edited = count_local_edits(ctx.project_root, lockfile, keys)
     if edited:
         ctx.logger.info(local_edit_hint(edited, installing=True))
+
+
+def unedited_apm_output(
+    deploy_root: Path,
+    user_scope: bool,
+    lockfile: LockFile,
+    targets: Collection,
+    drifted: Iterable,
+) -> frozenset[str]:
+    """Return drifted paths whose bytes are exactly what this installation last wrote.
+
+    A trusted local receipt proves such a file is stale APM output (for
+    example after a branch switch), not a local edit, so a frozen install
+    may replace it. Without a trusted receipt every mismatch counts as an
+    edit.
+    """
+    from apm_cli.core.deployment_ledger import trusted_receipt_baselines
+    from apm_cli.core.scope import InstallScope
+
+    actual = {deploy_root / drift.path: (drift.path, drift.actual) for drift in drifted}
+    baselines = trusted_receipt_baselines(
+        deploy_root,
+        InstallScope.USER if user_scope else InstallScope.PROJECT,
+        lockfile,
+        list(actual),
+        list(targets),
+    )
+    return frozenset(
+        relative for path, (relative, observed) in actual.items() if baselines.get(path) == observed
+    )

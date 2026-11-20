@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.service import FrozenDisposition
 
 
 class ServiceCommandContext(Protocol):
@@ -30,7 +31,6 @@ class ServiceCommandContext(Protocol):
     force: bool
     exec_allow_map: dict[str, dict[str, bool]] | None
     exec_allow_resolved: bool
-    frozen: bool
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class ServiceIntegrationResult:
     target_decision: EffectiveTargetDecision | None
 
 
-def run_service_integrations(
+def run_service_integrations(  # noqa: PLR0913
     ctx: ServiceCommandContext,
     *,
     apm_package: Any,
@@ -58,6 +58,8 @@ def run_service_integrations(
     explicit_target: str | list[str] | None,
     target_decision: EffectiveTargetDecision | None,
     active_package_keys: frozenset[str] | None = None,
+    claude_native_keys: frozenset[str] = frozenset(),
+    frozen_disposition: FrozenDisposition,
 ) -> ServiceIntegrationResult:
     """Resolve once, then reconcile package-declared MCP and LSP services."""
     from apm_cli.core.scope import InstallScope, get_modules_dir
@@ -107,16 +109,20 @@ def run_service_integrations(
         target_context=(apm_config, selected_target, ctx.scope),
         target_decision=target_decision,
         logger=ctx.logger,
+        claude_native_keys=claude_native_keys,
     )
     prepared_lsp.require_capable_target()
     prepared_mcp = None
     frozen_unrecorded: frozenset[tuple[str, str]] = frozenset()
-    if getattr(ctx, "frozen", False) is True:
+    if frozen_disposition.withhold_lockfile_writes:
         from apm_cli.install.mcp.integration import prepare_mcp_integration
         from apm_cli.install.service import InstallService
         from apm_cli.integration.lsp_integrator import LSPIntegrator
         from apm_cli.integration.mcp_integrator import MCPIntegrator
-        from apm_cli.integration.mcp_integrator_install import _resolve_target_runtimes
+        from apm_cli.integration.mcp_integrator_install import (
+            _resolve_target_runtimes,
+            mcp_servers_for_runtime,
+        )
 
         prepared_mcp = prepare_mcp_integration(
             apm_package=apm_package,
@@ -133,6 +139,7 @@ def run_service_integrations(
             project_root=ctx.project_root,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             no_policy=ctx.no_policy,
+            claude_native_keys=claude_native_keys,
         )
         mcp_targets = (
             _resolve_target_runtimes(
@@ -170,6 +177,15 @@ def run_service_integrations(
                 for dep in prepared_mcp.dependencies
                 if hasattr(dep, "name")
             },
+            mcp_target_servers={
+                target: mcp_servers_for_runtime(prepared_mcp.dependencies, target)
+                for target in mcp_targets or []
+            },
+            mcp_native_runtimes={
+                dep.name: dep.native_runtimes
+                for dep in prepared_mcp.dependencies
+                if getattr(dep, "native_runtimes", None)
+            },
         )
     from apm_cli.install.mcp.ownership import frozen_unrecorded_mcp_pairs
 
@@ -199,9 +215,10 @@ def run_service_integrations(
             scope=ctx.scope,
             prepared=prepared_mcp,
             active_package_keys=active_package_keys,
+            claude_native_keys=claude_native_keys,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             pre_install_lock=existing_lock,
-            frozen=getattr(ctx, "frozen", False) is True,
+            frozen=frozen_disposition.withhold_lockfile_writes,
         )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

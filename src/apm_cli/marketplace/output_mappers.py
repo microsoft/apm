@@ -424,6 +424,13 @@ def _remote_source_url(pkg: ResolvedPackage) -> str | None:
     return None
 
 
+def _codex_remote_url(pkg: ResolvedPackage) -> str:
+    """Return a full clone URL; Codex has no ``owner/repo`` shorthand."""
+    from apm_cli.utils.github_host import default_host
+
+    return _remote_source_url(pkg) or f"https://{default_host()}/{pkg.source_repo}"
+
+
 def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
     if entry.is_local:
         return OrderedDict(
@@ -435,7 +442,7 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
     if pkg.subdir:
         source_obj: dict[str, Any] = OrderedDict()
         source_obj["source"] = "git-subdir"
-        source_obj["url"] = _remote_source_url(pkg) or pkg.source_repo
+        source_obj["url"] = _codex_remote_url(pkg)
         source_obj["path"] = pkg.subdir
         if pkg.ref:
             source_obj["ref"] = pkg.ref
@@ -446,7 +453,7 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
 
     source_obj = OrderedDict()
     source_obj["source"] = "url"
-    source_obj["url"] = _remote_source_url(pkg) or pkg.source_repo
+    source_obj["url"] = _codex_remote_url(pkg)
     if pkg.ref:
         source_obj["ref"] = pkg.ref
     if pkg.sha:

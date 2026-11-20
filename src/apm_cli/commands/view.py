@@ -138,10 +138,11 @@ def display_package_info(
             locked_ref, locked_commit, locked_source = _lookup_lockfile_ref(package, project_root)
 
         try:
-            from rich.console import Console
             from rich.panel import Panel
 
-            console = Console()
+            from apm_cli.utils.console import new_console
+
+            console = new_console()
 
             content_lines = []
             content_lines.append(f"[bold]Name:[/bold] {package_info['name']}")
@@ -266,15 +267,20 @@ def _display_marketplace_plugin(
 
     # Resolve canonical reference for display
     resolved_display = None
+    # The hint names what install would do: an entry install refuses (#1326)
+    # is shown as refused, never as installable (A6, #3967).
+    install_hint = f"Install: apm install {plugin.name}@{marketplace_name}"
     try:
+        from ..marketplace.dependency_confusion import admit_marketplace_resolution
+        from ..marketplace.errors import DependencyConfusionError
         from ..marketplace.resolver import resolve_marketplace_plugin
 
-        canonical_str, _resolved = resolve_marketplace_plugin(
-            plugin_name,
-            marketplace_name,
-            plugin,
-        )
-        resolved_display = canonical_str
+        resolution = resolve_marketplace_plugin(plugin_name, marketplace_name)
+        resolved_display = resolution.canonical
+        try:
+            admit_marketplace_resolution(resolution)
+        except DependencyConfusionError as refusal:
+            install_hint = f"Install: refused -- {refusal}"
     except Exception:
         pass
 
@@ -292,10 +298,11 @@ def _display_marketplace_plugin(
         source_display = plugin.source
 
     try:
-        from rich.console import Console
         from rich.panel import Panel
 
-        console = Console()
+        from apm_cli.utils.console import new_console
+
+        console = new_console()
         lines = []
         lines.append(f"[bold]Name:[/bold]        {plugin.name}")
         if plugin.version:
@@ -316,7 +323,7 @@ def _display_marketplace_plugin(
             )
         )
         click.echo("")
-        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+        click.echo(f"  {install_hint}")
 
     except ImportError:
         # Plain-text fallback
@@ -333,7 +340,7 @@ def _display_marketplace_plugin(
         if plugin.tags:
             click.echo(f"  Tags:        {', '.join(plugin.tags)}")
         click.echo("")
-        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+        click.echo(f"  {install_hint}")
 
 
 def _display_registry_versions(
@@ -435,10 +442,11 @@ def _display_registry_versions(
         return
 
     try:
-        from rich.console import Console
         from rich.table import Table
 
-        console = Console()
+        from apm_cli.utils.console import new_console
+
+        console = new_console()
         table = Table(
             title=f"Available versions: {package}",
             show_header=True,
@@ -622,10 +630,11 @@ def display_versions(
 
     # -- render with Rich table (fallback to plain text) ---------------
     try:
-        from rich.console import Console
         from rich.table import Table
 
-        console = Console()
+        from apm_cli.utils.console import new_console
+
+        console = new_console()
         table = Table(
             title=f"Available versions: {package}",
             show_header=True,

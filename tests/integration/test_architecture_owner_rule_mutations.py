@@ -118,6 +118,39 @@ def test_audit_replay_scope_projection_cannot_bypass_owner(
 
 
 @pytest.mark.parametrize(
+    ("rule", "path", "original", "replacement"),
+    [
+        pytest.param(
+            "install-deployment-lsp-lifecycle",
+            "src/apm_cli/install/lsp/integration.py",
+            "        recorded_targets=recorded_lsp_targets(lockfile),\n",
+            "        recorded_targets=(),\n",
+            id="uninstall-reselects-lsp-targets",
+        ),
+        pytest.param(
+            "registry_delegation.audit_target_selection",
+            "src/apm_cli/install/lsp/integration.py",
+            "def recorded_lsp_targets(",
+            "def resolve_deployment_target_decision(**kwargs): return None\n\n\n"
+            "def recorded_lsp_targets(",
+            id="second-deployment-target-owner",
+        ),
+    ],
+)
+def test_uninstall_lsp_target_selection_cannot_bypass_owner(
+    rule: str, path: str, original: str, replacement: str
+) -> None:
+    """Uninstall keeps survivors on the recorded LSP targets through one owner (#4059)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement"),
     [
         pytest.param(
@@ -742,7 +775,7 @@ def test_hook_sidecar_comparison_must_use_canonical_owner(path: str, old: str, n
         ),
         (
             "src/apm_cli/integration/hook_integrator.py",
-            "return local_bundle_hook_source_marker(bundle_id)",
+            "return local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
             'return f"local-bundle::{bundle_id}"',
         ),
         (
@@ -869,6 +902,234 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
 
 
 @pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/install/exec_gate.py",
+            "            policy = resolve_trust_policy(self._project_root, announce=False)\n",
+            "            policy = None\n",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/install/local_bundle_handler.py",
+            "        announce=False,\n        raise_blocking_errors=not dry_run,\n",
+            "        announce=False,\n        raise_blocking_errors=not dry_run,\n"
+            "        cache_only=True,\n",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/commands/uninstall/engine.py",
+            "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
+            "    from ...policy.discovery import discover_policy_with_chain\n\n"
+            "    discover_policy_with_chain(project_root)\n"
+            "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "            _retire_per_file(project_root, targets, item)\n",
+            "",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/commands/install.py",
+            "    reconcile_scope_bundle_hooks(\n",
+            "    (lambda *a, **k: None)(\n",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "        elif not all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys):\n",
+            "        elif False:\n",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hooks.py",
+            "def _retire_bundle_hooks(",
+            'def _marker(slug):\n    return "local-bundle::" + slug\n\n\ndef _retire_bundle_hooks(',
+        ),
+        (
+            "install-deployment-bundle-user-scope-root",
+            "src/apm_cli/commands/install.py",
+            "                    user_scope=global_,\n",
+            "                    user_scope=False,\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/sources.py",
+            "                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)\n",
+            "                not ctx.update_refs\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/phases/integrate.py",
+            "        and not _locked_commit_unchanged\n",
+            "",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/phases/integrate.py",
+            "        and locked_commit_unchanged(_dep_locked_chk, _callback_sha)\n",
+            "        and _dep_locked_chk.resolved_commit == _callback_sha\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/source_helpers.py",
+            "    return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, "
+            "resolved_commit))\n",
+            "    return bool(ctx.update_refs)\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/source_helpers.py",
+            "        update_accepts_new_content(ctx, locked_dep, resolved_commit)\n        or dep_key",
+            "        ctx.update_refs\n        or dep_key",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/policy/outcome_routing.py",
+            "        fetch_result = discover_trust_policy(root)\n",
+            "        fetch_result = discover_policy_with_chain(root)\n",
+        ),
+    ],
+)
+def test_trust_and_integrity_owners_reject_bypasses(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Each trust and integrity consistency guard rejects its bypass (#4027)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/dry_run_plan.py",
+            "filter_lsp_by_allow_executables(list(self.lsp_dependencies), allow_map, ctx.logger)",
+            "filter_lsp_by_allow_executables(\n"
+            "                list(self.lsp_dependencies),\n"
+            '                getattr(apm_package, "allow_executables", None),\n'
+            "                ctx.logger,\n"
+            "            )",
+            id="manifest-grants-bypass-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "            allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),\n",
+            "",
+            id="omitted-first-party-map",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "                            allow_executables=replay_allow,\n",
+            "                            allow_executables=None,\n",
+            id="literal-none-map",
+        ),
+        pytest.param(
+            "src/apm_cli/install/lsp/integration.py",
+            "    allow_map = closed_exec_map(None)\n",
+            "    allow_map = None\n",
+            id="none-placeholder-map",
+        ),
+    ],
+)
+def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, new: str) -> None:
+    """Closed-world provenance: every allow-map consumer gets an owner map (#4018)."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/deployment_plan.py",
+            "def prepare_package_deployment(",
+            "def _hooks_ok(allow_executables, key):\n"
+            "    from apm_cli.security.executables import is_package_approved\n\n"
+            '    return is_package_approved(allow_executables, key, "hooks")\n\n\n'
+            "def prepare_package_deployment(",
+            id="out-of-owner-approval-lookup",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                hooks_approved=_hooks_approved_bundle,\n"
+            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "            )\n"
+            "            if _deploy_rel is None:",
+            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "            )\n"
+            "            if _deploy_rel is None:",
+            id="omitted-hooks-approved",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_paths.py",
+            "    hooks_approved: bool,\n    canvas_approved: bool,\n) -> str | None:\n"
+            '    """Return a bundle path relative',
+            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n) -> str | None:\n"
+            '    """Return a bundle path relative',
+            id="fail-open-hooks-approved-default",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    non_interactive: bool,\n",
+            "    non_interactive: bool = False,\n",
+            id="fail-open-trust-bin-default",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    if package_name == FIRST_PARTY_PACKAGE or exec_map_authorizes_all(allow_executables):\n"
+            "        return True, True, True, True, True\n",
+            "    if allow_executables is None or exec_map_authorizes_all(allow_executables):\n"
+            "        return True, True, True, True, True\n",
+            id="missing-map-authorizes",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    if native_install(package_info):\n",
+            "    if False:\n",
+            id="native-admission-skipped",
+        ),
+        pytest.param(
+            "src/apm_cli/install/deployment_plan.py",
+            "        hook_file_admitted=hook_filter,\n",
+            "",
+            id="pinned-hook-admission-omitted",
+        ),
+    ],
+)
+def test_executable_approval_cannot_leave_the_trust_owners(path: str, old: str, new: str) -> None:
+    """Closed-world: no adapter looks approvals up or fails open on omission (#4018)."""
+    rule_id = "install-deployment-executable-item-admission"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "old", "new"),
     [
         (
@@ -969,6 +1230,105 @@ def test_bundle_reinstall_reconciles_owned_mcp_servers() -> None:
 def test_object_form_declarations_map_to_their_locked_row(path: str, old: str, new: str) -> None:
     """Prune and dry-run read an object-form declaration through its lock row (#3960)."""
     rule_id = "marketplace-integrations-locked-evidence"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_raw_manifest_target_readers_pass_the_manifest_path() -> None:
+    """Plugin-only pack warns about deprecated target keys like every reader (#3965)."""
+    rule_id = "registry_delegation.target_vocabulary"
+    path = "src/apm_cli/core/build_orchestrator.py"
+    old = "targets = manifest_target_restriction(data, apm_yml_path)"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, "targets = manifest_target_restriction(data)")
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/audit_replay.py",
+            "        if locked_copy_is_stale(dep, path):",
+            "        if False:",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "        if not locked_copy_holds_commit(lock_dep, candidate):",
+            "        if not verify_marker(candidate, lock_dep.resolved_commit):",
+        ),
+        (
+            "src/apm_cli/install/orphans.py",
+            "def _build_expected_install_paths(",
+            "def _second_proof(dep, path):\n"
+            "    return _should_skip_redownload(dep, path)\n\n\n"
+            "def _build_expected_install_paths(",
+        ),
+    ],
+)
+def test_audit_and_install_share_one_copy_validity_owner(path: str, old: str, new: str) -> None:
+    """Warm audit and replay prove copies through drift.locked_copy_proof only (#3964)."""
+    rule_id = "install-deployment-locked-copy-validity"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_failed_direct_dependency_stops_before_integration() -> None:
+    """Dropping the apply barrier lets a failed install deploy untracked files (#3874)."""
+    rule_id = "install-deployment-outcome"
+    path = "src/apm_cli/install/pipeline.py"
+    old = "        if direct_dependency_failed(ctx):"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, "        if False:")
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/security/trust_fingerprint.py",
+            "return compute_native_plugin_pin(plugin_root)",
+            "return compute_native_plugin_hash(plugin_root)",
+        ),
+        (
+            "src/apm_cli/security/trust.py",
+            "def admit_native_plugin(",
+            "def _second_pin(root):\n"
+            "    return compute_native_plugin_pin(root)\n\n\n"
+            "def admit_native_plugin(",
+        ),
+    ],
+)
+def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) -> None:
+    """Approval pins leave the exec bit out and come from one owner."""
+    rule_id = "install-deployment-trust-fingerprint"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     mutated = source.replace(old, new)
@@ -1427,6 +1787,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-bundle-user-scope-root",
+        rule_id="install-deployment-bundle-user-scope-root",
+        path="src/apm_cli/install/local_bundle_handler.py",
+        old="    return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)\n",
+        new="    return Path.home() if user_scope else Path.cwd()\n",
+        intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
+    ),
+    MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",
         rule_id="install-deployment-cleanup-ownership-release",
         path="src/apm_cli/integration/cleanup.py",
@@ -1483,6 +1851,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Executable trust loses its canonical project-context resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-frozen-flag-reader",
+        rule_id="install-deployment-frozen-flag-reader",
+        path="src/apm_cli/install/phases/cleanup.py",
+        old="if frozen_disposition.retain_package_orphans:",
+        new="if ctx.frozen:",
+        intent="Orphan cleanup reads the frozen flag instead of the owner's disposition.",
+    ),
+    MutationCase(
         guard_id="install-deployment-frozen-mutation-eligibility",
         rule_id="install-deployment-frozen-mutation-eligibility",
         path="src/apm_cli/install/service.py",
@@ -1513,6 +1889,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="@serialized_lifecycle\ndef set(",
         new="def set(",
         intent="Config mutation stops routing through the canonical lifecycle lock.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-local-bundle-hook-trust",
+        rule_id="install-deployment-local-bundle-hook-trust",
+        path="src/apm_cli/install/local_bundle_hook_trust.py",
+        old="        if None in keys:\n",
+        new="        if not keys:\n",
+        intent="A local-bundle hook with no recorded approval key is admitted instead of retired.",
     ),
     MutationCase(
         guard_id="install-deployment-lock-parent-placement",
@@ -1610,9 +1994,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-orphan-selection",
         rule_id="install-deployment-orphan-selection",
         path="src/apm_cli/commands/prune.py",
-        old="_find_orphaned_packages(",
-        new="_find_orphaned_packages_disabled(",
-        intent="Prune bypasses the shared declaration-aware orphan selector.",
+        old="        orphaned_packages = list(decision.removed_paths)\n",
+        new="        orphaned_packages = [k for k in lockfile.dependencies if k not in expected_lock_keys]\n",
+        intent="Prune grows a second removal predicate beside the orphan owner.",
     ),
     MutationCase(
         guard_id="install-deployment-outcome",
@@ -1621,6 +2005,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def finalize_install_result(",
         new="def finalize_install_result_disabled(",
         intent="Install outcome owner stops defining the result finalizer.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-package-content-hash",
+        rule_id="install-deployment-package-content-hash",
+        path="src/apm_cli/utils/content_hash.py",
+        old='+ b"\\0" + mode',
+        new="+ mode",
+        intent="The shared tree framing drops the NUL that terminates each path.",
     ),
     MutationCase(
         guard_id="install-deployment-package-target-authorization",
@@ -1794,12 +2186,23 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The MCP view grows a second trust hasher beside the fingerprint owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-trust-policy-outcome",
+        rule_id="install-deployment-trust-policy-outcome",
+        path="src/apm_cli/security/executables.py",
+        old="    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)\n",
+        new=(
+            "    from apm_cli.policy.discovery import discover_policy_with_chain\n\n"
+            '    policy = getattr(discover_policy_with_chain(project_root), "policy", None)\n'
+        ),
+        intent="A trust reader drops the policy discovery outcome and keeps only .policy.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-reachability",
         rule_id="install-deployment-uninstall-reachability",
-        path="src/apm_cli/commands/uninstall/engine.py",
-        old="    if not candidate_orphans:",
-        new="    get_apm_dependencies = None\n    if not candidate_orphans:",
-        intent="Uninstall engine grows a parallel manifest walk outside deps/reachability.py.",
+        path="src/apm_cli/install/orphans.py",
+        old="    walk = compute_forward_reachable_keys(",
+        new="    walk = _parallel_manifest_walk(",
+        intent="The orphan owner stops consuming deps/reachability.py's forward walk.",
     ),
     MutationCase(
         guard_id="install-deployment-uninstall-selection",
@@ -1808,6 +2211,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def select_manifest_dependency(",
         new="def select_manifest_dependency_disabled(",
         intent="Dependency CLI selection loses the one manifest-selection function.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-unpack-executable-refusal",
+        rule_id="install-deployment-unpack-executable-refusal",
+        path="src/apm_cli/bundle/unpacker.py",
+        old="        _refuse_executable_content(unique_files, source_dir, bundle_path)\n",
+        new="",
+        intent="apm unpack copies executable bundle content without refusing it.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-update-content-integrity",
+        rule_id="install-deployment-update-content-integrity",
+        path="src/apm_cli/install/source_helpers.py",
+        old='    return bool(commit not in (None, "", "cached") and commit == locked_commit)\n',
+        new="    return False\n",
+        intent="apm update treats every locked commit as moved and skips the content-hash check.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
@@ -1853,6 +2272,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         ),
         new="None",
         intent="A rebound marketplace alias resolves without comparing the locked catalog origin.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-claude-ownership",
+        rule_id="marketplace-integrations-claude-ownership",
+        path="src/apm_cli/native_plugins/settings.py",
+        old="if enabled.get(key) is True:",
+        new="if key in enabled:",
+        intent="Retiring a native plugin deletes the user's explicit enabledPlugins false.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-codex-native-lifecycle",
@@ -2805,9 +3232,12 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-executable-item-admission",
         rule_id="install-deployment-executable-item-admission",
         path="src/apm_cli/install/exec_gate.py",
-        old="        transitive=_is_transitive(package_info, ctx),\n    )\n    if ctx is not None:",
+        old=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            "    )\n    if ctx is not None:"
+        ),
         new=(
-            "        transitive=_is_transitive(package_info, ctx),\n"
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
             '        extra_types=("mcp",),\n    )\n    if ctx is not None:'
         ),
         intent="Install adds native plugin types the approve views cannot see (#4042).",
@@ -3003,57 +3433,331 @@ def test_claude_cleanup_guard_preserves_unresolved_path_check() -> None:
     )
 
 
-def test_orphan_selection_guard_rejects_warning_bypass() -> None:
-    """The shared-selector rule protects warnings as well as destructive pruning."""
-    path = "src/apm_cli/commands/_helpers.py"
+_ORPHAN_RULE = "install-deployment-orphan-selection"
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new", "message"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = [\n"
+            "            key for key in lockfile.dependencies if key not in expected_lock_keys\n"
+            "        ]\n",
+            "Membership in expected_lock_keys is an orphan removal predicate",
+            id="second-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "        reachability=None,\n        deployment_claims=None,\n    )\n    orphaned",
+            "        reachability=None,\n    )\n    orphaned",
+            "call omits required input(s): deployment_claims",
+            id="omitted-input",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "    decision = decide_orphan_removal(\n",
+            "    decision = decide_orphan_removal(\n        OrphanOperation.AUDIT,\n",
+            "takes keyword-only inputs",
+            id="positional-input",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "    decision = decide_orphan_removal(\n",
+            "    decide = decide_orphan_removal\n    decision = decide_orphan_removal(\n",
+            "never pass or rebind it",
+            id="rebound-entry",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "from ._helpers import _scan_installed_packages\n",
+            "from ._helpers import _scan_installed_packages\n"
+            "from ..install.orphans import _find_orphaned_packages as _select\n",
+            "_find_orphaned_packages is private to install/orphans.py",
+            id="private-alias-import",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "from ._helpers import _scan_installed_packages\n",
+            "from ._helpers import _scan_installed_packages\n"
+            "from ..install import orphans as _owner\n"
+            "_select = getattr(_owner, '_find_orphaned_packages')\n",
+            "Dynamic read of orphan owner name",
+            id="getattr-read",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "def _preflight_prune_survivors(",
+            "def _find_orphan_keys():\n    return []\n\n\ndef _preflight_prune_survivors(",
+            "is a second orphan removal selector",
+            id="second-selector",
+        ),
+        # main's four bypass tests (#3502, #2926), restated in set-difference form.
+        pytest.param(
+            "src/apm_cli/commands/_helpers.py",
+            "        return list(\n"
+            "            _inspect_installed_orphans(\n"
+            "                declared_deps, lockfile, apm_modules_dir, installed\n"
+            "            ).removed_paths\n"
+            "        )\n",
+            "        return sorted(set(installed) - wanted)\n",
+            "_check_orphaned_packages must",
+            id="warning-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    for relative in decision.removed_paths:\n",
+            "    for relative in sorted(set(installed) - expected):\n",
+            "Deleted package paths must come from the decide_orphan_removal decision",
+            id="targeted-install-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "        for orphan in decision.superseded_entries(entries):\n",
+            "        for orphan in sorted(set(entries) - retained):\n",
+            "Removal sites must not subtract their own sets",
+            id="superseded-root-trim-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/deps/cli.py",
+            "        selected_orphans = set(inspection.removed_paths)\n",
+            "        selected_orphans = {\n"
+            "            name for _c, name, _h, _s in scanned_candidates if name not in expected_paths\n"
+            "        }\n",
+            "selected_orphans must come from the decide_orphan_removal decision",
+            id="deps-list-bypass",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = [key for key in lockfile.dependencies if key not in wanted]\n",
+            "orphaned_packages must come from the decide_orphan_removal decision",
+            id="renamed-evidence-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "def _preflight_prune_survivors(",
+            "def _stale_lock_keys(lock, wanted):\n"
+            "    return set(lock.dependencies) - set(wanted)\n\n\n"
+            "def _preflight_prune_survivors(",
+            "Subtracting from lock rows is an orphan removal predicate",
+            id="new-lock-row-helper",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "    from ..install.orphans import OrphanOperation, decide_orphan_removal\n",
+            "    from ..commands.prune import decide_orphan_removal\n"
+            "    from ..install.orphans import OrphanOperation\n",
+            "never through a re-export",
+            id="re-exported-entry",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "from ._helpers import _scan_installed_packages\n",
+            "from ..deps.reachability import retained_lock_keys as _keep\n"
+            "from ._helpers import _scan_installed_packages\n",
+            "retained_lock_keys feeds removal decisions",
+            id="aliased-reachability-import",
+        ),
+        # In-place sink growth and helpers outside the registered sites.
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = list(decision.removed_paths)\n"
+            "        orphaned_packages.extend(p for p in installed_packages if p not in declared_deps)\n",
+            "orphaned_packages must come from the decide_orphan_removal decision",
+            id="sink-extend",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "        orphaned_packages = list(decision.removed_paths)\n",
+            "        orphaned_packages = list(decision.removed_paths)\n"
+            "        for package in installed_packages:\n"
+            "            if package not in declared_deps:\n"
+            "                orphaned_packages.append(package)\n",
+            "Removal sites must not filter installed or locked sets",
+            id="sink-append-loop",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/prune.py",
+            "def _preflight_prune_survivors(",
+            "def _sweep(apm_modules_dir, keep):\n"
+            "    for package in _scan_installed_packages(apm_modules_dir):\n"
+            "        if package not in keep:\n"
+            "            safe_rmtree(apm_modules_dir / package, apm_modules_dir)\n\n\n"
+            "def _preflight_prune_survivors(",
+            "Deleted package paths must come from the decide_orphan_removal decision",
+            id="unregistered-deletion-helper",
+        ),
+        pytest.param(
+            "src/apm_cli/install/orphans.py",
+            "    deployment_claims: DeploymentClaims | None,\n) -> OrphanRemovalDecision:",
+            "    deployment_claims: DeploymentClaims | None = None,\n) -> OrphanRemovalDecision:",
+            "must take keyword-only inputs with no defaults",
+            id="defaulted-owner-input",
+        ),
+    ],
+)
+def test_orphan_owner_guard_is_closed_world(path: str, old: str, new: str, message: str) -> None:
+    """Any module, under any alias, must call the orphan owner with every input (#4011)."""
     source = _source(path)
-    old = "return _find_orphaned_packages(installed, expected)"
     assert source.count(old) == 1
-    mutated = source.replace(old, "return sorted(set(installed) - expected)", 1)
+    mutated = source.replace(old, new, 1)
     ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (_ORPHAN_RULE,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == _ORPHAN_RULE and message in violation.message
+        for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("dry_run=True,", "dry_run=False,"),
+        (
+            "_check_native_claude_transition(\n            reconcile_package_targets,",
+            "_ignore_native_claude_transition(\n            reconcile_package_targets,",
+        ),
+        (
+            'if reconcile_stats.get("errors") or reconcile_stats.get("files_removed"):',
+            'if reconcile_stats.get("errors"):',
+        ),
+    ],
+)
+def test_claude_native_transition_guard_requires_read_only_preservation(old: str, new: str) -> None:
+    path = "src/apm_cli/install/services.py"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "marketplace-integrations-claude-ownership"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
-def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
-    """Targeted-install module removal cannot bypass the shared selector (#3502)."""
-    path = "src/apm_cli/install/phases/cleanup.py"
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/deployment_plan.py",
+            "if codex_native is not None\n        else plan_native_claude_plugin(",
+            "if False\n        else plan_native_claude_plugin(",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "native_claude_plugin = deployment_plan.claude_native",
+            "native_claude_plugin = None",
+        ),
+        (
+            "src/apm_cli/install/deployment_plan.py",
+            "return [target for target in targets if target.name not in native_target_names]",
+            "return targets",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "and prior.pin == own.pin",
+            "and False",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "name not in prior_names\n            and existing.exists()",
+            "False\n            and existing.exists()",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "None if previous is None else frozenset(prior_names),",
+            "frozenset(prior_names),",
+        ),
+        (
+            "src/apm_cli/native_plugins/settings.py",
+            "if current is not None and current != declaration.marketplace_value:",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/native_plugins/settings.py",
+            "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
+            "for plugin in sorted(frozenset(enabled) - declaration.plugins):",
+        ),
+        (
+            "src/apm_cli/install/phases/claude_plugins.py",
+            "previous.write(lock_path)",
+            "pass",
+        ),
+        (
+            "src/apm_cli/native_plugins/layout.py",
+            "import json\n",
+            "import json\nimport subprocess\n",
+        ),
+        (
+            "src/apm_cli/integration/mcp_config_view.py",
+            "elif _is_local_claude_plugin_source(dependency, package_dir):",
+            "elif False:",
+        ),
+        (
+            "src/apm_cli/integration/mcp_config_view.py",
+            'if not package_dir.is_dir() or (package_dir / "apm.yml").exists():',
+            "if not package_dir.is_dir():",
+        ),
+        (
+            "src/apm_cli/claude_plugins/admission.py",
+            "return compute_native_plugin_hash(root)",
+            "return compute_package_hash(root)",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            'result["native_claude_plugin"] = True',
+            'result["native_claude_plugin"] = False',
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
+            'if result.get("native_plugin"):',
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            'local_modules_dir=scratch_root / "apm_modules",',
+            "local_modules_dir=apm_modules_dir,",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "verify_claude_native_cache(",
+            "ignore_native_fingerprint(",
+        ),
+    ],
+)
+def test_claude_native_fingerprint_guard_cannot_fall_back_to_legacy_hash_or_mutate_cache(
+    path: str, old: str, new: str
+) -> None:
     source = _source(path)
-    old = "for relative in _find_orphaned_packages("
     assert source.count(old) == 1
-    mutated = source.replace(old, "for relative in sorted(", 1)
+    mutated = source.replace(old, new, 1)
     ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
+    rule_id = "marketplace-integrations-claude-ownership"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
-def test_orphan_selection_guard_rejects_superseded_root_trim_bypass() -> None:
-    """Trimming a superseded whole-repo checkout cannot bypass the shared selector (#2926)."""
-    path = "src/apm_cli/install/phases/cleanup.py"
+def test_prune_hands_the_reachability_walk_to_the_orphan_owner() -> None:
+    """Prune's retained keys still come from deps/reachability.py, via the owner (#3668)."""
+    path = "src/apm_cli/commands/prune.py"
     source = _source(path)
-    old = "for orphan in _find_orphaned_packages(entries, retained):"
+    old = "                reachability=ReachabilityProbe(\n"
     assert source.count(old) == 1
-    mutated = source.replace(old, "for orphan in sorted(set(entries) - retained):", 1)
+    mutated = source.replace(
+        old, "                reachability=None if True else ReachabilityProbe(\n", 1
+    )
     ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
-    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
-    assert report.failures == ()
-    assert any(violation.rule_id == rule_id for violation in report.violations)
-
-
-def test_orphan_selection_guard_rejects_deps_list_bypass() -> None:
-    """deps list cannot classify bundled content apart from prune's selector (#2926)."""
-    path = "src/apm_cli/commands/deps/cli.py"
-    source = _source(path)
-    old = "_find_orphaned_packages(\n"
-    assert source.count(old) == 1
-    mutated = source.replace(old, "sorted(\n", 1)
-    ast.parse(mutated, filename=path)
-    rule_id = "install-deployment-orphan-selection"
+    rule_id = "install-deployment-uninstall-reachability"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
@@ -3174,8 +3878,9 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         ),
         (
             "src/apm_cli/commands/uninstall/engine.py",
+            "                fail_on_write_error=True,\n"
             "                stored_configs=lockfile.mcp_configs,\n",
-            "",
+            "                fail_on_write_error=True,\n",
         ),
         (
             "src/apm_cli/core/conflict_detector.py",
@@ -3277,7 +3982,7 @@ def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) 
         ),
         (
             "src/apm_cli/install/phases/integrate.py",
-            "if ctx.frozen and ctx.existing_lockfile is not None:",
+            "if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:",
             "if False:",
             "install-deployment-frozen-mutation-eligibility",
         ),
@@ -3326,6 +4031,87 @@ def test_frozen_mcp_verification_cannot_bypass_owners(
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "if lockfile_only or frozen_disposition.withhold_lockfile_writes",
+            'if lockfile_only or getattr(self.ctx, "frozen", False)',
+            id="getattr-read",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/apm_resolver.py",
+            "frozen=self._frozen,",
+            'frozen=vars(self)["frozen"],',
+            id="subscript-read-outside-install",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            "    frozen_disposition: FrozenDisposition,\n",
+            "    frozen_disposition: FrozenDisposition | None = None,\n",
+            id="disposition-fails-open-when-omitted",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition: FrozenDisposition,\n) -> None:",
+            "    frozen_disposition: FrozenDisposition,\n    frozen: bool = False,\n) -> None:",
+            id="new-bare-frozen-parameter",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            (
+                "    match vars(ctx):\n"
+                '        case {"frozen": replay}:\n'
+                "            del replay\n"
+                "    frozen_disposition = InstallService.frozen_disposition(ctx)\n"
+            ),
+            id="mapping-pattern-read",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            "    ctx.frozen |= False\n    frozen_disposition = InstallService.frozen_disposition(ctx)\n",
+            id="augmented-assignment-read",
+        ),
+    ],
+)
+def test_frozen_flag_reads_outside_owner_fail_guard(path: str, old: str, new: str) -> None:
+    """Only InstallService reads the frozen flag; consumers require its disposition."""
+    rule_id = "install-deployment-frozen-flag-reader"
+    assert run_selected_rules(ROOT, (rule_id,)).violations == ()
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_frozen_flag_writes_and_defaults_are_not_reads() -> None:
+    """Writes, deletes and a get/pop default named "frozen" do not read the flag."""
+    rule_id = "install-deployment-frozen-flag-reader"
+    path = "src/apm_cli/install/phases/cleanup.py"
+    old = "    frozen_disposition = InstallService.frozen_disposition(ctx)\n"
+    new = (
+        '    options = {"frozen": False}\n'
+        '    options["frozen"] = False\n'
+        '    del options["frozen"]\n'
+        '    options.get("mode", "frozen")\n'
+        '    options.pop("mode", "frozen")\n'
+        f"{old}"
+    )
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert report.violations == ()
 
 
 def test_frozen_preflight_uses_selected_lockfile_store() -> None:
@@ -4159,6 +4945,18 @@ def test_consumer_manifest_guard_rejects_anchor_bypasses(path: str, old: str, ne
             "f\"one: {detail.strip().replace('[x] ', '')}\"",
             id="caller-replaces-status-symbol",
         ),
+        pytest.param(
+            "src/apm_cli/commands/outdated.py",
+            "console=new_console(),",
+            "console=Console(),",
+            id="command-builds-unicode-rich-console",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/outdated.py",
+            "from apm_cli.utils.console import new_console\n",
+            "from rich.console import Console as new_console\n",
+            id="command-imports-rich-console",
+        ),
     ],
 )
 def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str, new: str) -> None:
@@ -4352,6 +5150,262 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
     ("path", "old", "new"),
     [
         pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "    dep_runtimes = {id(dep): mcp_dependency_runtimes(dep, target_runtimes) for dep",
+            "    dep_runtimes = {id(dep): list(target_runtimes) for dep",
+            id="install-writes-every-server-to-every-target",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "managed_target_servers[target] &= selected[target]",
+            "managed_target_servers[target] &= set(managed_target_servers[target])",
+            id="claims-ignore-dependency-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        transfer_deselected_shared_claims(\n",
+            "        (lambda *args, **kwargs: None)(\n",
+            id="retarget-drops-shared-file-claim",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "admitted = mcp_servers_for_runtime(mcp_deps, owned_target)",
+            "admitted = new_mcp_servers",
+            id="pruning-ignores-dependency-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned",
+            "mcp_servers_for_runtime([], owned_target, named_only=True) | bundle_owned",
+            id="target-scoped-install-retires-other-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            "mcp_servers_for_runtime(prepared_mcp.dependencies, target)",
+            "set(MCPIntegrator.get_server_names(prepared_mcp.dependencies))",
+            id="frozen-claims-every-server-on-every-target",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "target_decision is not None and target_decision.from_manifest",
+            'target_decision is not None and target_decision.source == "apm.yml"',
+            id="manifest-drop-keyed-on-display-label",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "            stale_for_target |= deselected_mcp_claims(\n",
+            "            stale_for_target |= set().union(\n",
+            id="owned-path-forks-deselection-algebra",
+        ),
+    ],
+)
+def test_mcp_dependency_target_selection_guard_rejects_mutations(
+    path: str, old: str, new: str
+) -> None:
+    """#2606: per-dependency MCP targets route through the one selection owner."""
+    rule_id = "mutation_writes.mcp_target_selection"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "                status, allowed_types = current_exec_decision(",
+            "                status, allowed_types = package_exec_decision(",
+            id="update-probe-reads-verdicts-outside-the-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "    def for_dependency(\n",
+            "    def for_dependency_replay(\n",
+            id="unregistered-staleness-reader",
+        ),
+    ],
+)
+def test_exec_decision_guard_rejects_second_readers(path: str, old: str, new: str) -> None:
+    """#3990/#3991: one owner decides exec status and allowed types; one compares them."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/lock.py",
+            'require_current_cli(project_root, command="apm lock")',
+            'check_current_cli(project_root, command="apm lock")',
+            id="command-renders-its-own-refusal",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile_generator.py",
+            "        raise refusal_exit(exc) from exc",
+            "        raise RuntimeError(str(exc)) from exc",
+            id="gate-skips-the-shared-renderer",
+        ),
+    ],
+)
+def test_lockfile_refusal_guard_keeps_one_renderer(path: str, old: str, new: str) -> None:
+    """#3967: every command renders the newer-lockfile refusal through one owner."""
+    rule_id = "contracts-tooling-lockfile-generator-gate"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            "        target_runtimes = [rt for rt in target_runtimes if rt != exclude]\n",
+            id="project-exclusion-filters-the-raw-spelling",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            "        exclusions = {exclude}\n"
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            id="project-exclusion-keeps-a-second-set",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/lsp_integrator.py",
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            "            candidates = [target for target in candidates if target != exclude]\n",
+            id="lsp-exclusion-filters-the-raw-spelling",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/lsp_integrator.py",
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            "            exclusions = {exclude}\n"
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            id="lsp-exclusion-keeps-a-second-set",
+        ),
+    ],
+)
+def test_exclusion_guard_routes_mcp_and_lsp_through_the_normalizer(
+    path: str, old: str, new: str
+) -> None:
+    """C4 (#3967): MCP and LSP ``--exclude`` read through the one runtime normalizer."""
+    rule_id = "mutation_writes.mcp_target_selection"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "            refusal_exit(e).show()\n",
+            "            InstallLogger(verbose=verbose, dry_run=dry_run).error(str(e))\n",
+            id="install-renders-the-refusal-on-stdout",
+        ),
+    ],
+)
+def test_lockfile_refusal_guard_routes_install_through_the_renderer(
+    path: str, old: str, new: str
+) -> None:
+    """#3967: ``apm install`` renders its newer-lockfile refusal through the shared owner."""
+    rule_id = "contracts-tooling-lockfile-generator-gate"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", yaml.safe_dump(lockfile.to_dict()))',
+            id="bundle-lock-from-a-dict-dump",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            '    shutil.copy2(project_root / "apm.lock.yaml", bundle_dir / "apm.lock.yaml")',
+            id="bundle-lock-copied-from-the-project",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            "    write_text_lf(\n"
+            "        bundle_dir / LOCKFILE_NAME, yaml.safe_dump(lockfile.to_dict())\n"
+            "    )",
+            id="bundle-lock-dict-dump-to-the-name-constant",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            '    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)',
+            "    shutil.copy2(get_lockfile_path(project_root), bundle_dir / LOCKFILE_NAME)",
+            id="bundle-lock-copied-to-the-name-constant",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/lockfile_enrichment.py",
+            '        data["apm_version"] = installed_apm_version()\n',
+            "        pass\n",
+            id="bundle-lock-keeps-the-input-stamp",
+        ),
+    ],
+)
+def test_bundle_lock_stamp_guard_rejects_other_writers(path: str, old: str, new: str) -> None:
+    """#3962: every packed lock names the packer as its generator."""
+    rule_id = "contracts-tooling-lockfile-generator-stamp"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
             "src/apm_cli/commands/uninstall/engine.py",
             "def _sync_integrations_after_uninstall(",
             "def _survivor_trust(project_root):\n"
@@ -4412,3 +5466,239 @@ def test_pack_mcp_reads_only_authored_sources(old: str, new: str) -> None:
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "    trust_ctx = exec_trust_context_for_project(\n        manifest_path,\n",
+            "    trust_ctx = exec_trust_context_for_project(\n        project_root,\n",
+            id="registered-caller-passes-a-root",
+        ),
+        pytest.param(
+            "src/apm_cli/security/executables.py",
+            "            project_manifest_path(project_root),\n",
+            "            Path(project_root),\n",
+            id="registered-caller-passes-a-path-built-from-a-root",
+        ),
+        pytest.param(
+            "src/apm_cli/install/exec_gate.py",
+            "            manifest, policy=policy, migrate_user_legacy=False\n",
+            "            self._project_root, policy=policy, migrate_user_legacy=False\n",
+            id="registered-method-passes-its-root-attribute",
+        ),
+    ],
+)
+def test_trust_owner_guard_requires_a_manifest_argument(path: str, old: str, new: str) -> None:
+    """A8: a registered caller handing the trust owner a directory fails the guard."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    clean = run_selected_rules(ROOT, (rule_id,))
+    assert not [v for v in clean.violations if v.rule_id == rule_id]
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id
+        and violation.path == path
+        and "not a directory" in violation.message
+        for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/mcp_config_view.py",
+            "        and name in deployed\n",
+            "",
+            id="bundle-claim-without-deployment-receipt",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "        mcp_deps = list(view.kept_dependencies())\n",
+            "        mcp_deps = manifest.get_all_mcp_dependencies()\n",
+            id="audit-policy-judges-only-apm-yml-servers",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/policy_checks.py",
+            "        mcp_brought_in_by=mcp_brought_in_by,\n",
+            "",
+            id="audit-policy-drops-transitive-declarers",
+        ),
+    ],
+)
+def test_bundle_baseline_guard_rejects_unjudged_or_unreceipted_servers(
+    path: str, old: str, new: str
+) -> None:
+    """#3989: a bundle: claim needs its receipt, and audit policy judges every kept server."""
+    rule_id = "mutation_writes.mcp_declaration_scope"
+    assert not run_selected_rules(ROOT, (rule_id,)).violations
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "                    _bundle_project_root,\n                    user_scope=global_,\n",
+            "                    _bundle_project_root,\n                    user_scope=False,\n",
+            id="global-bundle-install-reads-cwd-grants",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "    grants_manifest = project_manifest_path(manifest_root(project_root, "
+            "user_scope=user_scope))\n",
+            "    grants_manifest = project_manifest_path(project_root)\n",
+            id="bundle-grants-skip-the-scope-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_handler.py",
+            "def _filter_bundle_executables(",
+            "def _cwd_allow_map(root):\n"
+            "    return effective_exec_map_for_project(root, policy=None)\n\n\n"
+            "def _filter_bundle_executables(",
+            id="root-wrapper-called-with-a-raw-root",
+        ),
+    ],
+)
+def test_bundle_trust_guard_rejects_scope_blind_grants(path: str, old: str, new: str) -> None:
+    """#3989: under -g a local bundle reads grants from the user manifest, never the CWD."""
+    rule_id = "install-deployment-executable-trust-context"
+    assert not [v for v in run_selected_rules(ROOT, (rule_id,)).violations if v.rule_id == rule_id]
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/deps/apm_resolver.py",
+            "            refusal = catalog_metadata_refusal(dep_ref, resolved, "
+            "self._existing_lockfile)\n",
+            "            refusal = None\n",
+            id="catalog-metadata-re-read-skips-the-lock-pin",
+        ),
+        pytest.param(
+            "src/apm_cli/drift.py",
+            "        and not detect_ref_change(resolved, locked_dep)\n",
+            "        and resolved.reference == locked_dep.resolved_ref\n",
+            id="pin-comparison-bypasses-the-ref-change-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/plan.py",
+            "def lockfile_satisfies_manifest(",
+            "from apm_cli.drift import MARKETPLACE_CATALOG_METADATA as _METADATA\n\n\n"
+            "def lockfile_satisfies_manifest(",
+            id="second-catalog-metadata-consumer",
+        ),
+    ],
+)
+def test_catalog_metadata_guard_keeps_the_lock_pin(path: str, old: str, new: str) -> None:
+    """#3989: a catalog edit cannot silently re-pin a locked server-owning package."""
+    rule_id = "marketplace-integrations-locked-evidence"
+    assert not run_selected_rules(ROOT, (rule_id,)).violations
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        pytest.param(
+            "        drifted, _unresolved = verify_deployed_file_hashes(project_root, lockfile, targets)\n",
+            "        drifted, _unresolved = [], []\n",
+            id="plain-audit-skips-bundle-hashes",
+        ),
+    ],
+)
+def test_drift_reads_bundle_hashes_through_the_deployed_hash_verifier(old: str, new: str) -> None:
+    """#3989 P11: plain audit and --ci judge bundle files through one verifier."""
+    path = "src/apm_cli/install/drift.py"
+    rule_id = "install-deployment-frozen-mutation-eligibility"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/integrate.py",
+            "framed=_dep_locked_chk.content_hash_framed",
+            "framed=True",
+            id="integrate-row-stream",
+        ),
+        pytest.param(
+            "src/apm_cli/install/sources.py",
+            "record_package_digests(ctx, dep_key, local_digests)",
+            "ctx.package_hashes[dep_key] = local_digests.framed",
+            id="second-recorder",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/resolve.py",
+            "compute_package_hash(candidate_path, framed=True)",
+            "compute_package_hash(candidate_path)",
+            id="unnamed-stream",
+        ),
+        pytest.param(
+            "src/apm_cli/install/source_helpers.py",
+            'framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))\n    ctx',
+            (
+                'existing = getattr(ctx, "existing_lockfile", None)\n'
+                "    framed = existing is None or existing.framed_content_hashes\n    ctx"
+            ),
+            id="rederived-stream-rule",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/content_hash_stream.py",
+            "elif recorded_framed and dep.content_hash_framed:",
+            "elif dep.content_hash_framed:",
+            id="framed-flag-gate",
+        ),
+    ],
+)
+def test_package_content_hash_guard_rejects_second_streams_and_hashers(
+    path: str, old: str, new: str
+) -> None:
+    """Hash framing hardening keeps one hasher, one recorder and the row's stream (#4000)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    rule = "install-deployment-package-content-hash"
+    report = run_selected_rules(ROOT, (rule,), source_overrides={path: source.replace(old, new, 1)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule for violation in report.violations)

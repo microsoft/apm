@@ -1252,6 +1252,37 @@ class TestOpenCodeTarget:
             explicit_target=["claude", "copilot", "opencode"],
         ) == ["copilot", "claude", "opencode"]
 
+    @pytest.mark.parametrize(
+        ("value", "kept", "warning"),
+        [
+            ("Copilot", ["claude", "opencode"], None),
+            ("VSCode", ["claude", "opencode"], "is deprecated"),
+            ("OpenCode", ["copilot", "claude"], None),
+            ("bogus", ["copilot", "claude", "opencode"], "names no target or MCP runtime"),
+        ],
+    )
+    def test_exclude_reads_like_target(self, tmp_path, monkeypatch, capsys, value, kept, warning):
+        """LSP ``--exclude`` uses the one MCP/LSP exclusion owner (C4, #3967)."""
+        from apm_cli.core import target_detection
+        from apm_cli.core.target_detection import EffectiveTargetDecision
+        from apm_cli.integration import mcp_user_scope_runtimes
+
+        monkeypatch.setattr(target_detection, "_deprecated_flag_aliases_warned", set())
+        monkeypatch.setattr(mcp_user_scope_runtimes, "_unknown_exclusions_warned", set())
+        decision = EffectiveTargetDecision(["claude", "copilot", "opencode"], "--target flag")
+        assert (
+            LSPIntegrator.resolve_target_runtimes(
+                project_root=tmp_path,
+                exclude=value,
+                target_decision=decision,
+                explicit_target=["claude", "copilot", "opencode"],
+            )
+            == kept
+        )
+        output = " ".join("".join(capsys.readouterr()).split())
+        if warning is not None:
+            assert output.count(warning) == 1, output
+
     def test_autodetect_from_opencode_dir(self, tmp_path):
         (tmp_path / ".opencode").mkdir()
         with patch("apm_cli.integration.lsp_integrator.find_runtime_binary", return_value=None):

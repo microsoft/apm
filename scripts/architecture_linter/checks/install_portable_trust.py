@@ -1,8 +1,11 @@
-"""Portable executable-trust guards (#3902).
+"""Portable executable-trust guards (#3902, #4018).
 
 Three owners keep "may this dependency run code here?" single-sourced:
 
-* item admission  -- ``security/trust.py`` alone reads pinned item grants;
+* item admission  -- ``security/trust.py`` alone reads pinned item grants,
+  and across the whole inventory no adapter looks approvals up itself,
+  treats a missing approvals map as authorization, or omits an approval
+  input (closed world, not a caller list);
 * fingerprint     -- ``security/trust_fingerprint.py`` alone hashes;
 * MCP admission   -- every ``CurrentMcpConfigView.derive`` call passes the
   owner's ``admission=``; no command passes a literal trust boolean.
@@ -10,6 +13,7 @@ Three owners keep "may this dependency run code here?" single-sourced:
 
 from __future__ import annotations
 
+import ast
 import re
 
 from scripts.architecture_linter.checks.install_deployment_shared import (
@@ -56,27 +60,12 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
         "if matches and entry.get(exec_type, False) is True:",
         "project_allow, project_items = split_item_grants(project_raw_allow)",
     ),
-    "src/apm_cli/install/exec_gate.py": (
-        "hooks_package_admissible(allow_executables, tuple(candidate_keys))",
-        "return hook_file_filter(allow_executables, keys, Path(package_info.install_path))",
-        "verdict = admit_native_plugin(",
-        "if native_install(package_info):",
-        "return _native_approval(",
-    ),
-    "src/apm_cli/install/deployment_plan.py": (
-        "hook_file_admitted=hook_filter,",
-        "_warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx)",
-    ),
-    "src/apm_cli/integration/hook_reintegration.py": ("hook_file_admitted=hook_file_admission(",),
+    # The one grant writer outside security/ pins what it approves, and it
+    # lists native plugins with the trust owner's type set (#4042).
     "src/apm_cli/commands/approve.py": (
         "narrowed = record_pins(allow, identity",
-        "return package_type_verdicts(",
         "declaration = native_declaration(declaration, package_dir)",
         "decl = native_declaration(decl, pkg_dir)",
-    ),
-    "src/apm_cli/install/native_plugin_admission.py": (
-        "native=True,",
-        "set(native_plugin_exec_types(Path(install_path)))",
     ),
 }
 # A native plugin's executable types come from security/trust.py alone
@@ -86,9 +75,39 @@ _NATIVE_TYPE_TOKENS = ("extra_types=", "native_declared_types(", "def agent_plug
 # verdict comes from trust.package_type_verdicts.
 _PIN_BLIND = ("resolve_exec_decision(", "exec_status_for_declaration(")
 _SECURITY = "src/apm_cli/security/"
-# A live-loaded plugin is admitted as one whole-root item, never by a bool lookup.
-_NATIVE_ADMISSION = "src/apm_cli/install/native_plugin_admission.py"
-_BOOL_LOOKUPS = ("is_package_approved(", "_map_grants(", "allow_executables.get(")
+# Approval lookups belong to the trust owners; an adapter asks
+# package_type_approved(s) or the item-admission owner instead.
+_APPROVAL_LOOKUPS = (
+    "is_package_approved",
+    "is_any_type_approved",
+    "_map_grants(",
+    "_map_denies(",
+    "allow_executables.get(",
+)
+# A missing approvals map never implies authorization (exec_map_authorizes_all).
+_MAP_NONE_TEST = re.compile(
+    r"\b(?:allow_executables|allow_map|allow_execs|effective_allow_execs|"
+    r"effective_allow_executables|exec_allow_map)\s+is\s+(?:not\s+)?None\b"
+)
+# Approval inputs are required keyword-only arguments, passed at every call.
+_APPROVAL_INPUTS = ("hooks_approved", "canvas_approved")
+_TRUST_BIN_INPUT = "non_interactive"
+_HOOK_ITEMS = "hook_file_admitted"
+# Package-level approvals never skip native or pinned-hook item admission.
+_PACKAGE_APPROVALS = "package_type_approvals"
+_ITEM_ADMISSION_CALLS = ("native_install", "hooks_package_admissible")
+# Native plugin status is decided over the native union of types.
+_NATIVE_STATUS = ("package_exec_status", "package_exec_decision")
+# Grants are persisted only by the approve command and the install prompt.
+_GRANT_WRITERS = ("write_project_executables", "save_user_executables")
+_GRANT_WRITER_PATHS = ("src/apm_cli/commands/approve.py", "src/apm_cli/install/phases/integrate.py")
+_AST_PREFILTER = (
+    *_APPROVAL_INPUTS,
+    "trust_bin",
+    _PACKAGE_APPROVALS,
+    *_NATIVE_STATUS,
+    *_GRANT_WRITERS,
+)
 
 # Files that take fingerprints from the owner and must never hash themselves.
 _NO_HASHLIB = (
@@ -107,7 +126,9 @@ _FINGERPRINT_ROUTES: dict[str, tuple[str, ...]] = {
         "def evidence_fingerprint(",
         "def local_bundle_digest(",
         "def native_plugin_fingerprint(",
-        "return compute_native_plugin_hash(plugin_root)",
+        # Approval pins leave the exec bit out so they hold across operating
+        # systems; the mode-aware hash is the per-machine integrity check.
+        "return compute_native_plugin_pin(plugin_root)",
     ),
     _MCP_VIEW: ("return evidence_fingerprint(payload)",),
     _EXECUTABLES: ("digest = local_bundle_digest(source_dir, lockfile)",),
@@ -138,21 +159,214 @@ def _missing(provider: FactsProvider, rule_id: str, routes: dict[str, tuple[str,
     return findings
 
 
-def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Pinned item grants are read only by security/trust.py."""
-    findings = _missing(provider, GUARD_ITEM_ADMISSION, _ITEM_ROUTES)
-    facts, failures = _facts_for(provider, _NATIVE_ADMISSION, GUARD_ITEM_ADMISSION)
-    if not failures:
-        found = [token for token in _BOOL_LOOKUPS if _present(facts, token)]
-        if found:
+def _code_lines(facts: object) -> list[str]:
+    return [line for line in _lines(facts) if not line.lstrip().startswith(("#", "def "))]
+
+
+def _callee(node: ast.Call, aliases: dict[str, str]) -> str | None:
+    """Return ``name`` for a function call, ``Class.name`` for ``Class.name(...)``."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        return aliases.get(func.id, func.id)
+    if isinstance(func, ast.Attribute):
+        if isinstance(func.value, ast.Name):
+            return f"{aliases.get(func.value.id, func.value.id)}.{func.attr}"
+        return func.attr
+    return None
+
+
+def _bare(name: str | None) -> str:
+    return str(name).rsplit(".", 1)[-1]
+
+
+def _method_owners(tree: ast.AST) -> dict[int, str]:
+    return {
+        id(item): node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        for item in node.body
+    }
+
+
+def _signature_key(owners: dict[int, str], node: ast.AST) -> str:
+    owner = owners.get(id(node))
+    return f"{owner}.{node.name}" if owner else node.name
+
+
+def _approval_signatures(trees: dict[str, ast.AST]) -> dict[str, frozenset[str]]:
+    """Map every inventory function that takes an approval input to those inputs.
+
+    Methods are keyed ``Class.method`` so an unrelated ``x.method()`` never matches.
+    """
+    signatures: dict[str, frozenset[str]] = {}
+    for tree in trees.values():
+        owners = _method_owners(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            names = {arg.arg for arg in (*node.args.posonlyargs, *node.args.args)}
+            names |= {arg.arg for arg in node.args.kwonlyargs}
+            inputs = {name for name in _APPROVAL_INPUTS if name in names}
+            if _TRUST_BIN_INPUT in names and "trust_bin" in names:
+                inputs.add(_TRUST_BIN_INPUT)
+            if inputs:
+                if _HOOK_ITEMS in names:
+                    inputs.add(_HOOK_ITEMS)
+                key = _signature_key(owners, node)
+                signatures[key] = signatures.get(key, frozenset()) | frozenset(inputs)
+    return signatures
+
+
+def _signature_inputs(signatures, name: str | None) -> frozenset[str] | None:
+    """Inputs for a callee spelled ``Class.method``, ``name`` or ``module.name``."""
+    if not name:
+        return None
+    if name in signatures:
+        return signatures[name]
+    bare = _bare(name)
+    return signatures.get(bare)
+
+
+def _approval_input_findings(path: str, tree: ast.AST, signatures) -> list[Violation]:
+    """Approval inputs are required keyword-only arguments, passed at every call."""
+    findings: list[Violation] = []
+    aliases = {
+        alias.asname: alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.asname
+    }
+    owners = _method_owners(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            inputs = set(signatures.get(_signature_key(owners, node), ())) - {_HOOK_ITEMS}
+            required = {
+                arg.arg
+                for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)
+                if default is None
+            }
+            loose = sorted(name for name in inputs if name not in required)
+            if loose:
+                findings.append(
+                    _summary(
+                        GUARD_ITEM_ADMISSION,
+                        path,
+                        f"{node.name}: approval inputs must be required keyword-only "
+                        f"arguments without a default: {', '.join(loose)}",
+                    )
+                )
+        elif isinstance(node, ast.Call):
+            name = _callee(node, aliases)
+            inputs = _signature_inputs(signatures, name)
+            if not inputs or any(keyword.arg is None for keyword in node.keywords):
+                continue
+            passed = {keyword.arg: keyword.value for keyword in node.keywords}
+            missing = sorted(name for name in inputs - {_HOOK_ITEMS} if name not in passed)
+            hooks = passed.get("hooks_approved")
+            literal_false = isinstance(hooks, ast.Constant) and hooks.value is False
+            if _HOOK_ITEMS in inputs and hooks is not None and not literal_false:
+                missing += [] if _HOOK_ITEMS in passed else [_HOOK_ITEMS]
+            if missing:
+                findings.append(
+                    _summary(
+                        GUARD_ITEM_ADMISSION,
+                        path,
+                        f"Call to {name} at line {node.lineno} omits approval inputs: "
+                        + ", ".join(missing),
+                    )
+                )
+    return findings
+
+
+def _routing_findings(path: str, tree: ast.AST) -> list[Violation]:
+    """Adapters route package approvals and native status through item admission."""
+    findings: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        calls = {_bare(_callee(item, {})) for item in ast.walk(node) if isinstance(item, ast.Call)}
+        if _PACKAGE_APPROVALS in calls:
+            skipped = [name for name in _ITEM_ADMISSION_CALLS if name not in calls]
+            if skipped:
+                findings.append(
+                    _summary(
+                        GUARD_ITEM_ADMISSION,
+                        path,
+                        f"{node.name}: package approvals bypass item admission; route through "
+                        + ", ".join(skipped),
+                    )
+                )
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _bare(_callee(node, {}))
+        if name in _NATIVE_STATUS and not any(k.arg == "native" for k in node.keywords):
             findings.append(
                 _summary(
                     GUARD_ITEM_ADMISSION,
-                    _NATIVE_ADMISSION,
-                    "Native plugin hooks are admitted per file by security/trust.py; remove "
-                    + ", ".join(found),
+                    path,
+                    f"{name} at line {node.lineno} must pass native=",
                 )
             )
+        if name in _GRANT_WRITERS and path not in _GRANT_WRITER_PATHS:
+            findings.append(
+                _summary(
+                    GUARD_ITEM_ADMISSION,
+                    path,
+                    f"Executable grants are written only by apm approve and the install "
+                    f"prompt; remove {name}",
+                )
+            )
+    return findings
+
+
+def _inventory_findings(provider: FactsProvider) -> list[Violation]:
+    """Closed-world approval checks over every inventory file outside security/."""
+    findings: list[Violation] = []
+    trees: dict[str, ast.AST] = {}
+    code_by_path: dict[str, list[str]] = {}
+    for path in _python_paths(provider, _SRC):
+        facts, failures = _facts_for(provider, path, GUARD_ITEM_ADMISSION)
+        if failures:
+            continue
+        code = code_by_path[path] = _code_lines(facts)
+        if not path.startswith(_SECURITY):
+            found = [token for token in _APPROVAL_LOOKUPS if any(token in line for line in code)]
+            if any(_MAP_NONE_TEST.search(line) for line in code):
+                found.append("an approvals map compared with None")
+            if found:
+                findings.append(
+                    _summary(
+                        GUARD_ITEM_ADMISSION,
+                        path,
+                        "Executable approval belongs to the trust owners "
+                        "(package_type_approved, exec_map_authorizes_all); remove "
+                        + ", ".join(found),
+                    )
+                )
+        if any(token in line for line in code for token in _AST_PREFILTER):
+            index = provider.tree_index(path)
+            if index is not None and index.root is not None:
+                trees[path] = index.root
+    signatures = _approval_signatures(trees)
+    # Every file that can name an approval-taking callee is checked, not a caller list.
+    callee_tokens = {key.split(".", 1)[0] for key in signatures}
+    for path, code in code_by_path.items():
+        if path not in trees and any(token in line for line in code for token in callee_tokens):
+            index = provider.tree_index(path)
+            if index is not None and index.root is not None:
+                trees[path] = index.root
+    for path, tree in trees.items():
+        findings.extend(_approval_input_findings(path, tree, signatures))
+        if not path.startswith(_SECURITY):
+            findings.extend(_routing_findings(path, tree))
+    return findings
+
+
+def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Pinned item grants are read only by security/trust.py."""
+    findings = _missing(provider, GUARD_ITEM_ADMISSION, _ITEM_ROUTES)
     for path in _python_paths(provider, _SRC):
         if path == _TRUST:
             continue
@@ -194,12 +408,25 @@ def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
                     + ", ".join(found),
                 )
             )
+    findings.extend(_inventory_findings(provider))
     return tuple(findings)
 
 
 def check_trust_fingerprint(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every trust fingerprint is computed by security/trust_fingerprint.py."""
     findings = _missing(provider, GUARD_TRUST_FINGERPRINT, _FINGERPRINT_ROUTES)
+    for path in _python_paths(provider, _SRC):
+        if path in (_FINGERPRINT, "src/apm_cli/utils/content_hash.py"):
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_TRUST_FINGERPRINT)
+        if not failures and any("compute_native_plugin_pin(" in line for line in _lines(facts)):
+            findings.append(
+                _summary(
+                    GUARD_TRUST_FINGERPRINT,
+                    path,
+                    "Native plugin approval pins come only from native_plugin_fingerprint",
+                )
+            )
     for path in _NO_HASHLIB:
         facts, failures = _facts_for(provider, path, GUARD_TRUST_FINGERPRINT)
         if failures:

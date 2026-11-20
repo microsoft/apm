@@ -45,6 +45,7 @@ import contextlib
 import time
 from typing import TYPE_CHECKING
 
+from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 
 from ..agent_plugins.errors import AgentPluginError
@@ -65,6 +66,12 @@ from .errors import (
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
+from .outcome import (
+    direct_dependency_failed,
+    raise_direct_dependency_failure,
+    result_from_install_context,
+    stop_before_integration,
+)
 from .source_helpers import (
     lockfile_refresh_command,
     proxy_only_lock_entries,
@@ -117,6 +124,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     from apm_cli.integration.skill_adoption import locked_skill_sources
 
     from .phases import integrate as _integrate_phase
+    from .service import InstallService
 
     session = (
         None
@@ -131,7 +139,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
             contextlib.nullcontext()
             if ctx.lockfile_only
             else ctx.integrators["skill"].ownership_snapshot(
-                replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                replay_lockfile=InstallService.frozen_replay_lockfile(ctx),
                 materialization_session=session,
             )
         ):
@@ -655,12 +663,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         #
         # Phase 2.1 (native Copilot plugin registration capability) shares
         # this guard: it publishes the capability so the Agent Plugin
-        # deployment boundary can admit a verified plugin (issue #2703). In
-        # lockfile_only mode no primitives are deployed, so no native plugin
-        # can be admitted and resolving the capability would be pure waste.
+        # deployment boundary admits a verified plugin (#2703); lockfile_only skips it.
         # --------------------------------------------------------------
         if not lockfile_only:
-            from .phases import codex_plugins, copilot_plugins
+            from .phases import claude_plugins, codex_plugins, copilot_plugins
             from .phases import targets as _targets_phase
 
             _run_phase("targets", _targets_phase, ctx)
@@ -805,21 +811,16 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ctx.managed_files = managed_files
         ctx.installed_packages = installed_packages
 
+        # Apply barrier (#3874): a failed direct dependency integrates nothing.
+        if direct_dependency_failed(ctx):
+            return stop_before_integration(ctx, diagnostics)
+
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
         materialization_session = _run_integration_phase(ctx)
 
-        # Fail-loud: if any direct dependency failed validation or
-        # download, render the diagnostic summary and raise so the
-        # caller exits non-zero immediately.  Transitive failures
-        # are allowed to proceed (log + continue).
+        # A direct dependency failing integration fails the install; transitive ones continue.
         if ctx.direct_dep_failed:
-            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
-                ctx.diagnostics.render_summary()
-            raise DirectDependencyError(
-                "One or more direct dependencies failed validation. Run with --verbose for details."
-            )
-
-        from .outcome import result_from_install_context
+            raise_direct_dependency_failure(ctx)
 
         precommit_result = result_from_install_context(ctx)
         if precommit_result.disposition is InstallDisposition.FAILED:
@@ -854,6 +855,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ):
             from apm_cli.utils.console import _rich_info, _rich_warning
 
+            from .phases.cleanup import deployment_evidence
             from .skill_path_migration import (
                 COLLISION_HEADER_TEMPLATE,
                 COLLISION_HINT,
@@ -887,7 +889,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                             )
                 else:
                     _migration_result = execute_migration(
-                        _migration_plans, ctx.existing_lockfile, ctx.project_root
+                        _migration_plans,
+                        ctx.existing_lockfile,
+                        ctx.project_root,
+                        evidence=deployment_evidence(ctx),
                     )
                     _total = len(_migration_result.deleted) + len(_migration_result.skipped_no_file)
                     if _total > 0:
@@ -955,6 +960,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         if not lockfile_only:
             _run_phase("copilot_plugins", copilot_plugins, ctx)
             _run_phase("codex_plugins", codex_plugins, ctx)
+            _run_phase("claude_plugins", claude_plugins, ctx)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
@@ -962,7 +968,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return record_install_outcome(ctx, _run_phase("finalize", _finalize_phase, ctx))
 
-    except (AgentPluginError, CodexNativeError):
+    except (AgentPluginError, CodexNativeError, ClaudeNativePluginError):
         # Preserve schema-routing and native-boundary diagnostics verbatim.
         raise
     except AuthenticationError:

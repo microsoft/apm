@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ...bundle.local_bundle import looks_like_local_bundle
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
-from ...deps.lockfile import LockFile, lockfile_parent_identity
-from ...install.orphans import build_children_index as _build_children_index  # noqa: F401
-from ...install.orphans import collect_orphan_candidates as _collect_orphan_candidates
+from ...deps.lockfile import LockFile
+from ...install.orphans import OrphanOperation, ReachabilityProbe, decide_orphan_removal
+from ...integration.mcp_config_view import BUNDLE_MCP_OWNER_PREFIX
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
@@ -30,6 +31,7 @@ from ...utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from ...core.deployment_ledger import DeploymentMaterializationSession
+    from ...integration.cleanup import DeploymentEvidence
 
 
 class MCPUninstallCleanupError(RuntimeError):
@@ -439,7 +441,7 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
 def _warn_reachability_incomplete(reachability, logger):
     """Emit exactly one bounded warning when reachability could not be verified.
 
-    Fires at most once per ``_compute_actual_orphans`` call regardless of
+    Fires at most once per ``_uninstall_orphan_decision`` call regardless of
     how many manifests were unverifiable during the walk -- the per-node
     detail is confined to ``--verbose`` so the always-shown message stays
     a single, bounded line.
@@ -459,99 +461,44 @@ def _warn_reachability_incomplete(reachability, logger):
             logger.verbose_detail(f"    {pkg_id}: {reason}")
 
 
-def _compute_actual_orphans(
+def _uninstall_orphan_decision(
     lockfile,
-    orphans,
-    removed_repo_urls,
-    apm_yml_path,
     packages_to_remove,
     apm_modules_dir,
+    apm_yml_path,
     logger,
     *,
     warn_on_incomplete: bool = True,
 ):
-    """Decide which candidate orphans are truly unreachable and safe to delete.
+    """Ask the orphan owner which removed packages' descendants go too.
 
-    The single canonical decision helper shared by
-    ``_cleanup_transitive_orphans`` (real removal) and
-    ``_dry_run_uninstall`` (its ``--dry-run`` preview), so a preview and
-    the real run can never disagree about what would/will be kept.
-
-    Subtracts the project's surviving direct dependencies and every
-    still-declared lockfile entry from *orphans* (as before this fix),
-    then asks :mod:`apm_cli.deps.reachability` -- the canonical owner --
-    whether a remaining candidate is nonetheless still forward-reachable
-    from a SURVIVING package's own real, on-disk manifest (the
-    shared/diamond-dependency fix). If that walk could not be fully
-    verified, this fails closed: it preserves EVERY candidate for this
-    run rather than partially trusting an incomplete result.
-
-    Returns:
-        A ``(actual_orphans, repairs)`` tuple. *actual_orphans* is the
-        frozenset of keys safe to delete this run, unchanged in meaning
-        from before this docstring update. *repairs* maps each RESCUED
-        candidate's key to the ``(parent_repo_url, local_path, dev_only)`` of
-        the surviving node that rescued it (see
-        ``ReachabilityResult.reachable_via`` and ``dev_only``, which keeps
-        ``is_dev`` what install would write) -- a rescued candidate's
-        ``resolved_by``/``local_path`` are otherwise left pointing at a
-        parent that may no longer exist in the lockfile, which would
-        silently defeat the NEXT uninstall's backward orphan-candidate
-        scan (``_build_children_index`` is keyed on ``resolved_by``) and
-        permanently fail-close any later reachability walk that needs to
-        re-resolve this same entry's on-disk directory. Only
-        ``_cleanup_transitive_orphans`` (the real removal path) may act
-        on *repairs* by writing them into the lockfile; ``--dry-run``
-        must discard them -- its preview must stay read-only.
+    ``apm uninstall`` and its ``--dry-run`` preview share this one decision,
+    so a preview and the real run never disagree about what is kept. The
+    owner consumes :mod:`apm_cli.deps.reachability` to rescue a candidate a
+    SURVIVING package's own manifest still reaches, and keeps every
+    candidate when that walk is incomplete. Only the real removal path may
+    persist ``decision.repairs``; ``--dry-run`` stays read-only.
     """
-    if not orphans:
-        return builtins.frozenset(), {}
-
     direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
-
-    remaining_deps = builtins.set()
-    for ref in (*direct_refs, *dev_refs):
-        remaining_deps.add(ref.get_unique_key())
-    for dep in lockfile.get_package_dependencies():
-        key = dep.get_unique_key()
-        if (
-            key not in orphans
-            and lockfile_parent_identity(dep, lockfile.replacements) not in removed_repo_urls
-        ):
-            remaining_deps.add(key)
-
-    candidate_orphans = builtins.frozenset(orphans) - remaining_deps
-    if not candidate_orphans:
-        return candidate_orphans, {}
-
-    from ...deps.reachability import compute_forward_reachable_keys
-
-    project_root = apm_yml_path.parent if apm_yml_path else Path(".")
-    reachability = compute_forward_reachable_keys(
-        lockfile, project_root, apm_modules_dir, direct_refs, candidate_orphans, dev_refs=dev_refs
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.UNINSTALL,
+        roots=_removal_targets(packages_to_remove, lockfile) if lockfile else (),
+        candidate_universe=lockfile or None,
+        installed_paths=None,
+        resolved_keys=None,
+        intended=None,
+        materialized=None,
+        reachability=ReachabilityProbe(
+            project_root=apm_yml_path.parent if apm_yml_path else Path("."),
+            apm_modules_dir=apm_modules_dir,
+            direct_refs=tuple(direct_refs),
+            dev_refs=tuple(dev_refs),
+        ),
+        deployment_claims=None,
     )
-    if not reachability.complete:
-        if lockfile.replacements is not None:
-            unverifiable = sorted({key for key, _reason in reachability.unverifiable})
-            details = ", ".join(unverifiable[:3])
-            if len(unverifiable) > 3:
-                details += ", ..."
-            raise ValueError(
-                "Cannot verify replacement dependency reachability "
-                f"({len(unverifiable)} manifest(s): {details}). Restore missing or "
-                "invalid package manifests before uninstalling."
-            )
-        if warn_on_incomplete:
-            _warn_reachability_incomplete(reachability, logger)
-        return builtins.frozenset(), {}
-
-    rescued = candidate_orphans & reachability.reachable
-    repairs = {
-        key: (*reachability.reachable_via[key], key in reachability.dev_only)
-        for key in rescued
-        if key in reachability.reachable_via
-    }
-    return candidate_orphans - reachability.reachable, repairs
+    if not decision.reachability_complete and warn_on_incomplete:
+        _warn_reachability_incomplete(decision.reachability, logger)
+    return decision
 
 
 def _select_marketplace_declarations(
@@ -727,6 +674,33 @@ def _resolve_marketplace_packages(
     return resolved
 
 
+def _mcp_server_hint(name: str, lockfile: "LockFile | None") -> str | None:
+    """Route an MCP server name to the command that removes it (#3994).
+
+    ``apm uninstall`` selects packages; an MCP server leaves with its
+    declaration: the root manifest, the package that brings it in, or the
+    local bundle that installed it.
+    """
+    if lockfile is None or name not in lockfile.mcp_servers:
+        return None
+    owner = lockfile.mcp_config_provenance.get(name)
+    if isinstance(owner, str) and owner.startswith(BUNDLE_MCP_OWNER_PREFIX):
+        return (
+            f"'{name}' is an MCP server from a local bundle; "
+            "'apm uninstall' cannot remove local-bundle content yet (tracked in #3887)."
+        )
+    if isinstance(owner, str) and owner:
+        return (
+            f"'{name}' is an MCP server brought in by package '{owner}'. "
+            "Uninstall that package to remove it."
+        )
+    return (
+        f"'{name}' is an MCP server, not a package. Remove '{name}' under "
+        "dependencies.mcp in apm.yml, then run 'apm install' to remove it "
+        "from your harnesses."
+    )
+
+
 def _validate_uninstall_packages(
     packages: list[str],
     current_deps: list,
@@ -805,7 +779,8 @@ def _validate_uninstall_packages(
                 display_label = package
             else:
                 logger.error(
-                    f"Invalid package format: {package}. "
+                    _mcp_server_hint(package, lockfile)
+                    or f"Invalid package format: {package}. "
                     "Use 'owner/repo', 'plugin-name@marketplace', a local path, "
                     "or a key copied from 'apm deps list'."
                 )
@@ -858,6 +833,13 @@ def _validate_uninstall_packages(
                     f"{display_label} could not be mapped to one declared local dependency. "
                     "Run 'apm install' to regenerate apm.lock.yaml, or use one exact "
                     "path from apm.yml."
+                )
+            elif is_local and looks_like_local_bundle(Path(package)):
+                logger.error(
+                    f"'{Path(package).name}' is a local bundle. Bundles "
+                    "installed with 'apm install <bundle>' are not recorded in apm.yml, "
+                    "and 'apm uninstall' cannot remove local-bundle content yet "
+                    "(tracked in #3887)."
                 )
             elif is_local:
                 logger.error(
@@ -986,7 +968,7 @@ def _dry_run_uninstall(
     ``cli.py``'s Step 3 edits apm.yml). It defaults to ``None`` for
     direct-unit-test callers that don't set up a diamond-dependency
     scenario; production call sites always pass the real path so the
-    reachability rescue (see ``_compute_actual_orphans``) is exercised
+    reachability rescue (see ``_uninstall_orphan_decision``) is exercised
     for every real ``--dry-run`` invocation.
     """
     if lockfile is None:
@@ -1018,21 +1000,15 @@ def _dry_run_uninstall(
                 logger.progress(f"  - {package_label} from apm_modules/")
 
     if lockfile:
-        candidates, removed_parents = _collect_orphan_candidates(
-            lockfile, _removal_targets(packages_to_remove, lockfile)
-        )
-        actual_orphans, _resolved_by_repairs = _compute_actual_orphans(
+        # Resolved-by repairs are intentionally discarded: --dry-run's preview
+        # stays strictly read-only.
+        actual_orphans, _resolved_by_repairs = _project_transitive_orphans(
             lockfile,
-            candidates,
-            removed_parents,
-            apm_yml_path,
             packages_to_remove,
             apm_modules_dir,
+            apm_yml_path,
             logger,
         )
-        # _resolved_by_repairs is intentionally discarded: this LockFile
-        # instance is a throwaway local read (never .write()-ed back), and
-        # --dry-run's preview must stay strictly read-only regardless.
         if actual_orphans:
             logger.progress(f"  Transitive dependencies that would be removed:")  # noqa: F541
             for orphan_key in sorted(actual_orphans):
@@ -1134,7 +1110,7 @@ def _cleanup_transitive_orphans(
     # defeats the NEXT uninstall's backward orphan-candidate scan
     # (_build_children_index is keyed on resolved_by) and permanently
     # fail-closes any later reachability walk needing to re-resolve this
-    # same entry's on-disk directory (see _compute_actual_orphans'
+    # same entry's on-disk directory (see install/orphans.py's
     # docstring). Real removal path only -- --dry-run never reaches here.
     for rescued_key, (new_parent, new_local_path, dev_only) in resolved_by_repairs.items():
         rescued_dep = lockfile.get_dependency(rescued_key)
@@ -1249,29 +1225,18 @@ def _project_transitive_orphans(
     *,
     warn_on_incomplete: bool = True,
 ):
-    """Return the post-uninstall orphan set without mutating package state."""
-    if not lockfile or not apm_modules_dir.exists():
+    """Return the post-uninstall ``(orphan keys, repairs)`` without mutating state."""
+    if not lockfile:
         return builtins.frozenset(), {}
-
-    orphans, removed_repo_urls = _collect_orphan_candidates(
-        lockfile, _removal_targets(packages_to_remove, lockfile)
-    )
-    if not orphans:
-        return builtins.frozenset(), {}
-
-    # Determine which candidates are truly unreachable (still-needed direct
-    # deps and lockfile survivors, PLUS anything a surviving package's own
-    # real manifest still forward-reaches -- see _compute_actual_orphans).
-    return _compute_actual_orphans(
+    decision = _uninstall_orphan_decision(
         lockfile,
-        orphans,
-        removed_repo_urls,
-        apm_yml_path,
         packages_to_remove,
         apm_modules_dir,
+        apm_yml_path,
         logger,
         warn_on_incomplete=warn_on_incomplete,
     )
+    return decision.removed_keys, dict(decision.repairs)
 
 
 def _preflight_uninstall_survivors(
@@ -1379,6 +1344,8 @@ def _sync_integrations_after_uninstall(
     survivor_plan: list[tuple[DependencyReference, object]] | None = None,
     deployed_file_hashes: dict[str, str] | None = None,
     excluded_survivor_keys: frozenset[str] = frozenset(),
+    *,
+    evidence: "DeploymentEvidence | None",
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1477,14 +1444,16 @@ def _sync_integrations_after_uninstall(
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
     # their known-good merged settings (#3226).
-    from ...security.executables import resolve_project_exec_allow_map
+    from ...security.executables import closed_exec_map, resolve_project_exec_allow_map
 
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
-    _allow_executables = None
-    if target_survivor_plan:
-        _allow_executables = resolve_project_exec_allow_map(
+    _allow_executables = (
+        resolve_project_exec_allow_map(
             project_root, apm_package, user_scope=user_scope, logger=logger
         )
+        if target_survivor_plan
+        else closed_exec_map(None)
+    )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only
@@ -1535,6 +1504,7 @@ def _sync_integrations_after_uninstall(
                 apm_package,
                 project_root,
                 managed_files=_managed_subset,
+                evidence=evidence,
             )
             counts[_entry.counter_key] += result.get("files_removed", 0)
 
@@ -1586,6 +1556,7 @@ def _sync_integrations_after_uninstall(
                 managed_files=_buckets["skills"] if _buckets else None,
                 targets=_sync_targets,
                 removed_paths=removed_skill_paths,
+                evidence=evidence,
             )
         finally:
             DeploymentMaterializationSession.retire_removed(
@@ -1637,6 +1608,7 @@ def _sync_integrations_after_uninstall(
         managed_files=_buckets["hooks"] if _buckets else None,
         managed_file_hashes=deployed_file_hashes,
         targets=_resolved_targets,
+        evidence=evidence,
     )
     counts["hooks"] = result.get("files_removed", 0)
     unsafe_hook_paths = result.get("unsafe_paths", [])
@@ -1791,6 +1763,7 @@ def _cleanup_stale_mcp(
     user_scope: bool = False,
     scope=None,
     persist: bool = True,
+    logger=None,
 ):
     """Remove MCP servers that are no longer needed after uninstall."""
     managed_servers = set(old_mcp_servers or ())
@@ -1816,7 +1789,10 @@ def _cleanup_stale_mcp(
         admission=McpAdmission.admit_all(),
     )
     # Uninstall never admits a server: only previously managed servers survive.
-    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies) & managed_servers
+    # Local-bundle servers stay with their bundle, not the uninstalled package.
+    new_mcp_servers = (
+        MCPIntegrator.get_server_names(view.dependencies) | view.bundle_owned
+    ) & managed_servers
     stale_servers = managed_servers - new_mcp_servers
     from ...install.mcp.ownership import resolve_mcp_target_servers
 
@@ -1835,6 +1811,7 @@ def _cleanup_stale_mcp(
 
     from ...install.mcp.retired_destinations import (
         heal_retired_project_mcp_destinations,
+        report_retired_mcp_heal,
         restore_pending_retired_claims,
         split_mcp_claims,
     )
@@ -1862,11 +1839,16 @@ def _cleanup_stale_mcp(
             scope=scope,
             target_servers=target_servers,
         )
-        heal_retired_project_mcp_destinations(
-            stale_retired,
-            stored_configs=lockfile.mcp_configs,
-            native_hashes=retired.hashes,
-            project_root=deploy_root,
+        # Report the heal like install does (C5d, #3967): removed servers,
+        # kept user-edited ones, and deleted files.
+        report_retired_mcp_heal(
+            heal_retired_project_mcp_destinations(
+                stale_retired,
+                stored_configs=lockfile.mcp_configs,
+                native_hashes=retired.hashes,
+                project_root=deploy_root,
+            ),
+            logger,
         )
         owned_servers = {
             server

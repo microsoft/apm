@@ -150,8 +150,11 @@ def _build_hint(kind: GitErrorKind, operation: str, remote: str | None) -> str:
         return f"Verify the remote {remote_label} exists and the ref is spelled correctly."
     if kind == GitErrorKind.TIMEOUT:
         return "Network issue contacting the remote. Retry or check your connection."
-    # UNKNOWN
-    return f"Git failed during {operation}. See raw stderr above."
+    # UNKNOWN. Git's raw stderr is never printed, so do not point at it (#3994).
+    return (
+        f"Git failed during {operation}. Check the remote URL, network access and "
+        "credentials, then retry."
+    )
 
 
 def translate_git_stderr(

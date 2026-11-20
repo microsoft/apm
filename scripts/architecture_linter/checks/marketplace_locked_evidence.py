@@ -10,7 +10,7 @@ _ROUTES = (
     ("src/apm_cli/policy/ci_checks.py", "_check_ref_consistency", "lock.get_dependency"),
     ("src/apm_cli/policy/ci_checks.py", "_check_ref_consistency", "marketplace_ref_mismatch"),
     ("src/apm_cli/policy/ci_checks.py", "_check_ref_consistency", "dep_ref.get_display_name"),
-    ("src/apm_cli/policy/ci_checks.py", "_check_no_orphans", "lock.get_dependency"),
+    ("src/apm_cli/install/orphans.py", "_intent_keys", "lockfile.get_dependency"),
     ("src/apm_cli/install/plan.py", "lockfile_satisfies_manifest", "lockfile.get_dependency"),
     ("src/apm_cli/install/plan.py", "lockfile_satisfies_manifest", "dep.get_display_name"),
     ("src/apm_cli/drift.py", "detect_ref_change", "marketplace_ref_mismatch"),
@@ -32,11 +32,21 @@ _ROUTES = (
     ),
     ("src/apm_cli/integration/mcp_config_view.py", "_collect_unlocked_compat", "mcp_package_owner"),
     ("src/apm_cli/deps/reachability.py", "locked_marketplace_form", "locked.to_edge_reference"),
-    ("src/apm_cli/install/orphans.py", "build_expected_install_paths", "locked_marketplace_form"),
+    ("src/apm_cli/install/orphans.py", "_build_expected_install_paths", "locked_marketplace_form"),
     ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "locked_marketplace_replay"),
     ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "frozen_marketplace_refusal"),
     ("src/apm_cli/marketplace/resolver.py", "resolve_marketplace_plugin", "build_tag_regex"),
+    # A cold server-owning row reads the catalog for metadata only; the lock
+    # row keeps pinning the download (#3989).
+    ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "catalog_metadata_refusal"),
+    ("src/apm_cli/drift.py", "catalog_metadata_refusal", "locked_marketplace_row"),
+    ("src/apm_cli/drift.py", "catalog_metadata_refusal", "detect_ref_change"),
 )
+# The only consumer of a ``catalog-metadata`` replay decision outside its owner
+# is the resolver entry that applies catalog_metadata_refusal (closed world).
+_CATALOG_METADATA_NAME = "MARKETPLACE_CATALOG_METADATA"
+_CATALOG_METADATA_OWNER = "src/apm_cli/drift.py"
+_CATALOG_METADATA_CONSUMER = ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep")
 # Lock-first replay (#3911): the replay decision precedes any catalog call.
 _ORDERED = (
     (
@@ -238,7 +248,41 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
         }
         if not lines[first] or (lines[then] and min(lines[then]) < min(lines[first])):
             findings.append(violation(RULE_ID, path, f"{function} must call {first} before {then}"))
+    findings.extend(_catalog_metadata_consumers(provider))
     return tuple(findings)
+
+
+def _catalog_metadata_consumers(provider: FactsProvider) -> list[Violation]:
+    """Only the refusal-applying resolver entry may act on a catalog-metadata decision."""
+    findings: list[Violation] = []
+    for path in provider.inventory:
+        if (
+            not (path.startswith("src/apm_cli/") and path.endswith(".py"))
+            or path == _CATALOG_METADATA_OWNER
+        ):
+            continue
+        facts, failures = checked_facts(provider, path, RULE_ID, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        allowed = [
+            (definition.line, definition.end_line)
+            for definition in facts.definitions
+            if (path, definition.name) == _CATALOG_METADATA_CONSUMER
+        ]
+        findings.extend(
+            violation(
+                RULE_ID,
+                path,
+                f"{_CATALOG_METADATA_NAME} is consumed only by "
+                f"{_CATALOG_METADATA_CONSUMER[1]}, which applies catalog_metadata_refusal",
+                line=number,
+            )
+            for number, text in enumerate(facts.lines, start=1)
+            if _CATALOG_METADATA_NAME in text
+            and not any(start <= number <= end for start, end in allowed)
+        )
+    return findings
 
 
 RULES = (

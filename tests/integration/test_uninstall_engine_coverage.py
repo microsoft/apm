@@ -7,11 +7,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.commands.uninstall.engine import (
-    _build_children_index,
     _is_marketplace_ref,
     _parse_dependency_entry,
 )
 from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.install.orphans import _build_children_index
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -177,7 +177,6 @@ class TestUninstallEngine:
         from apm_cli.commands.uninstall import engine
 
         assert hasattr(engine, "_is_marketplace_ref")
-        assert hasattr(engine, "_build_children_index")
         assert hasattr(engine, "_parse_dependency_entry")
 
     def test_mcp_integrator_imported(self):

@@ -22,7 +22,11 @@ from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 # working without modification.
 from apm_cli.core.scope import InstallScope as _InstallScope
 from apm_cli.core.scope import get_apm_dir as _get_apm_dir
-from apm_cli.deps.lockfile_generator import check_current_cli
+from apm_cli.deps.lockfile_generator import (
+    LockfileGeneratorError,
+    check_current_cli,
+    refusal_exit,
+)
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -129,6 +133,7 @@ from apm_cli.install.validation import (
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
+from apm_cli.policy.outcome_routing import discover_trust_policy
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
 from ..constants import (
@@ -729,7 +734,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
     if is_user_scope(scope):
         from ..core.target_detection import EffectiveTargetDecision
-        from ..integration.mcp_integrator_install import (
+        from ..integration.mcp_user_scope_runtimes import (
             discover_user_scope_mcp_runtimes,
             filter_excluded_mcp_runtimes,
             partition_user_scope_runtimes,
@@ -857,9 +862,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     help=(
         "Refuse to install when apm.lock.yaml is missing or out of sync with "
         "apm.yml, including Git source, ref, host provider, transport, and MCP "
-        "config state (CI-safe; mutually exclusive with "
-        "--update, --mcp, and positional packages). Use 'apm audit' for on-disk "
-        "integrity."
+        "config state, or when deployed files do not match the hashes it records "
+        "(CI-safe; mutually exclusive with --update, --mcp, and positional packages)."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
@@ -915,7 +919,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     "global_",
     is_flag=True,
     default=False,
-    help="Install to the APM user home ($APM_HOME, default ~/.apm) instead of the current project. Direct MCP installs create or update the user manifest. APM_HOME controls metadata but not target deployment. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Supported runtimes include Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot.",
+    help="Install to the APM user home ($APM_HOME, default ~/.apm) instead of the current project. Direct MCP installs create or update the user manifest. APM_HOME controls metadata but not target deployment. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Runtimes without user-scope support are skipped with a warning that lists the supported ones.",
 )
 @click.option(
     "--ssh",
@@ -1242,11 +1246,20 @@ def install(  # noqa: PLR0913
                 from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
                 _bundle_project_root = _source_root
+                # One policy discovery serves the trust map and, at project
+                # scope (same root), the bundle policy preflight.
                 _allow_execs_for_bundle = _effective_bundle_allow_map(
                     _bundle_project_root,
+                    user_scope=global_,
                     no_policy=no_policy,
                     logger=logger,
                     migrate_user_legacy=not dry_run,
+                    dry_run=dry_run,
+                    policy_fetch_result=(
+                        _bundle_policy := None
+                        if no_policy
+                        else discover_trust_policy(_bundle_project_root)
+                    ),
                 )
                 _install_lb(
                     bundle_info=_bundle_info,
@@ -1262,6 +1275,7 @@ def install(  # noqa: PLR0913
                     legacy_skill_paths=legacy_skill_paths,
                     allow_executables=_allow_execs_for_bundle,
                     create_config=create_user_config,
+                    policy_fetch_result=None if global_ else _bundle_policy,
                     # Rejected-flag context for consolidated UsageError:
                     rejected_flags={
                         "--update": update,
@@ -1414,7 +1428,6 @@ def install(  # noqa: PLR0913
             get_apm_dir,
             get_manifest_path,
             get_modules_dir,
-            warn_unsupported_user_scope,
         )
 
         if scope is InstallScope.USER:
@@ -1422,7 +1435,6 @@ def install(  # noqa: PLR0913
                 dry_run=dry_run,
                 logger=logger,
                 ensure_user_dirs=ensure_user_dirs,
-                warn_unsupported_user_scope=warn_unsupported_user_scope,
             )
 
         # Scope-aware paths
@@ -1605,13 +1617,14 @@ def install(  # noqa: PLR0913
             if transaction is not None
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
-    except InsecureDependencyPolicyError as e:
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except InstallFailureAlreadyRendered as e:
+    except (
+        InsecureDependencyPolicyError,
+        InstallFailureAlreadyRendered,
+        LockfileGeneratorError,
+    ) as e:
+        if isinstance(e, LockfileGeneratorError):
+            # The shared refusal renderer: [x] on stderr, like every other command.
+            refusal_exit(e).show()
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1734,9 +1747,11 @@ def _install_apm_packages(ctx, outcome):
 
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
 
-    if ctx.frozen is True:
+    from apm_cli.install.service import InstallService
+
+    frozen_disposition = InstallService.frozen_disposition(ctx)
+    if frozen_disposition.replay:
         from apm_cli.install.request import InstallRequest
-        from apm_cli.install.service import InstallService
 
         InstallService.enforce_frozen(
             InstallRequest(
@@ -1805,6 +1820,7 @@ def _install_apm_packages(ctx, outcome):
             update=ctx.update,
             apm_dir=ctx.apm_dir,
             local_cleanup_pending=_local_cleanup_pending,
+            project_root=None if ctx.scope is _InstallScope.USER else ctx.project_root,
         )
         return (*prospective_plan.dependency_counts, None)
 
@@ -1817,6 +1833,15 @@ def _install_apm_packages(ctx, outcome):
     from apm_cli.install.phases.targets import reject_undeployable_manifest_targets
 
     reject_undeployable_manifest_targets(apm_package, logger)  # before the lockfile rename
+    from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+    reconcile_scope_bundle_hooks(
+        ctx.scope,
+        apm_package,
+        no_policy=ctx.no_policy,
+        logger=logger,
+        dry_run=bool(getattr(ctx, "dry_run", False)),
+    )
     migrate_lockfile_if_needed(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
@@ -1886,7 +1911,7 @@ def _install_apm_packages(ctx, outcome):
                 audit_override=ctx.audit_override,
                 legacy_skill_paths=ctx.legacy_skill_paths,
                 trust_transitive_mcp=ctx.trust_transitive_mcp,
-                frozen=ctx.frozen,
+                frozen=frozen_disposition.replay,
                 plan_callback=ctx.plan_callback,
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
@@ -1944,7 +1969,10 @@ def _install_apm_packages(ctx, outcome):
                 if isinstance(e, PolicyViolationError)
                 else f"Failed to install APM dependencies: {e}"
             )
-            logger.error(msg)
+            if isinstance(e, PolicyViolationError):
+                logger.refusal(msg)
+            else:
+                logger.error(msg)
             if not ctx.verbose:
                 logger.progress("Run with --verbose for detailed diagnostics")
             raise InstallFailureAlreadyRendered(msg) from e
@@ -1977,9 +2005,13 @@ def _install_apm_packages(ctx, outcome):
             active_package_keys=(
                 install_result.active_package_keys if install_result is not None else None
             ),
+            claude_native_keys=(
+                install_result.claude_native_keys if install_result is not None else frozenset()
+            ),
+            frozen_disposition=frozen_disposition,
         )
     except PolicyBlockError:
-        logger.error(
+        logger.refusal(
             "MCP server(s) blocked by org policy. "
             "APM packages remain installed; MCP configs were NOT written."
         )

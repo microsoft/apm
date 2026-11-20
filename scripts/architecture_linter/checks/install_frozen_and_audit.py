@@ -18,7 +18,6 @@ from scripts.architecture_linter.checks.contracts_dependency_policy import _uniq
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _INSTALL_ADAPTER,
     _SRC_PREFIX,
-    _UNINSTALL_ENGINE,
     _awk_body,
     _body_has,
     _duplicate_definition_lines,
@@ -30,6 +29,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.python_semantics import dotted_name
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, violation
 from scripts.architecture_linter.models import Violation
@@ -38,6 +38,7 @@ _GUARD_MCP_OWNERSHIP = "install-deployment-mcp-ownership-migration"
 
 
 _GUARD_FROZEN = "install-deployment-frozen-mutation-eligibility"
+_GUARD_FROZEN_FLAG_READER = "install-deployment-frozen-flag-reader"
 
 
 _GUARD_UNINSTALL_REACHABILITY = "install-deployment-uninstall-reachability"
@@ -69,6 +70,7 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
 # req-lk-017: frozen install and audit content-integrity share one verifier.
 _DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
+_DRIFT_DIFF = "src/apm_cli/install/drift.py"
 _DEPLOYED_HASH_FRAGMENTS = (
     (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
     (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
@@ -78,6 +80,9 @@ _DEPLOYED_HASH_FRAGMENTS = (
         "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
     ),
     (_DEPLOYED_HASH_VERIFIER, "= resolve_audit_scope(project_root, lock)"),
+    # Plain audit's drift row reads local-bundle hashes through the same
+    # verifier, so it never disagrees with --ci (#3989).
+    (_DRIFT_DIFF, "= verify_deployed_file_hashes(project_root, lockfile, targets)"),
 )
 
 
@@ -95,8 +100,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
     audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
+    drift, drift_fail = _facts_for(provider, _DRIFT_DIFF, rule_id)
     failures = (
-        owner_fail
+        drift_fail
+        + owner_fail
         + adapter_fail
         + services_fail
         + integration_fail
@@ -211,14 +218,17 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         or not _body_has(mcp_prepare_body, "active_package_keys=active_package_keys,")
         or not _body_has(mcp_prepare_body, "allow_pending=allow_pending,")
         or not _present(adapter, "allow_pending_mcp=ctx.install_mode != InstallMode.MCP,")
-        or not _present(integration, "if ctx.frozen and ctx.existing_lockfile is not None:")
+        or not _present(
+            integration,
+            "if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:",
+        )
         or not _present(
             integration, "active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),"
         )
         or not _before(acquisition, hydrated_check)
         or not _before(hydrated_check, deployment)
         or not all(
-            _present(owner if path == _FROZEN_OWNER else audit, needle)
+            _present({_FROZEN_OWNER: owner, _DRIFT_DIFF: drift}.get(path, audit), needle)
             for path, needle in _DEPLOYED_HASH_FRAGMENTS
         )
         or bool(duplicates)
@@ -233,6 +243,166 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         )
     ]
     findings.extend(duplicates)
+    return tuple(findings)
+
+
+# ``sys.frozen`` is PyInstaller's bundled-executable marker, not the install flag.
+_FOREIGN_FROZEN_RECEIVERS = frozenset({"sys"})
+_FROZEN_FLAG = "frozen"
+# Phase seams that take the disposition: keyword-only and required, never a
+# default that fails open when a caller omits it.
+_FROZEN_DISPOSITION_CONSUMERS = (
+    ("src/apm_cli/install/phases/cleanup.py", "_run_cleanup"),
+    ("src/apm_cli/install/service_integration.py", "run_service_integrations"),
+)
+
+
+# The only non-owner functions that take a bare ``frozen`` boolean: the Click
+# option origin and the parameters the owner's disposition is passed into.
+_FROZEN_PARAMETER_SITES = frozenset(
+    {
+        ("src/apm_cli/commands/install.py", "install"),
+        ("src/apm_cli/deps/apm_resolver.py", "__init__"),
+        ("src/apm_cli/deps/immutable_requirements.py", "__init__"),
+        ("src/apm_cli/install/dry_run_plan.py", "with_resolved_dependencies"),
+        ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
+        ("src/apm_cli/install/pipeline.py", "run_install_pipeline"),
+    }
+)
+
+
+def _frozen_parameter(node: ast.AST, path: str) -> str | None:
+    """Describe a new bare ``frozen`` parameter outside the known sites, else None."""
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return None
+    arguments = node.args
+    names = [
+        arg.arg
+        for arg in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            arguments.vararg,
+            arguments.kwarg,
+        )
+        if arg is not None
+    ]
+    name = getattr(node, "name", "<lambda>")
+    if _FROZEN_FLAG in names and (path, name) not in _FROZEN_PARAMETER_SITES:
+        return f"new frozen parameter on {name}"
+    return None
+
+
+def _is_frozen_flag(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value == _FROZEN_FLAG
+
+
+def _is_frozen_target(node: ast.AST) -> bool:
+    """Return whether *node* names the install flag as an attribute or key."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == _FROZEN_FLAG and (
+            dotted_name(node.value) not in _FOREIGN_FROZEN_RECEIVERS
+        )
+    return isinstance(node, ast.Subscript) and _is_frozen_flag(node.slice)
+
+
+def _frozen_flag_read(node: ast.AST) -> str | None:
+    """Describe one read of an install ``frozen`` flag, else None.
+
+    Plain writes and deletes (``options["frozen"] = False``) are not reads;
+    an augmented assignment reads the previous value first.
+    """
+    if isinstance(node, ast.Call):
+        return _frozen_call_read(node)
+    if isinstance(node, ast.AugAssign) and _is_frozen_target(node.target):
+        return "augmented frozen read"
+    if (
+        isinstance(node, (ast.Attribute, ast.Subscript))
+        and isinstance(node.ctx, ast.Load)
+        and _is_frozen_target(node)
+    ):
+        return "raw .frozen read" if isinstance(node, ast.Attribute) else "raw ['frozen'] read"
+    if isinstance(node, ast.MatchClass) and _FROZEN_FLAG in node.kwd_attrs:
+        return "frozen= class pattern read"
+    if isinstance(node, ast.MatchMapping) and any(_is_frozen_flag(key) for key in node.keys):
+        return "{'frozen': ...} mapping pattern read"
+    return None
+
+
+def _frozen_call_read(node: ast.Call) -> str | None:
+    """Describe a call that reads the install ``frozen`` flag by name, else None."""
+    name = dotted_name(node.func).rsplit(".", 1)[-1]
+    if (
+        name in {"getattr", "hasattr"}
+        and len(node.args) >= 2
+        and _is_frozen_flag(node.args[1])
+        and dotted_name(node.args[0]) not in _FOREIGN_FROZEN_RECEIVERS
+    ):
+        return f"{name}(..., 'frozen') read"
+    if name == "attrgetter" and any(_is_frozen_flag(arg) for arg in node.args):
+        return "attrgetter('frozen') read"
+    # Only the first argument of get/pop is the key; later ones are defaults.
+    if name in {"get", "pop"} and node.args and _is_frozen_flag(node.args[0]):
+        return f"{name}('frozen') read"
+    return None
+
+
+def _requires_disposition(index: object, function: str) -> bool:
+    """Return whether *function* takes ``frozen_disposition`` keyword-only, no default."""
+    for node in getattr(index, "nodes", ()):
+        if isinstance(node, ast.FunctionDef) and node.name == function:
+            arguments = node.args
+            return any(
+                arg.arg == "frozen_disposition" and default is None
+                for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+            )
+    return False
+
+
+def check_frozen_flag_reader(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Only InstallService reads the install ``frozen`` flag (closed world, #4012).
+
+    Every other module consumes ``InstallService.frozen_disposition``. There is
+    no exemption marker: a new reader must route through the owner.
+    """
+    rule_id = _GUARD_FROZEN_FLAG_READER
+    owner, failures = _facts_for(provider, _FROZEN_OWNER, rule_id)
+    if failures:
+        return tuple(failures)
+    findings: list[Violation] = []
+    if not _present_re(owner, re.compile(r"^    def frozen_disposition\(")):
+        findings.append(
+            _summary(rule_id, _FROZEN_OWNER, "InstallService must own frozen_disposition")
+        )
+    for path, function in _FROZEN_DISPOSITION_CONSUMERS:
+        _, consumer_failures = _facts_for(provider, path, rule_id)
+        findings.extend(consumer_failures)
+        if not consumer_failures and not _requires_disposition(provider.tree_index(path), function):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    f"{function} must require frozen_disposition as a keyword-only argument",
+                )
+            )
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == _FROZEN_OWNER:
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            reason = _frozen_flag_read(node) or _frozen_parameter(node, path)
+            if reason is not None:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{reason}: only InstallService.frozen_disposition reads the "
+                        "install frozen flag",
+                        line=getattr(node, "lineno", 1),
+                    )
+                )
     return tuple(findings)
 
 
@@ -508,25 +678,24 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
     return tuple(findings)
 
 
+_ORPHAN_OWNER = "src/apm_cli/install/orphans.py"
+
+
 def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Uninstall engine must reuse deps/reachability.py's forward-reachability walk."""
+    """The orphan owner must reuse deps/reachability.py's forward-reachability walk."""
     rule_id = _GUARD_UNINSTALL_REACHABILITY
     findings: list[Violation] = []
-    engine, engine_fail = _facts_for(provider, _UNINSTALL_ENGINE, rule_id)
-    if engine_fail:
-        return tuple(engine_fail)
+    owner, owner_fail = _facts_for(provider, _ORPHAN_OWNER, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
 
-    reach_pattern = re.compile(
-        r"reachability\.compute_forward_reachable_keys"
-        r"|from \.\.\.deps\.reachability import"
-        r"|from apm_cli\.deps\.reachability import"
-    )
-    if not _present_re(engine, reach_pattern):
+    if not _present_re(owner, re.compile(r"\bcompute_forward_reachable_keys\(")):
         findings.append(
             _summary(
                 rule_id,
-                _UNINSTALL_ENGINE,
-                "Uninstall engine must call deps/reachability.py's compute_forward_reachable_keys",
+                _ORPHAN_OWNER,
+                "Uninstall orphan decisions must call deps/reachability.py's "
+                "compute_forward_reachable_keys",
             )
         )
     for path in _python_paths(provider, "src/apm_cli/commands/uninstall/"):
@@ -551,14 +720,20 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
                     findings.append(
                         violation(rule_id, path, message, line=number, column=column + 1)
                     )
-    # Prune and the expected-path selector ask the same owner which lock
-    # entries are retained instead of re-deriving ``depth > 1`` (#3668).
-    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/install/orphans.py"):
+    # Prune's orphan decision asks the reachability owner which lock entries
+    # are retained instead of re-deriving ``depth > 1`` (#3668).
+    for path in ("src/apm_cli/commands/prune.py", _ORPHAN_OWNER):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
         if failures:
             continue
-        if not _present_re(facts, re.compile(r"\bretained_lock_keys\(")):
+        # The owner runs the walk; prune hands it the walk's inputs.
+        needle = (
+            re.compile(r"\bretained_lock_keys\(")
+            if path == _ORPHAN_OWNER
+            else re.compile(r"\breachability=ReachabilityProbe\(")
+        )
+        if not _present_re(facts, needle):
             findings.append(
                 _summary(rule_id, path, "Retained lock keys must come from deps/reachability.py")
             )
@@ -798,13 +973,15 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     subset_body = _awk_body(
         ci_checks, re.compile(r"^def _check_skill_subset_consistency\("), re.compile(r"^def ")
     )
+    view_body = _awk_body(ci_checks, re.compile(r"^def audit_mcp_view\("), re.compile(r"^def "))
     if (
         not _present_re(owner, re.compile(r"^def prepare_ci_audit_replay\("))
         or "run_replay" in audit_gate_calls
         or not _body_has(config_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay_error is not None")
-        or not _body_has(config_body, "project_root / APM_MODULES_DIR")
+        or not _body_has(config_body, "audit_mcp_view(")
+        or not _body_has(view_body, "project_root / APM_MODULES_DIR")
         or not _body_has(subset_body, "project_root / APM_MODULES_DIR")
     ):
         findings.append(

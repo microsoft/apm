@@ -199,6 +199,7 @@ def test_late_service_boundary_requires_actual_selected_source_evidence(
         "explicit_target": None,
         "target_decision": None,
         "active_package_keys": frozenset({dependency.get_unique_key()}),
+        "frozen_disposition": InstallService.frozen_disposition(context),
     }
     if mode is InstallMode.ALL:
         with pytest.raises(FrozenInstallError, match="cannot replay") as failure:
@@ -258,6 +259,21 @@ def test_native_guard_does_not_adopt_unrecorded_native_ownership(legacy: bool) -
         "  - MCP server 'managed' target 'intellij' ownership is not recorded in apm.lock.yaml"
     ]
     assert lock.mcp_target_servers == {}
+
+
+def test_native_guard_never_requires_a_claim_where_claude_loads_the_plugin() -> None:
+    """#3290: APM writes no Claude copy of a native plugin's server, so none is recorded."""
+    lock = LockFile(mcp_servers=["tracker"], mcp_target_servers={"copilot": ["tracker"]})
+    lock._mcp_target_servers_present = True
+    InstallService.enforce_frozen_services(
+        lock,
+        mcp_servers={"tracker"},
+        mcp_targets=["claude", "copilot"],
+        lsp_target_servers={},
+        current_mcp=None,
+        user_scope=True,
+        mcp_native_runtimes={"tracker": frozenset({"claude"})},
+    )
 
 
 def test_native_guard_requires_actual_source_evidence_even_without_claims() -> None:

@@ -176,11 +176,11 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
         return None
     if not isinstance(data, dict):
         return None
-    from ..deps.lockfile import require_supported_lockfile_version
+    from ..deps.lockfile import recorded_generator, require_supported_lockfile_version
     from ..deps.lockfile_generator import warn_if_newer
 
     data["lockfile_version"] = require_supported_lockfile_version(data)
-    warn_if_newer(lf_path, data.get("apm_version"), bundle=True)
+    warn_if_newer(lf_path, recorded_generator(data), bundle=True)
     return data
 
 
@@ -334,6 +334,15 @@ def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
+
+
+def looks_like_local_bundle(path: Path) -> bool:
+    """Cheap shape check for a local bundle path, without extracting archives."""
+    path = Path(path)
+    if path.is_dir():
+        return (path / "plugin.json").is_file()
+    name = path.name.lower()
+    return path.is_file() and name.endswith((".zip", ".tar.gz", ".tgz"))
 
 
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:

@@ -288,51 +288,24 @@ def get_unsupported_targets() -> list[str]:
     return [name for name, profile in KNOWN_TARGETS.items() if profile.user_supported is False]
 
 
-def warn_unsupported_user_scope() -> str:
-    """Return a warning message listing targets that lack user-scope support.
+def warn_unsupported_user_scope(targets) -> str:
+    """Return a warning naming primitives user scope skips for *targets*.
 
-    Returns an empty string when all targets are fully supported.
-
-    The message distinguishes three categories:
-
-    * **fully supported** -- ``user_supported is True``
-    * **partially supported** -- ``user_supported == "partial"``
-    * **not supported** -- ``user_supported is False``
-
-    When some targets have ``unsupported_user_primitives``, a second line
-    is added listing those primitives per target.
+    Only the selected targets are named: a Claude-only global install is
+    not warned about Windsurf (#3994). Returns an empty string when every
+    selected target deploys all of its primitives at user scope.
     """
     from ..integration.targets import KNOWN_TARGETS
 
-    fully_supported = [name for name, p in KNOWN_TARGETS.items() if p.user_supported is True]
-    partially_supported = [
-        name for name, p in KNOWN_TARGETS.items() if p.user_supported == "partial"
-    ]
-    unsupported = [name for name, p in KNOWN_TARGETS.items() if p.user_supported is False]
-
-    if not unsupported and not partially_supported:
+    skipped: list[str] = []
+    for name in dict.fromkeys(targets):
+        profile = KNOWN_TARGETS.get(name)
+        if profile is None:
+            continue
+        if profile.user_supported is False:
+            skipped.append(f"{name} (all primitives)")
+        elif profile.unsupported_user_primitives:
+            skipped.append(f"{name} ({', '.join(profile.unsupported_user_primitives)})")
+    if not skipped:
         return ""
-
-    parts: list[str] = []
-
-    supported_names = ", ".join(fully_supported)
-    parts.append(f"User-scope primitives are fully supported by {supported_names}.")
-
-    if partially_supported:
-        partial_names = ", ".join(partially_supported)
-        parts[0] += f" Partially supported: {partial_names}."
-
-    if unsupported:
-        unsupported_names = ", ".join(unsupported)
-        parts[0] += f" Targets without native user-level support: {unsupported_names}"
-
-    # Collect per-target unsupported primitives
-    unsupported_prims: list[str] = []
-    for name, profile in KNOWN_TARGETS.items():
-        prims = profile.unsupported_user_primitives
-        if prims:
-            unsupported_prims.append(f"{name} ({', '.join(prims)})")
-    if unsupported_prims:
-        parts.append("Some primitives are not supported: " + "; ".join(unsupported_prims))
-
-    return "\n".join(parts)
+    return "User scope does not deploy these primitives: " + "; ".join(skipped)

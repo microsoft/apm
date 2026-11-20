@@ -18,7 +18,6 @@ import yaml
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import (
     RuleBasedStateMachine,
-    initialize,
     invariant,
     precondition,
     rule,
@@ -55,6 +54,7 @@ from tests.utils.artifact_snapshot import (
 )
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_package import LocalPackage
+from tests.utils.world_snapshot import restore_tree
 
 pytestmark = [
     pytest.mark.integration,
@@ -306,11 +306,6 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         self.installed_revision = "a"
         self.published_commit = fixture.source.commit.sha
         self.installed_commit = fixture.source.commit.sha
-
-    @initialize()
-    def mandatory_spine(self) -> None:
-        """Guarantee connected commands inside every generated model execution."""
-        _mandatory_replay(self)
 
     @property
     def scenario(self) -> _Scenario:
@@ -612,7 +607,8 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
             1,
             command_cwd=self.fixture.audit_cwd,
         )
-        assert "is not tracked by any installed package" in " ".join(found.stdout.split())
+        # apm find keeps stdout for package names; errors go to stderr (#3994).
+        assert "is not tracked by any installed package" in " ".join(found.stderr.split())
         _assert_same_state(state, self._state())
         assert_snapshot_set_unchanged(before, self._capture())
 
@@ -680,6 +676,7 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
     @precondition(lambda self: self.fixture.global_scope and self.declared and self.materialized)
     def update(self) -> None:
         before = self._capture()
+        revision_changes = self.installed_commit != self.published_commit
         self._run(("update", "--global", "--yes", "--parallel-downloads", "0"), "update")
         assert_snapshot_changes_within(
             before,
@@ -689,7 +686,9 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         )
         self.installed_revision = self.published_revision
         self.installed_commit = self.published_commit
-        self.clean = True
+        # An update with nothing newer is a no-op and keeps local edits.
+        if revision_changes:
+            self.clean = True
 
     @rule()
     @precondition(lambda self: self.fixture.global_scope and self.materialized)
@@ -875,9 +874,52 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
                 assert alias.readlink() == self.scenario.isolated.home
         assert (self.project.root / "apm.lock.yaml").exists() is self.locked
 
-    def teardown(self) -> None:
-        """Remove per-example roots after Hypothesis records the result."""
-        shutil.rmtree(self.scenario.isolated.root)
+
+_REFERENCE_FIELDS = (
+    "declared",
+    "materialized",
+    "clean",
+    "locked",
+    "retained_user_file",
+    "local_skill_bytes",
+    "step",
+    "last_operation",
+    "published_revision",
+    "installed_revision",
+    "published_commit",
+    "installed_commit",
+)
+
+
+@dataclass(frozen=True)
+class _SpineWorld:
+    """One world per variant: the mandatory spine replays once, then each example restores it.
+
+    The world is restored at its original absolute path, so every environment
+    value, Git URL rewrite and symlink recorded during the spine stays valid.
+    """
+
+    fixture: _ModelFixture
+    pristine: Path
+    reference: tuple[tuple[str, object], ...]
+
+    @classmethod
+    def replay(
+        cls, root: Path, apm_binary_path: Path, variant: str
+    ) -> tuple[_SpineWorld, _LifecycleReferenceModel]:
+        model = _LifecycleReferenceModel(_ModelFixture.create(root, apm_binary_path, variant))
+        _mandatory_replay(model)
+        pristine = root.parent / f"{root.name}-pristine"
+        shutil.copytree(model.scenario.isolated.root, pristine, symlinks=True)
+        reference = tuple((name, getattr(model, name)) for name in _REFERENCE_FIELDS)
+        return cls(model.fixture, pristine, reference), model
+
+    def restore(self) -> _LifecycleReferenceModel:
+        restore_tree(self.pristine, self.fixture.scenario.isolated.root)
+        model = _LifecycleReferenceModel(self.fixture)
+        for name, value in self.reference:
+            setattr(model, name, value)
+        return model
 
 
 @pytest.mark.parametrize("variant", _VARIANTS)
@@ -886,12 +928,20 @@ def test_generated_lifecycle_sequences_preserve_reference_model(
     apm_binary_path: Path,
     variant: str,
 ) -> None:
-    """Generate and shrink guarded transition sequences over a real CLI."""
-    sequence = itertools.count()
+    """Generate and shrink guarded transition sequences over a real CLI.
+
+    The mandatory spine replays once per world, inside the first generated
+    model; every later example restores that post-spine world instead of
+    replaying the spine again.
+    """
+    world: _SpineWorld | None = None
 
     def factory() -> _LifecycleReferenceModel:
-        case_root = tmp_path / f"case-{next(sequence):03d}"
-        return _LifecycleReferenceModel(_ModelFixture.create(case_root, apm_binary_path, variant))
+        nonlocal world
+        if world is None:
+            world, model = _SpineWorld.replay(tmp_path / "world", apm_binary_path, variant)
+            return model
+        return world.restore()
 
     run_state_machine_as_test(
         factory,

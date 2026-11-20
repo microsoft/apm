@@ -945,3 +945,26 @@ def test_opencode_enabled_object_order_does_not_create_drift() -> None:
         )
         == set()
     )
+
+
+class TestMCPDependencyTargetsScoping:
+    """Regression for #2606: ``targets`` scopes reach; it is not a harness passthrough key."""
+
+    def test_targets_key_does_not_leak_into_extra(self):
+        dep = MCPDependency.from_dict(
+            {
+                "name": "srv-claude-only",
+                "registry": False,
+                "transport": "stdio",
+                "command": "echo",
+                "targets": ["claude"],
+            }
+        )
+        assert "targets" not in (dep.extra or {})
+
+    def test_targets_is_modeled_and_rejects_unknown_target_names(self):
+        base = {"name": "srv", "registry": False, "transport": "stdio", "command": "echo"}
+        scoped = MCPDependency.from_dict({**base, "targets": ["claude"]})
+        assert scoped.targets == ["claude"]
+        with pytest.raises(ValueError, match="Unknown target 'claud'"):
+            MCPDependency.from_dict({**base, "targets": ["claud"]})

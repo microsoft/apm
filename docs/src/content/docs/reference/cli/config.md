@@ -75,7 +75,7 @@ Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supporte
 | `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. Requires the `copilot-cowork` experimental flag for `set`. |
 | `audit-on-install` | enum | `off` | Default content-audit mode for `apm install`: `off` / `warn` / `block`. `warn` records findings in the install summary; `block` halts on critical findings. Overridable per-install with `--audit` / `--no-audit`; an org policy `security.audit.on_install` floor can raise it. Requires the `external-scanners` experimental flag for `set`. |
 | `external.<name>.llm` | boolean | unset | Opt a SARIF scanner into LLM-powered analysis (`<name>` validated against supported scanners). SkillSpector default is offline. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`. Overridable per-run with `--external-llm` / `--no-external-llm`. Requires the `external-scanners` experimental flag. |
-| `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
+| `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). A value starting with `-` needs `--` first: `apm config set -- external.<name>.args "--model gpt-4o"`. Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
 | `mcp-registry-url` | URL | GitHub MCP Registry | Persist a private MCP registry endpoint. Accepts `http://` or `https://` URLs. Provides a persistent fallback below `MCP_REGISTRY_URL` and above the built-in default, and applies to every registry lookup: `apm mcp list/search/show`, `apm install --mcp NAME`, and the `dependencies.mcp` entries `apm install` reads from `apm.yml`. |
 | `registry.<name>.url` | URL | unset | Base URL for registry `<name>`. Requires `registries` experimental flag. |
 | `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `$APM_HOME/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
@@ -247,14 +247,14 @@ apm config get registry.corp-main.default
 apm config unset registry.corp-main.token
 ```
 
-With URL, token, and default set in `config.json`, a project can omit the top-level `registries:` block from `apm.yml` and still route shorthand deps through `corp-main`. See [Registries](../../../guides/registries/).
+With URL, token, and default set in `config.json`, a project can omit the top-level `registries:` block from `apm.yml` and still route shorthand deps through `corp-main`. See [Registries](../../registries/).
 
 Configure an external scanner (experimental):
 
 ```bash
 apm experimental enable external-scanners
 apm config set external.skillspector.llm true
-apm config set external.skillspector.args "--model gpt-4o"
+apm config set -- external.skillspector.args "--model gpt-4o"   # -- ends option parsing
 apm config get external.skillspector.llm
 apm config unset external.skillspector.args
 ```
@@ -275,4 +275,4 @@ Internal JSON keys use snake_case (`install_target`, `self_update_channel`, `sel
 - [`apm self-update`](../self-update/) -- consumes `self-update.channel` and `self-update.install-dir`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
 - [Environment variables](../../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK` and `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys; `APM_GITHUB_AUTH_FIRST` is the env-var equivalent of the credential-order `github-auth-first` key.
-- [Registries](../../../guides/registries/) -- full private registry setup guide.
+- [Registries](../../registries/) -- full private registry setup guide.

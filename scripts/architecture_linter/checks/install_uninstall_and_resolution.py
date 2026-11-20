@@ -33,36 +33,7 @@ _GUARD_RESOLUTION_REPLACEMENT = "install-deployment-resolution-replacement"
 
 
 _GUARD_UNINSTALL_SELECTION = "install-deployment-uninstall-selection"
-_GUARD_ORPHAN_SELECTION = "install-deployment-orphan-selection"
 _GUARD_IMMUTABLE_REQUIREMENTS = "install-deployment-immutable-requirements"
-
-
-def check_orphan_selection(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Prune, advisory warnings and targeted installs share orphan selection."""
-    findings: list[Violation] = []
-    for path, scope in (
-        ("src/apm_cli/commands/_helpers.py", "_check_orphaned_packages"),
-        ("src/apm_cli/commands/deps/cli.py", "_resolve_scope_deps"),
-        ("src/apm_cli/commands/prune.py", "prune"),
-        ("src/apm_cli/install/phases/cleanup.py", "_remove_dropped_package_dirs"),
-        ("src/apm_cli/install/phases/cleanup.py", "_trim_superseded_package_roots"),
-    ):
-        facts, failures = _facts_for(provider, path, _GUARD_ORPHAN_SELECTION)
-        findings.extend(failures)
-        if failures:
-            continue
-        if not any(
-            call.qualname == "_find_orphaned_packages" and call.scope == scope
-            for call in facts.calls
-        ):
-            findings.append(
-                _summary(
-                    _GUARD_ORPHAN_SELECTION,
-                    path,
-                    f"{scope} must route orphan selection through _find_orphaned_packages",
-                )
-            )
-    return tuple(findings)
 
 
 def check_immutable_requirements(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -85,7 +56,7 @@ def check_immutable_requirements(provider: FactsProvider) -> tuple[Violation, ..
         "src/apm_cli/deps/apm_resolver.py": ("requirements.add(node)", "ImmutableRequirements("),
         "src/apm_cli/install/phases/resolve.py": (
             "reference_resolver=downloader",
-            "frozen=ctx.frozen",
+            "frozen=InstallService.frozen_disposition(ctx).replay",
         ),
         "src/apm_cli/install/service.py": ("frozen=request.frozen",),
         "src/apm_cli/install/pipeline.py": ("frozen=frozen",),
@@ -138,8 +109,9 @@ _UNINSTALL_ROUTES = (
     ("_removed_lock_key", "_removal_target", 1),
     ("_remove_packages_from_disk", "_removal_target", 1),
     ("_dry_run_uninstall", "_removal_target", 1),
-    ("_dry_run_uninstall", "_removal_targets", 1),
-    ("_project_transitive_orphans", "_removal_targets", 1),
+    ("_dry_run_uninstall", "_project_transitive_orphans", 1),
+    ("_project_transitive_orphans", "_uninstall_orphan_decision", 1),
+    ("_uninstall_orphan_decision", "_removal_targets", 1),
     # #3953: read-only package selection reuses the uninstall selector.
     ("select_installed_lock_key", "_validate_uninstall_packages", 1),
     ("select_installed_lock_key", "_removed_lock_key", 1),

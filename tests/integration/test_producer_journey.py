@@ -110,13 +110,12 @@ class TestAggregatorJourney:
         content = Path("apm.yml").read_text()
         assert "marketplace:" in content
 
-    def test_legacy_init_marketplace_flag_equivalent(self, runner, workdir):
-        """Legacy ``apm init --marketplace`` still seeds the same block."""
+    def test_removed_init_marketplace_flag_points_at_marketplace_init(self, runner, workdir):
+        """``apm init --marketplace`` was removed in 0.37 (#4073)."""
         result = runner.invoke(cli, ["init", "agg-demo", "--marketplace", "--yes"])
-        assert result.exit_code == 0, result.output
-        assert "deprecated" in result.stderr.lower()
-        content = Path("apm.yml").read_text()
-        assert "marketplace:" in content
+        assert result.exit_code == 2, result.output
+        assert "Run: apm marketplace init" in result.stderr
+        assert not Path("agg-demo").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +128,10 @@ class TestMonorepoJourney:
 
     def test_init_two_packages_under_monorepo(self, runner, workdir):
         # Aggregator at root
-        r1 = runner.invoke(cli, ["init", "monorepo-demo", "--marketplace", "--yes"])
+        r1 = runner.invoke(cli, ["init", "monorepo-demo", "--yes"])
         assert r1.exit_code == 0, r1.output
         # Now in monorepo-demo/
+        assert runner.invoke(cli, ["marketplace", "init"]).exit_code == 0
         Path("packages").mkdir(exist_ok=True)
         os.chdir("packages")
         Path("pkg-a").mkdir()
@@ -183,38 +183,7 @@ class TestHybridJourney:
 
 
 class TestSurfaceEquivalence:
-    """``apm plugin init`` and ``apm init --plugin`` MUST produce identical
-    on-disk artifacts. This guarantees a zero-cost migration.
-    """
-
-    def _hash_dir(self, path: Path) -> dict[str, str]:
-        out = {}
-        for f in sorted(path.rglob("*")):
-            if f.is_file():
-                rel = f.relative_to(path).as_posix()
-                out[rel] = f.read_text()
-        return out
-
-    def test_new_surface_matches_legacy_flag_byte_for_byte(self, runner, workdir):
-        # First run: new surface
-        r1 = runner.invoke(cli, ["plugin", "init", "parity-demo", "--yes"])
-        assert r1.exit_code == 0, r1.output
-        new_files = self._hash_dir(Path.cwd())  # we are in parity-demo/
-        # Walk back to workdir, clean, run legacy flag
-        os.chdir("..")
-        import shutil
-
-        shutil.rmtree("parity-demo")
-        r2 = runner.invoke(cli, ["init", "parity-demo", "--plugin", "--yes"])
-        assert r2.exit_code == 0, r2.output
-        legacy_files = self._hash_dir(Path.cwd())  # in parity-demo/ again
-        assert set(new_files.keys()) == set(legacy_files.keys()), (
-            f"file sets differ: new={sorted(new_files)}, legacy={sorted(legacy_files)}"
-        )
-        for rel in new_files:
-            assert new_files[rel] == legacy_files[rel], (
-                f"{rel} differs between new and legacy surfaces"
-            )
+    """Consumer ``apm init`` teaches the producer noun-verb namespace."""
 
     def test_apm_init_consumer_surfaces_namespace_hints(self, runner, workdir):
         """Wave 3 v3 promise: consumer init teaches noun-verb namespace."""
@@ -223,9 +192,8 @@ class TestSurfaceEquivalence:
         # Both noun-verb pointers appear
         assert "apm plugin init" in result.output
         assert "apm marketplace init" in result.output
-        # Consumer scripts also pointed at
+        # Consumers are pointed at install; `apm run` is no longer advertised (#4004).
         assert "apm install" in result.output
-        assert "apm run" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -233,24 +201,20 @@ class TestSurfaceEquivalence:
 # ---------------------------------------------------------------------------
 
 
-class TestDeprecationContract:
-    """Both deprecated flags MUST emit a stderr warning, name the
-    replacement, and cite the removal milestone. CI catches accidental
-    rewordings that would break our externally-promised migration path.
+class TestRemovedFlagContract:
+    """``apm init --plugin`` / ``--marketplace`` were removed in 0.37 (#4073).
+
+    Each stays a hidden stub: it writes nothing, exits 2 and names the
+    replacement, so scripts fail loudly with the migration path.
     """
 
-    def test_init_plugin_flag_warning_shape(self, runner, workdir):
-        result = runner.invoke(cli, ["init", "x", "--plugin", "--yes"])
-        assert result.exit_code == 0
-        msg = result.stderr.lower()
-        assert "deprecated" in msg
-        assert "apm plugin init" in result.stderr
-        assert "v0.16" in result.stderr
-
-    def test_init_marketplace_flag_warning_shape(self, runner, workdir):
-        result = runner.invoke(cli, ["init", "y", "--marketplace", "--yes"])
-        assert result.exit_code == 0
-        msg = result.stderr.lower()
-        assert "deprecated" in msg
-        assert "apm marketplace init" in result.stderr
-        assert "v0.16" in result.stderr
+    @pytest.mark.parametrize(
+        ("flag", "replacement"),
+        [("--plugin", "apm plugin init"), ("--marketplace", "apm marketplace init")],
+    )
+    def test_removed_flag_shape(self, runner, workdir, flag, replacement):
+        result = runner.invoke(cli, ["init", "x", flag, "--yes"])
+        assert result.exit_code == 2
+        assert f"Run: {replacement}" in result.stderr
+        assert "removed in 0.37" in result.stderr
+        assert not Path("x").exists()

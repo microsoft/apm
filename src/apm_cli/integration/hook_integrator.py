@@ -59,12 +59,14 @@ from apm_cli.integration.hook_native_formats import (
     require_claude_native_events,
 )
 from apm_cli.integration.hook_ownership import (
+    LocalBundleMarkers,
     dependency_hook_source_marker,
     dependency_hook_sources,
     drop_dependency_owned_entries,
     drop_source_entries,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
+    read_hook_object,
     read_merged_hook_config,
 )
 from apm_cli.integration.hook_ownership import (
@@ -81,7 +83,7 @@ from apm_cli.integration.hook_source_selection import (
     resolve_relative_hook_script,
     select_hook_sources,
 )
-from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
@@ -91,6 +93,7 @@ from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import UserHookHomeReference
 
 _log = logging.getLogger(__name__)
@@ -900,7 +903,7 @@ class HookIntegrator(BaseIntegrator):
                 return "_local"
             return f"_local/{package_name}"
         if isinstance(bundle_id := getattr(package_info, "local_bundle_id", None), str):
-            return local_bundle_hook_source_marker(bundle_id)
+            return local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)
         try:
             dependency_ref = vars(package_info).get("dependency_ref")
         except TypeError:
@@ -1116,9 +1119,8 @@ class HookIntegrator(BaseIntegrator):
                 continue
 
             # Write rewritten JSON
-            with open(target_path, "w", encoding="utf-8") as f:
-                json.dump(rewritten, f, indent=2)
-                f.write("\n")
+            write_text_lf(target_path, json.dumps(rewritten, indent=2) + "\n")
+            self.note_rendered_write(target_path)
 
             hooks_integrated += 1
             target_paths.append(target_path)
@@ -1723,8 +1725,10 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         excluded_targets,
+        *,
+        dry_run: bool = False,
     ) -> HookTargetReconcileStats:
-        """Remove this package's merged hooks from targets it no longer deploys to (#3924)."""
+        """Remove hooks from targets the package no longer deploys to, or count them (#3924)."""
         package_name = self._get_package_name(package_info, project_root)
         source_marker, legacy_source_markers = self._get_hook_source_markers(
             package_info,
@@ -1732,15 +1736,14 @@ class HookIntegrator(BaseIntegrator):
             package_name,
         )
         markers = frozenset({source_marker, *legacy_source_markers})
-        return self._retire_source_markers(project_root, excluded_targets, markers)
+        return self._retire_source_markers(project_root, excluded_targets, markers, dry_run)
 
     def retire_local_bundle_hooks(self, bundle_id: str, project_root: Path, targets):
         """Remove one local bundle's merged hooks; its next install ships none (#3700)."""
-        marker = frozenset({local_bundle_hook_source_marker(bundle_id)})
-        return self._retire_source_markers(project_root, targets, marker)
+        return self._retire_source_markers(project_root, targets, LocalBundleMarkers(bundle_id))
 
     def _retire_source_markers(
-        self, project_root: Path, excluded_targets, source_markers: frozenset[str]
+        self, project_root: Path, excluded_targets, source_markers: frozenset[str], dry_run=False
     ) -> HookTargetReconcileStats:
         stats: HookTargetReconcileStats = {
             "files_removed": 0,
@@ -1761,10 +1764,12 @@ class HookIntegrator(BaseIntegrator):
                 stats,
                 container=config.event_container_key,
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+                dry_run=dry_run,
             )
             if stats["errors"] != errors_before:
                 stats["failed_targets"].append(target.name)
-                stats["failed_paths"].append(portable_relpath(json_path, project_root))
+                for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
+                    stats["failed_paths"].append(portable_relpath(path, project_root))
         return stats
 
     @staticmethod
@@ -1775,26 +1780,14 @@ class HookIntegrator(BaseIntegrator):
         *,
         container: str,
         sidecar_path: Path,
+        dry_run: bool = False,
     ) -> None:
         """Remove one package owner while preserving user and sibling entries."""
         if not json_path.exists() and not sidecar_path.exists():
             return
         try:
-            data: dict = {}
-            if json_path.exists():
-                with open(json_path, encoding="utf-8") as handle:
-                    raw_data = json.load(handle)
-                if not isinstance(raw_data, dict):
-                    raise TypeError("native hook config must contain an object")
-                data = raw_data
-
-            sidecar_data: dict = {}
-            if sidecar_path.exists():
-                with open(sidecar_path, encoding="utf-8") as handle:
-                    raw_sidecar = json.load(handle)
-                if not isinstance(raw_sidecar, dict):
-                    raise TypeError("hook sidecar must contain an object")
-                sidecar_data = raw_sidecar
+            data = read_hook_object(json_path)
+            sidecar_data = read_hook_object(sidecar_path)
 
             hooks = data.get(container)
             native_modified = False
@@ -1846,6 +1839,12 @@ class HookIntegrator(BaseIntegrator):
                     event_name: entries for event_name, entries in sidecar_out.items() if entries
                 }
 
+            if dry_run:
+                # Match the config and sidecar writes that a real cleanup would make.
+                stats["files_removed"] += int(native_modified) + int(
+                    native_modified or sidecar_had_source
+                )
+                return
             if native_modified:
                 atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
@@ -1868,6 +1867,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         managed_file_hashes: dict[str, str] | None = None,
         targets=None,
+        evidence: "DeploymentEvidence | None" = None,
     ) -> dict:
         """Remove APM-managed hook files.
 
@@ -1890,27 +1890,19 @@ class HookIntegrator(BaseIntegrator):
         ]
         hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import remove_stale_deployed_files
-            from apm_cli.utils.diagnostics import DiagnosticCollector
+            from apm_cli.integration.cleanup import remove_synced_files
 
-            cleanup_paths: set[str] = set()
-            for rel_path in managed_files:
-                if not (normalized := rel_path.replace("\\", "/")).startswith(hook_prefix_tuple):
-                    continue
-                cleanup_paths.add(rel_path if Path(rel_path).is_absolute() else normalized)
-
-            cleanup_diagnostics = DiagnosticCollector()
-            cleanup = remove_stale_deployed_files(
-                cleanup_paths,
+            # Deletion needs deployment evidence; None keeps every file (#3701).
+            cleanup = remove_synced_files(
+                managed_files,
                 project_root,
+                prefixes=hook_prefix_tuple,
                 dep_key="<uninstall hooks>",
                 targets=guard_targets,
-                diagnostics=cleanup_diagnostics,
+                evidence=evidence,
                 recorded_hashes=managed_file_hashes,
-                failed_path_retained=False,
                 allow_final_symlink=True,
             )
-            cleanup_diagnostics.render_summary()
             stats["files_removed"] += len(cleanup.deleted)
             retained = cleanup.retained
             if retained:
@@ -1964,7 +1956,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
         )
-        from apm_cli.security.executables import resolve_project_exec_allow_map
+        from apm_cli.security.executables import closed_exec_map, resolve_project_exec_allow_map
 
         from .targets import resolve_targets
 
@@ -1986,11 +1978,11 @@ class HookIntegrator(BaseIntegrator):
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
         )
-        allow_map = None
-        if survivor_plan:
-            allow_map = resolve_project_exec_allow_map(
-                project_root, apm_package, user_scope=user_scope
-            )
+        allow_map = (
+            resolve_project_exec_allow_map(project_root, apm_package, user_scope=user_scope)
+            if survivor_plan
+            else closed_exec_map(None)
+        )
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(
