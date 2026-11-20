@@ -87,7 +87,7 @@ CI; a missing hash requires reinstalling to establish that baseline. These
 checks do not turn cache files into deployed-file claims. Native registration
 files are not covered by this content comparison.
 
-This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
+This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../enterprise/drift-detection/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
 `PACKAGE`, when supplied, scans one installed dependency, so only files recorded for that package are included. Pass the dependency key from `apm.lock.yaml` (`owner/repo` for GitHub, `host/owner/repo` for other hosts) or any form `apm uninstall` accepts, such as `https://github.com/owner/repo`, `github.com/owner/repo`, `owner/repo#ref`, `plugin@marketplace` or the `_local/<name>` key `apm deps list` prints; APM selects it offline, exactly as uninstall does, and normalizes it to the lockfile key. A package that matches no installed dependency fails with exit `1`, so a typo in a CI gate cannot pass silently:
 
@@ -342,7 +342,7 @@ scratch replay through `install/audit_replay.py`; materialization failures
 fail closed without mutating the checkout. Replay fetches each Git dependency
 over the transport its declaring `apm.yml` states, as install does: a
 `git@host:...` or `ssh://` dependency replays over SSH, and shorthand follows
-the usual [transport selection](../../../consumer/manage-dependencies/#transport-selection).
+the usual [transport selection](../../../consumer/install-packages/#transport-selection).
 
 ### Deployment-owner integrity
 
@@ -396,5 +396,5 @@ CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement
 - [`apm install`](../install/) -- the built-in scan that blocks critical findings before deployment.
 - [`apm export-patch`](../export-patch/) -- turn the `modified` drift this reports into upstream patches.
 - [`apm prune`](../prune/) -- reconciles the canonical deployment-owner references this check validates.
-- [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) -- consumer-side overview of the two-layer security model.
+- [Drift and secure by default](../../../enterprise/drift-detection/) -- consumer-side overview of the two-layer security model.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
