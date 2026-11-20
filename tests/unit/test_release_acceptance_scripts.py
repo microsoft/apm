@@ -75,6 +75,27 @@ class TestLineLint:
         )
         assert [issue["rule"] for issue in capture.lint_lines(out, "", 0)] == []
 
+    def test_tails_wrapped_after_a_colon_are_not_duplicates(self) -> None:
+        # Shape captured from `apm install` at 80 columns: Rich wraps right after "keys:".
+        out = (
+            "  [!] [pkg] Claude command accessibility-audit: frontmatter keys \n"
+            "not supported for claude commands and were dropped: mode. Supported keys: \n"
+            "allowed-tools, argument-hint, description, input, model.\n"
+            "  [!] [pkg] Claude command design-review: frontmatter keys not \n"
+            "supported for claude commands and were dropped: mode. Supported keys: \n"
+            "allowed-tools, argument-hint, description, input, model.\n"
+        )
+        assert capture.lint_lines(out, "", 0) == []
+
+    def test_list_items_after_a_long_colon_line_stay_separate(self) -> None:
+        head = "[x] --frozen: deployed files do not match the hashes recorded in apm.lock:"
+        out = f"{head}\n  - a.md: expected sha256:1\n  - b.md: expected sha256:2\n"
+        assert capture.unwrap(out) == [
+            head,
+            "  - a.md: expected sha256:1",
+            "  - b.md: expected sha256:2",
+        ]
+
     def test_help_screens_skip_the_duplicate_check(self) -> None:
         out = "  --ssh   Prefer SSH transport for git\n  --ssh   Prefer SSH transport for git\n"
         assert capture.lint_lines(out, "", 0, help_output=True) == []

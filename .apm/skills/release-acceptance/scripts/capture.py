@@ -123,21 +123,25 @@ def lint_lines(stdout: str, stderr: str, rc: int, *, help_output: bool = False) 
 def unwrap(text: str, width: int = 70) -> list[str]:
     """Join hard-wrapped continuation lines so a wrapped hint reads whole."""
     lines: list[str] = []
+    prev_physical = ""
     for raw in text.splitlines():
         line = raw.rstrip()
         stripped = line.strip()
+        # A wrap is judged on the previous physical line, not the joined one.
+        # Rich wraps after "keys:" too, so ":" may continue; list items never do.
         if (
             lines
             and stripped
-            and len(lines[-1]) >= width
+            and len(prev_physical) >= width
             and not stripped.startswith(STATUS_PREFIXES)
-            and not stripped.startswith("|")
+            and not stripped.startswith(("|", "- "))
             and not lines[-1].lstrip().startswith("|")
-            and not lines[-1].rstrip().endswith((".", ":", "!", "?"))
+            and not prev_physical.endswith((".", "!", "?"))
         ):
             lines[-1] = f"{lines[-1].rstrip()} {stripped}"
         else:
             lines.append(line)
+        prev_physical = line
     return lines
 
 

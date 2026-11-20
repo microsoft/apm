@@ -2889,7 +2889,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:e2e7219c0c22a9d7420300bb654c9b18ac692ea7e938fedd2fb22a9634e9810a
+  content_hash: sha256:fe2c64f27d7feaee8ddcf1c317229a0f28b31485dc6c0a8fd0aa98d17860b7c5
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/scripts/findings.py
@@ -3671,7 +3671,7 @@ local_deployed_file_hashes:
   .agents/skills/release-acceptance/references/verifier-brief.md: sha256:d0d9a9d1bb1a2721f1130feba1ce583b1bb2c86509e37396e962ada9ceb2c004
   .agents/skills/release-acceptance/references/walker-brief.md: sha256:3e0190461cbcdef88f81b750ab2016a7f64465f25525c122b398335640c3c539
   .agents/skills/release-acceptance/scripts/brief_lint.py: sha256:faefe5c3c41d9e9f7b5b89ebecdf33c0036393c9df27d396c5af789b10c43869
-  .agents/skills/release-acceptance/scripts/capture.py: sha256:e2e7219c0c22a9d7420300bb654c9b18ac692ea7e938fedd2fb22a9634e9810a
+  .agents/skills/release-acceptance/scripts/capture.py: sha256:fe2c64f27d7feaee8ddcf1c317229a0f28b31485dc6c0a8fd0aa98d17860b7c5
   .agents/skills/release-acceptance/scripts/findings.py: sha256:8757dc10bf72341f466e280cee13c5d5dc94eb359999daa3080287c75fdcb50c
   .agents/skills/release-acceptance/scripts/journeys.py: sha256:9b68ffbd02b6fde780ae84f6ccd76e380572211b5ce80be60e79f8cc17ef474e
   .agents/skills/release-acceptance/scripts/load_gate.py: sha256:2a022da626bf51cc1e941ab6a920d94c1ee553daa43d0395087044834169059f
