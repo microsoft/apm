@@ -656,7 +656,9 @@ class AgentsCompiler:
                     symbol="info",
                 )
             else:
-                # Full suppression: no AGENTS.md written at all
+                # Full suppression: no AGENTS.md written at all. The stat tells
+                # the CLI the zero-output result is explained, not a misconfig.
+                distributed_result.stats["agents_md_suppressed_by_dedup"] = suppressed_count
                 self._log(
                     "progress",
                     f"AGENTS.md not generated ({suppressed_count} {noun}) -- "
