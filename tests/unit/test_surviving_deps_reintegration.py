@@ -775,6 +775,7 @@ def test_uninstall_reports_org_policy_block_with_next_step(tmp_path: Path) -> No
             modules_dir=tmp_path / "apm_modules",
             deployed_file_hashes={},
             default_counts={"hooks": 0},
+            evidence=None,
         )
 
     assert error is refusal

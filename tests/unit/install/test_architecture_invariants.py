@@ -58,7 +58,8 @@ KNOWN_LARGE_MODULES = {
     # Replay builds the project's own package through the install builder (#3151).
     # Root-only hook replay (#3600), native Claude cache verification (#3290)
     # and local bundle hash drift through the deployed-hash verifier (#3989).
-    "drift.py": 1041,
+    # Cleanup evidence renders recorded targets too (#3701).
+    "drift.py": 1044,
 }
 
 
