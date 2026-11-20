@@ -37,7 +37,7 @@ _UNINSTALL_SIBLING = (
     "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
 )
 _UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
-_BUNDLE = "S-pending (neutral issue to follow): reinstalling a local bundle keeps hook files the gate no longer allows"
+_BUNDLE = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _BIN_UNLOCKED = (
     "#4225 the user lockfile does not record the bin/ files a marketplace plugin deployed"
 )
