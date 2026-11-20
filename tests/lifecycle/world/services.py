@@ -72,8 +72,15 @@ POLICY_VARIANTS = (
     "unreachable",
     "hash-mismatch",
     "chain-cycle",
+    "deny-lsp",
+    "deny-native",
+    "exec-gate-on",
 )
 DENIED_PACKAGE = "p-exec"
+# exec-gate-on: any org executables signal turns the gate on
+# (security/executables.py org_signal); recommending a package the world never
+# serves denies nothing.
+RECOMMENDED_ONLY = f"{ORG}/p-recommended"
 _CHAIN_PEER = "chain-cycle-peer"
 
 
@@ -97,6 +104,21 @@ def policy_documents() -> dict[str, dict[str, object]]:
         "mcp-deny": {"name": "mcp-deny", **base, "mcp": {"deny": ["*"]}},
         # The project pins a different hash (``use_policy``); the served bytes are benign.
         "hash-mismatch": {"name": "hash-mismatch", **base},
+        "deny-lsp": {
+            "name": "deny-lsp",
+            **base,
+            "dependencies": {"deny": ["**/p-lsp", f"{ORG}/p-lsp"]},
+        },
+        "deny-native": {
+            "name": "deny-native",
+            **base,
+            "dependencies": {"deny": ["**/p-native-claude", "**/p-native-codex"]},
+        },
+        "exec-gate-on": {
+            "name": "exec-gate-on",
+            **base,
+            "executables": {"recommend": [RECOMMENDED_ONLY]},
+        },
         "chain-cycle": {
             "name": "chain-cycle",
             **base,
@@ -172,6 +194,17 @@ class WorldServices:
 
     def reset(self) -> None:
         self.proxy.clear()
+
+    def serve(self, slug: str, origin: Path) -> None:
+        """Serve bare repository *origin* as ``owner/repo`` *slug* on every git host.
+
+        For repositories a test authors itself (``file://`` dependency specs are
+        refused by the CLI). Served until the worker's services close.
+        """
+        owner, _, repo = slug.partition("/")
+        if not owner or not repo or "/" in repo:
+            raise ValueError(f"slug must be owner/repo, got {slug!r}")
+        self._repositories[slug] = origin
 
     def start(self, directory: Path) -> WorldServices:
         """Start the proxy; ``directory`` receives its private CA material."""
@@ -264,30 +297,38 @@ class WorldServices:
         if len(parts) == 3:
             return _json(200, {"full_name": f"{owner}/{repo}", "default_branch": "main"})
         if len(parts) == 5 and parts[3] == "commits":
-            sha = self._rev_parse(repository, parts[4])
-            if sha is None:
-                return _not_found()
-            if "sha" in (request.header("Accept") or ""):
-                return ScriptedResponse(200, {"Content-Type": "text/plain"}, sha.encode("ascii"))
-            return _json(200, {"sha": sha})
+            return self._api_commit(request, repository, parts[4])
         if len(parts) == 5 and parts[3] == "contents":
-            ref = (parse_qs(request.query).get("ref") or ["HEAD"])[0]
-            content = self._blob(repository, ref, parts[4])
-            if content is None:
-                return _not_found()
-            if "raw" in (request.header("Accept") or ""):
-                return ScriptedResponse(200, {"Content-Type": "application/octet-stream"}, content)
-            return _json(
-                200,
-                {
-                    "type": "file",
-                    "name": parts[4].rsplit("/", 1)[-1],
-                    "path": parts[4],
-                    "encoding": "base64",
-                    "content": base64.b64encode(content).decode("ascii"),
-                },
-            )
+            return self._api_contents(request, repository, parts[4])
         return _not_found()
+
+    def _api_commit(self, request: ScriptedRequest, repository: Path, ref: str) -> ScriptedResponse:
+        sha = self._rev_parse(repository, ref)
+        if sha is None:
+            return _not_found()
+        if "sha" in (request.header("Accept") or ""):
+            return ScriptedResponse(200, {"Content-Type": "text/plain"}, sha.encode("ascii"))
+        return _json(200, {"sha": sha})
+
+    def _api_contents(
+        self, request: ScriptedRequest, repository: Path, file_path: str
+    ) -> ScriptedResponse:
+        ref = (parse_qs(request.query).get("ref") or ["HEAD"])[0]
+        content = self._blob(repository, ref, file_path)
+        if content is None:
+            return _not_found()
+        if "raw" in (request.header("Accept") or ""):
+            return ScriptedResponse(200, {"Content-Type": "application/octet-stream"}, content)
+        return _json(
+            200,
+            {
+                "type": "file",
+                "name": file_path.rsplit("/", 1)[-1],
+                "path": file_path,
+                "encoding": "base64",
+                "content": base64.b64encode(content).decode("ascii"),
+            },
+        )
 
     def _raw(self, request: ScriptedRequest) -> ScriptedResponse:
         parts = unquote(request.path).lstrip("/").split("/")
