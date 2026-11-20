@@ -1,0 +1,22 @@
+{
+  "changelog": "`apm install` of a `skills/` bundle, including `--frozen` replays, prints one skill integration line instead of two (#4217)",
+  "ledger_row": {
+    "issue": 4207,
+    "fixed_in": "Unreleased",
+    "summary": "A skills/ bundle install reported the same promoted skill twice, as 'Skill integrated' and '1 skill(s) integrated', on install and install --frozen.",
+    "failure_modes": [
+      "outcome"
+    ],
+    "properties": [
+      "outcome.status_matches_state",
+      "idempotency.byte_stable"
+    ],
+    "regression_tests": [
+      "tests/integration/test_install_summary_destinations_lifecycle.py::test_skill_bundle_install_prints_one_skill_line"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_install_summary_destinations_lifecycle.py::test_skill_bundle_install_prints_one_skill_line -n 0 -p no:cacheprovider -q -> AssertionError: At index 0 diff: '  |-- Skill integrated -> .claude/skills/' != '  |-- 1 skill(s) integrated -> .claude/skills/'; Left contains one more item",
+  "green": "same command -> 1 passed",
+  "owner": "src/apm_cli/install/services.py (integrate_package_primitives skill line); src/apm_cli/integration/skill_support.py (skills_integrated)",
+  "notes": "The services.py and skill_support.py hunks are byte-identical to the matching hunks in open PR #4143 (its #4089 fix), so the two merge without conflict. Test helpers make_skill_result in tests/integration/test_install_services_{orchestration,phase3w5}.py now model a created root skill with a skill_path (they previously passed skill_path=None, the bundle shape). services.py LOC budget is restored by the #4211 commit."
+}
