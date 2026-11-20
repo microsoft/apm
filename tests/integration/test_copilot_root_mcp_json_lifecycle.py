@@ -77,6 +77,11 @@ def _flat(text: str) -> str:
     return " ".join(text.split())
 
 
+def _audit_clean(project: _Project) -> None:
+    result = project.apm("audit", "--ci", "--no-policy")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_copilot_writes_root_mcp_json_and_leaves_user_entries(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -624,9 +629,21 @@ def test_frozen_upgrade_keeps_the_root_entry_apm_wrote(
     _seed_036_lock(project, [_ECHO], {runtime: ["echo"]})
     project.install("--frozen")
     assert "echo" in project.read_json(".mcp.json")["mcpServers"]
+    if runtime == "copilot":
+        # --frozen cannot restamp the lock, so the emptied file stays as the
+        # proof of the move (#4524).
+        github = project.root / ".github/mcp.json"
+        assert github.read_bytes() == b'{\n  "mcpServers": {}\n}\n'
+        _audit_clean(project)
 
-    project.install()
+    output = _flat(project.install())
     assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
+    if runtime == "copilot":
+        assert "Removed empty .github/mcp.json (APM created it and no longer writes it)" in output
+        assert not (project.root / ".github/mcp.json").exists()
+        _audit_clean(project)
+        project.install("--frozen")
+        assert "Removed" not in _flat(project.install())
 
     project.manifest(targets=["copilot"], dependencies={"mcp": [{**_ECHO, "args": ["hi"]}]})
     project.install()
