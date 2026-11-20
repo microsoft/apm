@@ -604,6 +604,7 @@ contracts-tests-taxonomy-classification
 contracts-tooling-ado-lock-coordinates
 contracts-tooling-apply-to-placement
 contracts-tooling-cached-policy-shape
+contracts-tooling-ci-validation-topology
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
