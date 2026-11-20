@@ -1571,14 +1571,27 @@ class DeploymentLedgerCodec:
         return DeploymentLedgerCodec.rows(DeploymentLedger(records=records))
 
     @staticmethod
-    def adopt_user_lockfile_rows(lockfile: LockFile) -> None:
-        """Map persisted user-form rows back to their in-memory form.
+    def adopt_lockfile_rows(lockfile: LockFile | None, path: Path) -> LockFile | None:
+        """Return *lockfile* read from *path*, a user lockfile's rows in memory form.
 
-        The inverse of :meth:`user_lockfile_rows`, decided by row content so
-        any reader maps the same file the same way: a target-relative value
-        resolves through the lock's own compatibility views. In-memory rows
-        carry compatibility values only, so a project lockfile reads unchanged,
-        as does a user lock still carrying project-scope absolute rows.
+        Only the user lockfile (``$APM_HOME``, decided by
+        :mod:`apm_cli.core.scope`) persists the user form; a project lockfile's
+        recorded scope is evidence and reads unchanged.
+        """
+        from apm_cli.core.scope import is_user_scope_root
+
+        if lockfile is not None and is_user_scope_root(path.parent):
+            DeploymentLedgerCodec.adopt_user_lockfile_rows(lockfile)
+        return lockfile
+
+    @staticmethod
+    def adopt_user_lockfile_rows(lockfile: LockFile) -> None:
+        """Map rows read from a user lockfile back to their in-memory form.
+
+        The inverse of :meth:`user_lockfile_rows`: a target-relative value
+        resolves through the lock's own compatibility views, else the
+        target's user root. A lock still carrying project-scope absolute rows
+        reads unchanged.
         """
         absolute = DeploymentLedgerCodec._absolute_values(lockfile)
         forms: dict[str, DeploymentLocator] = {}

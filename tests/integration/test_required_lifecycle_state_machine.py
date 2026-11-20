@@ -166,6 +166,9 @@ def _assert_skill_receipt(
     lock_root = scenario.isolated.config_root if scope == "user" else root
     lock = LockFile.read(lock_root / "apm.lock.yaml")
     assert lock is not None
+    if scope == "user":
+        # Read the user lockfile as the CLI does, whatever this process's APM_HOME.
+        DeploymentLedgerCodec.adopt_user_lockfile_rows(lock)
     claims = DeploymentLedgerCodec.from_lockfile(lock).records
     for key, row in ledger.records.items():
         path = expected[row.locator.target]
