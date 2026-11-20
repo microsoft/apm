@@ -10,6 +10,8 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.host_providers import classify_host_provider, effective_host_provider_identity
 
+pytestmark = pytest.mark.unit
+
 
 def test_gitlab_hint_does_not_route_global_pat_to_untrusted_host() -> None:
     sentinel = "gitlab-global-sentinel"

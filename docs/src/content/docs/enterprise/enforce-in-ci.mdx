@@ -92,7 +92,7 @@ apm audit --ci --policy ./apm-policy.yml
 [x] 1 of 11 check(s) failed
 ```
 
-Under `enforcement: warn` the same row reads `[+] ... (enforcement: warn)` and the job
+Under `enforcement: warn` the same row reads `[!] ... (enforcement: warn)` and the job
 passes. Until you switch to block, a green check does not mean the policy holds.
 
 **A policy that cannot be loaded.** An explicit source that fails to load fails closed:

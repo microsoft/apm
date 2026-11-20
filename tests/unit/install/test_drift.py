@@ -20,41 +20,15 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.drift import (
     CheckLogger,
-    DriftFinding,
     ReplayConfig,
-    _governed_root_dirs,
-    _normalize_line_endings,
-    _strip_bom,
-    _strip_build_id,
     diff_scratch_against_project,
-    render_drift_sarif,
-    render_drift_text,
 )
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Normalization helpers
 # ---------------------------------------------------------------------------
-
-
-def test_strip_build_id_removes_header_preserves_rest():
-    src = b"# Title\n<!-- Build ID: abc123def456 -->\nbody line\n<!-- Build ID: 999 -->trailing\n"
-    out = _strip_build_id(src)
-    assert b"Build ID" not in out
-    assert b"# Title\n" in out
-    assert b"body line\n" in out
-    assert b"trailing\n" in out
-
-
-def test_normalize_line_endings_crlf_to_lf():
-    assert _normalize_line_endings(b"a\r\nb\r\nc") == b"a\nb\nc"
-    assert _normalize_line_endings(b"no-crlf") == b"no-crlf"
-
-
-def test_strip_bom_at_start_only():
-    assert _strip_bom(b"\xef\xbb\xbfhello") == b"hello"
-    # BOM mid-stream must not be removed (not a real BOM there).
-    mid = b"x\xef\xbb\xbfy"
-    assert _strip_bom(mid) == mid
 
 
 # ---------------------------------------------------------------------------
@@ -69,12 +43,6 @@ def test_replay_config_is_frozen(tmp_path):
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.cache_only = False  # type: ignore[misc]
-
-
-def test_drift_finding_is_frozen():
-    f = DriftFinding(path=".apm/x.md", kind="modified")
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        f.kind = "orphaned"  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -526,16 +494,6 @@ def test_diff_engine_case_only_variant_is_unmanaged_conflict(tmp_path):
     assert [(f.path, f.kind) for f in findings] == [(".apm/skills/hello.md", "unmanaged-conflict")]
 
 
-def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
-    out = render_drift_text([DriftFinding(path=".claude/skills/x/SKILL.md", kind="unrecorded")])
-    assert "[x] Drift detected: 1 file(s)" in out
-    assert "unrecorded (1):" in out
-    assert ".claude/skills/x/SKILL.md" in out
-    from apm_cli.core.remediation import RESYNC_UNRECORDED
-
-    assert RESYNC_UNRECORDED.sentence() in out
-
-
 def test_diff_engine_100kb_inline_cap(tmp_path):
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"
@@ -569,22 +527,6 @@ def _target_with_skill_deploy_root(root_dir: str = ".github", deploy_root: str =
             "skills": dataclasses.replace(target.primitives["skills"], deploy_root=deploy_root)
         },
     )
-
-
-def test_governed_root_dirs_includes_primitive_deploy_root():
-    """The differ must walk per-primitive deploy roots (copilot skills ->
-    .agents), not only the target's top-level root_dir -- otherwise committed
-    .agents/skills/ content escapes drift detection (issue #1716)."""
-    roots = _governed_root_dirs([_target_with_skill_deploy_root()])
-    assert ".apm" in roots
-    assert ".github" in roots
-    assert ".agents" in roots
-
-
-def test_governed_root_dirs_collapses_nested_deploy_root_to_first_segment():
-    roots = _governed_root_dirs([_target_with_skill_deploy_root(deploy_root=".agents/nested")])
-    assert ".agents" in roots
-    assert ".agents/nested" not in roots
 
 
 def test_diff_engine_walks_skill_deploy_root_detects_drift(tmp_path):
@@ -626,46 +568,9 @@ def test_diff_engine_skill_deploy_root_clean_when_identical(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_render_sarif_rule_id_prefix():
-    findings = [
-        DriftFinding(path="a.md", kind="modified", package="pkg-a"),
-        DriftFinding(path="b.md", kind="orphaned", package="pkg-b"),
-        DriftFinding(path="c.md", kind="unrecorded", package="pkg-c"),
-    ]
-    results = render_drift_sarif(findings)
-    assert results[0]["ruleId"] == "apm/drift/modified"
-    assert results[1]["ruleId"] == "apm/drift/orphaned"
-    assert results[2]["ruleId"] == "apm/drift/unrecorded"
-    assert results[2]["level"] == "error"
-    assert results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "a.md"
-    assert results[1]["properties"]["package"] == "pkg-b"
-
-
 # ---------------------------------------------------------------------------
 # CheckLogger -- stderr only
 # ---------------------------------------------------------------------------
-
-
-def test_check_logger_phases_to_stderr(capsys):
-    logger = CheckLogger(verbose=False)
-    logger.replay_start()
-    logger.replay_complete(3)
-    logger.diff_start()
-    logger.findings(2)
-    logger.clean()
-
-    captured = capsys.readouterr()
-    # Everything must be on stderr to keep stdout JSON-clean.
-    assert captured.out == ""
-    assert "Replaying install" in captured.err
-    assert "Replayed 3 package(s)" in captured.err
-    assert "Diffing scratch" in captured.err
-    assert "Drift detected: 2 file(s)" in captured.err
-    assert "No drift detected" in captured.err
-    # ASCII-only status symbols.
-    assert "[>]" in captured.err
-    assert "[+]" in captured.err
-    assert "[!]" in captured.err
 
 
 def test_check_logger_scratch_root_emits_to_stderr_when_verbose(capsys, tmp_path):

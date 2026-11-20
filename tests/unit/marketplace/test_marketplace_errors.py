@@ -1,6 +1,6 @@
 """Tests for marketplace error hierarchy."""
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.core.remediation import (
     MARKETPLACE_UNREGISTERED_SHORTHAND,
@@ -12,6 +12,8 @@ from apm_cli.marketplace.errors import (
     MarketplaceNotFoundError,
     PluginNotFoundError,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestMarketplaceErrors:

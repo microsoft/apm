@@ -10,6 +10,8 @@ import pytest
 
 from apm_cli.core.script_runner import ScriptRunner
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def preserve_cwd():

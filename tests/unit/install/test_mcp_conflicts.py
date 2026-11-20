@@ -14,6 +14,8 @@ from apm_cli.install.mcp.conflicts import (
     validate_mcp_conflicts,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
@@ -182,14 +184,6 @@ class TestE3OnlyApmConflictsWithMcp:
 
 
 class TestE4TransportSelectionFlags:
-    def test_use_ssh_raises(self) -> None:
-        with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(any_transport_flag=True)
-
-    def test_use_https_raises(self) -> None:
-        with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(any_transport_flag=True)
-
     def test_allow_protocol_fallback_raises(self) -> None:
         with pytest.raises(click.UsageError, match=r"transport selection flags"):
             _call(any_transport_flag=True)
@@ -278,9 +272,6 @@ class TestE13RemoteTransportWithStdioCommand:
 
     def test_stdio_transport_with_command_ok(self) -> None:
         _call(transport="stdio", command_argv=["node", "server.js"])
-
-    def test_remote_transport_without_command_ok(self) -> None:
-        _call(transport="http", url="https://example.com")
 
 
 # ---------------------------------------------------------------------------

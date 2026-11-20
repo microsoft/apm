@@ -605,6 +605,8 @@ contracts-tests-taxonomy-classification
 contracts-tooling-ado-lock-coordinates
 contracts-tooling-apply-to-placement
 contracts-tooling-cached-policy-shape
+contracts-tooling-ci-merge-queue-freshness
+contracts-tooling-ci-merge-time-topology
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer

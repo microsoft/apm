@@ -19,6 +19,8 @@ from apm_cli.install.source_helpers import (
 )
 from apm_cli.utils.content_hash import compute_package_hash
 
+pytestmark = pytest.mark.component
+
 MIT = b"MIT License\n"
 
 

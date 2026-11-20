@@ -4408,6 +4408,9 @@
       "TestValidatePackageExistsVirtualEnforceOnly::test_github_enforce_only_returns_true_without_api",
       "TestValidatePackageExistsVirtualEnforceOnly::test_virtual_enforce_only_returns_true_without_probe"
     ],
+    "tests/unit/install/test_validation_local_path.py": [
+      "TestLocalPathNoMarkersHint::test_no_sub_packages_produces_no_output"
+    ],
     "tests/unit/install/test_validation_phase3.py": [
       "TestIsTlsFailure::test_certificate_verify_failed_string_returns_true",
       "TestIsTlsFailure::test_chained_ssl_error_returns_true",
@@ -6696,6 +6699,12 @@
       "TestLsRemoteResolve::test_oserror_raises_runtime_error",
       "TestLsRemoteResolve::test_timeout_raises_runtime_error"
     ],
+    "tests/integration/test_git_reference_resolver.py": [
+      "TestListRemoteRefs::test_artifactory_returns_empty_list",
+      "TestListRemoteRefs::test_unauthenticated_uses_noninteractive_env",
+      "TestResolveCommitShaForRef::test_ado_short_circuits_to_none",
+      "TestResolveCommitShaForRef::test_artifactory_short_circuits_to_none"
+    ],
     "tests/integration/test_git_reference_resolver_resolution.py": [
       "TestListRemoteRefs::test_artifactory_returns_empty_list",
       "TestListRemoteRefs::test_unauthenticated_uses_noninteractive_env",
@@ -8232,6 +8241,10 @@
     "tests/unit/commands/test_marketplace_outdated.py": [
       "TestOutdatedMissingYml::test_missing_yml_exits_1"
     ],
+    "tests/unit/commands/test_pack.py": [
+      "TestRenderBundleResult::test_dry_run_no_files_warns_empty",
+      "TestRenderMarketplaceCatalog::test_docs_url_emitted"
+    ],
     "tests/unit/commands/test_pack_cli_surface.py": [
       "TestEmitJsonErrorOrRaise::test_json_output_false_raises_click_exception",
       "TestEmitJsonErrorOrRaise::test_json_output_true_calls_ctx_exit",
@@ -9224,6 +9237,9 @@
     "tests/unit/core/test_script_executors.py": [
       "TestRedactUrlCredentials::test_strips_user_password"
     ],
+    "tests/unit/core/test_script_executors_logic.py": [
+      "TestRedactUrlCredentials::test_strips_user_password"
+    ],
     "tests/unit/core/test_script_runner_execution.py": [
       "TestAddDependencyToConfig::test_adds_new_dependency",
       "TestAddDependencyToConfig::test_no_duplicate_dependency",
@@ -9331,6 +9347,15 @@
       "TestSubstituteParametersEdgeCases::test_empty_content",
       "TestSubstituteParametersEdgeCases::test_multiple_occurrences",
       "TestSubstituteParametersEdgeCases::test_partial_placeholder_unchanged"
+    ],
+    "tests/unit/core/test_script_runner_execution_io.py": [
+      "TestAutoInstallVirtualPackage::test_returns_false_on_exception",
+      "TestCreateMinimalConfig::test_creates_apm_yml",
+      "TestDiscoverQualifiedPrompt::test_returns_none_when_no_apm_modules",
+      "TestListScripts::test_returns_empty_when_no_config",
+      "TestListScripts::test_returns_scripts_from_config",
+      "TestLoadConfig::test_returns_dict_when_apm_yml_exists",
+      "TestLoadConfig::test_returns_none_when_no_apm_yml"
     ],
     "tests/unit/core/test_script_runner_phase3.py": [
       "TestAddDependencyToConfig::test_adds_new_dependency",
@@ -9731,6 +9756,10 @@
       "TestValidateDependencyReference::test_empty_repo_url_is_invalid",
       "TestValidateDependencyReference::test_repo_url_without_slash_is_invalid",
       "TestValidateDependencyReference::test_valid_repo_url_is_valid"
+    ],
+    "tests/unit/deps/test_download_strategies_artifactory_archive.py": [
+      "TestDownloadArtifactoryArchive::test_empty_archive_raises_runtime_error",
+      "TestDownloadFileFromArtifactory::test_raises_when_file_not_in_archive"
     ],
     "tests/unit/deps/test_download_strategies_phase3.py": [
       "TestBuildContentsApiUrls::test_generic_host_returns_multiple_candidates",
@@ -10833,6 +10862,10 @@
       "TestResolveCachedCommit::test_locked_dep_is_none_falls_back",
       "TestResolveCachedCommit::test_no_lockfile_falls_back_to_dep_ref_reference"
     ],
+    "tests/unit/install/test_sources_selection.py": [
+      "TestMaterialization::test_custom_deltas",
+      "TestMaterialization::test_default_deltas"
+    ],
     "tests/unit/install/test_summary.py": [
       "TestRenderPostInstallSummary::test_invalid_error_count_defaults_to_zero"
     ],
@@ -10867,6 +10900,10 @@
       "TestValidatePackageExistsTlsFailure::test_tls_failure_from_api_returns_false",
       "TestValidatePackageExistsVirtualEnforceOnly::test_github_enforce_only_returns_true_without_api",
       "TestValidatePackageExistsVirtualEnforceOnly::test_virtual_enforce_only_returns_true_without_probe"
+    ],
+    "tests/unit/install/test_validation_local_path.py": [
+      "TestValidatePackageExistsLocal::test_local_path_with_apm_yml_returns_true",
+      "TestValidatePackageExistsLocal::test_local_path_with_skill_md_returns_true"
     ],
     "tests/unit/install/test_validation_phase3.py": [
       "TestIsTlsFailure::test_certificate_verify_failed_string_returns_true",
@@ -10906,6 +10943,9 @@
     "tests/unit/integration/test_copilot_app_db.py": [
       "TestNamespacedId::test_basic_format"
     ],
+    "tests/unit/integration/test_copilot_app_db_logic.py": [
+      "TestNamespacedId::test_basic_format"
+    ],
     "tests/unit/integration/test_lsp_integrator.py": [
       "TestDeduplicate::test_empty_list",
       "TestDeduplicate::test_first_occurrence_wins",
@@ -10919,6 +10959,19 @@
       "TestGetServerConfigs::test_plain_string_fallback",
       "TestGetServerNames::test_dep_objects",
       "TestGetServerNames::test_empty",
+      "TestGetServerNames::test_plain_strings"
+    ],
+    "tests/unit/integration/test_lsp_integrator_logic.py": [
+      "TestDeduplicate::test_first_occurrence_wins",
+      "TestDeduplicate::test_mixed_string_and_object",
+      "TestDeduplicate::test_nameless_duplicate_reference_skipped",
+      "TestDeduplicate::test_nameless_items_kept_by_value_inequality",
+      "TestDeduplicate::test_no_duplicates",
+      "TestDeduplicate::test_preserves_order",
+      "TestGetServerConfigs::test_empty",
+      "TestGetServerConfigs::test_multiple_deps",
+      "TestGetServerConfigs::test_plain_string_fallback",
+      "TestGetServerNames::test_dep_objects",
       "TestGetServerNames::test_plain_strings"
     ],
     "tests/unit/integration/test_mcp_integrator.py": [
@@ -10947,6 +11000,9 @@
       "TestGetServerNames::test_plain_strings",
       "TestIsVscodeAvailable::test_returns_true_when_code_on_path",
       "TestIsVscodeAvailable::test_returns_true_when_vscode_dir_exists",
+      "TestUpdateLockfile::test_updates_mcp_servers_in_lockfile"
+    ],
+    "tests/unit/integration/test_mcp_integrator_io.py": [
       "TestUpdateLockfile::test_updates_mcp_servers_in_lockfile"
     ],
     "tests/unit/integration/test_skill_integrator.py": [
@@ -11060,6 +11116,9 @@
       "TestSatisfiesRange::test_tilde",
       "TestSatisfiesRange::test_wildcard_star",
       "TestSatisfiesRange::test_wildcard_x"
+    ],
+    "tests/unit/marketplace/test_builder_logic.py": [
+      "TestSatisfiesRange::test_wildcard_star"
     ],
     "tests/unit/marketplace/test_io.py": [
       "TestAtomicWrite::test_no_tmp_file_remains",
@@ -11275,6 +11334,9 @@
     "tests/unit/policy/test_discovery.py": [
       "TestParseRemoteUrl::test_https_ghe"
     ],
+    "tests/unit/policy/test_discovery_logic.py": [
+      "TestParseRemoteUrl::test_https_ghe"
+    ],
     "tests/unit/policy/test_discovery_phase3w4.py": [
       "TestComputeHashNormalized::test_invalid_expected_hash_falls_to_sha256",
       "TestComputeHashNormalized::test_none_expected_hash_uses_sha256",
@@ -11427,10 +11489,18 @@
       "TestWriteCacheOsError::test_meta_write_os_error_returns_gracefully",
       "TestWriteCacheOsError::test_policy_write_os_error_returns_gracefully"
     ],
+    "tests/unit/policy/test_discovery_policy_resolution_io.py": [
+      "TestDeriveLeafHost::test_file_source_falls_back_to_git_remote",
+      "TestDetectGarbage::test_none_content_returns_none",
+      "TestFetchFromUrl::test_404_returns_absent"
+    ],
     "tests/unit/policy/test_matcher.py": [
       "TestMatchesPattern::test_exact_match"
     ],
     "tests/unit/policy/test_policy_checks.py": [
+      "TestRunPolicyChecks::test_no_apm_yml_returns_empty"
+    ],
+    "tests/unit/policy/test_policy_checks_io.py": [
       "TestRunPolicyChecks::test_no_apm_yml_returns_empty"
     ],
     "tests/unit/policy/test_policy_hash_pin.py": [
@@ -11445,6 +11515,9 @@
       "TestVerifySha256::test_mismatch_raises"
     ],
     "tests/unit/test_add_mcp_to_apm_yml.py": [
+      "TestDiffEntry::test_equal_strings_returns_empty"
+    ],
+    "tests/unit/test_add_mcp_to_apm_yml_logic.py": [
       "TestDiffEntry::test_equal_strings_returns_empty"
     ],
     "tests/unit/test_audit_phase3w4.py": [
@@ -11524,6 +11597,13 @@
       "TestRenderSummary::test_warning_findings",
       "TestScanSingleFile::test_clean_file_zero_findings",
       "TestScanSingleFile::test_file_with_critical_chars"
+    ],
+    "tests/unit/test_audit_scan_and_render_logic.py": [
+      "TestAuditOutcomeCause::test_absent",
+      "TestAuditOutcomeCause::test_empty",
+      "TestAuditOutcomeCause::test_no_git_remote",
+      "TestRenderSummary::test_critical_findings",
+      "TestRenderSummary::test_no_findings"
     ],
     "tests/unit/test_auth.py": [
       "TestGitlabRestHeaders::test_no_token_returns_empty_dict",
@@ -12180,6 +12260,9 @@
     "tests/unit/test_local_deps.py": [
       "TestIsLocalPath::test_protocol_relative_not_local"
     ],
+    "tests/unit/test_local_deps_logic.py": [
+      "TestIsLocalPath::test_protocol_relative_not_local"
+    ],
     "tests/unit/test_mcp_client_factory.py": [
       "TestCodexClientAdapter::test_get_config_path_user_scope"
     ],
@@ -12276,6 +12359,9 @@
       "TestUpdateLockfile::test_mcp_configs_written_when_provided",
       "TestUpdateLockfile::test_noop_when_lockfile_missing",
       "TestUpdateLockfile::test_noop_when_lockfile_read_returns_none",
+      "TestUpdateLockfile::test_updates_mcp_servers_in_lockfile"
+    ],
+    "tests/unit/test_mcp_integrator_overlay_io.py": [
       "TestUpdateLockfile::test_updates_mcp_servers_in_lockfile"
     ],
     "tests/unit/test_mcp_integrator_phase3w4.py": [
@@ -12499,6 +12585,9 @@
       "TestValidationResult::test_summary_valid_no_warnings",
       "TestValidationResult::test_summary_valid_with_warnings"
     ],
+    "tests/unit/test_models_validation_rules_logic.py": [
+      "TestValidationResult::test_summary_valid_with_warnings"
+    ],
     "tests/unit/test_outdated_marketplace_detection.py": [
       "TestCheckDepsWithProgress::test_parallel_no_rich",
       "TestCheckDepsWithProgress::test_sequential_no_rich",
@@ -12611,6 +12700,9 @@
       "TestUpdatePluginJsonPaths::test_no_strip_when_no_matching_keys",
       "TestUpdatePluginJsonPaths::test_strips_schema_invalid_keys_no_logger",
       "TestUpdatePluginJsonPaths::test_strips_schema_invalid_keys_with_logger"
+    ],
+    "tests/unit/test_plugin_exporter_compatibility_logic.py": [
+      "TestSanitizeBundleName::test_normal_name_unchanged"
     ],
     "tests/unit/test_plugin_exporter_phase3w5.py": [
       "TestCollectHooksFromRoot::test_hooks_dir_multiple_files",
@@ -12854,6 +12946,10 @@
       "TestResolveMarketplacePackages::test_dry_run_skips_registry",
       "TestValidateUninstallPackagesMarketplace::test_marketplace_ref_resolved_but_not_in_deps"
     ],
+    "tests/unit/test_uninstall_engine_helpers_io.py": [
+      "TestRemovePackagesFromDisk::test_no_modules_dir_returns_zero",
+      "TestRemovePackagesFromDisk::test_removes_existing_package"
+    ],
     "tests/unit/test_uninstall_engine_phase3w5.py": [
       "TestBuildChildrenIndex::test_empty_deps",
       "TestBuildChildrenIndex::test_no_resolved_by_skipped",
@@ -12908,6 +13004,9 @@
       "TestValidateUninstallPackages::test_package_not_in_current_deps",
       "TestValidateUninstallPackages::test_valid_package_found"
     ],
+    "tests/unit/test_uninstall_engine_validation_logic.py": [
+      "TestResolveMarketplacePackages::test_dry_run_skips_registry"
+    ],
     "tests/unit/test_unpacker.py": [
       "TestUnpackBundle::test_unpack_dry_run"
     ],
@@ -12950,6 +13049,9 @@
       "TestViewCommand::test_package_path_none_exits",
       "TestViewCommand::test_unknown_field_exits",
       "TestViewCommand::test_versions_field_calls_display_versions"
+    ],
+    "tests/unit/test_view_command_cli_surface_logic.py": [
+      "TestDisplayMarketplacePlugin::test_plugin_not_found_exits"
     ],
     "tests/unit/test_view_command_phase3w5.py": [
       "TestDisplayMarketplacePlugin::test_dict_source_with_ref_rendered",

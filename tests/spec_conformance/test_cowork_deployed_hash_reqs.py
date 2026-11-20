@@ -14,6 +14,8 @@ import pytest
 
 from apm_cli.install.phases.lockfile import compute_deployed_hashes
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.req("req-lk-012")
 def test_cowork_deployed_file_hash_is_canonical_sha256_envelope(

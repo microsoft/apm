@@ -9,7 +9,11 @@ confuse the reader.
 
 from __future__ import annotations
 
+import pytest
+
 from .conftest import write_apm_yml
+
+pytestmark = pytest.mark.component
 
 
 def _parse(tmp_path, content):

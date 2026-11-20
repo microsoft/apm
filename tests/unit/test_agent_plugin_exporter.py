@@ -17,6 +17,8 @@ from apm_cli.bundle.packer import pack_bundle
 from apm_cli.core.remediation import PACK_LOCKFILE_MISSING
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
+pytestmark = pytest.mark.component
+
 _SCHEMA_DIR = Path(__file__).parent.parent / "fixtures" / "schemas"
 _PLUGIN_SCHEMA_PATH = _SCHEMA_DIR / "agent-plugins-v1.0.0-plugin.schema.json"
 _MCP_SCHEMA_PATH = _SCHEMA_DIR / "agent-plugins-v1.0.0-mcp.schema.json"

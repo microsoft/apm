@@ -15,6 +15,8 @@ from apm_cli.policy._constraint_pinning import (
     is_pinned_constraint,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _dep(
     spec: str | None,
@@ -109,24 +111,41 @@ def test_classify_open_upper_in_multi_component():
 
 
 @pytest.mark.parametrize(
-    "spec",
+    "ref",
     [
-        "^1.2.3",
-        "^0.0.1",
-        "~1.2.3",
-        "1.2.3",
-        "0.0.1",
-        ">=1.0.0 <2.0.0",
-        ">=1.0.0 <=1.9.9",
-        "1.2.x",
-        "1.2.X",
-        "v1.2.3",
-        "v1.0.0-rc.1",
-        "v1.2.3+build.42",
+        "acme/lib#^1.2.3",
+        "acme/lib#^0.0.1",
+        "acme/lib#~1.2.3",
+        "acme/lib#1.2.3",
+        "acme/lib#0.0.1",
+        "acme/lib#>=1.0.0 <2.0.0",
+        "acme/lib#>=1.0.0 <=1.9.9",
+        "acme/lib#1.2.x",
+        "acme/lib#1.2.X",
+        "acme/lib#v1.2.3",
+        "acme/lib#v1.0.0-rc.1",
+        "acme/lib#v1.2.3+build.42",
+        # Package-qualified literal tags for the dependency's own name (#3224)
+        "acme/mono/packages/pkg-a#pkg-a-v1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a--v1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a-v1.1.0-rc.1",
+        "acme/mono/packages/pkg-a#pkg-a-v1.1.0+build.5",
+        "acme/widget#widget-v1.2.0",
+        "acme/widget#widget--v1.2.0",
+        "https://github.com/acme/widget.git#widget-v1.2.0",
+        # Ruling change (#3731): pkg-a@1.1.0 used to be a bare branch.
+        # An exact name@X.Y.Z tag declares one release, like v1.2.3, and
+        # the name is not bound to the dependency's own name.
+        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a@v1.1.0",
+        "shadcn/ui#shadcn@4.12.0",
+        "upstash/context7/skills/context7-mcp#@upstash/context7-mcp@4.4.4",
+        "acme/mono/packages/pkg-a#@scope/pkg-a@1.1.0-rc.1",
+        "acme/mono#pkg-a@1.1.0+build.5",
     ],
 )
-def test_classify_pinned_specs_return_none(spec):
-    assert classify_unbounded_reason(_dep(spec)) is None
+def test_classify_pinned_refs_return_none(ref):
+    assert classify_unbounded_reason(DependencyReference.parse(ref)) is None
 
 
 # Regression trap for the ``=1.2.3`` alternate exact-version form
@@ -182,12 +201,32 @@ def test_classify_literal_tag_v_prefixed_returns_pinned_none():
 
 
 @pytest.mark.parametrize(
-    "spec",
-    ["v01.2.3", "v1.02.3", "v1.2.3-01", "v1.2.3-rc..1", "v\u0661.2.3", "pkg@01.2.3"],
+    "ref",
+    [
+        # Leading zeros and non-ASCII digits are not exact SemVer releases (#3795).
+        "acme/lib#v01.2.3",
+        "acme/lib#v1.02.3",
+        "acme/lib#v1.2.3-01",
+        "acme/lib#v1.2.3-rc..1",
+        "acme/lib#v\u0661.2.3",
+        "acme/lib#pkg@01.2.3",
+        # another package's tag on a subdirectory dep
+        "acme/mono/packages/pkg-a#pkg-b-v1.1.0",
+        # the repository's tag layout on a subdirectory dep
+        "acme/mono/packages/pkg-a#mono-v1.1.0",
+        # a subdirectory package's tag on the repository dep
+        "acme/mono#pkg-a-v1.1.0",
+        # version-looking suffix that is not a full semver
+        "acme/mono/packages/pkg-a#pkg-a-v1.1",
+        "acme/mono/packages/pkg-a#pkg-a-v1",
+        # arbitrary prefix
+        "acme/mono/packages/pkg-a#release-pkg-a-v1.1.0",
+        # layouts the resolver does not select from
+        "acme/mono/packages/pkg-a#pkg-a_v1.1.0",
+    ],
 )
-def test_classify_non_semver_literal_tag_returns_bare_branch(spec):
-    # Leading zeros and non-ASCII digits are not exact SemVer releases (#3795).
-    assert classify_unbounded_reason(_dep(spec)) is UnboundedReason.BARE_BRANCH
+def test_classify_non_release_tag_refs_return_bare_branch(ref):
+    assert classify_unbounded_reason(DependencyReference.parse(ref)) is UnboundedReason.BARE_BRANCH
 
 
 def test_classify_sha_returns_pinned_none():

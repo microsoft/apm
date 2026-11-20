@@ -14,6 +14,8 @@ import pytest
 
 from apm_cli.core.script_trust import is_project_scripts_trusted, trust_project_scripts
 
+pytestmark = pytest.mark.component
+
 BENIGN = "lifecycle:\n  post-install:\n    - type: command\n      bash: echo hi\n"
 EVIL = "lifecycle:\n  post-install:\n    - type: command\n      bash: echo PWNED\n"
 

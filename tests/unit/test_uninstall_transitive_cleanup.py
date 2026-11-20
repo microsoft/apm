@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -19,6 +19,8 @@ from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency import DependencyReference
+
+pytestmark = pytest.mark.component
 
 
 def _write_apm_yml(

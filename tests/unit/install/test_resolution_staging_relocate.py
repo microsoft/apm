@@ -7,6 +7,8 @@ import pytest
 
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 
+pytestmark = pytest.mark.component
+
 
 def test_replacement_keeps_installed_hook_live_until_publish(tmp_path: Path) -> None:
     """A replacement download must not unlink the currently registered hook."""

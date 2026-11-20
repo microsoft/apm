@@ -1,19 +1,22 @@
-"""Unit tests for --target flag and compilation routing in apm compile command.
+"""Tests for --target routing and the ``apm compile`` command on a real project.
 
 Tests cover:
-- CompilationConfig.target defaults to "all"
 - --target vscode only generates AGENTS.md
 - --target agents is alias for vscode
 - --target claude only generates CLAUDE.md
 - --target all generates both files (default)
 - Invalid target value raises error
-- _merge_results() correctly combines results
+- _resolve_effective_target from flag, apm.yml and auto-detect
+- compile command branches: no apm.yml, --all, validate, watch routing,
+  distributed success, warnings, no content, import errors
 """
 
 import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -26,41 +29,16 @@ from apm_cli.compilation.agents_compiler import (
 )
 from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
 from apm_cli.core.remediation import ROOT_INSTRUCTIONS_HAND_AUTHORED
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
 
-class TestCompilationConfigTarget:
-    """Tests for CompilationConfig.target field."""
-
-    def test_target_default_is_all(self):
-        """Test that CompilationConfig.target defaults to 'all'."""
-        config = CompilationConfig()
-        assert config.target == "all"
-
-    def test_target_can_be_set_to_vscode(self):
-        """Test that target can be set to 'vscode'."""
-        config = CompilationConfig(target="vscode")
-        assert config.target == "vscode"
-
-    def test_target_can_be_set_to_agents(self):
-        """Test that target can be set to 'agents'."""
-        config = CompilationConfig(target="agents")
-        assert config.target == "agents"
-
-    def test_target_can_be_set_to_claude(self):
-        """Test that target can be set to 'claude'."""
-        config = CompilationConfig(target="claude")
-        assert config.target == "claude"
-
-    def test_from_apm_yml_applies_target_override(self):
-        """Test that from_apm_yml correctly applies target override."""
-        config = CompilationConfig.from_apm_yml(target="claude")
-        assert config.target == "claude"
-
-    def test_from_apm_yml_uses_default_when_no_override(self):
-        """Test that from_apm_yml uses default target when not overridden."""
-        config = CompilationConfig.from_apm_yml()
-        assert config.target == "all"
+_NO_COMPILE_OUTPUT_TARGETS = sorted(
+    capability.name
+    for capability in TARGET_CAPABILITIES.values()
+    if capability.compile_family is None
+)
 
 
 class TestCompileTargetRouting:
@@ -122,6 +100,7 @@ Use type hints in Python code.
         assert "AGENTS.md" in result.output_path
         # Content should contain AGENTS.md format elements
         assert "AGENTS.md" in result.content or result.content  # Has content
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_agents_is_alias_for_vscode(self, temp_project, sample_primitives):
         """Test that target='agents' produces same result as 'vscode'."""
@@ -138,6 +117,7 @@ Use type hints in Python code.
         # Both should reference AGENTS.md
         assert "AGENTS.md" in result_vscode.output_path
         assert "AGENTS.md" in result_agents.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_claude_generates_claude_md(self, temp_project, sample_primitives):
         """Test that target='claude' generates CLAUDE.md files."""
@@ -149,6 +129,7 @@ Use type hints in Python code.
         assert result.success
         # Output path should reference CLAUDE.md
         assert "CLAUDE" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_all_generates_both(self, temp_project, sample_primitives):
         """Test that target='all' generates both AGENTS.md and CLAUDE.md."""
@@ -164,6 +145,7 @@ Use type hints in Python code.
         assert result.success
         # Output path should mention both targets
         assert "AGENTS.md" in result.output_path or "CLAUDE" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_codex_generates_agents_md(self, temp_project, sample_primitives):
         """Regression for issue #766: --target codex must produce AGENTS.md, not a silent no-op."""
@@ -179,6 +161,7 @@ Use type hints in Python code.
         assert result.success
         assert result.output_path, "codex target must route to a compiler, not return empty"
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_codex_single_agents_no_claude_preview_issue_765_cli(self, temp_project):
         """Regression for issue #765: CLI --target codex --single-agents must not append Claude preview text.
@@ -239,6 +222,7 @@ Use type hints in Python code.
 
         assert result.success
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_grok_build_generates_agents_md(self, temp_project, sample_primitives):
         """Stable Grok Build compilation produces root project instructions."""
@@ -253,6 +237,7 @@ Use type hints in Python code.
 
         assert result.success
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_gemini_generates_gemini_md(self, temp_project, sample_primitives):
         """target='gemini' must produce GEMINI.md, not a silent no-op."""
@@ -267,6 +252,7 @@ Use type hints in Python code.
         assert result.success
         assert result.output_path, "gemini target must route to a compiler, not return empty"
         assert "GEMINI" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_minimal_generates_agents_md(self, temp_project, sample_primitives):
         """target='minimal' must route to AGENTS.md-only."""
@@ -281,6 +267,7 @@ Use type hints in Python code.
 
         assert result.success
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_vscode_writes_copilot_root_instructions_from_global_rules(self, temp_project):
         """Copilot compile should emit .github/copilot-instructions.md from global instructions."""
@@ -918,6 +905,7 @@ Use type hints in Python code.
         assert result.stats["copilot_root_instructions_unchanged"] == 0, (
             "unchanged means content was compared and matched -- not the case here"
         )
+        assert root_file.read_text(encoding="utf-8") == "# Hand-authored\n"
 
     def test_skip_warning_uses_relative_path_and_concrete_action(self, temp_project):
         """Round-3 UX fix: warning must use a relative path and tell the user
@@ -959,6 +947,7 @@ Use type hints in Python code.
         assert "<!-- Generated by APM CLI from .apm/ primitives -->" in warning, (
             "warning must disclose the literal marker string so users can self-serve recovery"
         )
+        assert root_file.read_text(encoding="utf-8") == "# Hand-authored\n"
 
     def test_dry_run_respects_hand_authored_guard(self, temp_project):
         """Round-4 regression: `--dry-run` must mirror the hand-authored guard
@@ -1047,6 +1036,7 @@ Use type hints in Python code.
 
         assert result.success is False
         assert any("Unknown compilation target" in e for e in result.errors)
+        assert not list(temp_project.glob("*.md"))
 
     def test_unknown_frozenset_target_family_returns_failure(self, temp_project, sample_primitives):
         """Unknown multi-target family must fail explicitly instead of silently no-oping."""
@@ -1062,199 +1052,7 @@ Use type hints in Python code.
         assert result.success is False
         assert any("Unknown compilation target family" in e for e in result.errors)
         assert any("not-a-real-family" in e for e in result.errors)
-
-
-class TestMergeResults:
-    """Tests for _merge_results() method."""
-
-    @pytest.fixture
-    def compiler(self):
-        """Create a compiler instance for testing."""
-        return AgentsCompiler(".")
-
-    def test_merge_empty_results_list(self, compiler):
-        """Test merging an empty results list."""
-        result = compiler._merge_results([])
-
-        assert result.success is True
-        assert result.output_path == ""
-        assert result.content == ""
-        assert result.warnings == []
-        assert result.errors == []
-        assert result.stats == {}
-
-    def test_merge_single_result(self, compiler):
-        """Test that single result is returned as-is."""
-        single_result = CompilationResult(
-            success=True,
-            output_path="AGENTS.md",
-            content="# Test content",
-            warnings=["warning1"],
-            errors=[],
-            stats={"test": 1},
-        )
-
-        result = compiler._merge_results([single_result])
-
-        assert result.success is True
-        assert result.output_path == "AGENTS.md"
-        assert result.content == "# Test content"
-        assert result.warnings == ["warning1"]
-        assert result.stats == {"test": 1}
-
-    def test_merge_multiple_results_success(self, compiler):
-        """Test merging multiple successful results."""
-        result1 = CompilationResult(
-            success=True,
-            output_path="AGENTS.md",
-            content="AGENTS content",
-            warnings=["agents warning"],
-            errors=[],
-            stats={"agents_files_generated": 2},
-        )
-
-        result2 = CompilationResult(
-            success=True,
-            output_path="CLAUDE.md: 1 files",
-            content="CLAUDE content",
-            warnings=["claude warning"],
-            errors=[],
-            stats={"claude_files_written": 1},
-        )
-
-        merged = compiler._merge_results([result1, result2])
-
-        assert merged.success is True
-        assert "AGENTS.md" in merged.output_path
-        assert "CLAUDE" in merged.output_path
-        assert "agents warning" in merged.warnings
-        assert "claude warning" in merged.warnings
-        assert "AGENTS content" in merged.content
-        assert "CLAUDE content" in merged.content
-
-    def test_merge_results_with_one_failure(self, compiler):
-        """Test that merged result is failure if any result fails."""
-        result1 = CompilationResult(
-            success=True,
-            output_path="AGENTS.md",
-            content="Success",
-            warnings=[],
-            errors=[],
-            stats={},
-        )
-
-        result2 = CompilationResult(
-            success=False,
-            output_path="CLAUDE.md",
-            content="",
-            warnings=[],
-            errors=["Failed to compile"],
-            stats={},
-        )
-
-        merged = compiler._merge_results([result1, result2])
-
-        assert merged.success is False
-        assert "Failed to compile" in merged.errors
-
-    def test_merge_results_combines_numeric_stats(self, compiler):
-        """Test that numeric stats are summed when merging."""
-        result1 = CompilationResult(
-            success=True,
-            output_path="A",
-            content="",
-            warnings=[],
-            errors=[],
-            stats={"primitives_found": 5, "instructions": 3},
-        )
-
-        result2 = CompilationResult(
-            success=True,
-            output_path="B",
-            content="",
-            warnings=[],
-            errors=[],
-            stats={"primitives_found": 2, "claude_files_written": 1},
-        )
-
-        merged = compiler._merge_results([result1, result2])
-
-        # Same key should be summed
-        assert merged.stats["primitives_found"] == 7
-        # Different keys should be kept
-        assert merged.stats["instructions"] == 3
-        assert merged.stats["claude_files_written"] == 1
-
-    def test_merge_results_preserves_all_warnings_and_errors(self, compiler):
-        """Test that all warnings and errors are preserved."""
-        result1 = CompilationResult(
-            success=True,
-            output_path="A",
-            content="",
-            warnings=["warn1", "warn2"],
-            errors=[],
-            stats={},
-        )
-
-        result2 = CompilationResult(
-            success=True,
-            output_path="B",
-            content="",
-            warnings=["warn3"],
-            errors=["error1"],
-            stats={},
-        )
-
-        merged = compiler._merge_results([result1, result2])
-
-        assert len(merged.warnings) == 3
-        assert "warn1" in merged.warnings
-        assert "warn2" in merged.warnings
-        assert "warn3" in merged.warnings
-        assert len(merged.errors) == 1
-        assert "error1" in merged.errors
-
-    def test_merge_results_joins_output_paths(self, compiler):
-        """Test that output paths are joined with ' | '."""
-        result1 = CompilationResult(
-            success=True,
-            output_path="Distributed: 3 AGENTS.md files",
-            content="",
-            warnings=[],
-            errors=[],
-            stats={},
-        )
-
-        result2 = CompilationResult(
-            success=True,
-            output_path="CLAUDE.md: 2 files",
-            content="",
-            warnings=[],
-            errors=[],
-            stats={},
-        )
-
-        merged = compiler._merge_results([result1, result2])
-
-        assert " | " in merged.output_path
-        assert "Distributed" in merged.output_path
-        assert "CLAUDE.md" in merged.output_path
-
-    def test_merge_results_joins_content_with_separator(self, compiler):
-        """Test that content is joined with separator."""
-        result1 = CompilationResult(
-            success=True, output_path="A", content="Content A", warnings=[], errors=[], stats={}
-        )
-
-        result2 = CompilationResult(
-            success=True, output_path="B", content="Content B", warnings=[], errors=[], stats={}
-        )
-
-        merged = compiler._merge_results([result1, result2])
-
-        assert "---" in merged.content
-        assert "Content A" in merged.content
-        assert "Content B" in merged.content
+        assert not list(temp_project.glob("*.md"))
 
 
 class TestCompileCommandCLI:
@@ -1649,6 +1447,7 @@ Use type hints.
         assert result.success
         # The merged output path should reference both targets
         assert "AGENTS.md" in result.output_path or "CLAUDE" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
 
 class TestClaudeAndAgentsMdConsistentOutput:
@@ -1854,205 +1653,6 @@ class TestCompileWarningOnMissingApplyTo:
             os.chdir(original_dir)
 
 
-class TestResolveCompileTarget:
-    """Tests for _resolve_compile_target() multi-target list mapping."""
-
-    def test_none_returns_none(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(None) is None
-
-    def test_single_string_passthrough(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target("claude") == "claude"
-        assert _resolve_compile_target("vscode") == "vscode"
-        assert _resolve_compile_target("all") == "all"
-        assert _resolve_compile_target("copilot") == "vscode"
-
-    def test_list_claude_and_copilot_returns_full_set(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        # 'vscode' family member is added because copilot/vscode/agents triggers
-        # copilot-instructions.md generation; 'agents' covers AGENTS.md.
-        assert _resolve_compile_target(["claude", "vscode"]) == frozenset(
-            {"vscode", "agents", "claude"}
-        )
-        assert _resolve_compile_target(["claude", "copilot"]) == frozenset(
-            {"vscode", "agents", "claude"}
-        )
-
-    def test_list_claude_only_returns_claude(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(["claude"]) == "claude"
-
-    def test_list_copilot_only_returns_vscode(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(["vscode"]) == "vscode"
-        assert _resolve_compile_target(["copilot"]) == "vscode"
-
-    def test_list_agents_md_only_family_preserves_bare_target(self):
-        """opencode/codex/windsurf must NOT collapse to 'vscode' (which would
-        wrongly route copilot-instructions.md). Single-element lists keep the
-        bare target name; multi-element lists pick the first present."""
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(["opencode"]) == "opencode"
-        assert _resolve_compile_target(["codex"]) == "codex"
-        assert _resolve_compile_target(["windsurf"]) == "windsurf"
-        # Multi-element AGENTS.md-only list collapses to a representative bare
-        # target according to deterministic catalog ordering (alphabetical).
-        assert _resolve_compile_target(["opencode", "codex"]) == "codex"
-        assert _resolve_compile_target(["codex", "windsurf"]) == "codex"
-
-    @pytest.mark.parametrize(
-        "target",
-        [
-            "cursor",
-            ["cursor"],
-            "agent-skills",
-            ["agent-skills"],
-            "intellij",
-            ["intellij"],
-            "hermes",
-            ["hermes"],
-            "grok-build",
-            ["grok-build"],
-            "grok-cloud",
-            ["grok-cloud"],
-        ],
-    )
-    def test_accepted_target_scalar_and_list_forms_resolve_identically(self, target):
-        """Every accepted target uses the same resolver path for both input shapes."""
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        target_name = target if isinstance(target, str) else target[0]
-        assert _resolve_compile_target(target) == _resolve_compile_target(target_name)
-
-    def test_windsurf_routes_via_agents_family(self):
-        """Regression: windsurf must route through the 'agents' compile_family
-        the same way opencode/codex do.  Before the registry-driven
-        refactor, windsurf was missing from agents_md_family and would have
-        silently collapsed to the 'vscode' fallback (emitting copilot-
-        instructions.md by mistake)."""
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        # Combined with claude/gemini -> frozenset of families
-        assert _resolve_compile_target(["windsurf", "claude"]) == frozenset({"agents", "claude"})
-        assert _resolve_compile_target(["windsurf", "gemini"]) == frozenset({"agents", "gemini"})
-        # Combined with copilot/vscode -> frozenset preserved because windsurf
-        # is a non-Copilot agents-family target that needs instructions in
-        # AGENTS.md (issue #1678 -- dedup must not fire for mixed targets).
-        assert _resolve_compile_target(["windsurf", "copilot"]) == frozenset({"agents", "vscode"})
-
-    def test_list_codex_and_claude_returns_agents_claude_set(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        # No 'vscode' family because copilot/vscode/agents was not requested;
-        # codex contributes only the 'agents' (AGENTS.md) family.
-        assert _resolve_compile_target(["codex", "claude"]) == frozenset({"agents", "claude"})
-
-    def test_list_gemini_only_returns_gemini(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(["gemini"]) == "gemini"
-
-    def test_list_gemini_and_claude_returns_claude_gemini_set(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(["gemini", "claude"]) == frozenset({"claude", "gemini"})
-
-    def test_list_gemini_and_copilot_returns_full_set(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(["gemini", "vscode"]) == frozenset(
-            {"vscode", "agents", "gemini"}
-        )
-
-    def test_list_all_three_families_returns_full_set(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-
-        assert _resolve_compile_target(["claude", "vscode", "gemini"]) == frozenset(
-            {"vscode", "agents", "claude", "gemini"}
-        )
-        assert _resolve_compile_target(["claude", "vscode", "codex"]) == frozenset(
-            {"vscode", "agents", "claude"}
-        )
-
-    def test_all_plus_explicit_compile_target_excludes_non_compile_expansion(self):
-        """Generic all expansion must not inject install-only targets into compile."""
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-        from apm_cli.core.target_detection import parse_target_field
-
-        parsed = parse_target_field("all,antigravity")
-
-        assert _resolve_compile_target(parsed) == frozenset(
-            {"vscode", "agents", "claude", "gemini"}
-        )
-
-
-class TestMultiTargetDoesNotGenerateUnrequestedFiles:
-    """Regression tests: multi-target lists must not generate files for families not requested."""
-
-    def test_claude_codex_does_not_compile_gemini(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-        from apm_cli.core.target_detection import (
-            should_compile_agents_md,
-            should_compile_claude_md,
-            should_compile_gemini_md,
-        )
-
-        resolved = _resolve_compile_target(["claude", "codex"])
-        assert should_compile_agents_md(resolved) is True
-        assert should_compile_claude_md(resolved) is True
-        assert should_compile_gemini_md(resolved) is False
-
-    def test_gemini_codex_does_not_compile_claude(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-        from apm_cli.core.target_detection import (
-            should_compile_agents_md,
-            should_compile_claude_md,
-            should_compile_gemini_md,
-        )
-
-        resolved = _resolve_compile_target(["gemini", "codex"])
-        assert should_compile_agents_md(resolved) is True
-        assert should_compile_claude_md(resolved) is False
-        assert should_compile_gemini_md(resolved) is True
-
-    def test_all_string_still_compiles_everything(self):
-        from apm_cli.core.target_detection import (
-            should_compile_agents_md,
-            should_compile_claude_md,
-            should_compile_gemini_md,
-        )
-
-        assert should_compile_agents_md("all") is True
-        assert should_compile_claude_md("all") is True
-        assert should_compile_gemini_md("all") is True
-
-    def test_single_target_strings_unchanged(self):
-        from apm_cli.core.target_detection import (
-            should_compile_agents_md,
-            should_compile_claude_md,
-            should_compile_gemini_md,
-        )
-
-        assert should_compile_agents_md("vscode") is True
-        assert should_compile_claude_md("vscode") is False
-        assert should_compile_gemini_md("vscode") is False
-
-        assert should_compile_agents_md("claude") is False
-        assert should_compile_claude_md("claude") is True
-        assert should_compile_gemini_md("claude") is False
-
-        assert should_compile_agents_md("gemini") is True
-        assert should_compile_claude_md("gemini") is False
-        assert should_compile_gemini_md("gemini") is True
-
-
 class TestMultiTargetLogOutput:
     """Regression tests for the 'Compiling for ...' log line on multi-target compiles."""
 
@@ -2181,3 +1781,632 @@ class TestClaudeMdHonorsSingleFileStrategy:
         assert (project_with_subdir_instruction / "CLAUDE.md").exists() or (
             project_with_subdir_instruction / "scripts" / "CLAUDE.md"
         ).exists()
+
+
+class TestResolveEffectiveTarget:
+    """Tests for _resolve_effective_target()."""
+
+    def _call(self, target: Any, source_root: Any = None) -> tuple[Any, str, Any]:
+        from apm_cli.commands.compile.cli import _resolve_effective_target
+
+        if source_root is None:
+            source_root = Path(".")
+        return _resolve_effective_target(target, source_root=source_root)
+
+    def test_none_triggers_auto_detect(self, tmp_path: Path) -> None:
+        """target=None should fall through to detect_target() in a no-apm-yml scenario."""
+        with patch(
+            "apm_cli.core.target_detection.detect_target",
+            return_value=("vscode", "no .github folder"),
+        ):
+            effective, _reason, _config = self._call(None, source_root=tmp_path)
+
+        assert effective is not None
+
+    def test_explicit_frozenset_returns_immediately(self, tmp_path: Path) -> None:
+        """A frozenset from _resolve_compile_target bypasses detect_target."""
+        fs = frozenset({"vscode", "claude", "agents"})
+        with patch("apm_cli.commands.compile.cli._resolve_compile_target", return_value=fs):
+            effective, reason, _config = self._call(["claude", "vscode"], source_root=tmp_path)
+
+        assert effective == fs
+        assert reason == "explicit --target flag"
+
+    def test_apm_yml_frozenset_config_without_explicit(self, tmp_path: Path) -> None:
+        """frozenset from apm.yml config_target (no explicit) → 'apm.yml target' reason."""
+        fs = frozenset({"claude", "agents"})
+        (tmp_path / "apm.yml").write_text("name: test\n")
+
+        with (
+            patch("apm_cli.commands.compile.cli._resolve_compile_target") as mock_rct,
+            patch("apm_cli.models.apm_package.APMPackage.from_apm_yml") as mock_pkg,
+        ):
+            mock_pkg.return_value.target = "claude,cursor"
+            mock_rct.side_effect = [None, fs]
+
+            effective, reason, _config = self._call(None, source_root=tmp_path)
+
+        assert effective == fs
+        assert reason == "apm.yml target"
+
+    def test_single_string_explicit_target_uses_detect_target(self, tmp_path: Path) -> None:
+        """Single explicit string passes through detect_target()."""
+        (tmp_path / "apm.yml").write_text("name: test\n")
+
+        with (
+            patch("apm_cli.commands.compile.cli._resolve_compile_target", side_effect=lambda x: x),
+            patch("apm_cli.models.apm_package.APMPackage.from_apm_yml") as mock_pkg,
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+                return_value=("claude", "explicit --target flag"),
+            ),
+        ):
+            mock_pkg.return_value.target = None
+
+            effective, _reason, _config = self._call("claude", source_root=tmp_path)
+
+        assert effective == "claude"
+
+
+class TestCompileCommandNoApmYml:
+    """compile command exits when no apm.yml is present."""
+
+    def test_exits_when_no_apm_yml(self) -> None:
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code != 0 or "Not an APM project" in result.output
+
+
+class TestCompileTargetWithoutCompileOutput:
+    """Explicit skills-only/experimental targets are a no-op, never auto-detect (#3842)."""
+
+    def _run(self, target: str) -> tuple[Any, list[str]]:
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            Path(".claude").mkdir()
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**'\n---\nUse type hints.\n"
+            )
+            with patch("apm_cli.core.experimental.is_enabled", return_value=False):
+                result = runner.invoke(cli, ["compile", "--target", target])
+            root_files = sorted(p.name for p in Path(".").glob("*.md"))
+        return result, root_files
+
+    @pytest.mark.parametrize("target", _NO_COMPILE_OUTPUT_TARGETS)
+    def test_explicit_target_is_successful_noop(self, target: str) -> None:
+        result, root_files = self._run(target)
+        output = " ".join(result.output.split())
+
+        assert result.exit_code == 0, result.output
+        assert root_files == []
+        assert "auto-detect" not in output
+        assert f"{target} has no compile outputs -- skipping" in output
+        experimental_flag = TARGET_CAPABILITIES[target].experimental_flag
+        if experimental_flag is not None:
+            flag = experimental_flag.replace("_", "-")
+            assert f"apm experimental enable {flag}" in output
+
+
+class TestCompileCommandAllFlag:
+    """--all flag semantics."""
+
+    def _run(self, args: list[str]) -> Any:
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+            )
+            return runner.invoke(cli, args, catch_exceptions=False)
+
+    def test_all_and_target_together_exit_code_2(self) -> None:
+        """--all with --target should exit with code 2."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            result = runner.invoke(cli, ["compile", "--all", "--target", "claude"])
+
+        assert result.exit_code == 2 or "Cannot use --all together with --target" in result.output
+
+    def test_target_all_emits_deprecation_warning(self) -> None:
+        """--target all should emit a deprecation warning."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            # Mock heavy compilation so we don't need full setup
+            with patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls:
+                mock_result = MagicMock()
+                mock_result.success = True
+                mock_result.warnings = []
+                mock_result.errors = []
+                mock_result.stats = {"agents_files_written": 1}
+                mock_result.has_critical_security = False
+                mock_cls.return_value.compile.return_value = mock_result
+                with (
+                    patch(
+                        "apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml"
+                    ) as mock_cfg,
+                    patch("apm_cli.commands.compile.cli.discover_primitives"),
+                ):
+                    mock_cfg.return_value.strategy = "distributed"
+                    mock_cfg.return_value.with_constitution = True
+                    result = runner.invoke(cli, ["compile", "--target", "all"])
+
+        assert "deprecated" in result.output.lower() or result.exit_code in (0, 1)
+
+
+class TestCompileCommandValidateMode:
+    """compile --validate mode."""
+
+    def test_validate_mode_success(self) -> None:
+        """--validate with no errors should print success message."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+            )
+            mock_primitives = MagicMock()
+            mock_primitives.count.return_value = 1
+            mock_primitives.chatmodes = []
+            mock_primitives.instructions = [MagicMock()]
+            mock_primitives.contexts = []
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch(
+                    "apm_cli.commands.compile.cli.discover_primitives", return_value=mock_primitives
+                ),
+            ):
+                mock_cls.return_value.validate_primitives.return_value = []
+                result = runner.invoke(cli, ["compile", "--validate"])
+
+        assert result.exit_code == 0
+        assert "validated" in result.output.lower() or "success" in result.output.lower()
+
+    def test_validate_mode_with_errors_exits_1(self) -> None:
+        """--validate with errors should exit with code 1."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+            )
+            mock_primitives = MagicMock()
+            mock_primitives.count.return_value = 1
+            mock_primitives.chatmodes = []
+            mock_primitives.instructions = [MagicMock()]
+            mock_primitives.contexts = []
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch(
+                    "apm_cli.commands.compile.cli.discover_primitives", return_value=mock_primitives
+                ),
+            ):
+                mock_cls.return_value.validate_primitives.return_value = ["error1"]
+                result = runner.invoke(cli, ["compile", "--validate"])
+
+        assert result.exit_code == 1
+
+    def test_validate_mode_discover_exception_exits_1(self) -> None:
+        """--validate when discover_primitives raises should exit with code 1."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+            )
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler"),
+                patch(
+                    "apm_cli.commands.compile.cli.discover_primitives",
+                    side_effect=RuntimeError("boom"),
+                ),
+            ):
+                result = runner.invoke(cli, ["compile", "--validate"])
+
+        assert result.exit_code == 1
+
+
+class TestCompileCommandWatchMode:
+    """compile --watch mode."""
+
+    def test_watch_mode_delegates_to_watch_mode(self) -> None:
+        """--watch should call _watch_mode with resolved effective_target."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+            )
+            with (
+                patch("apm_cli.commands.compile.cli._watch_mode") as mock_watch,
+                patch(
+                    "apm_cli.commands.compile.cli._resolve_effective_target",
+                    return_value=("vscode", "auto-detect", None),
+                ),
+            ):
+                result = runner.invoke(cli, ["compile", "--watch"])
+
+        assert result.exit_code == 0, result.output
+        mock_watch.assert_called_once()
+
+
+class TestCompileCommandDistributedSuccess:
+    """compile command - distributed strategy success path."""
+
+    def _setup_project_dir(self) -> None:
+        Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+        apm_dir = Path(".apm") / "instructions"
+        apm_dir.mkdir(parents=True)
+        (apm_dir / "test.instructions.md").write_text(
+            "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+        )
+
+    def test_distributed_success_with_files_written(self) -> None:
+        """Success + non-zero _files_written logs success message."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            self._setup_project_dir()
+
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.warnings = []
+            mock_result.errors = []
+            mock_result.stats = {"agents_files_written": 2}
+            mock_result.has_critical_security = False
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch("apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml") as mock_cfg,
+            ):
+                mock_cfg.return_value.strategy = "distributed"
+                mock_cfg.return_value.with_constitution = True
+                mock_cfg.return_value.target = "vscode"
+                mock_cfg.return_value.output_path = "AGENTS.md"
+                mock_cfg.return_value.chatmode = None
+                mock_cfg.return_value.resolve_links = True
+                mock_cfg.return_value.dry_run = False
+                mock_cfg.return_value.debug = False
+                mock_cfg.return_value.trace = False
+                mock_cfg.return_value.local_only = False
+                mock_cfg.return_value.clean_orphaned = False
+                mock_cls.return_value.compile.return_value = mock_result
+
+                result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 0
+        assert "success" in result.output.lower() or "compil" in result.output.lower()
+
+    def test_distributed_success_zero_files_emits_warning(self) -> None:
+        """Success + zero _files_written logs a warning (not success message)."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            self._setup_project_dir()
+
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.warnings = []
+            mock_result.errors = []
+            mock_result.stats = {"agents_files_written": 0, "claude_files_written": 0}
+            mock_result.has_critical_security = False
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch("apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml") as mock_cfg,
+            ):
+                mock_cfg.return_value.strategy = "distributed"
+                mock_cfg.return_value.with_constitution = True
+                mock_cfg.return_value.target = "vscode"
+                mock_cfg.return_value.output_path = "AGENTS.md"
+                mock_cfg.return_value.chatmode = None
+                mock_cfg.return_value.resolve_links = True
+                mock_cfg.return_value.dry_run = False
+                mock_cfg.return_value.debug = False
+                mock_cfg.return_value.trace = False
+                mock_cfg.return_value.local_only = False
+                mock_cfg.return_value.clean_orphaned = False
+                mock_cls.return_value.compile.return_value = mock_result
+
+                result = runner.invoke(cli, ["compile"])
+
+        assert (
+            "no output" in result.output.lower()
+            or "warning" in result.output.lower()
+            or result.exit_code in (0, 1)
+        )
+
+    def test_distributed_success_reports_nested_repository_skips(self) -> None:
+        """Partial distributed output names the nested placements that were skipped."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            self._setup_project_dir()
+
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.warnings = []
+            mock_result.errors = []
+            mock_result.stats = {
+                "agents_files_written": 2,
+                "copilot_root_instructions_generated": 1,
+                "copilot_root_instructions_written": 1,
+                "nested_git_placements_skipped": 1,
+            }
+            mock_result.has_critical_security = False
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch("apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml") as mock_cfg,
+            ):
+                mock_cfg.return_value.strategy = "distributed"
+                mock_cfg.return_value.with_constitution = True
+                mock_cfg.return_value.target = "vscode"
+                mock_cfg.return_value.output_path = "AGENTS.md"
+                mock_cfg.return_value.chatmode = None
+                mock_cfg.return_value.resolve_links = True
+                mock_cfg.return_value.dry_run = False
+                mock_cfg.return_value.debug = False
+                mock_cfg.return_value.trace = False
+                mock_cfg.return_value.local_only = False
+                mock_cfg.return_value.clean_orphaned = False
+                mock_cls.return_value.compile.return_value = mock_result
+
+                result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 0
+        normalized_output = " ".join(result.output.split())
+        assert "Compiled 3 output files (2 AGENTS.md files)" in normalized_output
+        assert "skipped 1 nested Git repository placement" in normalized_output
+
+    def test_result_errors_exits_1(self) -> None:
+        """result.errors → exit code 1."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            self._setup_project_dir()
+
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.warnings = []
+            mock_result.errors = ["compilation error detail"]
+            mock_result.stats = {"agents_files_written": 1}
+            mock_result.has_critical_security = False
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch("apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml") as mock_cfg,
+            ):
+                mock_cfg.return_value.strategy = "distributed"
+                mock_cfg.return_value.with_constitution = True
+                mock_cfg.return_value.target = "vscode"
+                mock_cfg.return_value.output_path = "AGENTS.md"
+                mock_cfg.return_value.chatmode = None
+                mock_cfg.return_value.resolve_links = True
+                mock_cfg.return_value.dry_run = False
+                mock_cfg.return_value.debug = False
+                mock_cfg.return_value.trace = False
+                mock_cfg.return_value.local_only = False
+                mock_cfg.return_value.clean_orphaned = False
+                mock_cls.return_value.compile.return_value = mock_result
+
+                result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 1
+
+    def test_critical_security_exits_1(self) -> None:
+        """has_critical_security → exit code 1."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            self._setup_project_dir()
+
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.warnings = []
+            mock_result.errors = []
+            mock_result.stats = {"agents_files_written": 1}
+            mock_result.has_critical_security = True
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch("apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml") as mock_cfg,
+            ):
+                mock_cfg.return_value.strategy = "distributed"
+                mock_cfg.return_value.with_constitution = True
+                mock_cfg.return_value.target = "vscode"
+                mock_cfg.return_value.output_path = "AGENTS.md"
+                mock_cfg.return_value.chatmode = None
+                mock_cfg.return_value.resolve_links = True
+                mock_cfg.return_value.dry_run = False
+                mock_cfg.return_value.debug = False
+                mock_cfg.return_value.trace = False
+                mock_cfg.return_value.local_only = False
+                mock_cfg.return_value.clean_orphaned = False
+                mock_cls.return_value.compile.return_value = mock_result
+
+                result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 1
+        assert "critical" in result.output.lower()
+
+
+class TestCompileCommandWarnings:
+    """compile command - warnings propagation."""
+
+    def test_result_warnings_appear_in_output(self) -> None:
+        """result.warnings should be printed."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+            )
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.warnings = ["deprecated usage detected"]
+            mock_result.errors = []
+            mock_result.stats = {"agents_files_written": 1}
+            mock_result.has_critical_security = False
+
+            with (
+                patch("apm_cli.commands.compile.cli.AgentsCompiler") as mock_cls,
+                patch("apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml") as mock_cfg,
+            ):
+                mock_cfg.return_value.strategy = "distributed"
+                mock_cfg.return_value.with_constitution = True
+                mock_cfg.return_value.target = "vscode"
+                mock_cfg.return_value.output_path = "AGENTS.md"
+                mock_cfg.return_value.chatmode = None
+                mock_cfg.return_value.resolve_links = True
+                mock_cfg.return_value.dry_run = False
+                mock_cfg.return_value.debug = False
+                mock_cfg.return_value.trace = False
+                mock_cfg.return_value.local_only = False
+                mock_cfg.return_value.clean_orphaned = False
+                mock_cls.return_value.compile.return_value = mock_result
+
+                result = runner.invoke(cli, ["compile"])
+
+        assert "warning" in result.output.lower() or "deprecated" in result.output.lower()
+
+
+class TestCompileCommandNoContent:
+    """compile command - no content to compile branches."""
+
+    def test_no_apm_modules_no_local_apm_content(self) -> None:
+        """When no apm_modules, no .apm content, no constitution → exit 1."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            # No .apm dir, no apm_modules dir
+            result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 1
+        assert (
+            "No APM content" in result.output
+            or "No instruction files" in result.output
+            or "Not an APM project" in result.output
+        )
+
+    def test_empty_apm_dir_shows_no_instructions_message(self) -> None:
+        """Empty .apm dir (no .instructions.md) shows different message."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            Path(".apm").mkdir()
+            result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 1
+        # Either "No instruction files" or "No APM content"
+        assert "No" in result.output
+
+
+class TestCompileCommandImportError:
+    """compile command - ImportError path."""
+
+    def test_import_error_in_compilation_exits_1(self) -> None:
+        """ImportError inside the try block should exit with code 1."""
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+            )
+            with patch(
+                "apm_cli.commands.compile.cli.CompilationConfig.from_apm_yml",
+                side_effect=ImportError("missing module"),
+            ):
+                result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 1
+        assert "not available" in result.output or "module" in result.output.lower()

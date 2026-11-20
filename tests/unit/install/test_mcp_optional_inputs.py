@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.registry.operations import MCPServerOperations
+
+pytestmark = pytest.mark.component
 
 
 def _context7_server_info() -> dict[str, Any]:

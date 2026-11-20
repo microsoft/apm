@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 import apm_cli.update_policy as policy_mod
 from apm_cli.core.remediation import CLI_BINARY_OUTDATED
 from apm_cli.update_policy import (
@@ -20,6 +22,8 @@ from apm_cli.update_policy import (
     get_update_hint_message,
     is_self_update_enabled,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # _is_printable_ascii

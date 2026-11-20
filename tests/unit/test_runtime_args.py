@@ -3,7 +3,11 @@
 import unittest
 from unittest import mock  # noqa: F401
 
+import pytest
+
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+
+pytestmark = pytest.mark.unit
 
 
 class TestRuntimeArguments(unittest.TestCase):

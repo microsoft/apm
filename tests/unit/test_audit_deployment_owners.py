@@ -23,6 +23,8 @@ from apm_cli.core.deployment_state import (
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 _GHOST_OWNER = "removed/beta"
 _GHOST_PATH = ".claude/rules/beta.md"
 

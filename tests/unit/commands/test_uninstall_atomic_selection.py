@@ -23,6 +23,8 @@ from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
+pytestmark = pytest.mark.component
+
 
 def _write_manifest(project: Path, dependencies: Sequence[object]) -> None:
     dump_yaml(
@@ -88,6 +90,7 @@ def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path)
     assert isinstance(error, OSError)
     message = logger.error.call_args.args[0]
     assert "'apm install --global'" in message
+    assert not (tmp_path / "apm.lock.yaml").exists()
 
 
 def test_uninstall_help_points_to_actionable_dependency_keys() -> None:

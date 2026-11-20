@@ -8,6 +8,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.core.remediation import ORPHANED_AGENTS_MD
 
+pytestmark = pytest.mark.component
+
 
 def test_clean_removes_claude_md_after_last_primitive_is_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

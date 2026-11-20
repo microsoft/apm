@@ -20,6 +20,8 @@ import pytest
 
 from apm_cli.commands.compile.watcher import APMFileHandler, _format_target_label
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -101,10 +103,14 @@ class TestFormatTargetLabel:
         assert label is not None
         assert "CLAUDE.md" in label
 
-    def test_none_target_returns_none(self) -> None:
-        """None effective_target → returns None."""
-        result = _format_target_label(None, None, None)
-        assert result is None
+    @pytest.mark.parametrize(
+        ("user_label", "config_label"),
+        [(None, None), (["claude", "cursor"], ["claude"])],
+        ids=["no-labels", "with-labels"],
+    )
+    def test_none_target_returns_none(self, user_label, config_label) -> None:
+        """None effective_target returns None whatever the label sources."""
+        assert _format_target_label(None, user_label, config_label) is None
 
     def test_string_target_returns_description(self) -> None:
         """A single-string target returns its description label."""
@@ -409,165 +415,3 @@ class TestAPMFileHandlerRecompile:
             handler._recompile("any.md")
 
         assert mock_from_yml.call_args.kwargs["target"] == target
-
-
-# ===========================================================================
-# _watch_mode tests
-# ===========================================================================
-
-
-class TestWatchMode:
-    """Tests for the ``_watch_mode`` function."""
-
-    def _mock_observer(self) -> MagicMock:
-        observer = MagicMock()
-        observer.start = MagicMock()
-        observer.stop = MagicMock()
-        observer.join = MagicMock()
-        observer.schedule = MagicMock()
-        return observer
-
-    def test_import_error_exits_1(self) -> None:
-        """Missing watchdog library → sys.exit(1)."""
-        import sys as _sys
-
-        from apm_cli.commands.compile.watcher import _watch_mode
-
-        with (
-            patch("apm_cli.commands.compile.watcher.CommandLogger") as mock_logger_cls,
-            patch.dict(
-                _sys.modules,
-                {
-                    "watchdog": None,
-                    "watchdog.events": None,
-                    "watchdog.observers": None,
-                },
-            ),
-        ):
-            mock_logger_cls.return_value = _make_logger()
-            with pytest.raises(SystemExit) as exc_info:
-                _watch_mode(
-                    output="AGENTS.md",
-                    chatmode=None,
-                    no_links=False,
-                    dry_run=False,
-                )
-        assert exc_info.value.code == 1
-
-    def test_no_watch_paths_returns_early(self, tmp_path) -> None:
-        """When no APM dirs or apm.yml exist, logs warning and returns."""
-        import os
-
-        from apm_cli.commands.compile.watcher import _watch_mode
-
-        old_cwd = os.getcwd()
-        os.chdir(tmp_path)
-        try:
-            logger_mock = _make_logger()
-            with patch(
-                "apm_cli.commands.compile.watcher.CommandLogger",
-                return_value=logger_mock,
-            ):
-                # No apm.yml, no .apm, etc. in tmp_path
-                with (
-                    patch("watchdog.observers.Observer"),
-                    patch("watchdog.events.FileSystemEventHandler"),
-                ):
-                    _watch_mode(
-                        output="AGENTS.md",
-                        chatmode=None,
-                        no_links=False,
-                        dry_run=False,
-                    )
-        except (ImportError, SystemExit):
-            pass  # watchdog might not be installed; that's fine here
-        except Exception:
-            pass  # any other error is acceptable — we just check no crash loop
-        finally:
-            os.chdir(old_cwd)
-
-    def test_watch_mode_initial_compilation_success(self, tmp_path) -> None:
-        """Successful initial compilation calls logger.success."""
-        from apm_cli.commands.compile.watcher import _watch_mode
-
-        # Create apm.yml so there's a watch path
-        (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
-
-        import os
-
-        old_cwd = os.getcwd()
-        os.chdir(tmp_path)
-        try:
-            logger_mock = _make_logger()
-            mock_result = SimpleNamespace(success=True, output_path="AGENTS.md", errors=[])
-            mock_observer = self._mock_observer()
-
-            # Make observer.start raise KeyboardInterrupt to exit the loop
-            def _start_and_interrupt():
-                raise KeyboardInterrupt
-
-            mock_observer.start.side_effect = _start_and_interrupt
-
-            with (
-                patch(
-                    "apm_cli.commands.compile.watcher.CommandLogger",
-                    return_value=logger_mock,
-                ),
-                patch(
-                    "apm_cli.commands.compile.watcher.CompilationConfig.from_apm_yml",
-                    return_value=MagicMock(),
-                ),
-                patch("apm_cli.commands.compile.watcher.AgentsCompiler") as mock_compiler_cls,
-                patch("watchdog.observers.Observer", return_value=mock_observer),
-                patch("watchdog.events.FileSystemEventHandler"),
-            ):
-                mock_compiler_cls.return_value.compile.return_value = mock_result
-                import contextlib
-
-                with contextlib.suppress(ImportError, SystemExit):
-                    _watch_mode(
-                        output="AGENTS.md",
-                        chatmode=None,
-                        no_links=False,
-                        dry_run=False,
-                    )
-        finally:
-            os.chdir(old_cwd)
-
-    def test_watch_mode_general_exception_exits_1(self, tmp_path) -> None:
-        """General exception in _watch_mode → sys.exit(1)."""
-        from apm_cli.commands.compile.watcher import _watch_mode
-
-        (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
-
-        import os
-
-        old_cwd = os.getcwd()
-        os.chdir(tmp_path)
-        try:
-            logger_mock = _make_logger()
-
-            with (
-                patch(
-                    "apm_cli.commands.compile.watcher.CommandLogger",
-                    return_value=logger_mock,
-                ),
-                patch(
-                    "apm_cli.commands.compile.watcher.CompilationConfig.from_apm_yml",
-                    side_effect=RuntimeError("fatal error"),
-                ),
-                patch("watchdog.observers.Observer"),
-                patch("watchdog.events.FileSystemEventHandler"),
-            ):
-                with pytest.raises(SystemExit) as exc_info:
-                    _watch_mode(
-                        output="AGENTS.md",
-                        chatmode=None,
-                        no_links=False,
-                        dry_run=False,
-                    )
-            assert exc_info.value.code == 1
-        except ImportError:
-            pytest.skip("watchdog not installed")
-        finally:
-            os.chdir(old_cwd)
