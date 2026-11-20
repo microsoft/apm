@@ -1,7 +1,9 @@
 """Behavioral receipts for OpenAPM resolution requirements (req-rs-*).
 
-req-rg-001 (registry server immutability) has no receipt here: APM ships
-no registry server, only the consumer side.
+Not testable against this implementation (no receipt here):
+req-rg-001 -- registry server immutability; APM ships no registry server.
+req-pr-004 -- tag/version alignment is a producer rule; APM has no consumer check.
+req-pr-005 -- advisory tag-signing SHOULD; v0.1 consumers verify nothing.
 """
 
 from __future__ import annotations

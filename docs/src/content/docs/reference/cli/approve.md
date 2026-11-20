@@ -123,6 +123,10 @@ holds on Windows; the installed copy is still integrity-checked including file
 modes. Any byte change parks the whole plugin: it is not registered, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
+An Agent Plugin's root `mcp.json` counts: `mcp`, plus `bin` when a server
+runs a command. `apm approve --pending`, `--list` and `apm policy explain`
+list those types, and a type-level grant must cover both; one that misses a
+type parks the plugin with `not approved (missing grant: bin)`.
 A plugin that runs files under its root `.apm/` or `apm.yml` that are not
 copies of pinned files cannot be pinned: `apm approve` refuses it (exit 1)
 with `APM cannot pin files under .apm/ or apm.yml`, and install parks it.
@@ -205,7 +209,10 @@ or `--list` is a usage error (exit 2).
 
 It exits 1 when any requested package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
-approval that was not recorded. The first pinned approval in a project also
+approval that was not recorded. It also exits 1, writing nothing, when the
+org policy outcome blocks, exactly as `apm install` would (for example an
+unreachable policy under `policy.fetch_failure_default: block`); run
+`apm policy status --no-cache` to diagnose. The first pinned approval in a project also
 prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,

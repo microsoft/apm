@@ -21,37 +21,12 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit
 
-# ---------------------------------------------------------------------------
-# Secret redaction (gate for every external diagnostic string)
-# ---------------------------------------------------------------------------
+from ..utils.credential_rendering import redact_secrets
 
-# Keyword + ``:``/``=`` separator redacts any value (optionally after an auth
-# scheme word). Keyword + whitespace only redacts token-shaped values (>= 16
-# chars) so prose such as "bearer token acquisition failed" stays readable.
-SECRET_RE = re.compile(
-    r"(?:"
-    r"(?:token|password|secret|authorization)\s*[:=]\s*"
-    r"(?:(?:bearer|basic|token)\s+)?"
-    r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"
-    r"|"
-    r"(?:token|password|secret|bearer|basic)\s+"
-    r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{16,}"
-    r"|"
-    r"://[^:@/\s]+:[^:@/\s]+@"
-    r"|"
-    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psour]_[A-Za-z0-9_]{20,})\b"
-    r"|"
-    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}"
-    r")",
-    re.IGNORECASE,
-)
+# Secret redaction (gate for every external diagnostic string) is owned by
+# utils/credential_rendering.py.
 
 _MAX_DETAIL_CHARS = 300
-
-
-def redact_secrets(text: str) -> str:
-    """Replace credential-shaped substrings in *text* with ``[REDACTED]``."""
-    return SECRET_RE.sub("[REDACTED]", text)
 
 
 def sanitize_diagnostic_detail(text: str | None) -> str:

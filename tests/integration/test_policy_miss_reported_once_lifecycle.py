@@ -33,10 +33,7 @@ _TARGET = "copilot"
 # A github.com org that is never reached: every request goes to a closed proxy.
 _REMOTE = "https://github.com/apm-policy-unreachable-fixture/app.git"
 _DEAD_PROXY = "http://127.0.0.1:9"
-_APPROVE_WARNING = (
-    "Org policy could not be resolved; approval is proceeding without org "
-    "restrictions. Run 'apm policy status --no-cache' to diagnose."
-)
+_APPROVE_WARNING = "[!] Org policy not applied (outcome=cache_miss_fetch_fail,"
 
 
 def _evidence(result: CommandResult) -> str:

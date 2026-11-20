@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` and cold lockfile replays print the package header as `<name> #<ref> @<sha>`, without repeating the locked commit (#4217)
 - `apm install --frozen` with MCP servers prints its MCP targeting line once instead of twice, at project and user scope (#4217)
 - Installing a dependency whose repository the host answers 404 for now reports `Repository <owner/repo> not found on <host>` once, with `Run 'apm uninstall <owner/repo>'`, instead of a network error. (#4217)
+- `apm config` and related output show credential values such as registry tokens redacted. (closes #4171, #4240)
+- `apm audit --ci` drift replay and lifecycle scripts now apply org policy outcomes as `apm install` does. (#4079, #4151)
+- `apm audit --ci` and `apm approve` now handle every org policy outcome as `apm install` does; `apm approve` exits 1 when the policy outcome blocks. (#4084, #4151)
+- An org policy field of the wrong type is reported as a malformed policy instead of stopping the command with an internal error. (#4140, #4151)
+- `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
 
 ## [0.37.0] - 2026-11-20
 
@@ -188,6 +193,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Orphan previews in `apm install --dry-run` and `apm uninstall --dry-run` now match the real run; every command's orphan removal comes from one owner. (#4021)
 - A targeted `apm install` keeps both a repository and its virtual child when the child stays locked; the outcome no longer varies between runs. (closes #4060, #4063)
 - `apm install` reports pinned hooks denied by org policy or `apm deny --user` as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4044, #4055)
+- `apm install` reports a denied canvas extension as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4052, #4064)
 
 ### Security
 

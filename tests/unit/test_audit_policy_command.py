@@ -69,6 +69,8 @@ def _write_policy_file(project: Path, **overrides) -> Path:
         "name": "test-policy",
         "version": "1.0.0",
         "enforcement": "block",
+        # One rule so discovery reports ``found``; a rule-less policy is ``empty``.
+        "dependencies": {"deny": ["blocked-org/*"]},
     }
     data.update(overrides)
     policy_path = project / "apm-policy.yml"
@@ -177,7 +179,9 @@ class TestCiWithPolicyOrg:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
+        mock_result = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:test/.github", outcome="found"
+        )
 
         with patch(
             "apm_cli.policy.discovery.discover_policy", return_value=mock_result
@@ -199,7 +203,7 @@ class TestCiPolicyNotFound:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(error=None, policy=None)
+        mock_result = PolicyFetchResult(error=None, policy=None, outcome="absent")
 
         with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result):
             result = runner.invoke(
@@ -243,7 +247,9 @@ class TestNoCacheFlag:
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
 
-        mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
+        mock_result = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:test/.github", outcome="found"
+        )
 
         with patch(
             "apm_cli.policy.discovery.discover_policy", return_value=mock_result

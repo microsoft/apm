@@ -23,6 +23,7 @@ from apm_cli.commands.approve import (
 )
 from apm_cli.commands.policy import policy as policy_group
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 
@@ -182,81 +183,83 @@ def test_approval_policy_benign_miss_does_not_warn(tmp_path: Path, outcome: str)
     logger.warning.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "outcome",
-    [
-        "incomplete_chain",
-        "malformed",
-        "cache_miss_fetch_fail",
-        "garbage_response",
-    ],
-)
-def test_approval_policy_resolution_failure_warns(
+@pytest.mark.parametrize("outcome", ["malformed", "cache_miss_fetch_fail", "garbage_response"])
+def test_approval_policy_resolution_failure_is_reported_through_the_owner(
     tmp_path: Path,
     outcome: str,
 ) -> None:
     logger = MagicMock(spec=CommandLogger)
-    result = PolicyFetchResult(policy=None, outcome=outcome)
+    result = PolicyFetchResult(policy=None, outcome=outcome, source="org:contoso/.github")
 
-    with patch(
-        "apm_cli.policy.discovery.discover_policy_with_chain",
-        return_value=result,
+    with (
+        patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=result),
+        patch("apm_cli.utils.console._rich_warning") as warning,
     ):
         loaded = load_org_policy(tmp_path, logger=logger)
 
     assert loaded == ApmPolicy()
-    logger.warning.assert_called_once_with(
-        "Org policy could not be resolved; approval is proceeding without org "
-        "restrictions. Run 'apm policy status --no-cache' to diagnose."
-    )
+    warning.assert_called_once()
+    assert f"outcome={outcome}" in warning.call_args.args[0]
 
 
-def test_approval_policy_hash_mismatch_gets_distinct_sanitized_warning(
-    tmp_path: Path,
+@pytest.mark.parametrize("outcome", ["hash_mismatch", "incomplete_chain"])
+def test_approval_policy_blocking_outcome_raises_without_error_detail(
+    tmp_path: Path, outcome: str
 ) -> None:
     logger = MagicMock(spec=CommandLogger)
     result = PolicyFetchResult(
         policy=None,
-        outcome="hash_mismatch",
+        outcome=outcome,
         error="SENSITIVE_URL_TOKEN_HASH_EXCEPTION",
     )
 
-    with patch(
-        "apm_cli.policy.discovery.discover_policy_with_chain",
-        return_value=result,
+    with (
+        patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=result),
+        patch("apm_cli.utils.console._rich_warning") as warning,
+        pytest.raises(PolicyViolationError) as excinfo,
     ):
-        loaded = load_org_policy(tmp_path, logger=logger)
+        load_org_policy(tmp_path, logger=logger)
 
-    assert loaded == ApmPolicy()
-    logger.warning.assert_called_once_with(
-        "Policy hash verification failed; this may indicate policy tampering. "
-        "Approval is proceeding without org restrictions. "
-        "Run 'apm policy status --no-cache' to verify the policy source."
-    )
-    assert "SENSITIVE_URL_TOKEN_HASH_EXCEPTION" not in logger.warning.call_args.args[0]
+    assert "SENSITIVE_URL_TOKEN_HASH_EXCEPTION" not in str(excinfo.value)
+    warning.assert_not_called()
 
 
-def test_approve_recommended_warns_when_org_policy_chain_fails() -> None:
+def test_approve_recommended_warns_when_org_policy_discovery_fails() -> None:
     runner = CliRunner()
-    warning = (
-        "Org policy could not be resolved; approval is proceeding without org "
-        "restrictions. Run 'apm policy status --no-cache' to diagnose."
-    )
     with runner.isolated_filesystem():
         _write_manifest(".")
         _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
-        with (
-            patch(
-                "apm_cli.policy.discovery.discover_policy_with_chain",
-                side_effect=RuntimeError("SENSITIVE_TRANSPORT_DETAIL"),
-            ),
-            patch("apm_cli.core.command_logger.CommandLogger.warning") as mock_warning,
+        with patch(
+            "apm_cli.policy.discovery.discover_policy_with_chain",
+            side_effect=RuntimeError("SENSITIVE_TRANSPORT_DETAIL"),
         ):
             result = runner.invoke(approve_cmd, ["--recommended"])
 
     assert result.exit_code == 0
-    mock_warning.assert_called_once_with(warning)
+    assert "Org policy not applied (outcome=cache_miss_fetch_fail" in " ".join(
+        result.output.split()
+    )
     assert "SENSITIVE_TRANSPORT_DETAIL" not in result.output
+
+
+def test_approve_exits_on_blocking_policy_outcome_without_writing() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_manifest(".")
+        _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+        before = Path("apm.yml").read_bytes()
+        with patch(
+            "apm_cli.policy.discovery.discover_policy_with_chain",
+            return_value=PolicyFetchResult(outcome="incomplete_chain"),
+        ):
+            result = runner.invoke(approve_cmd, ["--recommended"])
+        after = Path("apm.yml").read_bytes()
+
+    assert result.exit_code == 1
+    flat = " ".join(result.output.split())
+    assert "Blocked by org policy" in flat
+    assert "apm policy status --no-cache" in flat
+    assert after == before
 
 
 # ---------------------------------------------------------------------------

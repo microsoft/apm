@@ -217,8 +217,8 @@ class TestPolicyGateFailClosed:
         with pytest.raises(PolicyViolationError) as excinfo:
             run(ctx)
         assert "foo/.github-private returned 404." in str(excinfo.value)
-        ctx.logger.policy_discovery_miss.assert_called_once()
-        assert ctx.logger.policy_discovery_miss.call_args.kwargs["hint"] == fetch.discovery_hint
+        # The block is the only report; no "proceeding without" miss (#4180).
+        ctx.logger.policy_discovery_miss.assert_not_called()
 
     @patch(_PATCH_DISCOVER)
     def test_no_git_remote_block_raises(self, mock_discover):
