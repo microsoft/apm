@@ -160,15 +160,6 @@ def _recorded(observation: Observation) -> frozenset[str]:
 
 KNOWN_CELLS: tuple[KnownCell, ...] = (
     KnownCell(
-        "gate-cell-b",
-        "R",
-        "#4042",
-        lambda machine, op, before, after, result: (
-            op.name == "approve" and op.cell_kinds == ("plugin",) and machine.plugin_installed
-        ),
-        match=r"^approve plugin recorded no grant",
-    ),
-    KnownCell(
         "gate-cell-approve-usage",
         "R",
         "#4262",

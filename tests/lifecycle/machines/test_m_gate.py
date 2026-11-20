@@ -60,6 +60,10 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("install", "plain"),
     ("install", "frozen"),
     ("audit_ci", True),
+    # Approving the plugin now takes effect (#4042); revoke it so update and
+    # deny still meet the plugin while its approval is pending.
+    ("decide", "plugin", "revoke"),
+    ("install", "plain"),
     ("update",),
     ("uninstall", "lsp"),
     ("declare", "lsp"),

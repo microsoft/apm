@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import tarfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -21,11 +22,13 @@ from types import SimpleNamespace
 import pytest
 import requests
 
+from apm_cli.bundle.packer import pack_bundle
 from apm_cli.core.auth import AuthResolver, _redact_secrets
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.registry.extractor import UnsafeTarballError, extract_tarball
 from apm_cli.install.phases.integrate import _run_executable_approval_prompt
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.policy.policy_checks import (
     _check_required_executable_untrusted,
@@ -39,6 +42,7 @@ from apm_cli.utils.http_credentials import (
     RedirectRefusedError,
     origin_bounded_request,
 )
+from tests.unit.test_packer import _setup_project
 
 pytestmark = [
     pytest.mark.component,
@@ -222,7 +226,7 @@ def test_parked_required_package_satisfies_presence_and_is_reported_separately()
     assert "acme/tools" in " ".join(missing.details)
 
 
-# --- passing clauses of req-sc-002 / req-sc-007 (ids report their xfails) -----
+# --- req-sc-002 archive extraction; req-sc-005; passing redaction clause of req-sc-007 --
 
 
 def _tarball(*members: tuple[str, bytes | None, bytes]) -> bytes:
@@ -240,6 +244,7 @@ def _tarball(*members: tuple[str, bytes | None, bytes]) -> bytes:
     return gzip.compress(buffer.getvalue())
 
 
+@pytest.mark.req("req-sc-002")
 @pytest.mark.parametrize(
     "bad",
     [("../escape.txt", None, b"x"), ("/abs.txt", None, b"x"), ("link", b"/etc/passwd", b"")],
@@ -250,6 +255,101 @@ def test_unsafe_archive_entry_is_rejected(tmp_path: Path, bad: tuple) -> None:
     with pytest.raises(UnsafeTarballError):
         extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
     assert not (tmp_path / "escape.txt").exists()
+
+
+@pytest.mark.req("req-sc-002")
+def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
+    data = _tarball(("first.txt", None, b"ok"), ("../escape.txt", None, b"x"))
+    out = tmp_path / "out"
+    with pytest.raises(UnsafeTarballError):
+        extract_tarball(data, hashlib.sha256(data).hexdigest(), out)
+    assert not out.exists() or not any(out.iterdir())
+
+
+@pytest.mark.req("req-sc-005")
+@pytest.mark.xfail(strict=True, reason="S-pending")
+@pytest.mark.usefixtures("isolated_credentials")
+def test_token_scoped_to_its_host_class() -> None:
+    """A credential for one registrable domain is not resolved for another."""
+    context = AuthResolver().resolve("acme.ghe.com")
+    assert context.token != _FAKE_PAT
+
+
+# --- req-sc-006: plaintext registry URLs ---------------------------------------
+
+_V01_SCHEMA = "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json"
+
+
+_CONTRACTS = pytest.mark.parametrize("schema", [None, _V01_SCHEMA], ids=["default", "openapm-v0.1"])
+
+
+def _load_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema, entry: dict):
+    import apm_cli.deps.registry.feature_gate as gate
+
+    monkeypatch.setattr(gate, "is_package_registry_enabled", lambda **_kw: True)
+    base: dict = {"name": "p", "version": "1.0.0"}
+    if schema:
+        base["$schema"] = schema
+    return APMPackage.from_mapping(
+        {**base, "registries": {"corp": entry}}, package_path=tmp_path, create_config=False
+    )
+
+
+@pytest.mark.req("req-sc-006")
+@pytest.mark.xfail(strict=True, reason="#4286: a public http:// registry URL is accepted at parse")
+@_CONTRACTS
+def test_public_plaintext_registry_url_is_rejected_naming_the_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
+) -> None:
+    with pytest.raises(ValueError, match="corp"):
+        _load_registry(tmp_path, monkeypatch, schema, {"url": "http://r.example.com"})
+
+
+# Passing loopback / RFC 1918 clause of req-sc-006 (unmarked; the id reports its xfails).
+@_CONTRACTS
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8080", "http://10.0.0.5", "http://192.168.1.2"])
+def test_private_plaintext_registry_url_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None, url: str
+) -> None:
+    loaded = _load_registry(tmp_path, monkeypatch, schema, {"url": url})
+    assert loaded.registries == {"corp": url}
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        pytest.param(
+            None,
+            id="default",
+            marks=[
+                pytest.mark.req("req-sc-006"),
+                pytest.mark.xfail(
+                    strict=True, reason="S-pending: the default contract rejects the insecure field"
+                ),
+            ],
+        ),
+        # Passing under the v0.1 contract; unmarked so the id reports the xfail above.
+        pytest.param(_V01_SCHEMA, id="openapm-v0.1"),
+    ],
+)
+def test_insecure_opt_in_admits_a_public_plaintext_registry_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
+) -> None:
+    entry = {"url": "http://r.example.com", "insecure": True}
+    assert _load_registry(tmp_path, monkeypatch, schema, entry).registries == {
+        "corp": "http://r.example.com"
+    }
+
+
+@pytest.mark.req("req-sc-007")
+@pytest.mark.xfail(strict=True, reason="S-pending")
+@pytest.mark.parametrize("name", [".env", "server.pem", "id_ed25519"])
+def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
+    deployed = [".github/instructions/rules.md", f".github/skills/tool/{name}"]
+    project = _setup_project(tmp_path, deployed, target="vscode")
+    with pytest.raises(ValueError, match=re.escape(name)):
+        pack_bundle(project, tmp_path / "build", fmt="apm")
+    assert not (tmp_path / "build").exists()
 
 
 def test_token_text_is_redacted_from_diagnostics() -> None:
