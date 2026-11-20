@@ -317,6 +317,33 @@ def test_approve_pending_lists_parked_bundle_executables(
     assert "All packages with executables are approved." in pending, pending
 
 
+def test_update_names_a_bundle_whose_executables_are_parked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4441: 'apm update' names a parked bundle and its next step, and changes nothing."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("parked-update-consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle))
+    durable = ("apm.yml", "apm.lock.yaml", "apm_modules/.local-bundle-pending.json")
+    before = {name: (consumer / name).read_bytes() for name in durable}
+
+    updated = output(world.apm(consumer, "update", "--yes"))
+
+    assert "Local bundle 'hookpkg': hooks parked, awaiting approval." in updated, updated
+    assert "apm approve --pending" in updated, updated
+    assert "executables.allow" in updated, updated
+    assert {name: (consumer / name).read_bytes() for name in durable} == before
+
+    # Once the exact key is approved and the bundle reinstalled, nothing is parked.
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    assert "awaiting approval" not in output(world.apm(consumer, "update", "--yes"))
+
+
 def _skill_bundle(world: MarketplacePackWorld, tmp_path: Path) -> Path:
     producer = world.isolated.work_root / "skillpkg"
     write(

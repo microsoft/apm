@@ -1252,6 +1252,12 @@ NATIVE_PLUGIN_HASH_MISSING = _entry(
 NATIVE_PLUGIN_CACHE_DIFFERS = _entry(
     "native-plugin-cache-differs", "apm install", "restore the package"
 )
+LOCAL_BUNDLE_EXECUTABLES_PARKED = _entry(
+    "local-bundle-executables-parked",
+    "apm approve --pending",
+    "list the approval key of each parked local bundle executable",
+    then="add it under executables.allow and reinstall the bundle",
+)
 # -- end W4 drift-trust --
 # -- W4 phases-targets --
 # Advice printed by install/phases, install/presentation and the install

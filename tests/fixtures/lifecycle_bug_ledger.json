@@ -4155,6 +4155,16 @@
       ]
     },
     {
+      "issue": 4441,
+      "fixed_in": "Unreleased",
+      "summary": "apm update names each installed local bundle whose executables stay parked, with the parked types and the approval next step, instead of a silent success; its exit code and state are unchanged.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_update_names_a_bundle_whose_executables_are_parked"
+      ]
+    },
+    {
       "issue": 4449,
       "fixed_in": "Unreleased",
       "summary": "A user's own MCP entry equal to a self-defined declaration, on Codex including one switched off with enabled = false, is no conflict: install, --frozen replay and audit agree, leave it unowned and change no byte; a different command still fails closed.",
