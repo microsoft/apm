@@ -602,6 +602,7 @@
     "tests/integration/test_policy_discovery_e2e.py",
     "tests/integration/test_policy_install_e2e.py",
     "tests/integration/test_policy_install_enforcement_lifecycle.py",
+    "tests/integration/test_policy_outcome_routing_lifecycle.py",
     "tests/integration/test_policy_pinned_constraint_e2e.py",
     "tests/integration/test_policy_refusal_stderr_lifecycle.py",
     "tests/integration/test_policy_tighten_chain_lifecycle.py",
