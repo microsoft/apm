@@ -677,6 +677,7 @@ def _audit_ci_gate(
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
     # files via unmanaged-files checks. --no-policy skips discovery.
+    from ..policy.outcome_routing import ALWAYS_BLOCKING_OUTCOMES
     from ..policy.project_config import (
         read_project_fetch_failure_default,
     )
@@ -739,7 +740,7 @@ def _audit_ci_gate(
             "malformed",
             "cache_miss_fetch_fail",
             "garbage_response",
-            "incomplete_chain",
+            *ALWAYS_BLOCKING_OUTCOMES,
         )
         no_policy_outcomes = ("absent", "no_git_remote", "empty")
 
@@ -759,7 +760,7 @@ def _audit_ci_gate(
             source = fetch_result.source
             err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
             cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
-            if fetch_result.outcome == "incomplete_chain" or project_default == "block":
+            if fetch_result.outcome in ALWAYS_BLOCKING_OUTCOMES or project_default == "block":
                 click.echo(
                     f"[x] {cause} (policy.fetch_failure_default=block)",
                     err=True,

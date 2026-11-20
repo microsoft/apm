@@ -354,6 +354,31 @@ class RegistryPackageResolver:
         return package_info
 
     # ------------------------------------------------------------------
+    def _lockfile_replay_client(
+        self, dep_ref: DependencyReference, resolved_url: str, version: str
+    ) -> RegistryClient:
+        """The client of the declared registry that serves *resolved_url*.
+
+        Any registry declared in apm.yml may serve the locked bytes; the
+        caller verifies them against ``resolved_hash`` (req-rs-009, #4278).
+        Each registry's credentials reach only its own archive URL, and a
+        URL no declared registry serves is refused before any fetch.
+        """
+        owner, repo = split_registry_identity(dep_ref.repo_url)
+        locked_name = dep_ref.registry_name
+        locked_url = self._resolve_registry_url(locked_name)
+        candidates = [(locked_name, locked_url)] + [
+            (name, url) for name, url in self._registries.items() if name != locked_name and url
+        ]
+        for name, base_url in candidates:
+            client = self._build_client(name, base_url)
+            if client.archive_url(owner, repo, version) == resolved_url:
+                return client
+        raise RegistryResolutionError(
+            "lockfile registry URL does not match any registry endpoint declared in apm.yml"
+        )
+
+    # ------------------------------------------------------------------
     def download_from_lockfile(
         self,
         dep_ref: DependencyReference,
@@ -373,15 +398,7 @@ class RegistryPackageResolver:
         locked version.  ``apm update`` bypasses this path entirely via
         ``update_refs=True``.
         """
-        registry_name = dep_ref.registry_name
-        base_url = self._resolve_registry_url(registry_name)
-        client = self._build_client(registry_name, base_url)
-        owner, repo = split_registry_identity(dep_ref.repo_url)
-        expected_url = client.archive_url(owner, repo, version)
-        if resolved_url != expected_url:
-            raise RegistryResolutionError(
-                "lockfile registry URL does not match the configured registry endpoint"
-            )
+        client = self._lockfile_replay_client(dep_ref, resolved_url, version)
         try:
             archive_bytes, content_type = client.fetch_from_url(resolved_url)
         except RegistryError as exc:

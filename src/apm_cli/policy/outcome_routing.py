@@ -36,12 +36,17 @@ if TYPE_CHECKING:  # pragma: no cover - type-checking only
 
 # Genuine resolution failures with no policy usable by approval fallback.
 POLICY_HASH_MISMATCH_OUTCOME = "hash_mismatch"
+# Several git remotes and no ``origin``: discovery fails closed (req-pl-012).
+AMBIGUOUS_GIT_REMOTE_OUTCOME = "ambiguous_git_remote"
+# Outcomes that always fail closed, whatever ``fetch_failure_default`` says.
+ALWAYS_BLOCKING_OUTCOMES = frozenset({"incomplete_chain", AMBIGUOUS_GIT_REMOTE_OUTCOME})
 POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
     {
         "cache_miss_fetch_fail",
         "garbage_response",
         POLICY_HASH_MISMATCH_OUTCOME,
         "incomplete_chain",
+        AMBIGUOUS_GIT_REMOTE_OUTCOME,
         "malformed",
     }
 )
@@ -144,6 +149,16 @@ def route_discovery_outcome(
                 "Update apm.yml policy.hash or contact your org admin.",
                 policy_source=source or "unknown",
             )
+        return None
+
+    if outcome == AMBIGUOUS_GIT_REMOTE_OUTCOME:
+        if raise_blocking_errors:
+            raise PolicyViolationError(
+                f"{blocked_label}: {fetch_result.error}",
+                policy_source="git remote",
+            )
+        if logger is not None:
+            logger.policy_discovery_miss(outcome=outcome, source=source, error=fetch_result.error)
         return None
 
     if outcome == "incomplete_chain":

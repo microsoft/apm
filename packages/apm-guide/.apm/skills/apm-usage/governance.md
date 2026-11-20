@@ -526,7 +526,8 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 ### 2. Discovery and applicability
 
-APM auto-discovers org policy from the project's git remote by checking
+APM auto-discovers org policy from the project's git remote (`origin`, else the
+single remote; several remotes without `origin` stop the install and are named) by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. No policy found is silent by default; on github.com, `*.ghe.com` and
 the `GITHUB_HOST` host, `apm policy status`, `--verbose` and the `fetch_failure_default: block`

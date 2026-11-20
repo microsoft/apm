@@ -137,28 +137,22 @@ def test_default_transitive_depth_cap_is_fifty(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("req-rs-006")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4277: exceeding the depth cap drops the dependency without failing",
-)
 def test_exceeding_depth_cap_fails_naming_the_chain(tmp_path: Path) -> None:
+    """The dependency past the cap fails resolution naming the chain (#4277)."""
     manifest = _chain_project(tmp_path)
     resolver = APMDependencyResolver(apm_modules_dir=tmp_path / "apm_modules", max_depth=1)
     resolver._project_root = tmp_path
     tree = resolver.build_dependency_tree(manifest)
 
-    assert any("org/a" in error and "org/b" in error for error in tree.resolution_errors)
+    assert tree.resolution_errors == ["Dependency depth limit (1) exceeded: org/a -> org/b"]
 
 
 # --- req-rs-009: any declared registry may serve hash-matching bytes ----------
 
 
 @pytest.mark.req("req-rs-009")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4278: a resolved_url on another declared registry is refused before hashing",
-)
 def test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash(tmp_path: Path) -> None:
+    """A declared mirror may serve the locked bytes; the hash still decides (#4278)."""
     archive, digest = _build_apm_tarball()
     download = "/v1/packages/acme/web/versions/1.0.0/download"
     target = tmp_path / "apm_modules" / "acme" / "web"

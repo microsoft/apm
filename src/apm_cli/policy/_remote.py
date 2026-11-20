@@ -3,7 +3,7 @@
 Split out of ``discovery.py`` (which grew past the file-length ratchet): the
 canonical splitter :func:`_remote_url_parts` and the host-specific
 :func:`_parse_remote_url` live here. ``discovery.py`` re-exports both and reads
-the ``origin`` remote via its own ``_git_remote_origin_url``; the architecture
+the project's remote via its own ``_git_remote_origin_url``; the architecture
 guard ``install-deployment-policy-remote-origin-owner`` keeps these the single
 owners of git-remote reading and URL parsing.
 """
@@ -30,16 +30,22 @@ class _Unset:
 _UNSET = _Unset()
 
 
-def _git_remote_origin_url(project_root: Path) -> str | None:
-    """Return the ``origin`` remote URL, or ``None`` when unavailable.
+class AmbiguousGitRemoteError(ValueError):
+    """Several git remotes and none named ``origin`` (req-pl-012)."""
 
-    Canonical reader of the project's ``origin`` remote, shared by
-    :func:`_extract_org_host_port_from_git_remote` and GitLab subgroup
-    discovery so the ``git remote get-url`` subprocess lives in one place.
-    """
+    def __init__(self, candidates: list[str]) -> None:
+        self.candidates = candidates
+        super().__init__(
+            "cannot choose the project's git remote for org policy discovery: no 'origin' "
+            f"and several remotes ({', '.join(candidates)}). Add an 'origin' remote or "
+            "remove the extra remotes."
+        )
+
+
+def _git(project_root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
-            [get_git_executable(), "remote", "get-url", "origin"],
+            [get_git_executable(), *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -51,6 +57,28 @@ def _git_remote_origin_url(project_root: Path) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip()
+
+
+def _git_remote_origin_url(project_root: Path) -> str | None:
+    """Return the URL of the project's remote, or ``None`` when there is none.
+
+    Canonical reader of the project's remote, shared by
+    :func:`_extract_org_host_port_from_git_remote` and GitLab subgroup
+    discovery so the ``git remote`` subprocesses live in one place.
+    req-pl-012 (#4279): ``origin`` when present, else the single remote.
+
+    Raises:
+        AmbiguousGitRemoteError: no ``origin`` and several other remotes.
+    """
+    origin = _git(project_root, "remote", "get-url", "origin")
+    if origin is not None:
+        return origin
+    names = sorted(name for name in (_git(project_root, "remote") or "").splitlines() if name)
+    if len(names) > 1:
+        raise AmbiguousGitRemoteError(names)
+    if not names:
+        return None
+    return _git(project_root, "remote", "get-url", names[0])
 
 
 def _extract_org_host_port_from_git_remote(
@@ -66,7 +94,11 @@ def _extract_org_host_port_from_git_remote(
     read here; an explicit ``None`` means "no remote" and is not re-read.
     """
     if isinstance(remote_url, _Unset):
-        remote_url = _git_remote_origin_url(project_root)
+        try:
+            remote_url = _git_remote_origin_url(project_root)
+        except AmbiguousGitRemoteError:
+            # No single identity; auto-discovery reports it and fails closed.
+            return None
     if not remote_url:
         return None
     try:

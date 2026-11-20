@@ -29,6 +29,7 @@ from ..utils.yaml_io import load_yaml_str
 from . import _gitlab
 from ._policy_http import policy_get
 from ._remote import (  # noqa: F401  -- re-exported for callers/tests
+    AmbiguousGitRemoteError,
     _extract_org_from_git_remote,
     _extract_org_host_port_from_git_remote,
     _git_remote_origin_url,
@@ -929,7 +930,7 @@ def _auto_discover(
 ) -> PolicyFetchResult:
     """Auto-discover policy by cascading through candidate repos.
 
-    1. Run git remote get-url origin
+    1. Read the project's remote (origin, else the single remote)
     2. Parse org + host from URL
     3. Select host profile to determine candidate repos
     4. Try each candidate in precedence order (.github-private > .github > .apm > _apm)
@@ -938,8 +939,14 @@ def _auto_discover(
        - Found -> return (first match wins)
     5. All candidates exhausted -> outcome="absent"
     """
-    # Read origin once: identity and GitLab ancestry share the same remote.
-    remote_url = _git_remote_origin_url(project_root)
+    # Read the remote once: identity and GitLab ancestry share it.
+    try:
+        remote_url = _git_remote_origin_url(project_root)
+    except AmbiguousGitRemoteError as exc:
+        # req-pl-012 (#4279): several remotes and no origin fail closed.
+        from .outcome_routing import AMBIGUOUS_GIT_REMOTE_OUTCOME
+
+        return PolicyFetchResult(error=str(exc), outcome=AMBIGUOUS_GIT_REMOTE_OUTCOME)
     identity = _extract_org_host_port_from_git_remote(project_root, remote_url=remote_url)
     if identity is None:
         return PolicyFetchResult(

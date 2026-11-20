@@ -123,8 +123,9 @@ Priya, on the Contoso platform team, starts in `warn` so nothing breaks on day o
 
 ## Where it lives
 
-APM derives the organization from the checkout's git remote and looks for
-`apm-policy.yml` in these repositories, in this order. The earliest match wins.
+APM derives the organization from the checkout's git remote (`origin`, or the only remote
+when there is no `origin`; with several remotes and no `origin`, install stops and names them)
+and looks for `apm-policy.yml` in these repositories, in this order. The earliest match wins.
 
 | Host | Discovery order |
 |---|---|
@@ -175,8 +176,8 @@ shows the same check as an `[x]` row followed by its details. Then:
 1. **Which policy ruled?** Run `apm policy status`. `Outcome`, `Source`, `Enforcement`
    and `Extends chain` answer it. Add `--no-cache` if an admin changed the policy in the
    last hour (the default cache TTL is 3600 seconds).
-2. **Wrong policy or none?** Check `git remote get-url origin`: discovery follows the
-   remote's owner. Test another source with `--policy-source <owner>/.github`.
+2. **Wrong policy or none?** Check `git remote -v`: discovery follows the owner of
+   `origin` (or of the only remote). Test another source with `--policy-source <owner>/.github`.
 3. **Why is a hook or MCP server parked?** `apm policy explain <pkg>` shows the
    executable-trust decision and which layer made it.
 4. **Fix the right side.** Change the dependency in `apm.yml`, or open a pull request

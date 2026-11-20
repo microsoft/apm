@@ -792,6 +792,19 @@ class APMDependencyResolver:
             )
             return None
 
+    def _depth_limit_error(
+        self, dep_ref: DependencyReference, parent_node: DependencyNode | None
+    ) -> str:
+        """Name the chain that reached ``max_depth`` (req-rs-006)."""
+        chain = [dep_ref.to_display_reference()]
+        ancestor = parent_node
+        while ancestor is not None:
+            chain.append(ancestor.dependency_ref.to_display_reference())
+            ancestor = ancestor.parent
+        return f"Dependency depth limit ({self.max_depth}) exceeded: " + " -> ".join(
+            reversed(chain)
+        )
+
     def build_dependency_tree(
         self,
         root_apm_yml: Path,
@@ -959,12 +972,10 @@ class APMDependencyResolver:
                 # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
 
-                # Check maximum depth to prevent infinite recursion
+                # Check maximum depth to prevent infinite recursion. Exceeding
+                # the cap fails resolution naming the chain (req-rs-006, #4277).
                 if depth > self.max_depth:
-                    if self._read_only:
-                        tree.resolution_errors.append(
-                            f"Dependency preview depth limit reached: {dep_ref.to_display_reference()}"
-                        )
+                    tree.resolution_errors.append(self._depth_limit_error(dep_ref, parent_node))
                     continue
 
                 # Check if we already processed this dependency at this level or higher

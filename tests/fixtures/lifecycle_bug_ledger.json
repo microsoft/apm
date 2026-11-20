@@ -1051,6 +1051,60 @@
       ]
     },
     {
+      "issue": 4277,
+      "fixed_in": "Unreleased",
+      "summary": "A dependency chain deeper than the transitive depth cap dropped the dependency past the cap and installed an incomplete graph instead of failing.",
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_dependency_depth_cap_lifecycle.py::test_install_fails_when_the_chain_exceeds_the_depth_cap",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_exceeding_depth_cap_fails_naming_the_chain"
+      ]
+    },
+    {
+      "issue": 4278,
+      "fixed_in": "Unreleased",
+      "summary": "Registry lock replay refused a resolved_url on another registry declared in apm.yml before fetching, even when its bytes matched resolved_hash.",
+      "failure_modes": [
+        "reference",
+        "auth"
+      ],
+      "properties": [
+        "source.ref_cache_coherent",
+        "auth.credentials_isolated"
+      ],
+      "regression_tests": [
+        "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
+        "tests/unit/registry/test_resolver.py::TestDownloadFromLockfile::test_declared_mirror_may_serve_but_the_locked_hash_decides",
+        "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
+      ]
+    },
+    {
+      "issue": 4279,
+      "fixed_in": "Unreleased",
+      "summary": "Org policy discovery read only the origin remote: a project whose single remote had another name was treated as having none, and several remotes without origin were not reported.",
+      "failure_modes": [
+        "outcome",
+        "routing"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_several_remotes_without_origin_fail_closed",
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_single_non_origin_remote_is_used_for_discovery",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_single_non_origin_remote_identifies_the_project",
+        "tests/spec_conformance/test_policy_behavior_reqs.py::test_several_non_origin_remotes_fail_closed_naming_candidates"
+      ]
+    },
+    {
       "issue": 4287,
       "fixed_in": "Unreleased",
       "summary": "apm audit --ci --format json printed no JSON when the install replay failed on a local dependency; the failure is now a failed drift check in the document.",
