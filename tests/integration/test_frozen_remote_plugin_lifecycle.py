@@ -178,7 +178,8 @@ def _scenario(
     lock = load_yaml(producer / "apm.lock.yaml")
     assert {entry["resolved_commit"] for entry in lock["dependencies"]} == pins
     assert {entry["resolved_ref"] for entry in lock["dependencies"]} == pins
-    expected_type = {"plugin": "skill_bundle", "skill_bundle": "skill_bundle"}.get(shape, shape)
+    # A Claude plugin manifest classifies the tree as on its fresh fetch (#4270).
+    expected_type = {"plugin": "marketplace_plugin"}.get(shape, shape)
     assert (
         next(entry for entry in lock["dependencies"] if entry["repo_url"] == "frozen/plugin")[
             "package_type"
