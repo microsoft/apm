@@ -152,6 +152,7 @@
       "owner": "cli.py (_LazyCommand, _LAZY_COMMANDS, _OutputModeGroup) + deps/__init__.py (PEP 562 __getattr__); installed-CLI budget in tests/integration/test_cli_startup_import_budget.py",
       "selectors": [
         "src/apm_cli/deps/__init__.py",
+        "src/apm_cli/update_notice.py",
         "tests/integration/test_cli_startup_import_budget.py"
       ],
       "guards": ["registry-delegation-cli-startup-import-budget"]
