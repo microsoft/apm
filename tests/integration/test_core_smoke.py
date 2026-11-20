@@ -164,8 +164,11 @@ class TestBinaryStartup:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         assert f"test-org/{repo_name}" in result.stdout
-        # Rich borders are structural Unicode, not ANSI, so piped output keeps them.
-        assert "\u2502" in result.stdout, "deps list did not render a Rich table"
+        # Tables render with ASCII borders (encoding rule); the wide cell must not break them.
+        assert any(
+            line.lstrip().startswith("|") and f"test-org/{repo_name}" in line
+            for line in result.stdout.splitlines()
+        ), "deps list did not render the package row inside an ASCII table"
 
 
 class TestPortableByManifest:
