@@ -100,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When the Git config cannot be read, `apm install` refuses and names Git's error, the config file at fault, and a command to inspect it. (#4442)
 - `install.sh` prints color codes only on a terminal and honors `NO_COLOR`, so piped and `apm self-update` output is plain text. (closes #4308, #4429)
 - `apm update` and `apm approve` print an org-policy block as an `[x]` error line, like every other refusal. (closes #4403, #4427)
+- `apm install --dry-run` previews the org policy block that the real install applies when policy cannot be resolved under `fetch_failure_default: block`. (closes #4455, #4466)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)

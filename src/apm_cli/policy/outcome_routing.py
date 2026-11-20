@@ -299,6 +299,9 @@ def route_discovery_outcome(
             f"{blocked_label}: {route.block_reason}",
             policy_source=source or "unknown",
         )
+    if route.blocks and logger is not None:
+        # A dry run previews the block the real command applies (#4455).
+        logger.warning(f"Would be blocked by policy: {route.block_reason}")
     return policy
 
 
