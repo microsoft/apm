@@ -1,5 +1,8 @@
 """Thin rule catalog for transport/platform architecture checks."""
 
+from scripts.architecture_linter.checks.transport_archive_limits import (
+    RULES as _ARCHIVE_LIMIT_RULES,
+)
 from scripts.architecture_linter.checks.transport_auth_outcome import (
     COLLECTORS as _AUTH_OUTCOME_COLLECTORS,
 )
@@ -18,6 +21,9 @@ from scripts.architecture_linter.checks.transport_cache_identity import (
     COLLECTORS as _CACHE_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_cache_identity import RULES as _CACHE_RULES
+from scripts.architecture_linter.checks.transport_credential_value_rendering import (
+    RULES as _CREDENTIAL_RENDERING_RULES,
+)
 from scripts.architecture_linter.checks.transport_gitlab_sparse import (
     RULES as _GITLAB_SPARSE_RULES,
 )
@@ -61,6 +67,8 @@ RULES = (
     + _LS_REMOTE_TAG_RULES
     + _NETWORK_RULES
     + _REDIRECT_RULES
+    + _CREDENTIAL_RENDERING_RULES
+    + _ARCHIVE_LIMIT_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS

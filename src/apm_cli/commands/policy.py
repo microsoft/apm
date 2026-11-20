@@ -409,8 +409,14 @@ def explain(package, global_scope):
     Note: resolves packages installed in the current project, or at user
     scope (apm install -g) with -g.
     """
-    from .approve import explain_decision
+    from ..install.errors import PolicyViolationError
+    from .approve import _report_policy_block, explain_decision
 
     logger = CommandLogger("policy explain")
-    explain_decision(package, logger=logger, global_scope=global_scope)
-    logger.render_summary()
+    try:
+        explain_decision(package, logger=logger, global_scope=global_scope)
+    except PolicyViolationError as exc:
+        _report_policy_block(exc)
+        sys.exit(1)
+    finally:
+        logger.render_summary()

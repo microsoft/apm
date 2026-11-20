@@ -70,10 +70,176 @@ class PolicyValidationError(Exception):
         super().__init__(f"Policy validation failed: {'; '.join(errors)}")
 
 
+# Every typed policy field, by path. A value of the wrong type is a
+# validation error (a malformed policy), checked before any membership test,
+# hashing or iteration, so no TypeError escapes the parser (#4140).
+_MAPPING_FIELDS: tuple[tuple[str, ...], ...] = (
+    ("cache",),
+    ("dependencies",),
+    ("mcp",),
+    ("mcp", "transport"),
+    ("compilation",),
+    ("compilation", "target"),
+    ("compilation", "strategy"),
+    ("manifest",),
+    ("manifest", "content_types"),
+    ("unmanaged_files",),
+    ("registry_source",),
+    ("security",),
+    ("security", "audit"),
+    ("security", "integrity"),
+    ("bin_deploy",),
+    ("executables",),
+)
+_ENUM_FIELDS: tuple[tuple[tuple[str, ...], frozenset[str]], ...] = (
+    (("enforcement",), frozenset(_VALID_ENFORCEMENT)),
+    (("fetch_failure",), frozenset(_VALID_FETCH_FAILURE)),
+    (("dependencies", "require_resolution"), frozenset(_VALID_REQUIRE_RESOLUTION)),
+    (("mcp", "self_defined"), frozenset(_VALID_SELF_DEFINED)),
+    (("manifest", "scripts"), frozenset(_VALID_SCRIPTS)),
+    (("unmanaged_files", "action"), frozenset(_VALID_UNMANAGED_ACTION)),
+    (("security", "audit", "on_install"), frozenset(_VALID_AUDIT_ON_INSTALL)),
+)
+_BOOL_FIELDS: tuple[tuple[str, ...], ...] = (
+    ("dependencies", "require_pinned_constraint"),
+    ("mcp", "trust_transitive"),
+    ("compilation", "source_attribution"),
+    ("manifest", "require_explicit_includes"),
+    ("registry_source", "allow_non_registry"),
+    ("security", "audit", "fail_on_drift"),
+    ("security", "integrity", "require_hashes"),
+    ("bin_deploy", "deny_all"),
+    ("executables", "deny_all"),
+)
+_STR_FIELDS: tuple[tuple[str, ...], ...] = (
+    ("name",),
+    ("extends",),
+    ("compilation", "target", "enforce"),
+    ("compilation", "strategy", "enforce"),
+)
+_POSITIVE_INT_FIELDS: tuple[tuple[str, ...], ...] = (
+    ("cache", "ttl"),
+    ("dependencies", "max_depth"),
+)
+_STR_LIST_FIELDS: dict[tuple[str, ...], str] = {
+    ("dependencies", "allow"): "a YAML list of package patterns",
+    ("dependencies", "deny"): "a YAML list of package patterns",
+    ("dependencies", "require"): "a YAML list of package patterns",
+    ("mcp", "allow"): "a YAML list of server patterns",
+    ("mcp", "deny"): "a YAML list of server patterns",
+    ("mcp", "transport", "allow"): "a YAML list of transport names",
+    ("compilation", "target", "allow"): "a YAML list of target names",
+    ("manifest", "required_fields"): "a YAML list of field names",
+    ("manifest", "content_types", "allow"): "a YAML list of content types",
+    ("unmanaged_files", "directories"): "a YAML list of directories",
+    ("unmanaged_files", "exclude"): "a YAML list of path globs",
+    ("registry_source", "require"): "a YAML list of package patterns",
+    ("security", "audit", "external"): "a YAML list of scanner names",
+    ("bin_deploy", "deny"): "a YAML list of package strings",
+    ("executables", "deny"): "a YAML list of package strings",
+    ("executables", "require"): "a YAML list of package strings",
+    ("executables", "recommend"): "a YAML list of package strings",
+    ("executables", "enforce"): "a YAML list of package strings",
+}
+_UNMANAGED_FILES_SHAPE_HINT = (
+    "; use a block, for example:\n"
+    "  unmanaged_files:\n"
+    "    action: deny\n"
+    "    directories:\n"
+    "      - .github/instructions"
+)
+_MISSING = object()
+
+
+def _field(data: dict, path: tuple[str, ...]) -> Any:
+    """Return the value at *path*, or ``_MISSING`` when absent or under a non-mapping."""
+    node: Any = data
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return _MISSING
+        node = node[key]
+    return node
+
+
+def _set_field(data: dict, path: tuple[str, ...], value: Any) -> None:
+    node = data
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+
+
+def _type_name(value: Any) -> str:
+    return type(value).__name__
+
+
+def _check_mappings(data: dict, errors: list[str]) -> None:
+    for path in _MAPPING_FIELDS:
+        value = _field(data, path)
+        if value is _MISSING or value is None or isinstance(value, dict):
+            continue
+        name = ".".join(path)
+        if path == ("unmanaged_files",):
+            errors.append(
+                f"unmanaged_files must be a YAML mapping (got {_type_name(value)} {value!r})"
+                + _UNMANAGED_FILES_SHAPE_HINT
+            )
+        else:
+            errors.append(f"{name} must be a YAML mapping")
+
+
+def _check_enums(data: dict, errors: list[str]) -> None:
+    """Membership runs only on a string, so a list or mapping never reaches ``in``."""
+    for path, valid in _ENUM_FIELDS:
+        value = _field(data, path)
+        if value is _MISSING or value is None:
+            continue
+        if isinstance(value, bool):
+            # YAML 1.1 reads off/on as booleans; map them back to strings.
+            value = _YAML_BOOL_COERCE[value]
+            _set_field(data, path, value)
+        if not isinstance(value, str) or value not in valid:
+            errors.append(f"{'.'.join(path)} must be one of {sorted(valid)}, got '{value}'")
+
+
+def _check_scalars(data: dict, errors: list[str]) -> None:
+    for path in _BOOL_FIELDS:
+        value = _field(data, path)
+        if value is not _MISSING and value is not None and not isinstance(value, bool):
+            errors.append(f"{'.'.join(path)} must be a boolean, got '{value}'")
+    for path in _STR_FIELDS:
+        value = _field(data, path)
+        if value is not _MISSING and value is not None and not isinstance(value, str):
+            errors.append(f"{'.'.join(path)} must be a string (got {_type_name(value)})")
+    version = data.get("version")
+    if version is not None and (
+        isinstance(version, bool) or not isinstance(version, (str, int, float))
+    ):
+        errors.append(f"version must be a string (got {_type_name(version)})")
+    for path in _POSITIVE_INT_FIELDS:
+        value = _field(data, path)
+        if value is _MISSING or value is None:
+            continue
+        name = ".".join(path)
+        if not isinstance(value, int) or isinstance(value, bool):
+            errors.append(f"{name} must be a positive integer, got '{value}'")
+        elif value <= 0:
+            errors.append(f"{name} must be a positive integer, got {value}")
+
+
+def _check_str_lists(data: dict, errors: list[str]) -> None:
+    for path, shape in _STR_LIST_FIELDS.items():
+        value = _field(data, path)
+        if value is _MISSING or value is None:
+            continue
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            errors.append(f"{'.'.join(path)} must be {shape} (got {_type_name(value)})")
+
+
 def validate_policy(data: dict) -> tuple[list[str], list[str]]:
     """Validate a raw dict against the policy schema.
 
-    Returns (errors, warnings) where each is a list of strings.
+    Returns (errors, warnings) where each is a list of strings. Every field
+    is type-checked first; a wrongly typed field is an error, never a crash.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -83,186 +249,36 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
         return errors, warnings
 
     # Unknown top-level keys (warn, don't fail)
-    unknown = set(data.keys()) - _KNOWN_TOP_LEVEL_KEYS
-    for key in sorted(unknown):
+    for key in sorted(str(key) for key in set(data.keys()) - _KNOWN_TOP_LEVEL_KEYS):
         warnings.append(f"Unknown top-level policy key: '{key}'")
 
-    for key in ("mcp", "manifest", "compilation", "registry_source", "bin_deploy"):
-        value = data.get(key)
-        if value is not None and not isinstance(value, dict):
-            errors.append(f"{key} must be a YAML mapping")
+    _check_mappings(data, errors)
+    _check_enums(data, errors)
+    _check_scalars(data, errors)
+    _check_str_lists(data, errors)
 
-    # enforcement (coerce YAML booleans: off → "off")
-    enforcement = data.get("enforcement")
-    if isinstance(enforcement, bool):
-        enforcement = _YAML_BOOL_COERCE.get(enforcement, str(enforcement))
-        data["enforcement"] = enforcement
-    if enforcement is not None and enforcement not in _VALID_ENFORCEMENT:
-        errors.append(
-            f"enforcement must be one of {sorted(_VALID_ENFORCEMENT)}, got '{enforcement}'"
-        )
-
-    # fetch_failure (closes #829): controls fail-closed behavior on
-    # policy fetch / parse failure. Default "warn" (back-compat).
-    fetch_failure = data.get("fetch_failure")
-    if isinstance(fetch_failure, bool):
-        fetch_failure = _YAML_BOOL_COERCE.get(fetch_failure, str(fetch_failure))
-        data["fetch_failure"] = fetch_failure
-    if fetch_failure is not None and fetch_failure not in _VALID_FETCH_FAILURE:
-        errors.append(
-            f"fetch_failure must be one of {sorted(_VALID_FETCH_FAILURE)}, got '{fetch_failure}'"
-        )
-
-    # cache.ttl
-    cache = data.get("cache")
-    if cache is not None and not isinstance(cache, dict):
-        errors.append("cache must be a YAML mapping")
-    elif isinstance(cache, dict):
-        ttl = cache.get("ttl")
-        if ttl is not None:
-            if not isinstance(ttl, int) or isinstance(ttl, bool):
-                errors.append(f"cache.ttl must be a positive integer, got '{ttl}'")
-            elif ttl <= 0:
-                errors.append(f"cache.ttl must be a positive integer, got {ttl}")
-
-    # dependencies
-    deps = data.get("dependencies")
-    if deps is not None and not isinstance(deps, dict):
-        errors.append("dependencies must be a YAML mapping")
-    elif isinstance(deps, dict):
-        for key in ("allow", "deny", "require"):
-            value = deps.get(key)
-            if value is not None and (
-                not isinstance(value, list) or not all(isinstance(item, str) for item in value)
-            ):
-                errors.append(f"dependencies.{key} must be a YAML list of package patterns")
-        rr = deps.get("require_resolution")
-        if rr is not None and rr not in _VALID_REQUIRE_RESOLUTION:
-            errors.append(
-                f"dependencies.require_resolution must be one of "
-                f"{sorted(_VALID_REQUIRE_RESOLUTION)}, got '{rr}'"
-            )
-        md = deps.get("max_depth")
-        if md is not None:
-            if not isinstance(md, int) or isinstance(md, bool):
-                errors.append(f"dependencies.max_depth must be a positive integer, got '{md}'")
-            elif md <= 0:
-                errors.append(f"dependencies.max_depth must be a positive integer, got {md}")
-        rpc = deps.get("require_pinned_constraint")
-        if rpc is not None and not isinstance(rpc, bool):
-            errors.append(f"dependencies.require_pinned_constraint must be a boolean, got '{rpc}'")
-
-    # mcp.self_defined
     mcp = data.get("mcp")
     if isinstance(mcp, dict):
-        sd = mcp.get("self_defined")
-        if sd is not None and sd not in _VALID_SELF_DEFINED:
-            errors.append(
-                f"mcp.self_defined must be one of {sorted(_VALID_SELF_DEFINED)}, got '{sd}'"
-            )
         _warn_unknown_mcp_transports(mcp.get("transport"), warnings)
-
-    # manifest.scripts
-    manifest = data.get("manifest")
-    if isinstance(manifest, dict):
-        scripts = manifest.get("scripts")
-        if scripts is not None and scripts not in _VALID_SCRIPTS:
-            errors.append(
-                f"manifest.scripts must be one of {sorted(_VALID_SCRIPTS)}, got '{scripts}'"
-            )
-        rei = manifest.get("require_explicit_includes")
-        if rei is not None and not isinstance(rei, bool):
-            errors.append(f"manifest.require_explicit_includes must be a boolean, got '{rei}'")
-
-    # unmanaged_files
-    uf = data.get("unmanaged_files")
-    if uf is not None and not isinstance(uf, dict):
-        errors.append(
-            "unmanaged_files must be a YAML mapping "
-            f"(got {type(uf).__name__} {uf!r}); use a block, for example:\n"
-            "  unmanaged_files:\n"
-            "    action: deny\n"
-            "    directories:\n"
-            "      - .github/instructions"
-        )
-    elif isinstance(uf, dict):
-        action = uf.get("action")
-        if action is not None and action not in _VALID_UNMANAGED_ACTION:
-            errors.append(
-                f"unmanaged_files.action must be one of "
-                f"{sorted(_VALID_UNMANAGED_ACTION)}, got '{action}'"
-            )
-        exclude = uf.get("exclude")
-        if exclude is not None and not isinstance(exclude, list):
-            errors.append(
-                "unmanaged_files.exclude must be a YAML list of path globs "
-                f"(got {type(exclude).__name__})"
-            )
-
-    # security.audit (install-time audit + external scanners)
-    security = data.get("security")
-    if security is not None and not isinstance(security, dict):
-        errors.append("security must be a YAML mapping")
-    elif isinstance(security, dict):
-        audit = security.get("audit")
-        if audit is not None and not isinstance(audit, dict):
-            errors.append("security.audit must be a YAML mapping")
-        elif isinstance(audit, dict):
-            on_install = audit.get("on_install")
-            if isinstance(on_install, bool):
-                on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
-            if on_install is not None and on_install not in _VALID_AUDIT_ON_INSTALL:
-                errors.append(
-                    f"security.audit.on_install must be one of "
-                    f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
-                )
-            fail_on_drift = audit.get("fail_on_drift")
-            if fail_on_drift is not None and not isinstance(fail_on_drift, bool):
-                errors.append(
-                    f"security.audit.fail_on_drift must be a boolean, got '{fail_on_drift}'"
-                )
-            _validate_scanners(audit.get("scanners"), errors, warnings)
-        integrity = security.get("integrity")
-        if integrity is not None and not isinstance(integrity, dict):
-            errors.append("security.integrity must be a YAML mapping")
-        elif isinstance(integrity, dict):
-            require_hashes = integrity.get("require_hashes")
-            if require_hashes is not None and not isinstance(require_hashes, bool):
-                errors.append(
-                    f"security.integrity.require_hashes must be a boolean, got '{require_hashes}'"
-                )
+    audit = _field(data, ("security", "audit"))
+    if isinstance(audit, dict):
+        _validate_scanners(audit.get("scanners"), errors, warnings)
 
     # executables (issue #1873, Gap A): org grant/deny trust block.
-    _validate_executables(data, errors, warnings)
+    _validate_executables(data, warnings)
 
     return errors, warnings
 
 
-def _validate_executables(data: dict, errors: list[str], warnings: list[str]) -> None:
-    """Validate the ``executables:`` block and warn on deprecated ``bin_deploy``."""
+def _validate_executables(data: dict, warnings: list[str]) -> None:
+    """Warn on deprecated ``bin_deploy`` and the inert ``executables.enforce``."""
     if data.get("bin_deploy") is not None:
         warnings.append(
             "'bin_deploy' is deprecated; use 'executables' (deny_all/deny) instead. "
             "bin_deploy is still honored as a bin-scoped deny alias for one minor cycle."
         )
-
     execs = data.get("executables")
-    if execs is None:
-        return
-    if not isinstance(execs, dict):
-        errors.append("executables must be a YAML mapping")
-        return
-    deny_all = execs.get("deny_all")
-    if deny_all is not None and not isinstance(deny_all, bool):
-        errors.append(f"executables.deny_all must be a boolean, got '{deny_all}'")
-    for key in ("deny", "require", "recommend", "enforce"):
-        val = execs.get(key)
-        if val is not None and not isinstance(val, list):
-            errors.append(
-                f"executables.{key} must be a YAML list of package strings "
-                f"(got {type(val).__name__})"
-            )
-    if execs.get("enforce"):
+    if isinstance(execs, dict) and execs.get("enforce"):
         warnings.append(
             "executables.enforce is accepted but INERT in v1: it degrades to "
             "'recommend' (no force-execute; a user deny still overrides). "
@@ -482,7 +498,11 @@ def load_policy(source: str | Path) -> tuple[ApmPolicy, list[str]]:
     if errors:
         raise PolicyValidationError(errors, warnings)
 
-    return _build_policy(data), warnings
+    try:
+        return _build_policy(data), warnings
+    except (TypeError, AttributeError, ValueError) as exc:
+        # A shape validate_policy did not foresee is still a malformed policy.
+        raise PolicyValidationError([f"Policy has an invalid field: {exc}"], warnings) from exc
 
 
 def _parse_allow(val: Any) -> tuple[str, ...] | None:
@@ -543,6 +563,11 @@ def _validate_scanners(scanners: Any, errors: list[str], warnings: list[str]) ->
     from ..security.external.registry import SUPPORTED_SCANNERS
 
     for name, block in scanners.items():
+        if not isinstance(name, str):
+            errors.append(
+                f"security.audit.scanners keys must be strings (got {type(name).__name__})"
+            )
+            continue
         if name not in SUPPORTED_SCANNERS:
             warnings.append(
                 f"security.audit.scanners: unknown scanner '{name}' "

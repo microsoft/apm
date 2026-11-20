@@ -21,6 +21,7 @@ from apm_cli.copilot_plugins.constants import ENABLED_PLUGINS_KEY, EXTRA_MARKETP
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 from apm_cli.install.native_plugin_admission import finalize_native_plugin
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.security.executables import (
     TRUST_DENIED,
     TRUST_GATED,
@@ -645,7 +646,7 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     # Update reads org policy for packages with executables (#3990); no org here.
     monkeypatch.setattr(
         "apm_cli.policy.discovery.discover_policy_with_chain",
-        lambda *_args, **_kwargs: SimpleNamespace(outcome="no_policy", policy=None),
+        lambda *_args, **_kwargs: PolicyFetchResult(outcome="absent"),
     )
 
     updated = CliRunner().invoke(

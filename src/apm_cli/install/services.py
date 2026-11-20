@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
-from apm_cli.core.scope import is_user_scope
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import format_target_collapse as _format_target_collapse
@@ -484,7 +483,7 @@ def integrate_package_primitives(  # noqa: PLR0913
                 EXEC_TYPE_CANVAS,
             )
             if not _dep_canvas_ok:
-                _log_canvas_skip(package_name, package_info, logger, is_user_scope(scope))
+                _log_canvas_skip(package_name, package_info, logger, ctx)
                 continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         # A primitive can be statically present on a target (e.g. the
@@ -668,8 +667,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
         from apm_cli.install.exec_gate import log_bin_status
 
-        _bin_args = (skill_result, _skill_suffix, package_name, package_info, _log_integration)
-        log_bin_status(*_bin_args, user_scope=is_user_scope(scope))
+        log_bin_status(
+            skill_result, _skill_suffix, package_name, package_info, _log_integration, ctx=ctx
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
     deployed.extend(

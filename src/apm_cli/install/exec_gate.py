@@ -106,13 +106,20 @@ def check_executable_approval(
             _decl.exec_types,
         )
         unapproved = [t for t in _decl.exec_types if t not in pinned_status and not approved[t]]
-        denied: frozenset[str] = frozenset()
-        from apm_cli.security.executables import TRUST_GATED, ExecTrustContext, denied_exec_types
+        from apm_cli.security.executables import (
+            TRUST_DENIED,
+            TRUST_GATED,
+            ExecTrustContext,
+            denied_exec_types,
+        )
 
+        # A pinned type the item owner denies is reported as denied, like a
+        # type-level deny: approving cannot lift it.
+        denied = frozenset(t for t, status in pinned_status.items() if status == TRUST_DENIED)
         if unapproved and isinstance(ctx.exec_trust_ctx, ExecTrustContext):
-            denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)
-            if denied:
-                ctx.package_denied_exec_types[package_name] = denied
+            denied |= denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)
+        if denied:
+            ctx.package_denied_exec_types[package_name] = denied
         # Only a declared type that stays unapproved and is not hard-denied
         # (approving cannot lift a deny), or a pinned item awaiting
         # re-approval, parks the package for approval.
@@ -514,17 +521,36 @@ def bin_deploy_denial(package_info: Any, policy: Any) -> str | None:
     return "bin_deploy.deny" if package_key in denied else None
 
 
+def executable_skip_reason(
+    ctx: InstallContext | None, package_name: str, label: str, exec_type: str, kind: str
+) -> str:
+    """Return why *kind* of *package_name* was skipped, with the next step.
+
+    The gate records hard-denied types in ``ctx.package_denied_exec_types``;
+    a denied type points to ``apm policy explain`` because approving cannot
+    lift a deny. Any other skip is approvable.
+    """
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.trust import approve_command, explain_command
+
+    user_scope = is_user_scope(getattr(ctx, "scope", None))
+    denied = getattr(ctx, "package_denied_exec_types", None) or {}
+    if exec_type in denied.get(package_name, frozenset()):
+        explain = explain_command(label, user_scope=user_scope)
+        return f"{kind} skipped (denied). Run '{explain}' to see which deny applies."
+    approve = approve_command(label, user_scope=user_scope)
+    return f"{kind} skipped (not approved in executables.allow). Run '{approve}' to approve."
+
+
 def log_bin_status(
     skill_result: Any,
     suffix: str,
     package_name: str,
     package_info: Any,
     log_fn,
-    *,
-    user_scope: bool = False,
+    ctx: InstallContext | None = None,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
-    from apm_cli.security.trust import approve_command
     from apm_cli.utils.diagnostics import printable_ascii_text
 
     package_label = printable_ascii_text(package_name or getattr(package_info, "name", "unknown"))
@@ -543,10 +569,12 @@ def log_bin_status(
             "  |-- plugin ships executables; no active Claude Code skills target to receive them"
         )
     elif skill_result.bin_skipped_reason == "not_approved":
-        log_fn(
-            f"  |-- bin/ executables skipped (not approved in executables.allow). "
-            f"Run '{approve_command(package_label, user_scope=user_scope)}' to approve."
+        from apm_cli.security.executables import EXEC_TYPE_BIN
+
+        reason = executable_skip_reason(
+            ctx, package_name, package_label, EXEC_TYPE_BIN, "bin/ executables"
         )
+        log_fn(f"  |-- {reason}")
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
             "  |-- bin/ executables skipped (not trusted). "
@@ -580,23 +608,8 @@ def log_hooks_skip(
     from apm_cli.security.executables import EXEC_TYPE_HOOKS
 
     label = package_name or getattr(package_info, "name", "unknown")
-    denied = getattr(ctx, "package_denied_exec_types", None) or {}
-    from apm_cli.core.scope import is_user_scope
-    from apm_cli.security.trust import approve_command, explain_command
-
-    user_scope = is_user_scope(getattr(ctx, "scope", None))
-    if EXEC_TYPE_HOOKS in denied.get(package_name, frozenset()):
-        message = (
-            f"{label}: hooks skipped (denied). "
-            f"Run '{explain_command(label, user_scope=user_scope)}' to see which deny applies."
-        )
-    else:
-        command = approve_command(label, user_scope=user_scope)
-        message = (
-            f"{label}: hooks skipped (not approved in executables.allow). "
-            f"Run '{command}' to approve."
-        )
-    logger.warning(message, symbol="warning")
+    reason = executable_skip_reason(ctx, package_name, label, EXEC_TYPE_HOOKS, "hooks")
+    logger.warning(f"{label}: {reason}", symbol="warning")
 
 
 class ReplayExecAllowMap:

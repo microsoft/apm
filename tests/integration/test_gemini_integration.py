@@ -30,6 +30,7 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _make_package_info(
@@ -481,7 +482,14 @@ class TestGeminiUninstallCleanup:
 
         target = KNOWN_TARGETS["gemini"]
         integrator = CommandIntegrator()
-        stats = integrator.sync_for_target(target, None, self.root, managed_files=managed_files)
+        # Deletion needs deployment evidence, never a lockfile hash alone (#3701).
+        stats = integrator.sync_for_target(
+            target,
+            None,
+            self.root,
+            managed_files=managed_files,
+            evidence=receipted_evidence(commands_dir, deploy_root=self.root),
+        )
 
         assert stats["files_removed"] == 1
         assert not (commands_dir / "review.toml").exists()
@@ -492,14 +500,22 @@ class TestGeminiUninstallCleanup:
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill\nCheck style.")
 
+        # The lockfile records the skill directory and its members; deleting a
+        # member needs deployment evidence (#3701).
         managed_files = {
             ".agents/skills/style-checker",
+            ".agents/skills/style-checker/SKILL.md",
         }
 
         integrator = SkillIntegrator()
-        stats = integrator.sync_integration(None, self.root, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            self.root,
+            managed_files=managed_files,
+            evidence=receipted_evidence(skills_dir, deploy_root=self.root),
+        )
 
-        assert stats["files_removed"] == 1
+        assert stats["files_removed"] >= 1
         assert not skills_dir.exists()
 
     def test_uninstall_transitive_dep_cleans_skill(self):
@@ -510,12 +526,18 @@ class TestGeminiUninstallCleanup:
 
         managed_files = {
             ".agents/skills/review-and-refactor",
+            ".agents/skills/review-and-refactor/SKILL.md",
         }
 
         integrator = SkillIntegrator()
-        stats = integrator.sync_integration(None, self.root, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            None,
+            self.root,
+            managed_files=managed_files,
+            evidence=receipted_evidence(skill_dir, deploy_root=self.root),
+        )
 
-        assert stats["files_removed"] == 1
+        assert stats["files_removed"] >= 1
         assert not skill_dir.exists()
 
 
