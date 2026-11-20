@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ import pytest
 from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
     output,
+    remote_url,
     skill_md,
     tree_bytes,
     write,
@@ -116,3 +118,42 @@ def test_source_package_with_plugin_json_installs_as_local_dependency(
     world.apm(consumer, "uninstall", str(producer))
     assert not (consumer / ".claude" / "skills" / "bs").exists()
     assert tree_bytes(producer).keys() >= {"apm.yml", "plugin.json"}
+
+
+def test_apm_format_pack_carries_skills_deployed_under_agents(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``--format apm`` bundles copilot skills deployed to ``.agents/skills/`` (#4202)."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    package = world.isolated.package_root / "skillpkg"
+    write(
+        package / "apm.yml", "name: skillpkg\nversion: 1.0.0\ndescription: s\ntargets: [copilot]\n"
+    )
+    write(package / ".apm" / "skills" / "ks" / "SKILL.md", skill_md("ks", "body\n"))
+    _, commit = world.publish("skillpkg", package)
+    producer = world.consumer(
+        "producer", targets=("copilot",), deps=({"git": remote_url("skillpkg"), "ref": commit.sha},)
+    )
+    world.apm(producer, "install")
+    deployed = ".agents/skills/ks/SKILL.md"
+    assert (producer / deployed).is_file()
+    recorded = {p for dep in world.lock(producer)["dependencies"] for p in dep["deployed_files"]}
+    assert ".agents/skills/ks" in recorded, recorded
+    sources_before = tree_bytes(producer)
+
+    out = tmp_path / "out"
+    packed = world.apm(producer, "pack", "--format", "apm", "--archive", "-o", str(out))
+    assert "No deployed files found" not in output(packed), output(packed)
+    # Pack only adds the generated Copilot plugin manifest to the project.
+    after = tree_bytes(producer)
+    assert {k: v for k, v in after.items() if k != ".github/plugin/plugin.json"} == sources_before
+    archive = out / "producer-0.1.0.zip"
+    with zipfile.ZipFile(archive) as bundle:
+        names = bundle.namelist()
+        assert f"producer-0.1.0/{deployed}" in names, names
+        assert bundle.read(f"producer-0.1.0/{deployed}") == (producer / deployed).read_bytes()
+
+    target = world.consumer("bundle-target", targets=("copilot",))
+    unpacked = world.apm(target, "unpack", str(archive))
+    assert "No files were unpacked" not in output(unpacked), output(unpacked)
+    assert (target / deployed).read_bytes() == (producer / deployed).read_bytes()

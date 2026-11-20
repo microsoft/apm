@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)
 - CI: merge-queue integration uses the release shard planner, and a daily alarm fails when `main` moves without a `merge_group` run. (#4149)
 - `apm unpack` applies org policy and integrity checks like `apm install <bundle>`, waits for other APM operations, and records deployed files when unpacking into an APM project. (closes #4080, #4157)
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
@@ -25,9 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
+- `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
 - MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
+- `apm pack` and `apm publish` refuse to package credential files (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa`, `id_ed25519`), naming each path. (closes #4323, #4339)
 - Registry archives get the same archive limits for every accepted format, and every entry is validated before anything is written. (closes #4235, #4266)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)
@@ -43,6 +47,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
 - `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
 - A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
+- Plain `apm audit` renders advisory drift as `[!] Drift detected` and prints `[x]` only when drift fails the run via `fail_on_drift` (#4217)
+- A failed `apm install plugin@marketplace` no longer leaves a marketplace version pin under APM_HOME (#4217)
+- `apm marketplace outdated` lists local-path entries such as `source: ./` as skipped instead of failing a git ls-remote (#4217)
+- `apm pack --json` now reports the missing `license:` warning in the JSON `warnings` array instead of dropping it. (#4217)
+- `apm prune` no longer prints `Reconciled merged hook ownership` when the pruned packages left merged hook configuration unchanged (#4217)
+- `apm run` with an unknown script now ends with one runnable next step, `Run 'apm list'`, instead of a placeholder install command. (#4217)
+- `apm install --skill` with no matching skill now ends with one runnable `apm install <package> --skill <available>` command. (#4217)
+- `apm install` of a `skills/` bundle, including `--frozen` replays, prints one skill integration line instead of two (#4217)
+- `apm compile` no longer warns that compilation produced no output after it already explained that AGENTS.md was skipped because deployed rules cover the target. (#4217)
+- `apm targets` now shows `apm.yml` in the SOURCE column (and JSON `source`) for targets declared in apm.yml. (#4217)
+- `apm install` names every destination folder on integration lines for three or more targets instead of printing 'N targets' (#4217)
+- `apm install --dry-run plugin@marketplace` no longer writes the marketplace ref-pin file under APM_HOME (#4217)
+- `apm install --mcp` and `apm uninstall` name the manifest as `apm.yml` or `~/.apm/apm.yml` instead of its absolute path (#4217)
+- `apm marketplace add OWNER/REPO#ref` and `HOST/OWNER/REPO#ref` register the named ref instead of tracking `main` (#4217)
+- `apm pack --format apm` now includes skills deployed under `.agents/skills/` for Copilot, Cursor, Gemini and OpenCode projects instead of packing an empty bundle. (#4217)
+- `apm lock` keeps the recorded `exec_status` of packages whose executables await approval, so `apm lock` and `apm install` no longer rewrite each other's lockfile (#4217)
+- An inaccessible repository now names the host and the credential source tried (never its value) and ends with `Run 'apm install --verbose <package>'`, whose output shows that source. (#4217)
+- `apm install <bundle>` names the destination folders it deployed into, as package installs do (#4217)
+- `apm uninstall`, `apm prune` and target-removal installs list each deployed path they delete, and the cleanup count matches the listed paths (#4217)
+- `apm install --frozen` and cold lockfile replays print the package header as `<name> #<ref> @<sha>`, without repeating the locked commit (#4217)
+- Installing a dependency whose repository the host answers 404 for now reports `Repository <owner/repo> not found on <host>` once, with `Run 'apm uninstall <owner/repo>'`, instead of a network error. (#4217)
+- `apm install --frozen` replays a lockfile written through `PROXY_REGISTRY_URL` for tag and branch refs, verifying the proxy route, ref and locked content hash (#4217)
+- With registries disabled, `apm install` names the `$APM_HOME` file that configures registries instead of blaming apm.yml, and prints `Run 'apm experimental enable registries'` (#4217)
+- `apm install <pkg>` also locks declared local-path dependencies missing from `apm.lock.yaml`, and reports byte-identical pre-existing skills as adopted (#4217)
+- `apm update` lists a moved SHA pin once (under Revision pin updates) and its Total line counts only changed dependencies. (#4217)
+- After `apm deny`, `apm install` names each hook file it removes and no longer reports those removed files as retained historical claims (#4217)
 
 ## [0.37.0] - 2026-11-20
 

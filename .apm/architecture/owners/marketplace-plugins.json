@@ -229,6 +229,15 @@
         "src/apm_cli/core/build_orchestrator.py"
       ],
       "guards": ["marketplace-integrations-pack-plugin-manifests"]
+    },
+    {
+      "id": "pack-credential-files",
+      "decision": "Credential files are refused by apm pack (req-sc-007)",
+      "owner": "bundle/credential_files.py (CREDENTIAL_FILE_PATTERNS, refuse_credential_files), called by every bundle format before any write",
+      "selectors": [
+        "src/apm_cli/bundle/credential_files.py"
+      ],
+      "guards": ["marketplace-integrations-pack-credential-files"]
     }
   ]
 }
