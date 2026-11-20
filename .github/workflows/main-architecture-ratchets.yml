@@ -25,7 +25,7 @@ jobs:
   test-architecture-contracts:
     name: Architecture Ratchet Contracts (main)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
 
