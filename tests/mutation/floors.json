@@ -406,7 +406,7 @@
         {
           "functions": [
             "_is_skill_directory_entry",
-            "_strip_sha256_prefix"
+            "_keep_without_evidence"
           ],
           "source": "src/apm_cli/integration/cleanup.py"
         }

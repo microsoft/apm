@@ -489,11 +489,48 @@ def test_skill_directory_entry_uses_the_last_separator(rel_path: str, expected: 
     assert _is_skill_directory_entry(rel_path) is expected
 
 
-@pytest.mark.parametrize(
-    ("digest", "expected"),
-    [("sha256:abc", "abc"), ("abc", "abc"), ("SHA256:abc", "SHA256:abc"), ("sha256:", "")],
-)
-def test_strip_sha256_prefix(digest: str, expected: str) -> None:
-    from apm_cli.integration.cleanup import _strip_sha256_prefix
+class _Warnings:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
 
-    assert _strip_sha256_prefix(digest) == expected
+    def warn(self, message: str, *, package: str) -> None:
+        self.calls.append((message, package))
+
+
+@pytest.mark.parametrize(
+    ("verdict", "lists", "message"),
+    [
+        (
+            "unproven",
+            ("skipped_unmanaged", "unproven"),
+            "Kept a.md: no local deployment receipt or render of the locked package "
+            "version proves APM deployed it. Delete it manually if you no longer need it.",
+        ),
+        (
+            "unreadable",
+            ("skipped_user_edit",),
+            "Skipped removing a.md: could not verify file content. "
+            "Inspect the file and delete it manually if no longer needed.",
+        ),
+        (
+            "edited",
+            ("skipped_user_edit",),
+            "Skipped removing a.md: file has been edited since APM deployed it. "
+            "Delete it manually if you no longer need it, or ignore this warning "
+            "to keep your changes.",
+        ),
+    ],
+)
+def test_unauthorized_deletion_keeps_the_file_with_exact_remediation(
+    verdict: str, lists: tuple[str, ...], message: str
+) -> None:
+    from apm_cli.integration.cleanup import CleanupResult, _keep_without_evidence
+
+    result = CleanupResult()
+    diagnostics = _Warnings()
+
+    _keep_without_evidence(result, diagnostics, "a.md", verdict, "acme/pkg")
+
+    assert diagnostics.calls == [(message, "acme/pkg")]
+    for name in ("skipped_unmanaged", "unproven", "skipped_user_edit"):
+        assert getattr(result, name) == (["a.md"] if name in lists else []), name
