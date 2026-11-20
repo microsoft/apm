@@ -457,7 +457,7 @@ def _configure_logging(verbose: bool = False) -> None:
       level name: DEBUG, INFO, WARNING, ERROR, CRITICAL).
 
     When neither is set the ``apm_cli`` logger defaults to WARNING so
-    routine runs stay silent.  A :class:`~apm_cli.core.auth.SecretRedactionFilter`
+    routine runs stay silent.  A :class:`~apm_cli.core.auth_outcome.SecretRedactionFilter`
     is always installed on the ``apm_cli`` logger to strip token-bearing
     exception strings from debug records regardless of which mechanism
     activated debug mode.
@@ -483,7 +483,7 @@ def _configure_logging(verbose: bool = False) -> None:
     apm_logger.setLevel(level)
 
     # Install secret-redaction filter (idempotent: skip if already present).
-    from apm_cli.core.auth import SecretRedactionFilter
+    from apm_cli.core.auth_outcome import SecretRedactionFilter
 
     handlers = {
         *logging.getLogger().handlers,

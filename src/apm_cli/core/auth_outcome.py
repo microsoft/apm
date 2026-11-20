@@ -14,7 +14,9 @@ same way.
 
 from __future__ import annotations
 
+import logging
 import re
+import traceback
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -52,6 +54,36 @@ _MAX_DETAIL_CHARS = 300
 def redact_secrets(text: str) -> str:
     """Replace credential-shaped substrings in *text* with ``[REDACTED]``."""
     return SECRET_RE.sub("[REDACTED]", text)
+
+
+class SecretRedactionFilter(logging.Filter):
+    """Logging filter that redacts secret patterns from all emitted log records.
+
+    Lives beside :func:`redact_secrets` so the root CLI can install it on every
+    run without importing the auth resolver. Install on logging handlers when
+    debug logging is enabled so that exception messages carrying HTTP client error strings --
+    which some libraries embed auth headers or token values in -- do not leak
+    credentials into the debug stream.
+
+    Usage::
+
+        logging.getLogger("apm_cli").addFilter(SecretRedactionFilter())
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            redacted = redact_secrets(msg)
+            if redacted != msg:
+                record.msg = redacted
+                record.args = ()
+            if record.exc_info is not None:
+                formatted = "".join(traceback.format_exception(*record.exc_info))
+                record.exc_text = redact_secrets(formatted)
+                record.exc_info = None
+        except Exception:
+            pass
+        return True
 
 
 def sanitize_diagnostic_detail(text: str | None) -> str:

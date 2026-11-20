@@ -33,7 +33,6 @@ import logging
 import os
 import sys
 import threading
-import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -49,10 +48,11 @@ from apm_cli.core.auth_chain import (  # AdoAuthChainExhaustedError: re-exported
     helper_cache_key,
     run_ado_chain,
 )
-from apm_cli.core.auth_outcome import (
+from apm_cli.core.auth_outcome import (  # noqa: F401 -- SecretRedactionFilter re-exported
     SECRET_RE,
     AuthAttemptFailed,
     AuthOutcomeKind,
+    SecretRedactionFilter,
     classify_auth_outcome,
     redact_secrets,
     sanitize_diagnostic_detail,
@@ -97,35 +97,6 @@ def _redact_secrets(text: str) -> str:
     secret patterns so non-sensitive messages are returned verbatim.
     """
     return redact_secrets(text)
-
-
-class SecretRedactionFilter(logging.Filter):
-    """Logging filter that redacts secret patterns from all emitted log records.
-
-    Install on the ``apm_cli`` logger (or a sub-logger) when debug logging is
-    enabled so that exception messages carrying HTTP client error strings --
-    which some libraries embed auth headers or token values in -- do not leak
-    credentials into the debug stream.
-
-    Usage::
-
-        logging.getLogger("apm_cli").addFilter(SecretRedactionFilter())
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            msg = record.getMessage()
-            redacted = _redact_secrets(msg)
-            if redacted != msg:
-                record.msg = redacted
-                record.args = ()
-            if record.exc_info is not None:
-                formatted = "".join(traceback.format_exception(*record.exc_info))
-                record.exc_text = _redact_secrets(formatted)
-                record.exc_info = None
-        except Exception:
-            pass
-        return True
 
 
 _PORT_CREDENTIAL_DOCS_URL = (
