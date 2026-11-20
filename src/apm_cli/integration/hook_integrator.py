@@ -1957,7 +1957,7 @@ class HookIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import (
             surviving_dependency_refs_for_reintegration,
         )
-        from apm_cli.security.executables import resolve_project_exec_allow_map
+        from apm_cli.security.executables import closed_exec_map, resolve_project_exec_allow_map
 
         from .targets import resolve_targets
 
@@ -1979,11 +1979,11 @@ class HookIntegrator(BaseIntegrator):
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
         )
-        allow_map = None
-        if survivor_plan:
-            allow_map = resolve_project_exec_allow_map(
-                project_root, apm_package, user_scope=user_scope
-            )
+        allow_map = (
+            resolve_project_exec_allow_map(project_root, apm_package, user_scope=user_scope)
+            if survivor_plan
+            else closed_exec_map(None)
+        )
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:
             target_selection = resolve_effective_package_targets(

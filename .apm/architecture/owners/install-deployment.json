@@ -205,7 +205,7 @@
     {
       "id": "executable-trust-context",
       "decision": "Executable trust context and per-package approval",
-      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision)",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision, authorized_exec_map, package_type_approved, compose_trust_bin); install/exec_gate.py adapters consume it and never treat a missing map as authorization; every deploy-path allow-map consumer receives an owner-produced map (#4018)",
       "selectors": ["src/apm_cli/security/executables.py"],
       "guards": ["install-deployment-executable-trust-context"]
     },

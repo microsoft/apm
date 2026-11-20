@@ -31,7 +31,7 @@ class TestFindRuntimeBinary:
         apm_binary.touch()
         apm_binary.chmod(0o755)
 
-        with patch("apm_cli.runtime.utils.shutil.which", return_value="/usr/bin/codex"):
+        with patch("shutil.which", return_value="/usr/bin/codex"):
             result = find_runtime_binary("codex")
 
         assert result == str(apm_binary)
@@ -43,7 +43,7 @@ class TestFindRuntimeBinary:
         # No binary created in ~/.apm/runtimes/
 
         path_binary = "/usr/bin/codex"
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=path_binary):
+        with patch("shutil.which", return_value=path_binary):
             result = find_runtime_binary("codex")
 
         assert result == path_binary
@@ -58,7 +58,7 @@ class TestFindRuntimeBinary:
         runtime_dir.mkdir(parents=True)
         # No binary in APM directory
 
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             result = find_runtime_binary("codex")
 
         assert result is None
@@ -82,7 +82,7 @@ class TestFindRuntimeBinary:
         apm_binary.chmod(0o644)
 
         path_binary = "/usr/bin/codex"
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=path_binary):
+        with patch("shutil.which", return_value=path_binary):
             result = find_runtime_binary("codex")
 
         assert result == path_binary
@@ -100,7 +100,7 @@ class TestFindRuntimeBinary:
         apm_binary_exe.touch()
         apm_binary_exe.chmod(0o755)
 
-        with patch("apm_cli.runtime.utils.shutil.which", return_value="/usr/bin/codex"):
+        with patch("shutil.which", return_value="/usr/bin/codex"):
             result = find_runtime_binary("codex")
 
         assert result == str(apm_binary_exe)
@@ -119,7 +119,7 @@ class TestFindRuntimeBinary:
             apm_binary.touch()
             apm_binary.chmod(0o755)
 
-            with patch("apm_cli.runtime.utils.shutil.which", return_value=None):
+            with patch("shutil.which", return_value=None):
                 result = find_runtime_binary("codex")
 
             assert result == str(apm_binary)
@@ -139,7 +139,7 @@ class TestFindRuntimeBinary:
             apm_binary_exe.chmod(0o755)
 
             path_binary = "/usr/bin/codex"
-            with patch("apm_cli.runtime.utils.shutil.which", return_value=path_binary):
+            with patch("shutil.which", return_value=path_binary):
                 result = find_runtime_binary("codex")
 
             # Should fall back to PATH since .exe suffix is ignored on non-Windows
@@ -158,7 +158,7 @@ class TestFindRuntimeBinary:
         python_binary.touch()
         python_binary.chmod(0o755)
 
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             result = find_runtime_binary("python")
 
         assert result == str(python_binary)
@@ -168,7 +168,7 @@ class TestFindRuntimeBinary:
         node_binary.touch()
         node_binary.chmod(0o755)
 
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             result = find_runtime_binary("node")
 
         assert result == str(node_binary)
@@ -190,7 +190,7 @@ class TestFindRuntimeBinary:
         apm_binary.chmod(0o600)  # Read/write but not execute
 
         path_binary = "/opt/bin/codex"
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=path_binary):
+        with patch("shutil.which", return_value=path_binary):
             result = find_runtime_binary("codex")
 
         assert result == path_binary
@@ -203,7 +203,7 @@ class TestFindRuntimeBinary:
         """
         # Don't create the directory - leave it as non-existent
         path_binary = "/usr/bin/codex"
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=path_binary):
+        with patch("shutil.which", return_value=path_binary):
             result = find_runtime_binary("codex")
 
         assert result == path_binary
@@ -219,7 +219,7 @@ class TestFindRuntimeBinary:
         apm_binary.touch()
         apm_binary.chmod(0o755)
 
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             result = find_runtime_binary("codex")
 
         assert isinstance(result, str)
@@ -266,7 +266,7 @@ class TestFindRuntimeBinaryPathSecurity:
 
     def test_valid_simple_name_does_not_raise(self, fake_home):
         """A plain binary name (no separators) must not raise any exception."""
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             # Should not raise; result is None because binary is absent
             result = find_runtime_binary("codex")
         assert result is None
@@ -288,7 +288,7 @@ class TestFindRuntimeBinaryPathSecurity:
         os.symlink(outside_binary, apm_link)
 
         path_binary = "/usr/bin/codex"
-        with patch("apm_cli.runtime.utils.shutil.which", return_value=path_binary):
+        with patch("shutil.which", return_value=path_binary):
             result = find_runtime_binary("codex")
 
         # The symlink escapes runtimes dir, so must fall back to PATH
@@ -309,7 +309,7 @@ class TestFindRuntimeBinaryWindowsExe:
 
         with (
             patch("sys.platform", "win32"),
-            patch("apm_cli.runtime.utils.shutil.which", return_value=None),
+            patch("shutil.which", return_value=None),
         ):
             result = find_runtime_binary("codex")
 
@@ -326,7 +326,7 @@ class TestFindRuntimeBinaryWindowsExe:
 
         with (
             patch("sys.platform", "linux"),
-            patch("apm_cli.runtime.utils.shutil.which", return_value=None),
+            patch("shutil.which", return_value=None),
         ):
             result = find_runtime_binary("codex")
 

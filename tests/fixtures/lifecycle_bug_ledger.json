@@ -909,6 +909,24 @@
         "tests/integration/test_lock_parked_exec_status_lifecycle.py::test_lock_keeps_parked_exec_status_and_converges",
         "tests/integration/test_executables_gate_integration.py::TestLockfileExecStatusIntegration::test_lock_only_carries_recorded_exec_status_forward"
       ]
+    },
+    {
+      "issue": 4235,
+      "fixed_in": "Unreleased",
+      "summary": "Registry archive extraction applies one set of archive limits to every accepted format: entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries, with every entry validated before the first write.",
+      "failure_modes": ["transaction", "observation"],
+      "properties": ["transaction.failed_command_preserves_state", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/unit/registry/test_extractor.py::TestArchiveLimitsApplyToEveryFormat::test_entry_count_cap",
+        "tests/unit/registry/test_extractor.py::TestArchiveLimitsApplyToEveryFormat::test_uncompressed_size_cap_counts_streamed_bytes",
+        "tests/unit/registry/test_extractor.py::TestArchiveLimitsApplyToEveryFormat::test_duplicate_entry_is_refused",
+        "tests/unit/registry/test_extractor.py::test_tar_special_file_is_refused",
+        "tests/unit/registry/test_extractor.py::test_tar_size_cap_applies_before_reading_past_an_oversized_member",
+        "tests/unit/registry/test_extractor.py::test_conflicting_entries_are_refused_before_any_write",
+        "tests/unit/registry/test_extractor.py::test_zip_special_file_modes_are_refused",
+        "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
+        "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
+      ]
     }
   ],
   "lifecycle_contracts": [

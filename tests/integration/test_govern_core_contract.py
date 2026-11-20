@@ -756,7 +756,8 @@ def test_real_govern_core_contract(
     assert hash_check["details"]
 
     assert govern_receipt.pinned_governed_install.returncode == 1
-    assert "dependency-pinned-constraint" in govern_receipt.pinned_governed_install.stdout
+    # Policy refusals print on stderr (#3967, #3992).
+    assert "dependency-pinned-constraint" in govern_receipt.pinned_governed_install.stderr
     assert govern_receipt.pinned_lock_after == govern_receipt.pinned_lock_before
     assert_unchanged(
         govern_receipt.pinned_snapshot_before,

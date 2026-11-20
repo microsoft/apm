@@ -55,6 +55,15 @@ if TYPE_CHECKING:
     from ..core.auth import AuthResolver
 
 
+def _retry_sleep(seconds: float) -> None:
+    """Wait before retrying a failed Git connection.
+
+    The single retry-wait seam: tests patch this instead of the process-wide
+    ``time.sleep``, which would also record sleeps from unrelated threads.
+    """
+    time.sleep(seconds)
+
+
 def _is_connect_failure(error: GitCommandError | subprocess.CalledProcessError, url: str) -> bool:
     """Recognize only Git's pre-connection HTTPS failure for this exact remote."""
     remote = urlsplit(url)
@@ -197,7 +206,7 @@ class CloneEngine:
                 _debug("HTTPS connection failed; retrying the same Git action once in 1s")
                 # Clone callbacks own partial-target cleanup; fetch callbacks
                 # retain the existing bare repository. Never delete here.
-                time.sleep(1)
+                _retry_sleep(1)
                 clone_action(url, env, target)
 
         dep_host = dep_ref.host if dep_ref else None
