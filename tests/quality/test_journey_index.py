@@ -16,6 +16,11 @@ import yaml
 
 RATCHET_TEST_SCOPE = "repository"
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-user-facing-output-diagnostics", "P-INV-I6", "P-INV-I8", "P-INV-I9"),
+]
+
 _ROOT = Path(__file__).parents[2]
 INDEX = _ROOT / "tests" / "lifecycle" / "journeys" / "index.yaml"
 DOCS = _ROOT / "docs" / "src" / "content" / "docs"

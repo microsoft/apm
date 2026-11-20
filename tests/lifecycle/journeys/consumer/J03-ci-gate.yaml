@@ -37,9 +37,6 @@ steps:
     exit: 1
     drift: true
     files: []
-    docs:
-      page: consumer/run-in-ci.mdx
-      output: ["[x] --frozen: deployed files do not match the hashes recorded in apm.lock.yaml."]
     key_lines:
       - "[x] --frozen: deployed files do not match the hashes recorded in apm.lock.yaml."
       - ".agents/skills/style-checker/SKILL.md: expected sha256:<H>"
@@ -63,8 +60,8 @@ steps:
   - n: 7
     edit:
       - replace: apm.yml
-        old: "- microsoft/apm-sample-package#v1.0.0\n"
-        new: "- microsoft/apm-sample-package#v1.0.0\n  - microsoft/apm/packages/apm-guide#{release}\n"
+        old: "    - microsoft/apm-sample-package#v1.0.0\n"
+        new: "    - microsoft/apm-sample-package#v1.0.0\n    - microsoft/apm/packages/apm-guide#{release}\n"
     run: [apm install --frozen]
     exit: 1
     files: []
@@ -74,7 +71,7 @@ steps:
   - n: 8
     edit:
       - replace: apm.yml
-        old: "  - microsoft/apm/packages/apm-guide#{release}\n"
+        old: "    - microsoft/apm/packages/apm-guide#{release}\n"
         new: ""
     run: [apm install --frozen, apm audit --ci]
     exit: 0

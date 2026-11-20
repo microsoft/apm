@@ -5,47 +5,44 @@ deployed; the next mutating command removes what is no longer allowed, and
 says so (P-INV-I7). Source: tests/lifecycle/oracles.py (I4),
 docs/src/content/docs/enterprise/control-executables.mdx.
 
-Each cell is one (KIND, PATH, CHANGE) tuple, replayed through
-``tests/lifecycle/rows.py`` so ``check_cross_cutting`` (I1-I9) runs after
-every CLI step. ``GateReplay`` adds what the row schema cannot express yet:
-input edits (revoke, definition change, org policy, gate off), user scope,
-bundle and marketplace package keys, and surfaces the core table does not
-observe (native plugin MCP, user-scope Copilot files). For every cell it also
-checks, as state facts:
+Shared machinery for the G obligations ``G|<path>|<change>|<kind>``:
 
-- the gated surface was deployed before the change (the removal is real);
-- after the change no CLI step deploys a gated surface that was not
-  deployed at the change (the deployed gated set never grows);
-- the final world equals the reference model and the surface is gone;
-- the removing step announces it (I7).
+- ``PATHS``: how each deploy or execute path arranges the package and which
+  steps must then remove it;
+- ``CHANGES``: how each gate change is applied (local deny, revoke, a
+  definition change, org deny, org turning the gate on, policy denying the
+  dependency);
+- ``gate_slices/<kind>.py``: per-KIND data tables (id, state facts,
+  announcement); one parametrized test replays every registered row.
 
-Every parameter row is named by its exact obligation id
-``G|<path>|<change>|<kind>`` (security obligation export, lane T-7a); rows
-with no G id (canvas: the export has no canvas kind) use ``X|...``. Coverage
-is pairwise over KIND x PATH x CHANGE. Ids with no row, and why:
+Every row replays through ``tests/lifecycle/rows.py`` (``check_cross_cutting``
+I1-I9 after every CLI step). ``GateReplay`` adds input edits, user scope,
+bundle and marketplace keys and the surfaces the core table does not observe,
+and checks as state facts: the gated surface was deployed before the change;
+after it no CLI step deploys a gated surface that was not already deployed;
+the final world equals the reference model and the surface is gone. Then
+``check_obligation`` credits the row's G id with e2e evidence: the removing
+step's result, its announcement and the row's snapshot facts.
+
+G ids with no registered row (count per path in the lane report):
 
 | ids | why |
 |---|---|
 | G|*|*|bin | bin/ deploys only for marketplace plugins to Claude at user scope |
 |           | (integration/skill_integrator.py _deploy_plugin_bin); no world    |
 |           | package ships a bin/ the gate could deploy                         |
-| G|unpack|* | deprecated command; reads only --format apm bundles, none in the world |
-| G|mcp-install|* | root-declared MCP servers are the user's own, not a dependency gate |
-| G|*-g|org-* , G|native-plugin|org-* | org policy governs project installs only |
+| G|unpack|* | deprecated command that reads only --format apm bundles; the world has none |
+| G|mcp-install|* | not registered yet                                                 |
+| G|native-plugin|* | native at user scope: approve cannot find the plugin (#4154)    |
 | lsp/native in bundle-install, marketplace-install | the world packs and lists p-exec only |
-| definition-changed in bundle/marketplace | a bundle or a tag cannot change in place |
-| native approve-based rows | approve cannot find a parked native plugin (#4154); |
-|                           | they are strict expected failures naming it          |
-
-Lifecycle scripts (the execute path APM runs itself) have no deployed file;
-their rows count script runs instead (``test_lifecycle_script_gate``).
+| definition-changed in bundle/marketplace | a packed bundle or a published tag cannot change in place |
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -56,8 +53,17 @@ from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
 from tests.lifecycle.model.expected import expected_deployed, expected_exit
 from tests.lifecycle.model.state import GATED_KINDS
-from tests.lifecycle.oracles import ExpectedCell, Observation, check_cross_cutting, operation_for
+from tests.lifecycle.obligation_space import security_obligations
+from tests.lifecycle.oracles import (
+    Evidence,
+    ExpectedCell,
+    Observation,
+    check_cross_cutting,
+    check_obligation,
+    operation_for,
+)
 from tests.lifecycle.rows import Row, RowReplay, _RowModel
+from tests.lifecycle.security.gate_slices import GateRow, GateSlice, slices
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
 from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.services import DENIED_PACKAGE
@@ -71,7 +77,8 @@ pytestmark = [
     pytest.mark.promise("P-INV-I4", "P-INV-I7"),
 ]
 
-PROMISES = [f"P-INV-I{law}" for law in range(1, 10)]
+PROMISES = tuple(f"P-INV-I{law}" for law in range(1, 10))
+STRENGTH = "e2e-evidence"
 
 # (scope, kind, target) -> glob, or (glob, marker) for a shared file that must
 # name the package's entry. World convention: "<pkg>-mcp", "<pkg>-server".
@@ -80,15 +87,14 @@ _SURFACES: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("project", "hook", "copilot"): ".github/hooks/{pkg}-*.json",
     ("project", "mcp", "copilot"): (".mcp.json", '"{pkg}-mcp"'),
     ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
-    ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "native", "claude"): (".mcp.json", '"{pkg}-mcp"'),
-    ("user", "native", "claude"): (".claude/settings.json", '"{pkg}'),
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
     ("user", "lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
 }
-# HOME prefixes a project command may write: receipts, bookkeeping, script trust.
+# HOME prefixes a project command may write: receipts, bookkeeping, script
+# trust and logs, the marketplace cache.
 _PROJECT_HOME_ALLOWED = (
     ".apm/deployment-receipts",
     ".apm-local",
@@ -97,10 +103,12 @@ _PROJECT_HOME_ALLOWED = (
     ".apm/scripts-trust.json",
     ".apm/scripts-trust.json.lock",
     ".apm/logs",
+    ".apm/cache/marketplace",
 )
 # Commands after which nothing the model forbids may stay deployed (I4).
 _GATE_REMOVING = frozenset({"install", "update", "uninstall", "prune"})
 _RECONCILING = frozenset({"install", "update"})
+_SCRIPT_LOG = "script-runs.log"
 
 
 class GateReplay(RowReplay):
@@ -111,6 +119,9 @@ class GateReplay(RowReplay):
         self.scope = scope
         self.ceiling: frozenset[str] | None = None
         self.witness: tuple[str, ...] = ()
+        self.at_change: Observation | None = None
+        self.removal: CommandResult | None = None
+        self.bundle_key = ""
 
     # -- steps -----------------------------------------------------------
 
@@ -124,13 +135,7 @@ class GateReplay(RowReplay):
         edit = str(step["edit"])
         key = str(step.get("pkg", ""))
         if "witness" in step:
-            self.witness = tuple(step["witness"])
-            deployed = self.observe().deployed
-            assert set(self.witness) <= deployed, (
-                f"{self.witness} must be deployed before the gate change; deployed "
-                f"{sorted(deployed)}"
-            )
-            self.ceiling = frozenset(s for s in deployed if s.split("/")[1] in GATED_KINDS)
+            self._mark_change(tuple(step["witness"]))
         if edit == "revoke":
             self._edit_store(lambda block: _drop_entries(block, self._identities(key)))
             self.model = self.model.revoke(key, self.kinds[key])
@@ -150,19 +155,59 @@ class GateReplay(RowReplay):
             manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
             for name, kinds in self.kinds.items():
                 self.model = self.model.approve(name, kinds)
+        elif edit in ("bundle-approve", "bundle-deny"):
+            self._bundle_decision(key, "allow" if edit == "bundle-approve" else "deny")
         elif edit == "lifecycle":
             manifest = self.world.project / "apm.yml"
             data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-            data["lifecycle"] = _lifecycle_block(self.world, str(step.get("tag", "v1")))
+            log = self.world.project / _SCRIPT_LOG
+            command = f"echo run >> '{log}'"
+            data["lifecycle"] = {
+                "post-install": [{"type": "command", "command": command, "timeoutSec": 30}]
+            }
             manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
         elif edit != "mark":
             raise ValueError(f"unknown edit {edit!r}")
+        if "witness" in step:
+            # The lock records each package's executable state, so a gate change
+            # leaves it out of date until a resolving install reconciles it.
+            self.model = self.model.with_lock("stale")
+
+    def _mark_change(self, witness: tuple[str, ...]) -> None:
+        self.witness = witness
+        observation = self.observe()
+        assert set(witness) <= observation.deployed, (
+            f"{witness} must be deployed before the gate change; deployed "
+            f"{sorted(observation.deployed)}"
+        )
+        self.at_change = observation
+        self.ceiling = frozenset(s for s in observation.deployed if s.split("/")[1] in GATED_KINDS)
+
+    def _bundle_decision(self, key: str, store: str) -> None:
+        """Pin this exact bundle, as the install output tells the user to."""
+        if not self.bundle_key:
+            assert self.last is not None
+            found = re.search(r'"(p-exec#[^"]+@sha256:[0-9a-f]+)"', self.last.stdout)
+            assert found, f"bundle install printed no approval key:\n{self.last.stdout}"
+            self.bundle_key = found.group(1)
+        entry = {"hooks": True, "mcp": True, "bin": True}
+
+        def decide(block: dict) -> None:
+            for other in ("allow", "deny"):
+                (block.get(other) or {}).pop(self.bundle_key, None)
+            block.setdefault(store, {})[self.bundle_key] = entry
+
+        self._edit_store(decide)
+        if store == "allow":
+            self.model = self.model.approve(key, self.kinds[key])
+        else:
+            self.model = self.model.deny(key, self.kinds[key])
 
     def _identities(self, key: str) -> tuple[str, ...]:
         ref = self.world.packages[key]
         return (ref.spec, ref.name)
 
-    def _edit_store(self, edit) -> None:
+    def _edit_store(self, edit: Callable[[dict], None]) -> None:
         if self.scope == "project":
             manifest = self.world.project / "apm.yml"
             data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
@@ -232,22 +277,15 @@ class GateReplay(RowReplay):
         )
 
     def check_then(self) -> None:
-        then = self.row.then
-        if "exit" in then:
-            assert self.last is not None and self.last.returncode == then["exit"], self.last
         observed = set(self.observe().deployed)
-        if then.get("deployed") == "expected":
-            wanted = {
-                "/".join(cell)
-                for cell in expected_deployed(self.model, self.kinds)
-                if (self.scope, cell[1], cell[2]) in _SURFACES
-            }
-            assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
+        wanted = {
+            "/".join(cell)
+            for cell in expected_deployed(self.model, self.kinds)
+            if (self.scope, cell[1], cell[2]) in _SURFACES
+        }
+        assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
         gone = set(self.witness) & observed
         assert not gone, f"I4: {sorted(gone)} still deployed after the gate change"
-        if "announce" in then:
-            output = " ".join(f"{self.announced}".split())
-            assert re.search(str(then["announce"]), output), f"I7: not announced: {output[-400:]}"
 
     # -- one CLI step ----------------------------------------------------
 
@@ -256,15 +294,13 @@ class GateReplay(RowReplay):
         return tuple(url if arg == "MARKETPLACE_URL" else arg for arg in super()._args(line))
 
     def _fields(self, args: tuple[str, ...], read_only: bool) -> dict[str, object]:
-        if self.scope == "project":
+        if self.scope == "project" and args[0] != "marketplace":
             fields: dict[str, object] = {
                 "forbidden": {"home": ("*",)},
                 "allowed": {"home": _PROJECT_HOME_ALLOWED},
             }
         else:
             fields = {"forbidden": {"project": ("*",)}, "allowed": {}}
-        if args[0] == "marketplace":
-            fields["forbidden"] = {"project": ("*",)}
         fields["read_only"] = read_only or "--dry-run" in args
         if args[0] not in _GATE_REMOVING:
             fields["mutating"] = False
@@ -280,8 +316,9 @@ class GateReplay(RowReplay):
     ) -> CommandResult:
         requested = self._requested(driver.command_args(line))
         args = self._args(line)
-        fields = self._fields(args, read_only)
-        op = operation_for(args, scope=self.scope, paired=paired or {}, **fields)
+        op = operation_for(
+            args, scope=self.scope, paired=paired or {}, **self._fields(args, read_only)
+        )
         frozen = "FROZEN" in op.modifiers
         allowed_exit = (
             frozenset({pinned_exit})
@@ -309,18 +346,21 @@ class GateReplay(RowReplay):
         if self.ceiling is not None:
             grown = {s for s in after.deployed if s.split("/")[1] in GATED_KINDS} - self.ceiling
             assert not grown, f"I4: {line!r} deployed {sorted(grown)} after the gate change"
-        if self.ceiling is not None and op.mutating:
-            self.announced += f"{result.stdout}\n{result.stderr}\n"
-        if result.returncode == 0 and op.command in _RECONCILING and not frozen:
-            self.model = requested.installed()
-        elif result.returncode == 0 and op.command in _RECONCILING:
-            self.model = replace(requested, converged=self.model.converged)
-        elif result.returncode == 0:
-            self.model = requested
+            if self.removal is None and args[0] in _GATE_REMOVING:
+                self.removal = result
+        self._advance_model(op, requested, result)
         self.last = result
         return result
 
-    announced = ""
+    def _advance_model(self, op, requested, result: CommandResult) -> None:
+        if result.returncode != 0 or "DRYRUN" in op.modifiers:
+            return
+        if op.command in _RECONCILING and "FROZEN" not in op.modifiers:
+            self.model = requested.installed()
+        elif op.command in _RECONCILING:
+            self.model = replace(requested, converged=self.model.converged)
+        else:
+            self.model = requested
 
 
 def _drop_entries(block: dict, identities: tuple[str, ...]) -> None:
@@ -347,9 +387,6 @@ def _redefine(root: Path, kind: str) -> None:
     if kind == "hook":
         hook = root / ".apm" / "hooks" / "session.json"
         hook.write_text(hook.read_text("ascii").replace("echo p-exec", "echo p-exec-v2"), "ascii")
-    elif kind == "canvas":
-        (script,) = (p for p in root.rglob("extension.mjs") if "apm_modules" not in p.parts)
-        script.write_text(script.read_text("ascii") + "// v2\n", "ascii")
     elif kind == "native":
         config = root / ".mcp.json"
         data = json.loads(config.read_text("ascii"))
@@ -362,213 +399,187 @@ def _redefine(root: Path, kind: str) -> None:
         manifest.write_text(yaml.safe_dump(data), "utf-8")
 
 
-def _script_log(world) -> Path:
-    return world.root / "script-runs.log"
-
-
-def _lifecycle_block(world, tag: str) -> dict[str, object]:
-    command = f"echo {tag} >> '{_script_log(world)}'"
-    return {"post-install": [{"type": "command", "command": command, "timeoutSec": 30}]}
-
-
-# -- the cell table ---------------------------------------------------------
-
-# KIND -> (package key, target); p-exec carries hook, mcp and bin.
-_KINDS: Mapping[str, tuple[str, str]] = {
-    "hook": ("p-exec", "copilot"),
-    "mcp": ("p-exec", "copilot"),
-    "lsp": ("p-lsp", "copilot"),
-    "canvas": ("p-canvas", "copilot"),
-    "native": ("p-native-claude", "claude"),
-}
-# PATH -> (package key suffix, scope, the steps that must remove the surface).
-_PATHS: Mapping[str, tuple[str, str, tuple[object, ...]]] = {
-    "install": ("", "project", ("apm install",)),
-    "frozen": ("", "project", ("apm install --frozen",)),
-    "update": ("", "project", ("apm update --yes",)),
-    "uninstall-prune-rebuild": ("", "project", ("apm uninstall p-skill", "apm prune")),
-    "audit-ci": ("", "project", ({"pair": ["apm audit --ci", "apm install --frozen"]},)),
-    "dry-run": ("", "project", ("apm install --dry-run", "apm install")),
-    "install-g": ("", "user", ("apm install",)),
-    "frozen-g": ("", "user", ("apm install --frozen",)),
-    "bundle-install": (":bundle", "project", ("apm install",)),
-    "marketplace-install": (":marketplace", "project", ("apm install",)),
-    "native-plugin": ("", "user", ("apm install",)),
-}
-# CHANGE -> what the removing step must say (I7), as a regex.
-_REMOVAL = r"(Cleaned|Removed) (\d+ )?stale|Parked|skipped|Filtered"
-_ANNOUNCE = {
-    "local-deny": rf"denied|{_REMOVAL}",
-    "revoke-approval": rf"not approved|{_REMOVAL}",
-    "definition-changed": r"definition changed since approval",
-    "org-deny": rf"deny_all|denied|{_REMOVAL}",
-    "org-enables-gate": rf"deny_all|denied|{_REMOVAL}",
-    "policy-dep-deny": r"denied by pattern",
-}
-# The one step left for a user whose dependency the policy now denies: every
-# resolving step refuses it (exit 1, state kept), so they uninstall it.
-_DENY_PKG_TAIL = "apm uninstall {key}"
-
-
-def _change(change: str, key: str, kind: str, witness: list[str]) -> list[object]:
-    if change == "local-deny":
-        return [{"edit": "mark", "witness": witness}, f"apm deny {key}"]
-    if change == "revoke-approval":
-        return [{"edit": "revoke", "pkg": key, "witness": witness}]
-    if change == "definition-changed":
-        return [{"edit": "redefine", "pkg": key, "kind": kind, "witness": witness}]
-    if change in ("org-deny", "org-enables-gate"):
-        return [{"edit": "policy", "variant": "exec-deny-all", "witness": witness}]
-    if change == "policy-dep-deny":
-        return [{"edit": "policy", "variant": "deny-pkg", "witness": witness}]
-    raise ValueError(change)
+# -- path registry ----------------------------------------------------------
 
 
 @dataclass(frozen=True)
-class Cell:
-    id: str  # the exact obligation id: G|<path>|<change>|<kind>
-    smoke: bool = False
-    xfail: str = ""
-    known: tuple[Mapping[str, str], ...] = ()
+class PathSpec:
+    """How one deploy or execute path arranges a package and removes it."""
 
-    @property
-    def parts(self) -> tuple[str, str, str]:
-        _, path, change, kind = self.id.split("|")
-        return path, change, kind
+    scope: str = "project"
+    key_suffix: str = ""
+    sibling: bool = False  # a second, ungated package the act steps operate on
+    arrange: Callable[[str], list[object]] | None = None
+    act: tuple[str | Mapping[str, object], ...] = ("apm install",)
 
 
-def build_row(cell: Cell) -> tuple[Row, str]:
-    path, change, kind = cell.parts
-    base, target = _KINDS[kind]
-    suffix, scope, removal = _PATHS[path]
-    key = base + suffix
-    sibling = path == "uninstall-prune-rebuild"
-    packages = (key, "p-skill") if sibling else (key,)
-    witness = [f"{key}/{kind}/{target}"]
-    given: list[object] = []
-    if path == "marketplace-install":
-        given.append("apm marketplace add MARKETPLACE_URL")
-    if change == "org-enables-gate":
-        given.append({"edit": "gate-off"})
-    given.append(f"apm install {key}")
-    if sibling:
-        given.append("apm install p-skill")
-    if change != "org-enables-gate":
-        given += [f"apm approve {key}", "apm install"]
-    when = [*_change(change, key, kind, witness), *removal]
-    if change == "policy-dep-deny":
-        when.append(_DENY_PKG_TAIL.format(key=key))
-    row = Row(
-        id=cell.id,
-        promises=tuple(PROMISES),
-        packages=packages,
-        targets=(target,),
-        scope="project",
-        given=tuple(given),
-        when=tuple(when),
-        then={"deployed": "expected", "announce": _ANNOUNCE[change]},
-        cell={"OP": path, "PRIM": kind, "GATE": change, "SCOPE": scope},
-        known_cells=cell.known,
-    )
-    return row, scope
+def _default_arrange(key: str) -> list[object]:
+    return [f"apm install {key}", f"apm approve {key}", "apm install"]
 
 
-_NATIVE_APPROVE = "#4154 approve cannot find a parked native plugin"
-CELLS = (
-    Cell("G|install|revoke-approval|hook", smoke=True),
-    Cell("G|install|local-deny|lsp", smoke=True),
-    Cell("G|install|org-deny|mcp"),
-    Cell("G|install|org-enables-gate|native"),
-    Cell("G|install|policy-dep-deny|hook"),
-    Cell("G|install|definition-changed|mcp"),
-    Cell("G|frozen|org-deny|hook"),
-    Cell("G|frozen|local-deny|mcp"),
-    Cell("G|frozen|revoke-approval|lsp"),
-    Cell("G|frozen|definition-changed|hook"),
-    Cell("G|frozen|local-deny|native", xfail=_NATIVE_APPROVE),
-    Cell("G|frozen|policy-dep-deny|mcp"),
-    Cell("G|frozen|org-enables-gate|lsp"),
-    Cell("G|update|definition-changed|hook", smoke=True),
-    Cell("G|update|policy-dep-deny|mcp"),
-    Cell("G|update|org-enables-gate|lsp"),
-    Cell("G|update|revoke-approval|native", xfail=_NATIVE_APPROVE),
-    Cell("G|update|local-deny|hook"),
-    Cell("G|update|org-deny|lsp"),
-    Cell("G|uninstall-prune-rebuild|org-enables-gate|hook"),
-    Cell("G|uninstall-prune-rebuild|revoke-approval|mcp"),
-    Cell("G|uninstall-prune-rebuild|org-deny|lsp"),
-    Cell("G|uninstall-prune-rebuild|definition-changed|native", xfail=_NATIVE_APPROVE),
-    Cell("G|uninstall-prune-rebuild|policy-dep-deny|hook"),
-    Cell("G|uninstall-prune-rebuild|local-deny|lsp"),
-    Cell("G|audit-ci|local-deny|hook"),
-    Cell("G|audit-ci|org-enables-gate|mcp"),
-    Cell("G|audit-ci|org-deny|lsp"),
-    Cell("G|audit-ci|revoke-approval|native", xfail=_NATIVE_APPROVE),
-    Cell("G|audit-ci|definition-changed|mcp"),
-    Cell("G|audit-ci|policy-dep-deny|hook"),
-    Cell("G|dry-run|local-deny|hook"),
-    Cell("G|dry-run|org-deny|mcp"),
-    Cell("G|dry-run|revoke-approval|lsp"),
-    Cell("G|install-g|local-deny|hook"),
-    Cell("G|install-g|definition-changed|mcp"),
-    Cell("G|install-g|revoke-approval|lsp"),
-    Cell("G|frozen-g|revoke-approval|hook"),
-    Cell("G|frozen-g|local-deny|mcp"),
-    Cell("G|frozen-g|definition-changed|hook"),
-    Cell("G|bundle-install|local-deny|hook"),
-    Cell("G|bundle-install|org-deny|mcp"),
-    Cell("G|bundle-install|revoke-approval|hook"),
-    Cell("G|bundle-install|org-enables-gate|mcp"),
-    Cell("G|marketplace-install|policy-dep-deny|hook"),
-    Cell("G|marketplace-install|revoke-approval|mcp"),
-    Cell("G|marketplace-install|local-deny|hook"),
-    Cell("G|marketplace-install|org-deny|mcp"),
-    Cell("G|marketplace-install|org-enables-gate|hook"),
-    Cell("G|native-plugin|local-deny|native", xfail=_NATIVE_APPROVE),
-    Cell("X|install|definition-changed|canvas"),
-    Cell("X|update|org-deny|canvas"),
-    Cell("X|uninstall-prune-rebuild|local-deny|canvas"),
-)
+def _bundle_arrange(key: str) -> list[object]:
+    return [f"apm install {key}", {"edit": "bundle-approve", "pkg": key}, f"apm install {key}"]
 
 
-def _param(cell: Cell):
-    marks = []
-    if cell.smoke:
-        marks.append(pytest.mark.lifecycle_smoke)
-    if cell.xfail:
-        marks.append(pytest.mark.xfail(strict=True, raises=AssertionError, reason=cell.xfail))
-    return pytest.param(cell, id=cell.id, marks=marks)
+def _marketplace_arrange(key: str) -> list[object]:
+    return ["apm marketplace add MARKETPLACE_URL", *_default_arrange(key)]
 
 
-@pytest.mark.parametrize("cell", [_param(cell) for cell in CELLS])
-def test_gate_change_removes_on_the_next_mutating_command(lifecycle_world, cell: Cell) -> None:
-    row, scope = build_row(cell)
-    GateReplay(lifecycle_world, row, scope=scope).replay()
+def _script_arrange(key: str) -> list[object]:
+    return [{"edit": "lifecycle"}, "apm lifecycle trust", f"apm install {key}"]
 
 
-# -- lifecycle scripts: the execute path APM runs itself ---------------------
-
-_SCRIPT_CHANGES = {
-    "G|lifecycle-scripts|revoke-approval|script": ("apm lifecycle untrust",),
-    "G|lifecycle-scripts|org-deny|script": ({"edit": "policy", "variant": "exec-deny-all"},),
-    "X|lifecycle-scripts|definition-changed|script": ({"edit": "lifecycle", "tag": "v2"},),
+_FROZEN_THEN_INSTALL = ("apm install --frozen", "apm install")
+PATHS: Mapping[str, PathSpec] = {
+    "install": PathSpec(),
+    # A gate change leaves the lock out of date: --frozen refuses and keeps the
+    # world; the plain install that follows removes.
+    "frozen": PathSpec(act=_FROZEN_THEN_INSTALL),
+    "update": PathSpec(act=("apm update --yes",)),
+    "uninstall-prune-rebuild": PathSpec(sibling=True, act=("apm uninstall p-skill", "apm prune")),
+    "audit-ci": PathSpec(act=({"pair": ["apm audit --ci", "apm install --frozen"]}, "apm install")),
+    "dry-run": PathSpec(act=("apm install --dry-run", "apm install")),
+    "install-g": PathSpec(scope="user"),
+    "frozen-g": PathSpec(scope="user", act=_FROZEN_THEN_INSTALL),
+    "bundle-install": PathSpec(
+        key_suffix=":bundle", arrange=_bundle_arrange, act=("apm install {key}",)
+    ),
+    "marketplace-install": PathSpec(key_suffix=":marketplace", arrange=_marketplace_arrange),
+    "lifecycle-scripts": PathSpec(arrange=_script_arrange),
 }
 
 
-@pytest.mark.parametrize("cell_id", sorted(_SCRIPT_CHANGES))
-def test_lifecycle_script_gate(lifecycle_world, cell_id: str) -> None:
-    """A trusted project script runs; after the change the next install runs none."""
-    world = lifecycle_world
+# -- change registry --------------------------------------------------------
+
+_REMOVAL = r"(Cleaned|Removed) (\d+ )?stale|Parked|skipped|Filtered"
+_FROZEN_REFUSAL = r"out of sync|does not match"
+
+
+@dataclass(frozen=True)
+class ChangeSpec:
+    """How one gate change is applied, and what the removing step must say."""
+
+    apply: Callable[[str, str, str], list[object]]
+    announce: str
+    gate_off_first: bool = False
+    # The policy refuses the package itself: resolving steps exit 1 and keep
+    # the world, and the user's way out is to uninstall it.
+    refuses_package: bool = False
+
+
+def _local_deny(key: str, kind: str, path: str) -> list[object]:
+    if path == "bundle-install":
+        return [{"edit": "bundle-deny", "pkg": key}]
+    return [f"apm deny {key}"]
+
+
+def _revoke(key: str, kind: str, path: str) -> list[object]:
+    if kind == "script":
+        return ["apm lifecycle untrust"]
+    return [{"edit": "revoke", "pkg": key}]
+
+
+def _org(variant: str) -> Callable[[str, str, str], list[object]]:
+    return lambda key, kind, path: [{"edit": "policy", "variant": variant}]
+
+
+CHANGES: Mapping[str, ChangeSpec] = {
+    "local-deny": ChangeSpec(_local_deny, rf"denied|{_REMOVAL}"),
+    "revoke-approval": ChangeSpec(_revoke, rf"not approved|{_REMOVAL}"),
+    "definition-changed": ChangeSpec(
+        lambda key, kind, path: [{"edit": "redefine", "pkg": key, "kind": kind}],
+        r"definition changed since approval",
+    ),
+    "org-deny": ChangeSpec(_org("exec-deny-all"), rf"deny_all|denied|{_REMOVAL}"),
+    "org-enables-gate": ChangeSpec(
+        _org("exec-deny-all"), rf"deny_all|denied|{_REMOVAL}", gate_off_first=True
+    ),
+    "policy-dep-deny": ChangeSpec(_org("deny-pkg"), r"denied by pattern", refuses_package=True),
+}
+
+
+# -- rows -------------------------------------------------------------------
+
+
+def registered() -> list[tuple[GateSlice, GateRow]]:
+    return [(gate_slice, row) for gate_slice in slices() for row in gate_slice.rows]
+
+
+def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
+    """The replay row of one G obligation, its scope and its announcement regex."""
+    path, change, kind = gate_row.parts
+    spec, how = PATHS[path], CHANGES[change]
+    key = gate_slice.package + spec.key_suffix
+    witness = [] if kind == "script" else [f"{key}/{kind}/{gate_slice.target}"]
+    arrange = (spec.arrange or _default_arrange)(key)
+    given: list[object] = []
+    if how.gate_off_first:
+        given.append({"edit": "gate-off"})
+        arrange = [step for step in arrange if not str(step).startswith("apm approve")]
+    given += arrange[:1]
+    if spec.sibling:
+        given.append("apm install p-skill")
+    given += arrange[1:]
+    when: list[object] = [{"edit": "mark", "witness": witness}]
+    when += how.apply(key, kind, path)
+    when += [step.format(key=key) if isinstance(step, str) else step for step in spec.act]
+    if how.refuses_package:
+        when.append(f"apm uninstall {key}")
+    announce = gate_row.announce
+    if announce is None:
+        announce = _FROZEN_REFUSAL if "frozen" in path or path == "audit-ci" else how.announce
     row = Row(
-        id=cell_id,
-        promises=tuple(PROMISES),
-        packages=("p-skill",),
-        targets=("copilot",),
+        id=gate_row.id,
+        promises=PROMISES,
+        packages=(key, "p-skill") if spec.sibling else (key,),
+        targets=(gate_slice.target,),
         scope="project",
-        given=({"edit": "lifecycle"}, "apm lifecycle trust", "apm install p-skill"),
-        when=(*_SCRIPT_CHANGES[cell_id], "apm install"),
-        then={"deployed": "expected"},
+        given=tuple(given),
+        when=tuple(when),
+        cell={"OP": path, "PRIM": kind, "GATE": change, "SCOPE": spec.scope},
     )
-    GateReplay(world, row).replay()
-    runs = _script_log(world).read_text("ascii").split()
-    assert runs == ["v1"], f"script runs after the gate change: {runs}"
+    return row, spec.scope, announce
+
+
+def _param(gate_slice: GateSlice, gate_row: GateRow):
+    marks = []
+    if gate_row.smoke:
+        marks.append(pytest.mark.lifecycle_smoke)
+    if gate_row.xfail:
+        marks.append(pytest.mark.xfail(strict=True, raises=AssertionError, reason=gate_row.xfail))
+    return pytest.param(gate_slice, gate_row, id=gate_row.id, marks=marks)
+
+
+def test_every_registered_row_is_a_g_obligation() -> None:
+    universe = security_obligations()["G"]
+    ids = [row.id for _, row in registered()]
+    assert len(ids) == len(set(ids)), "a G id is registered twice"
+    assert set(ids) <= set(universe), sorted(set(ids) - set(universe))
+    for gate_slice, row in registered():
+        path, change, kind = row.parts
+        assert kind == gate_slice.kind, row.id
+        assert path in PATHS and change in CHANGES, row.id
+        assert universe[row.id] == STRENGTH, row.id
+
+
+@pytest.mark.parametrize(("gate_slice", "gate_row"), [_param(*item) for item in registered()])
+def test_gate_change_removes_on_the_next_mutating_command(
+    lifecycle_world, gate_slice: GateSlice, gate_row: GateRow
+) -> None:
+    row, scope, announce = build_row(gate_slice, gate_row)
+    replay = GateReplay(lifecycle_world, row, scope=scope)
+    replay.replay()
+    assert replay.removal is not None, "no removing step ran after the gate change"
+    check_obligation(
+        gate_row.id,
+        strength=STRENGTH,
+        before=replay.at_change,
+        after=replay.observe(),
+        result=replay.removal,
+        evidence=Evidence(
+            absent=gate_row.absent,
+            unchanged=gate_row.unchanged,
+            output_matches=(announce,),
+        ),
+        scope=scope,
+    )

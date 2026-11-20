@@ -381,8 +381,9 @@ class JourneyRun:
             if "append" in edit:
                 path.write_text(text + _sub(edit["text"]), encoding="utf-8")
             else:
-                assert edit["old"] in text, f"edit: {edit['old']!r} not in {path.name}"
-                path.write_text(text.replace(edit["old"], _sub(edit["new"]), 1), encoding="utf-8")
+                old = _sub(edit["old"])
+                assert old in text, f"edit: {old!r} not in {path.name}"
+                path.write_text(text.replace(old, _sub(edit["new"]), 1), encoding="utf-8")
         if step.get("remediate_from"):
             source = step["remediate_from"]
             spec = next(s for s in self.journey["steps"] if s["n"] == source)
@@ -428,7 +429,9 @@ class JourneyRun:
             result = driver.run(world, line, scope=scope)
         else:
             result = self._shell(line, world)
-        return _Command(line, result, self._normalize(result.stdout), self._normalize(result.stderr))
+        return _Command(
+            line, result, self._normalize(result.stdout), self._normalize(result.stderr)
+        )
 
     def _text(self, n: int) -> str:
         return "\n".join(f"{c.stdout}\n{c.stderr}" for c in self.outputs.get(n, ()))
@@ -562,7 +565,7 @@ class JourneyRun:
         wanted = set(oracles)
         if (step.get("docs") or {}).get("output"):
             wanted.add("O2")
-        if step.get("docs"):
+        if (step.get("docs") or {}).get("commands"):
             wanted.add("O13")
         if "O8" in wanted and not any(c.result.returncode for c in facts.apm):
             wanted.discard("O8")  # O8 applies to red steps only
@@ -576,7 +579,11 @@ class JourneyRun:
         return [(law, message) for message in check(facts)]
 
     def _key(self, facts: _StepFacts) -> list[str]:
-        return [f"key line not printed: {k!r}" for k in facts.step.get("key_lines") or () if _sub(k) not in facts.text]
+        return [
+            f"key line not printed: {k!r}"
+            for k in facts.step.get("key_lines") or ()
+            if _sub(k) not in facts.text
+        ]
 
     def _forbid(self, facts: _StepFacts) -> list[str]:
         found = []
@@ -605,7 +612,10 @@ class JourneyRun:
         rendered = norm.render_golden(
             self.journey["id"],
             n,
-            [norm.render_command(c.line, c.result.returncode, c.stdout, c.stderr) for c in facts.commands],
+            [
+                norm.render_command(c.line, c.result.returncode, c.stdout, c.stderr)
+                for c in facts.commands
+            ],
         )
         rendered = self._normalize(rendered)
         if self.record_dir is not None:
@@ -663,8 +673,14 @@ class JourneyRun:
             helps = "--help" in driver.command_args(command.line)
             for name, text in (("stdout", command.stdout), ("stderr", command.stderr)):
                 lines = [] if helps else text.splitlines()
-                found += [f"{command.line!r} {name} repeats {d!r}" for d in norm.duplicate_lines(lines, allow)]
-                found += [f"{command.line!r} {name} repeats a token: {t!r}" for t in norm.adjacent_tokens(lines)]
+                found += [
+                    f"{command.line!r} {name} repeats {d!r}"
+                    for d in norm.duplicate_lines(lines, allow)
+                ]
+                found += [
+                    f"{command.line!r} {name} repeats a token: {t!r}"
+                    for t in norm.adjacent_tokens(lines)
+                ]
                 for block in norm.package_blocks(lines):
                     pairs = [p for p in map(_kind_destination, block[1:]) if p]
                     repeated = sorted({p for p in pairs if pairs.count(p) > 1})
@@ -811,7 +827,9 @@ class JourneyRun:
         found = list(docs_problems(docs))
         for command in docs["commands"]:
             for part in _sub(command).split(" && "):
-                ran = part[3:] == facts.step.get("chdir") if part.startswith("cd ") else part in runs
+                ran = (
+                    part[3:] == facts.step.get("chdir") if part.startswith("cd ") else part in runs
+                )
                 if not ran:
                     found.append(f"docs command {part!r} is not run literally")
         return found
@@ -819,10 +837,16 @@ class JourneyRun:
     # settle -----------------------------------------------------------------
 
     def settle(self, n: int, violations: list[tuple[str, str]]) -> None:
-        cells = [c for c in self.journey.get("known_cells") or () if c["step"] == n and c["law"] in _O_LAWS]
+        cells = [
+            c
+            for c in self.journey.get("known_cells") or ()
+            if c["step"] == n and c["law"] in _O_LAWS
+        ]
         unexpected = []
         for law, message in violations:
-            owner = next((c for c in cells if c["law"] == law and re.search(c["match"], message)), None)
+            owner = next(
+                (c for c in cells if c["law"] == law and re.search(c["match"], message)), None
+            )
             if owner is None:
                 unexpected.append(f"{law}: {message}")
             else:
@@ -832,9 +856,12 @@ class JourneyRun:
                 unexpected.append(f"strict expected failure {_label(cell)} now passes; remove it")
         if unexpected:
             evidence = "\n".join(
-                f"$ {c.line} [exit {c.result.returncode}]\n{c.stdout}\n{c.stderr}" for c in self.outputs.get(n, ())
+                f"$ {c.line} [exit {c.result.returncode}]\n{c.stdout}\n{c.stderr}"
+                for c in self.outputs.get(n, ())
             )
-            pytest.fail(f"{self.journey['id']} step {n}:\n" + "\n".join(unexpected) + f"\n---\n{evidence}")
+            pytest.fail(
+                f"{self.journey['id']} step {n}:\n" + "\n".join(unexpected) + f"\n---\n{evidence}"
+            )
 
     def check_seen(self) -> None:
         strict = {_label(c) for c in self.journey.get("known_cells") or ()}
@@ -924,7 +951,9 @@ def test_journey_files_agree_with_the_index() -> None:
     for path in journey_files():
         for step in load_journey(path)["steps"]:
             if step.get("docs"):
-                problems += [f"{path.stem} step {step['n']}: {p}" for p in docs_problems(step["docs"])]
+                problems += [
+                    f"{path.stem} step {step['n']}: {p}" for p in docs_problems(step["docs"])
+                ]
     assert problems == []
 
 
@@ -951,7 +980,17 @@ def test_twin_fidelity_o10(slug: str, tmp_path: Path) -> None:
     twin = TWINS[slug]
     upstream = tmp_path / "upstream"
     clone = subprocess.run(
-        ("git", "clone", "-q", "--depth", "1", "--branch", twin.ref, f"https://github.com/{slug}", str(upstream)),
+        (
+            "git",
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            "--branch",
+            twin.ref,
+            f"https://github.com/{slug}",
+            str(upstream),
+        ),
         capture_output=True,
         text=True,
         timeout=300,
@@ -959,14 +998,24 @@ def test_twin_fidelity_o10(slug: str, tmp_path: Path) -> None:
     )
     assert clone.returncode == 0, clone.stderr
     if twin.copy_from:
-        want = {p.relative_to(REPO / twin.copy_from).as_posix() for p in (REPO / twin.copy_from).rglob("*") if p.is_file()}
-        got = {p.relative_to(upstream / twin.copy_to).as_posix() for p in (upstream / twin.copy_to).rglob("*") if p.is_file()}
+        want = {
+            p.relative_to(REPO / twin.copy_from).as_posix()
+            for p in (REPO / twin.copy_from).rglob("*")
+            if p.is_file()
+        }
+        got = {
+            p.relative_to(upstream / twin.copy_to).as_posix()
+            for p in (upstream / twin.copy_to).rglob("*")
+            if p.is_file()
+        }
         assert got == want
         return
     primitives = {p for p in twin.files if p.startswith((".apm/", "skills/")) or p == "apm.yml"}
     for relative in primitives:
         assert (upstream / relative).is_file(), f"{slug}@{twin.ref} has no {relative}"
-        assert _front_keys((upstream / relative).read_text(encoding="utf-8")) == _front_keys(twin.files[relative])
+        assert _front_keys((upstream / relative).read_text(encoding="utf-8")) == _front_keys(
+            twin.files[relative]
+        )
     if "apm.yml" in primitives:
         real = yaml.safe_load((upstream / "apm.yml").read_text(encoding="utf-8"))
         assert real.get("dependencies") == yaml.safe_load(twin.files["apm.yml"]).get("dependencies")

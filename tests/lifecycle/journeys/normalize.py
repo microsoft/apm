@@ -43,8 +43,13 @@ _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"@[0-9a-f]{8}\b"), "@<SHA8>"),
     (re.compile(r"=[0-9a-f]{12}(?=\.\.\.)"), "=<SHA12>"),
     # N3: durations and dates.
-    (re.compile(r"\bin \d+(?:\.\d+)?s\b"), "in <DUR>"),
-    (re.compile(r"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?"), "<DATE>"),
+    (re.compile(r"\b(in|after) \d+(?:\.\d+)?s\b"), r"\1 <DUR>"),
+    (
+        re.compile(
+            r"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+        ),
+        "<DATE>",
+    ),
 )
 # The engine driver's usage line names the module; the binary names itself.
 _ENTRY_POINT = re.compile(r"(?:\S*python\S*|\S*/python3?) -m apm_cli\.cli")

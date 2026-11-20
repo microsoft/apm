@@ -27,8 +27,11 @@ and becomes a strict expected failure.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import shutil
 import subprocess
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,7 +43,7 @@ from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.outcome_routing import resolve_trust_policy, route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
-from tests.lifecycle import driver, oracles
+from tests.lifecycle import driver, oracles, rows
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.rows import Row, RowReplay
 from tests.lifecycle.world import World, use_policy
@@ -217,7 +220,10 @@ def test_owner_routes_each_outcome(tmp_path: Path, cell_id: str) -> None:
 # == Tier 2: one routing E2E per decision site =====================================
 
 POLICY_CONTENTS = "/contents/apm-policy.yml"
+SERVED_POLICY_CONTENTS = "/.github/contents/apm-policy.yml"
 SCRIPT_MARKER = ".lifecycle-script-ran"
+# Documented script log (reference/cli/lifecycle.md): $APM_HOME/logs/scripts.log.
+SCRIPT_LOG = (".apm/logs",)
 MCP_SERVER = "p-exec-mcp"
 
 
@@ -231,11 +237,15 @@ class Expect:
     absent: tuple[str, ...] = ()  # project paths absent after the command
     present: tuple[str, ...] = ()  # project paths present after the command
     unchanged: tuple[str, ...] = ()  # project path prefixes byte-identical
-    policy_fetch: bool | None = None  # the command fetched the policy file (or not)
+    # True: the command requested the org policy file; False: it did not fetch the
+    # served policy repository (a warm cache may still probe ``.github-private``).
+    policy_fetch: bool | None = None
     xfail: str | None = None  # "#<issue> <neutral text>" -> strict expected failure
     smoke: bool = False
     # Overrides CLASS_SETUPS[cls] when the site needs another input for the class.
     setup: Callable[[World, RowReplay], None] | None = None
+    # HOME paths the command may write besides receipts and bookkeeping.
+    home_writes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -305,7 +315,33 @@ def _warm(world: World, replay: RowReplay) -> None:
     del replay
 
 
+def _aged(seconds: int) -> Callable[[World, RowReplay], None]:
+    """A found policy cached *seconds* ago, and every refresh now fails to connect."""
+
+    def setup(world: World, replay: RowReplay) -> None:
+        _warm(world, replay)
+        _set_knob(world, "warn")
+        metas = [
+            path for path in world.root.rglob("*.meta.json") if "cached_at" in path.read_text()
+        ]
+        assert metas, "no policy cache entry to age"
+        for meta in metas:
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            data["cached_at"] = time.time() - seconds
+            meta.write_text(json.dumps(data), encoding="utf-8")
+        for key in [key for key in world.env if key.lower() in _PROXY_KEYS]:
+            world.env[key] = _DEAD_PROXY
+
+    return setup
+
+
+_PROXY_KEYS = ("https_proxy", "http_proxy", "all_proxy")
+_DEAD_PROXY = "http://127.0.0.1:9"
+_HOUR, _DAY = 3600, 24 * 3600
+
 CLASS_SETUPS: Mapping[str, Callable[[World, RowReplay], None]] = {
+    "cache=stale<7d": _aged(2 * _HOUR),
+    "cache=stale>7d-or-expired": _aged(8 * _DAY),
     "found": _variant("deny-pkg", "block"),
     "cache=cold": _variant("deny-pkg", "block"),
     "cache=warm-fresh": _warm,
@@ -375,6 +411,13 @@ SITE_SLICES["install-pipeline"] = SiteSlice(
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), present=(SKILL,)),
         "cache=cold": Expect(1, (DENIED,), absent=(SKILL, HOOK), policy_fetch=True),
         "cache=warm-fresh": Expect(1, (DENIED,), absent=(SKILL, HOOK), policy_fetch=False),
+        "cache=stale<7d": Expect(
+            1,
+            (DENIED, r"(?i)stale"),
+            absent=(SKILL, HOOK),
+            xfail="#0 with a stale cached org policy and no network, install skips the cached policy",
+        ),
+        "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), present=(SKILL,)),
     },
 )
 
@@ -392,12 +435,7 @@ SITE_SLICES["mcp-install-preflight"] = SiteSlice(
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,)),
         "cache=cold": Expect(
-            1,
-            (r"(?i)denied|blocked",),
-            absent=(".mcp.json",),
-            unchanged=("apm.yml",),
-            policy_fetch=True,
-            setup=_variant("mcp-deny", "block"),
+            0, (r"Policy: org:policy-deny-pkg/\.github -- enforcement=block",), policy_fetch=True
         ),
     },
 )
@@ -411,10 +449,17 @@ SITE_SLICES["lifecycle-scripts"] = SiteSlice(
             0, (r"Lifecycle scripts suppressed by org policy",), absent=(SCRIPT_MARKER,), smoke=True
         ),
         "cache_miss_fetch_fail/warn": Expect(
-            0, forbids=(r"Lifecycle scripts suppressed",), present=(SCRIPT_MARKER,)
+            0,
+            forbids=(r"Lifecycle scripts suppressed",),
+            present=(SCRIPT_MARKER,),
+            home_writes=SCRIPT_LOG,
         ),
         "cache=cold": Expect(
-            0, forbids=(r"Lifecycle scripts suppressed",), present=(SCRIPT_MARKER,)
+            0,
+            (r"Lifecycle scripts suppressed by org policy \(executables\.deny_all\)",),
+            absent=(SCRIPT_MARKER,),
+            policy_fetch=True,
+            setup=_variant("exec-deny-all", "warn"),
         ),
     },
 )
@@ -599,14 +644,23 @@ def run_site_row(world: World, cell_id: str) -> None:
     replay = _replay(world)
     slice_.arrange(world, replay)
     (expect.setup or CLASS_SETUPS[cls])(world, replay)
+    # The org policy input changed, so the converged state no longer holds.
+    replay.model = dataclasses.replace(replay.model, converged=False)
     before = replay.observe()
     world.services.reset()
-    replay.step({"run": slice_.command(world), "exit": expect.exit})
+    with pytest.MonkeyPatch.context() as patch:
+        if expect.home_writes:
+            allowed = (*rows._PROJECT_HOME_ALLOWED, *expect.home_writes)
+            patch.setattr(rows, "_PROJECT_HOME_ALLOWED", allowed)
+        replay.step({"run": slice_.command(world), "exit": expect.exit})
     after = replay.observe()
     egress = tuple(world.services.egress_log())
-    fetched = any(entry["path"].endswith(POLICY_CONTENTS) for entry in egress)
-    if expect.policy_fetch is not None:
-        assert fetched is expect.policy_fetch, egress
+    requested = any(entry["path"].endswith(POLICY_CONTENTS) for entry in egress)
+    served = any(entry["path"].endswith(SERVED_POLICY_CONTENTS) for entry in egress)
+    if expect.policy_fetch is True:
+        assert requested, egress
+    elif expect.policy_fetch is False:
+        assert not served, egress
     oracles.check_obligation(
         cell_id,
         strength="e2e",
