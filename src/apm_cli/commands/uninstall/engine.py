@@ -1346,6 +1346,7 @@ def _sync_integrations_after_uninstall(
     excluded_survivor_keys: frozenset[str] = frozenset(),
     *,
     evidence: "DeploymentEvidence | None",
+    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1449,8 +1450,13 @@ def _sync_integrations_after_uninstall(
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
     _allow_executables = None
     if target_survivor_plan:
+        # The command resolved survivor trust before its first write (#4185).
         _allow_executables = resolve_project_exec_allow_map(
-            project_root, apm_package, user_scope=user_scope, logger=logger
+            project_root,
+            apm_package,
+            user_scope=user_scope,
+            executable_context=executable_context,
+            logger=logger,
         )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
