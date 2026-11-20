@@ -459,6 +459,28 @@ U_BIN_PATHS: Mapping[str, tuple[str, ...]] = {
     "bundle-install": ("local-deny", "org-deny", "org-enables-gate", "revoke-approval"),
     "unpack": _GATE_CHANGES,
 }
+# Path shape -> the gate removal row that witnesses it (one absence row per
+# shape, tests/lifecycle/security/gate_slices/bin.py): every U-BIN cell names
+# the witness of its shape.
+U_BIN_SHAPES: Mapping[str, str] = {
+    "install": "install",
+    "frozen": "install",
+    "update": "install",
+    "uninstall-prune-rebuild": "install",
+    "audit-ci": "install",
+    "install-g": "install-g",
+    "frozen-g": "install-g",
+    "dry-run": "dry-run",
+    "bundle-install": "bundle-install",
+    "unpack": "unpack",
+}
+
+
+def u_bin_witness(cell: str) -> str:
+    """The shape witness row of U-BIN cell ``G|<path>|<change>|bin``."""
+    return f"G|{U_BIN_SHAPES[cell.split('|')[1]]}|local-deny|bin"
+
+
 U_BIN_CELLS = tuple(
     sorted(f"G|{path}|{change}|bin" for path, changes in U_BIN_PATHS.items() for change in changes)
 )

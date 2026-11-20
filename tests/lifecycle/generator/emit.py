@@ -30,7 +30,7 @@ from tests.lifecycle.generator.factors import (
     compile_staged_targets,
     row_targets,
 )
-from tests.lifecycle.generator.rules import RULES, U_BIN_CELLS, U_BIN_PIN
+from tests.lifecycle.generator.rules import RULES, U_BIN_CELLS, U_BIN_PIN, u_bin_witness
 from tests.lifecycle.generator.space import Entry, Space, build_space
 from tests.lifecycle.generator.witnesses import machine_witnesses, scenario_witnesses
 
@@ -157,14 +157,14 @@ def _counts(space: Space, statuses: Mapping[str, str], lanes: Mapping[str, str],
     }
 
 
-def u_bin_audit(digest: str) -> tuple[dict[str, list[str]], dict[str, dict[str, object]]]:
+def u_bin_audit(digest: str) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
     """(excluded, reinstated) gate cells of U-BIN for the live pin *digest*.
 
     The cells are excluded only while *digest* equals the approved U_BIN_PIN;
     otherwise each one is must-cover again (the rule's premise has changed).
     """
     if digest == U_BIN_PIN:
-        return {key: ["U-BIN"] for key in U_BIN_CELLS}, {}
+        return {key: {"rules": ["U-BIN"], "witness": u_bin_witness(key)} for key in U_BIN_CELLS}, {}
     return {}, {key: {"rules": ["U-BIN"], "must_cover": True} for key in U_BIN_CELLS}
 
 

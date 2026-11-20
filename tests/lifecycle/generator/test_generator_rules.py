@@ -550,7 +550,15 @@ def test_u_bin_pin_matches_the_source_and_excludes_exactly_its_cells() -> None:
     assert bin_pin.pin_digest() == U_BIN_PIN
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     assert data["pins"] == {"U-BIN": U_BIN_PIN}
-    assert data["excluded"] == {key: ["U-BIN"] for key in U_BIN_CELLS}
+    witnesses = {entry["witness"] for entry in data["excluded"].values()}
+    assert set(data["excluded"]) == set(U_BIN_CELLS)
+    assert all(entry["rules"] == ["U-BIN"] for entry in data["excluded"].values())
+    # One witness row per path shape, each itself a U-BIN cell.
+    assert witnesses == {
+        f"G|{shape}|local-deny|bin"
+        for shape in ("install", "install-g", "dry-run", "bundle-install", "unpack")
+    }
+    assert witnesses <= set(U_BIN_CELLS)
     assert len(U_BIN_CELLS) == 41 and not data["reinstated"]
 
 

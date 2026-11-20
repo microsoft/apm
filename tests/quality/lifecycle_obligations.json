@@ -71,129 +71,252 @@
   ]
  },
  "excluded": {
-  "G|audit-ci|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|audit-ci|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|audit-ci|org-enables-gate|bin": [
-   "U-BIN"
-  ],
-  "G|audit-ci|policy-dep-deny|bin": [
-   "U-BIN"
-  ],
-  "G|audit-ci|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|bundle-install|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|bundle-install|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|bundle-install|org-enables-gate|bin": [
-   "U-BIN"
-  ],
-  "G|bundle-install|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|dry-run|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|dry-run|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|dry-run|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|frozen-g|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|frozen-g|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|frozen|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|frozen|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|frozen|org-enables-gate|bin": [
-   "U-BIN"
-  ],
-  "G|frozen|policy-dep-deny|bin": [
-   "U-BIN"
-  ],
-  "G|frozen|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|install-g|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|install-g|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|install|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|install|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|install|org-enables-gate|bin": [
-   "U-BIN"
-  ],
-  "G|install|policy-dep-deny|bin": [
-   "U-BIN"
-  ],
-  "G|install|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|uninstall-prune-rebuild|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|uninstall-prune-rebuild|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|uninstall-prune-rebuild|org-enables-gate|bin": [
-   "U-BIN"
-  ],
-  "G|uninstall-prune-rebuild|policy-dep-deny|bin": [
-   "U-BIN"
-  ],
-  "G|uninstall-prune-rebuild|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|unpack|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|unpack|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|unpack|org-enables-gate|bin": [
-   "U-BIN"
-  ],
-  "G|unpack|policy-dep-deny|bin": [
-   "U-BIN"
-  ],
-  "G|unpack|revoke-approval|bin": [
-   "U-BIN"
-  ],
-  "G|update|local-deny|bin": [
-   "U-BIN"
-  ],
-  "G|update|org-deny|bin": [
-   "U-BIN"
-  ],
-  "G|update|org-enables-gate|bin": [
-   "U-BIN"
-  ],
-  "G|update|policy-dep-deny|bin": [
-   "U-BIN"
-  ],
-  "G|update|revoke-approval|bin": [
-   "U-BIN"
-  ]
+  "G|audit-ci|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|audit-ci|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|audit-ci|org-enables-gate|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|audit-ci|policy-dep-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|audit-ci|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|bundle-install|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|bundle-install|local-deny|bin"
+  },
+  "G|bundle-install|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|bundle-install|local-deny|bin"
+  },
+  "G|bundle-install|org-enables-gate|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|bundle-install|local-deny|bin"
+  },
+  "G|bundle-install|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|bundle-install|local-deny|bin"
+  },
+  "G|dry-run|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|dry-run|local-deny|bin"
+  },
+  "G|dry-run|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|dry-run|local-deny|bin"
+  },
+  "G|dry-run|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|dry-run|local-deny|bin"
+  },
+  "G|frozen-g|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install-g|local-deny|bin"
+  },
+  "G|frozen-g|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install-g|local-deny|bin"
+  },
+  "G|frozen|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|frozen|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|frozen|org-enables-gate|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|frozen|policy-dep-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|frozen|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|install-g|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install-g|local-deny|bin"
+  },
+  "G|install-g|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install-g|local-deny|bin"
+  },
+  "G|install|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|install|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|install|org-enables-gate|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|install|policy-dep-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|install|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|uninstall-prune-rebuild|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|uninstall-prune-rebuild|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|uninstall-prune-rebuild|org-enables-gate|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|uninstall-prune-rebuild|policy-dep-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|uninstall-prune-rebuild|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|unpack|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|unpack|local-deny|bin"
+  },
+  "G|unpack|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|unpack|local-deny|bin"
+  },
+  "G|unpack|org-enables-gate|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|unpack|local-deny|bin"
+  },
+  "G|unpack|policy-dep-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|unpack|local-deny|bin"
+  },
+  "G|unpack|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|unpack|local-deny|bin"
+  },
+  "G|update|local-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|update|org-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|update|org-enables-gate|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|update|policy-dep-deny|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  },
+  "G|update|revoke-approval|bin": {
+   "rules": [
+    "U-BIN"
+   ],
+   "witness": "G|install|local-deny|bin"
+  }
  },
  "factors": {
   "DEPLOYED": [
@@ -23886,5 +24009,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "30cf9e28361e6919a990063fd2770cb7f53c54edd77cae4bddb45696f18a1cdf"
+ "sha256": "f0d788a4b922cb6537d6b2e6e08a5f0929cefa95a0918365acde96a181a15cda"
 }
