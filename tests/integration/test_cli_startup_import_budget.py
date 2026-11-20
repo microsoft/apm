@@ -52,18 +52,28 @@ def _console_script_python(apm: Path) -> str:
     return shebang.split()[0]
 
 
+def _tree(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def _imported_modules(python: str, apm: Path, args: tuple[str, ...], env: dict) -> set[str]:
     result = subprocess.run(
         [python, "-X", "importtime", str(apm), *args],
         capture_output=True,
-        text=True,
         env=env,
+        cwd=env["HOME"],
         timeout=120,
         check=False,
     )
+    # I8 exit contract and I6 ASCII output for the startup commands.
     assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.isascii(), "startup output must be ASCII"
     modules = set()
-    for line in result.stderr.splitlines():
+    for line in result.stderr.decode("utf-8", errors="replace").splitlines():
         match = _IMPORT_LINE.match(line)
         if match:
             modules.add(match.group("name").strip())
@@ -92,8 +102,14 @@ def test_installed_cli_startup_stays_within_import_budget(
     apm_binary_path: Path, startup_env: dict[str, str], args: tuple[str, ...]
 ) -> None:
     python = _console_script_python(apm_binary_path)
+    home = Path(startup_env["HOME"])
+    before = _tree(home)
     modules = _imported_modules(python, apm_binary_path, args, startup_env)
 
+    if args == ("--help",):
+        # I5: root help writes nothing. ``--version`` is excluded: it seeds
+        # ~/.apm/config.json through the experimental-flag read (pre-existing).
+        assert _tree(home) == before
     assert _forbidden(modules) == [], f"apm {' '.join(args)} imported forbidden modules"
     assert len(modules) <= MODULE_BUDGET, (
         f"apm {' '.join(args)} imported {len(modules)} modules (budget {MODULE_BUDGET})"
