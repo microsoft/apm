@@ -161,7 +161,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 ),
                 _EXEC_GATE: (
                     "return dependency_approval_key(dep_ref)",
-                    "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+                    "denied |= denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+                    # A pinned item the item owner denies is reported as denied (#4044).
+                    "denied = frozenset(t for t, status in pinned_status.items() "
+                    "if status == TRUST_DENIED)",
                     "self._trust_ctx_value = exec_trust_context_for_project(",
                 ),
                 # Audit replay withholds what the install gate withheld, under
