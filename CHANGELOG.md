@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it warns and writes no hook files. (#PR)
+- `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it warns and writes no hook files. (#4141)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 
 ## [0.37.0] - 2026-11-20
