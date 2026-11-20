@@ -740,7 +740,7 @@ jobs:
   #
   # #2238 (bounded best-effort ref-lookup retries) is intentionally NOT
   # duplicated here: its regression coverage
-  # (tests/unit/deps/test_download_strategies_phase3.py,
+  # (tests/unit/deps/test_download_strategies_selection.py,
   # tests/unit/deps/test_git_reference_resolver.py) is unit-level and
   # already required today via build-and-test-shard.
   #

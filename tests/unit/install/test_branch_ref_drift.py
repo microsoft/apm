@@ -24,10 +24,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from apm_cli.install.heals.buggy_lockfile_recovery import (
-    _BUGGY_BRANCH_REF_DRIFT_VERSIONS,
-    _is_buggy_lockfile_apm_version,
-)
 from apm_cli.install.phases.integrate import _resolve_download_strategy
 from apm_cli.install.sources import CachedDependencySource
 from apm_cli.models.apm_package import GitReferenceType
@@ -229,34 +225,6 @@ class TestBranchRefDriftDetection:
 # ----------------------------------------------------------------------
 # Fix C -- self-heal for v<=0.12.2 lockfiles
 # ----------------------------------------------------------------------
-
-
-class TestBuggyVersionDetection:
-    def test_buggy_versions_are_recognised(self):
-        for v in ("0.10.0", "0.11.0", "0.12.0", "0.12.2"):
-            assert v in _BUGGY_BRANCH_REF_DRIFT_VERSIONS
-
-    def test_post_fix_versions_not_flagged(self):
-        for v in ("0.13.0", "0.13.1", "1.0.0"):
-            assert v not in _BUGGY_BRANCH_REF_DRIFT_VERSIONS
-
-    def test_is_buggy_lockfile_handles_none(self):
-        assert _is_buggy_lockfile_apm_version(None) is False
-
-    def test_is_buggy_lockfile_no_version(self):
-        lock = MagicMock()
-        lock.apm_version = None
-        assert _is_buggy_lockfile_apm_version(lock) is False
-
-    def test_is_buggy_lockfile_buggy_version(self):
-        lock = MagicMock()
-        lock.apm_version = "0.12.2"
-        assert _is_buggy_lockfile_apm_version(lock) is True
-
-    def test_is_buggy_lockfile_fixed_version(self):
-        lock = MagicMock()
-        lock.apm_version = "0.13.0"
-        assert _is_buggy_lockfile_apm_version(lock) is False
 
 
 class TestSelfHealForUpgradingUsers:

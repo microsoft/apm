@@ -1,7 +1,8 @@
 {
   "partition": "unit/deps+install",
   "steps_done": [
-    1
+    1,
+    2
   ],
   "folds": {
     "tests/unit/install/test_sources_phase3.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml": "tests/unit/install/test_sources_materialisation.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml",
@@ -11,7 +12,8 @@
     "tests/unit/deps/test_download_strategies_phase3.py::TestDownloadGitlabFile::test_401_without_token_includes_context": "tests/unit/deps/test_download_strategies_selection.py::TestDownloadGitlabFile::test_401_without_token_includes_context",
     "tests/unit/deps/test_download_strategies_phase3.py::TestDownloadGitlabFile::test_verbose_callback_called_on_success": "tests/unit/deps/test_download_strategies_selection.py::TestDownloadGitlabFile::test_verbose_callback_called_on_success",
     "tests/unit/install/test_mcp_integrator_install_phase3.py::TestRunMcpInstallSelfDefined::test_self_defined_dep_separated_correctly": "tests/unit/install/test_mcp_integrator_install_flow.py::TestRunMcpInstallSelfDefined::test_self_defined_dep_separated_correctly",
-    "tests/unit/deps/test_github_downloader_validation_phase3.py::TestBuildValidationAttempts::test_github_token_delegates_header_format_to_auth_resolver": "tests/unit/deps/test_github_downloader_input_validation.py::TestBuildValidationAttempts::test_github_token_delegates_header_format_to_auth_resolver"
+    "tests/unit/deps/test_github_downloader_validation_phase3.py::TestBuildValidationAttempts::test_github_token_delegates_header_format_to_auth_resolver": "tests/unit/deps/test_github_downloader_input_validation.py::TestBuildValidationAttempts::test_github_token_delegates_header_format_to_auth_resolver",
+    "tests/unit/install/test_branch_ref_drift.py::TestBuggyVersionDetection::test_buggy_versions_are_recognised": "tests/unit/install/heals/test_buggy_lockfile_recovery_heal.py::TestBuggyVersionDetection::test_buggy_versions_in_set"
   },
   "decisions": [
     "D5: for cross-file equal-copy groups the copy in the *_phase3*/phase3w5 module was deleted and the behavior-named twin kept, regardless of the report's keep order (D5 equality is symmetric).",
@@ -23,7 +25,14 @@
     "download_strategies: 8 TestDownloadGitlabFile same-body twins differed only by the autouse Git isolation fixture; kept the owner, whose fixture drives the real sparse-Git transport to its typed failure (covers more code).",
     "download_strategies: owner test_rate_limit_returns_first_response_without_retry, test_success_extracts_files_stripping_root_prefix and test_no_ado_token_no_auth_header replaced by the stronger twin bodies; twin gitlab test_401_without_token_includes_context (equivalent setup) and test_verbose_callback_called_on_success (owner asserts a superset) folded into owner.",
     "Twin modules test_pipeline_phase3, test_resolve_phase3w5, test_integrate_phase3w5, test_validation_phase3, test_mcp_integrator_install_phase3 (install) and test_github_downloader_phase3, test_github_downloader_validation_phase3 (deps) merged into their behavior-named owners and deleted.",
-    "Owner test_content_hash_mismatch_forces_redownload and test_non_verbose_emits_single_warning replaced by the stronger twin bodies; owner test_github_token_delegates_header_format_to_auth_resolver gained the twin's native-credential assertions; twin mcp test_self_defined_dep_separated_correctly (suppressed all exceptions, no assertion) folded into the owner, which asserts the delegation."
+    "Owner test_content_hash_mismatch_forces_redownload and test_non_verbose_emits_single_warning replaced by the stronger twin bodies; owner test_github_token_delegates_header_format_to_auth_resolver gained the twin's native-credential assertions; twin mcp test_self_defined_dep_separated_correctly (suppressed all exceptions, no assertion) folded into the owner, which asserts the delegation.",
+    "test_branch_ref_drift.py::TestBuggyVersionDetection removed: five bodies survive verbatim in heals/test_buggy_lockfile_recovery_heal.py (owner of the heal), and test_buggy_versions_are_recognised is a subset of the owner's test_buggy_versions_in_set (which also checks 0.12.1).",
+    ".github/workflows/ci.yml comment for #2238 retry coverage repointed from the deleted test_download_strategies_phase3.py to test_download_strategies_selection.py (TestResilientGet moved there).",
+    "Kept (same body, different context): test_validation_error_handling.py TestIsTlsFailure::test_ssl_error_returns_true and TestLocalPathNoMarkersHint::test_no_sub_packages_produces_no_output, test_download_strategies_selection.py TestBuildUnsupportedOrMissingError::test_github_host_with_fallback_ref: their twins live in tests/integration (outside every partition); deleting the unit owner copy would move pure-logic coverage out of the unit lane, the misplaced integration copy is the one to remove.",
+    "Kept: test_git_remote_ops.py::TestValidateLsRemoteTagOutput::test_invalid_or_ambiguous_records_are_rejected shares only its body with protected tests/spec_conformance test_revision_pin_update_rejects_malformed_tag_records; the parametrize data differs (10 unit cases vs 6 spec cases), so neither covers the other.",
+    "Kept: test_skill_path_migration.py same-file group and the 27 test_services_branches.py/test_services_phase3.py groups: those files are owned by open pull requests."
   ],
-  "counts_left": {}
+  "counts_left": {
+    "same_body_groups": 32
+  }
 }
