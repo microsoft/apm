@@ -290,7 +290,6 @@ def _run_mcp_lsp_integration(
     effective_allow_resolved: bool = False,
     force: bool = False,
     trust_transitive_mcp: bool = False,
-    mcp_policy_enforced: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -364,7 +363,6 @@ def _run_mcp_lsp_integration(
             scope=scope,
             executable_context=(effective_allow_executables, effective_allow_resolved),
             pre_install_lock=existing_lock,
-            policy_enforced=mcp_policy_enforced,
         )
     except PolicyBlockError:
         logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
@@ -1008,7 +1006,6 @@ def _run_dep_update_locked(
                 effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
                 force=force,
                 trust_transitive_mcp=trust_transitive_mcp,
-                mcp_policy_enforced=getattr(result, "mcp_policy_enforced", False),
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))
