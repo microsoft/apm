@@ -229,6 +229,13 @@ class TestRenderBundleResult:
         # A bare 'build/x' parses as owner/repo, so the line spells a path (#3994).
         assert "Share with: apm install ./build/my-bundle" in logger.infos
 
+    def test_live_count_names_the_embedded_lockfile(self) -> None:
+        """Counts say the bundle also embeds apm.lock.yaml (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["a.md", "b.md"], bundle_path="build/x")
+        _render_bundle_result(logger, result, BundleFormat.CLAUDE_PLUGIN, None, False)
+        assert any("Packed 2 file(s) plus apm.lock.yaml -> build/x" in m for m in logger.successes)
+
     def test_live_legacy_format_shares_with_unpack(self) -> None:
         """'apm install' rejects the legacy APM layout; unpack reads it (#3994)."""
         logger = _RecordingLogger()

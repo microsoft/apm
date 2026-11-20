@@ -747,6 +747,11 @@ def _bundle_size_suffix(bundle_path) -> str:
     return f" ({size / (1024 * 1024):.1f} MiB)"
 
 
+def _lock_note(pack_result) -> str:
+    """Every bundle embeds apm.lock.yaml; name it when the file list omits it (#3994)."""
+    return "" if "apm.lock.yaml" in pack_result.files else " plus apm.lock.yaml"
+
+
 def _render_bundle_result(
     logger,
     pack_result,
@@ -774,7 +779,8 @@ def _render_bundle_result(
                 logger.verbose_detail(f"    {original} -> {mapped}")
         if pack_result.files:
             logger.dry_run_notice(
-                f"Would pack {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
+                f"Would pack {len(pack_result.files)} file(s){_lock_note(pack_result)} -> "
+                f"{pack_result.bundle_path}"
             )
             for f in pack_result.files:
                 logger.tree_item(f"  {f}")
@@ -792,7 +798,8 @@ def _render_bundle_result(
     else:
         size_suffix = _bundle_size_suffix(pack_result.bundle_path)
         logger.success(
-            f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}{size_suffix}"
+            f"Packed {len(pack_result.files)} file(s){_lock_note(pack_result)} -> "
+            f"{pack_result.bundle_path}{size_suffix}"
         )
         for f in pack_result.files:
             logger.verbose_detail(f"    {f}")

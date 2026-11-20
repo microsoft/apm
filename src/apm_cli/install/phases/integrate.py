@@ -45,6 +45,12 @@ if TYPE_CHECKING:
 # ======================================================================
 
 
+def _announce_held_headers(prepared_integrations) -> None:
+    """Emit every held package header (refusal paths before integration)."""
+    for _dep_key, _install_path, source, _materialization, _deltas in prepared_integrations:
+        announce_package(source)
+
+
 def _resolve_download_strategy(
     ctx: InstallContext,
     dep_ref: Any,
@@ -699,36 +705,43 @@ def run(ctx: InstallContext) -> None:
         for _, _, source, materialization, _ in prepared_integrations
         if materialization is not None
     ]
-    preflight_agent_plugin_materializations(materialized)
-    _fail_explicit_target_without_deploy(ctx)
-    deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)
-    if ctx.skill_baseline_refused:
-        return
+    # A batch refusal must not swallow the acquired packages' held [+]
+    # headers: print them before the refusal surfaces (#3994).
+    try:
+        preflight_agent_plugin_materializations(materialized)
+        _fail_explicit_target_without_deploy(ctx)
+        deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)
+        if ctx.skill_baseline_refused:
+            _announce_held_headers(prepared_integrations)
+            return
 
-    if ctx.frozen and ctx.existing_lockfile is not None:
-        from apm_cli.core.scope import is_user_scope
-        from apm_cli.install.service import InstallService
-        from apm_cli.install.template import effective_allow_map
-        from apm_cli.security.trust import McpAdmission
+        if ctx.frozen and ctx.existing_lockfile is not None:
+            from apm_cli.core.scope import is_user_scope
+            from apm_cli.install.service import InstallService
+            from apm_cli.install.template import effective_allow_map
+            from apm_cli.security.trust import McpAdmission
 
-        InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
-        effective_allow_map(ctx)
-        InstallService.enforce_hydrated_mcp(
-            ctx.apm_package,
-            ctx.existing_lockfile,
-            apm_modules_dir,
-            # The pipeline's routed, cached trust context (already resolved
-            # for materialized packages) is the same one deployment uses.
-            admission=McpAdmission.for_project(
-                ctx.project_root,
-                user_scope=is_user_scope(ctx.scope),
-                one_off=ctx.trust_transitive_mcp,
-                trust_context=getattr(effective_allow_map(ctx), "trust_context", None)
-                or getattr(ctx, "exec_trust_ctx", None),
-            ),
-            logger=ctx.logger,
-            active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
-        )
+            InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
+            effective_allow_map(ctx)
+            InstallService.enforce_hydrated_mcp(
+                ctx.apm_package,
+                ctx.existing_lockfile,
+                apm_modules_dir,
+                # The pipeline's routed, cached trust context (already resolved
+                # for materialized packages) is the same one deployment uses.
+                admission=McpAdmission.for_project(
+                    ctx.project_root,
+                    user_scope=is_user_scope(ctx.scope),
+                    one_off=ctx.trust_transitive_mcp,
+                    trust_context=getattr(effective_allow_map(ctx), "trust_context", None)
+                    or getattr(ctx, "exec_trust_ctx", None),
+                ),
+                logger=ctx.logger,
+                active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
+            )
+    except BaseException:
+        _announce_held_headers(prepared_integrations)
+        raise
 
     for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
         if terminal_deltas is not None:

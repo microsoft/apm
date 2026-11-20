@@ -256,10 +256,13 @@ def prune(ctx, dry_run):
                     removed_owners = set(violation.invalid_owners)
                     if violation.invalid_active_owner is not None:
                         removed_owners.add(violation.invalid_active_owner)
+                    locator = violation.locator
+                    # Name the path and target; the composite ledger key is internal (#3994).
                     logger.dry_run_notice(
-                        f"repair {violation.locator.key} "
-                        f"(remove owner(s): {', '.join(sorted(removed_owners))})"
+                        f"repair {locator.value} ({locator.target}): "
+                        f"remove owner(s) {', '.join(sorted(removed_owners))}"
                     )
+                    logger.verbose_detail(f"    ledger key: {locator.key}")
             logger.success("Dry run complete - no changes made")
             return
 
