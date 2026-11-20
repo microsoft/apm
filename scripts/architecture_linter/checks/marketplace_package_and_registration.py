@@ -193,8 +193,8 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
             _RID_PROJECTION,
             "src/apm_cli/install/native_plugin_admission.py",
             (
-                "expected_hash = compute_package_hash(replay_path)",
-                "verify_locked_package(candidate, expected_hash, carried)",
+                "expected_hash = compute_package_hash(replay_path, framed=lock_dep.content_hash_framed)",
+                "candidate, expected_hash, carried, framed=lock_dep.content_hash_framed",
             ),
             "Native cache verification must hash the canonical replay image",
         )

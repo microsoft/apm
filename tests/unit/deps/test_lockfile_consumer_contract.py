@@ -58,6 +58,8 @@ _LOCKED_DEPENDENCY_VALUES = {
     "resolved_at": "2026-01-01T00:00:00+00:00",
     "declared_license": "MIT",
     "carried_licenses": (CarriedLicense("LICENSE", "LICENSE", f"sha256:{'f' * 64}"),),
+    # Survives as the lockfile version, not as a per-row key.
+    "content_hash_framed": True,
     "exec_status": "gated_pending_approval",
     "exec_allowed_types": ("hooks",),
     "name": "consume-contract",

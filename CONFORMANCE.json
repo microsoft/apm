@@ -300,10 +300,19 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 3,
+      "test_count": 12,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[bare64]",
-        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[envelope]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-bare64-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-fresh]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[version4-bare64-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[version4-cached]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[version4-fresh]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_adds_only_version_4_to_the_0_1_60_contract",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[3-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[4-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lock_schema_0_1_68_admits_version_4[4-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reader_tolerates_bare_hex_hash"
       ]
     },

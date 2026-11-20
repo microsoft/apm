@@ -1321,14 +1321,18 @@ def installed_content_matches_lock(locked_dependency: Any, package_dir: Path) ->
     if locked_dependency is None or not expected or locked_dependency.is_local_source:
         return True
     from apm_cli.deps.carried_license import carried_license_paths
-    from apm_cli.utils.content_hash import compute_package_hash
+    from apm_cli.utils.content_hash import verify_package_hash
 
     excluded = carried_license_paths(tuple(locked_dependency.carried_licenses or ()))
     try:
-        actual = compute_package_hash(package_dir, exclude=excluded)
+        return verify_package_hash(
+            package_dir,
+            expected,
+            exclude=excluded,
+            framed=getattr(locked_dependency, "content_hash_framed", True),
+        )
     except (OSError, ValueError):
         return False
-    return actual == expected
 
 
 def record_pins(

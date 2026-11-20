@@ -173,7 +173,11 @@ class InstallContext:
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
+    # Package content hashes in the stream the existing lockfile records
+    # (legacy for versions 1-3, framed for 4 or a new lockfile), and the framed
+    # digest of the same bytes for the one-time promotion to version 4.
     package_hashes: dict[str, str] = field(default_factory=dict)
+    package_framed_hashes: dict[str, str] = field(default_factory=dict)
     # Declared-license provenance (issue #1777, U6): maps dep_key -> the SPDX
     # expression the dependency's manifest DECLARED at resolve time (apm.yml
     # ``license:`` or plugin.json ``license``). Populated next to
