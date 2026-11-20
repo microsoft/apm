@@ -182,25 +182,8 @@ def _output(result) -> str:
     return " ".join((result.stdout + result.stderr).split())
 
 
-_REFUSE_ONLY = {
-    # A current-format lock with all origin evidence cleared (S-lead rule 3).
-    ("origin", "clear"),
-    # An older generator stamp on a lock whose rows carry origin evidence (rule 1).
-    ("apm_version", "downgrade"),
-}
-
-
-@pytest.mark.parametrize(
-    ("field", "edit"),
-    [
-        *((field, edit) for field in _PROVENANCE for edit in ("tamper", "clear")),
-        *sorted(_REFUSE_ONLY),
-    ],
-)
-def test_update_restores_or_refuses_altered_marketplace_provenance(
-    tmp_path: Path, apm_binary_path: Path, field: str, edit: str
-) -> None:
-    """#4228: update never keeps altered provenance; it restores it or fails closed."""
+def _provenance_world(tmp_path: Path, apm_binary_path: Path, dependencies=()):
+    """One marketplace catalog serving one plugin, and a consumer project."""
     isolated = IsolatedApmEnvironment.create(
         tmp_path.resolve() / "isolated", base_env=dict(os.environ)
     )
@@ -235,15 +218,44 @@ def test_update_restores_or_refuses_altered_marketplace_provenance(
     repositories.install_url_rewrite(repository, _REMOTE)
     (isolated.home / ".gitconfig").write_bytes(Path(environment["GIT_CONFIG_GLOBAL"]).read_bytes())
     environment = repositories.url_rewrite_subprocess_env(repository, _REMOTE)
-    consumer = LocalPackageFactory(isolated.work_root).create("consumer", targets=("codex",))
+    consumer = LocalPackageFactory(isolated.work_root).create(
+        "consumer", targets=("codex",), dependencies=dependencies
+    )
     runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
     lock_path = consumer.root / "apm.lock.yaml"
     runner.run_sequence(
-        (
-            ("marketplace", "add", _REMOTE, "--name", _MARKETPLACE, "--ref", "main"),
-            ("install", _ALIAS, "--target", "codex", "--no-policy", "--parallel-downloads", "0"),
-        ),
-        expected_returncodes=(0, 0),
+        (("marketplace", "add", _REMOTE, "--name", _MARKETPLACE, "--ref", "main"),),
+        expected_returncodes=(0,),
+        scenario_id="4228-marketplace",
+        cwd=consumer.root,
+        env=environment,
+    )
+    return consumer, runner, environment, lock_path
+
+
+_REFUSE_ONLY = {
+    # A current-format lock with all origin evidence cleared (S-lead rule 3).
+    ("origin", "clear"),
+    # An older generator stamp on a lock whose rows carry origin evidence (rule 1).
+    ("apm_version", "downgrade"),
+}
+
+
+@pytest.mark.parametrize(
+    ("field", "edit"),
+    [
+        *((field, edit) for field in _PROVENANCE for edit in ("tamper", "clear")),
+        *sorted(_REFUSE_ONLY),
+    ],
+)
+def test_update_restores_or_refuses_altered_marketplace_provenance(
+    tmp_path: Path, apm_binary_path: Path, field: str, edit: str
+) -> None:
+    """#4228: update never keeps altered provenance; it restores it or fails closed."""
+    consumer, runner, environment, lock_path = _provenance_world(tmp_path, apm_binary_path)
+    runner.run_sequence(
+        (("install", _ALIAS, "--target", "codex", "--no-policy", "--parallel-downloads", "0"),),
+        expected_returncodes=(0,),
         scenario_id="4228-install",
         cwd=consumer.root,
         env=environment,
@@ -282,6 +294,43 @@ def test_update_restores_or_refuses_altered_marketplace_provenance(
         assert "[x]" in _output(update), _output(update)
         assert lock_path.read_bytes() == altered
     # Paired probe: install --frozen and audit --ci agree on the resulting state.
+    frozen = run("install", "--frozen", "--target", "codex", "--parallel-downloads", "0")
+    audit = run("audit", "--ci", "--no-policy")
+    assert (frozen.returncode == 0) == (audit.returncode == 0), (
+        _output(frozen) + " || " + _output(audit)
+    )
+
+
+def test_update_refuses_a_marketplace_declaration_whose_lock_row_lost_provenance(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4228: apm.yml declares marketplace form, so a stripped lock row is refused."""
+    consumer, runner, environment, lock_path = _provenance_world(
+        tmp_path,
+        apm_binary_path,
+        dependencies=({"name": _PLUGIN, "marketplace": _MARKETPLACE},),
+    )
+    runner.run_sequence(
+        (("install", "--target", "codex", "--no-policy", "--parallel-downloads", "0"),),
+        expected_returncodes=(0,),
+        scenario_id="4228-object-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    lock = load_yaml(lock_path)
+    for name in _PROVENANCE:
+        lock["dependencies"][0].pop(name, None)
+    dump_yaml(lock, lock_path)
+    altered = lock_path.read_bytes()
+
+    def run(*args: str):
+        return runner.run(args, scenario_id=f"4228-{args[0]}", cwd=consumer.root, env=environment)
+
+    update = run("update", "--yes", "--target", "codex", "--parallel-downloads", "0")
+
+    assert update.returncode == 1, _output(update)
+    assert "[x]" in _output(update) and f"{_PLUGIN}@{_MARKETPLACE}" in _output(update)
+    assert lock_path.read_bytes() == altered
     frozen = run("install", "--frozen", "--target", "codex", "--parallel-downloads", "0")
     audit = run("audit", "--ci", "--no-policy")
     assert (frozen.returncode == 0) == (audit.returncode == 0), (
