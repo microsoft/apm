@@ -48,9 +48,9 @@ def _discovery(monkeypatch: pytest.MonkeyPatch, result: PolicyFetchResult) -> li
 
 
 def _readers(root: Path):
+    from apm_cli.core.command_logger import CommandLogger
     from apm_cli.install.exec_gate import ReplayExecAllowMap
     from apm_cli.install.local_bundle_handler import effective_bundle_allow_map
-    from apm_cli.core.command_logger import CommandLogger
     from apm_cli.security.executables import resolve_project_exec_allow_map
 
     logger = CommandLogger("test")

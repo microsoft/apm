@@ -43,7 +43,7 @@ def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
     During an update only an unchanged commit is checked, so the hint points
     at the cache instead.
     """
-    if getattr(ctx, "update_refs", False):
+    if getattr(ctx, "update_refs", False) is True:
         # Only an unchanged commit is checked during an update, so updating
         # again cannot accept the new bytes.
         return (
@@ -217,6 +217,19 @@ def record_carried_package_hash(
             ctx, dep_key, content_hash.compute_package_digests(install_path, exclude=excluded)
         )
     return excluded
+
+
+def update_accepts_new_content(ctx: Any, locked_dep: Any, resolved_commit: str | None) -> bool:
+    """Return whether this run may lock new content without the hash check.
+
+    Only ``apm update`` may, and only for a commit that moved: an unchanged
+    commit must still hold its locked content (#4027).
+    """
+    locked_commit = getattr(locked_dep, "resolved_commit", None)
+    return bool(
+        ctx.update_refs
+        and not (resolved_commit and locked_commit and resolved_commit == locked_commit)
+    )
 
 
 def ensure_carried_licenses_match(

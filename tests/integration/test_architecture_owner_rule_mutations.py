@@ -894,6 +894,12 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         ),
         (
             "install-deployment-update-content-integrity",
+            "src/apm_cli/install/sources.py",
+            "                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)\n",
+            "                not ctx.update_refs\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
             "src/apm_cli/install/phases/integrate.py",
             "        and not _locked_commit_unchanged\n",
             "",
@@ -1993,9 +1999,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="install-deployment-update-content-integrity",
         rule_id="install-deployment-update-content-integrity",
-        path="src/apm_cli/install/sources.py",
-        old="                not _commit_moved\n",
-        new="                not ctx.update_refs\n",
+        path="src/apm_cli/install/source_helpers.py",
+        old="        and not (resolved_commit and locked_commit and resolved_commit == locked_commit)\n",
+        new="",
         intent="apm update skips the content-hash check even for an unchanged commit.",
     ),
     MutationCase(

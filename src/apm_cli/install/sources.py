@@ -46,6 +46,7 @@ from apm_cli.install.source_helpers import (
     record_carried_package_hash,
     record_package_digests,
     supply_chain_mismatch_hint,
+    update_accepts_new_content,
 )
 from apm_cli.install.source_helpers import (
     format_package_type_label as _format_package_type_label,
@@ -863,26 +864,18 @@ class FreshDependencySource(DependencySource):
             )
             _carried_paths = record_carried_package_hash(ctx, dep_key, install_path, package_info)
 
-            # Supply-chain protection: verify content hash on fresh
-            # downloads when the lockfile already records a hash.
+            # Supply-chain protection: verify content hash on fresh downloads
+            # when the lockfile records one, unless an update moved the commit.
             # Skip when ``ctx.expected_hash_change_deps`` marks this dep
             # (set by resolve.py's BFS callback and _resolve_download_strategy
             # when branch-ref drift or the v<=0.12.2 self-heal forces a
             # re-download whose hash is legitimately expected to differ from
             # the lockfile record).
-            # Thread-safety: resolve phase completes before integrate runs,
-            # so the set is stable here.  integrate.py's own .add() is
-            # idempotent (set semantics) and runs single-threaded.
-            # ``apm update`` accepts new bytes only for a commit that moved;
-            # an unchanged commit must still hold its locked content.
+            # Thread-safety: the set is stable once resolve completes, and
+            # integrate.py's own .add() is idempotent and single-threaded.
             _expected_hash_deps = ctx.expected_hash_change_deps
-            _locked_commit = getattr(dep_locked_chk, "resolved_commit", None)
-            _commit_moved = bool(
-                ctx.update_refs
-                and not (resolved_commit and _locked_commit and resolved_commit == _locked_commit)
-            )
             if (
-                not _commit_moved
+                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)
                 and dep_key not in _expected_hash_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash

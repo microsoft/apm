@@ -270,8 +270,8 @@ def resolve_trust_policy(
     routes through :func:`route_discovery_outcome` with the project's
     ``policy.fetch_failure_default``, exactly as package installs do: an
     unusable policy raises :class:`PolicyViolationError` when the project or
-    the cached policy asks to block, and is reported otherwise. A reader
-    never silently drops the org layer. ``announce=False`` suppresses the
+    the cached policy asks to block, and is reported otherwise.
+    ``announce=False`` suppresses the
     miss report (for read-only replays whose command reports it);
     ``raise_blocking_errors=False`` serves dry-run previews.
     """

@@ -33,6 +33,7 @@ _EXEC_GATE = "src/apm_cli/install/exec_gate.py"
 _LOCAL_BUNDLE = "src/apm_cli/install/local_bundle_handler.py"
 _SOURCES = "src/apm_cli/install/sources.py"
 _INTEGRATE = "src/apm_cli/install/phases/integrate.py"
+_HELPERS = "src/apm_cli/install/source_helpers.py"
 _UNPACKER = "src/apm_cli/bundle/unpacker.py"
 
 _DISCOVERY = "discover_policy_with_chain"
@@ -96,8 +97,7 @@ def check_trust_policy_outcome(provider: FactsProvider) -> tuple[Violation, ...]
             _summary(
                 GUARD_TRUST_POLICY_OUTCOME,
                 _LOCAL_BUNDLE,
-                "Local bundle installs resolve org policy as package installs do, "
-                "never cache-only",
+                "Local bundle installs resolve org policy as package installs do, never cache-only",
             )
         )
     for path in _python_paths(provider, "src/apm_cli/"):
@@ -125,18 +125,26 @@ def check_update_content_integrity(provider: FactsProvider) -> tuple[Violation, 
     if failures:
         return tuple(failures)
     findings: list[Violation] = []
-    for needle in (
-        "and not (resolved_commit and _locked_commit and resolved_commit == _locked_commit)",
-        "not _commit_moved",
-    ):
-        if not _present(facts, needle):
-            findings.append(
-                _summary(
-                    GUARD_UPDATE_CONTENT_INTEGRITY,
-                    _SOURCES,
-                    f"An unchanged commit must keep its locked content hash; missing {needle}",
-                )
+    if not _present(facts, "not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)"):
+        findings.append(
+            _summary(
+                GUARD_UPDATE_CONTENT_INTEGRITY,
+                _SOURCES,
+                "The fresh-download hash check must ask update_accepts_new_content",
             )
+        )
+    helpers, helper_failures = _facts_for(provider, _HELPERS, GUARD_UPDATE_CONTENT_INTEGRITY)
+    findings.extend(helper_failures)
+    if not helper_failures and not _present(
+        helpers, "and not (resolved_commit and locked_commit and resolved_commit == locked_commit)"
+    ):
+        findings.append(
+            _summary(
+                GUARD_UPDATE_CONTENT_INTEGRITY,
+                _HELPERS,
+                "apm update may skip the content-hash check only for a moved commit",
+            )
+        )
     integrate, integrate_failures = _facts_for(provider, _INTEGRATE, GUARD_UPDATE_CONTENT_INTEGRITY)
     findings.extend(integrate_failures)
     if not integrate_failures and not _present(integrate, "and not _locked_commit_unchanged"):

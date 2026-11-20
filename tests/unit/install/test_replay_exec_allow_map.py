@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from apm_cli.install.exec_gate import ReplayExecAllowMap
+from apm_cli.policy.discovery import PolicyFetchResult
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def discovered(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 
     def _discover(project_root, **_kwargs):
         calls.append(project_root)
-        return SimpleNamespace(policy=None)
+        return PolicyFetchResult(outcome="absent")
 
     monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", _discover)
     return calls

@@ -138,6 +138,14 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
     _GUARD_SKILLS_ROOT,
     check_skills_root_derivation,
 )
+from scripts.architecture_linter.checks.install_trust_integrity import (
+    GUARD_TRUST_POLICY_OUTCOME,
+    GUARD_UNPACK_EXECUTABLES,
+    GUARD_UPDATE_CONTENT_INTEGRITY,
+    check_trust_policy_outcome,
+    check_unpack_executable_refusal,
+    check_update_content_integrity,
+)
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
     _GUARD_ORPHAN_SELECTION,
@@ -147,14 +155,6 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
     check_orphan_selection,
     check_resolution_replacement,
     check_uninstall_selection,
-)
-from scripts.architecture_linter.checks.install_trust_integrity import (
-    GUARD_TRUST_POLICY_OUTCOME,
-    GUARD_UNPACK_EXECUTABLES,
-    GUARD_UPDATE_CONTENT_INTEGRITY,
-    check_trust_policy_outcome,
-    check_unpack_executable_refusal,
-    check_update_content_integrity,
 )
 from scripts.architecture_linter.models import Rule
 

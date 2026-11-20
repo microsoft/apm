@@ -407,5 +407,6 @@ def _refuse_executable_content(rel_paths: list[str], source_dir: Path, bundle_pa
     raise ValueError(
         f"Refusing to unpack {len(refused)} executable file(s); 'apm unpack' cannot "
         f"apply the executables gate or org policy:\n{listed}{more}\n\n"
-        f"Install the bundle instead: apm install {bundle_path}"
+        f"Install the bundle instead: apm install {bundle_path}\n"
+        "(repack a legacy '--format apm' bundle with 'apm pack --archive' first)"
     )

@@ -23,15 +23,14 @@ Extraction is **additive-only**: only files listed in the bundle's lockfile are 
 
 `BUNDLE_PATH` accepts a `.zip` archive (the default), a legacy `.tar.gz` archive, or the directory form of an unpacked bundle.
 
-:::caution[Bundles are self-contained and deploy executable surfaces directly]
-`apm unpack` materializes a complete, self-contained bundle into your
-project. Unlike `apm install`, there is no upstream executable-trust
-approval prompt at unpack time -- a bundle that contains a canvas
-`extension.mjs` (executable Node.js code) deploys that file when the
-`canvas` experimental flag is enabled. Only unpack bundles from sources
-you trust, and use `--dry-run` to inspect the file list first. See
-[Executable approval](../approve/) for the gate that
-governs dependency installs.
+:::caution[Executable content is refused]
+`apm unpack` copies files verbatim, so it cannot apply the
+[executables gate](../approve/) or org policy. It refuses, before writing or
+previewing anything, a bundle that carries hooks or hook scripts, MCP or LSP
+configuration, `bin/` executables, or canvas extensions (with the `canvas`
+flag off, canvas files are dropped instead). Install such bundles with
+`apm install <bundle>`; repack a legacy `--format apm` bundle with
+`apm pack --archive` first.
 :::
 
 ## Options
