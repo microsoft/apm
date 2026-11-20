@@ -517,9 +517,17 @@ def _i9_no_noise(before, after, result: CommandResult | None, model, op) -> list
         if first == second:
             found.append(Violation("I9", f"identical consecutive line: {first.strip()!r}"))
             break
-    integrated = [line.strip() for line in lines if "integrated" in line]
-    if len(integrated) != len(set(integrated)):
-        found.append(Violation("I9", "duplicate 'integrated' line"))
+    # Each package block ("[+] <package>") reports its own integrations, so the
+    # same line under two packages is not noise; twice in one block is.
+    seen: set[str] = set()
+    for line in lines:
+        if line.lstrip().startswith("[+]"):
+            seen = set()
+        elif "integrated" in line:
+            if line.strip() in seen:
+                found.append(Violation("I9", "duplicate 'integrated' line"))
+                break
+            seen.add(line.strip())
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
         if "Traceback (most recent call last)" in text:
             found.append(Violation("I9", f"{stream} has a Python traceback"))

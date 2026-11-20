@@ -43,7 +43,10 @@ class DriverWorld(Protocol):
 
 
 def command_cwd(world: DriverWorld, scope: str) -> Path:
-    """Project commands run in the project; user-scope ones outside it (no apm.yml)."""
+    """Project commands run in the project; user-scope ones outside it (no apm.yml).
+
+    ``apm approve --user`` reads the cwd's apm.yml first (commands/approve.py).
+    """
     user_cwd = getattr(world, "user_cwd", None)
     return user_cwd if scope == "user" and user_cwd is not None else world.project
 

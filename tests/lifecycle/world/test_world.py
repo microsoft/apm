@@ -24,13 +24,38 @@ from tests.lifecycle.world.services import (
     API_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
+    ORG,
     POLICY_VARIANTS,
     REGISTRY_HOST,
     REGISTRY_SERVER,
     policy_org,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise(
+        "P-INV-I5",
+        "P-INV-I7",
+        "P-OWN-install-command-scope-selection",
+        "P-OWN-apm-home-resolution",
+        "P-OWN-executable-trust-context",
+        "P-OWN-copilot-cli-mcp-config-paths",
+        "P-OWN-lsp-target-contract",
+        "P-OWN-post-uninstall-dependency-reachability",
+        "P-OWN-claude-native-plugin-registration",
+        "P-OWN-codex-native-plugin-lifecycle",
+        "P-OWN-git-transport-selection",
+        "P-OWN-host-reference-coordinates",
+        "P-OWN-marketplace-catalog-origin",
+        "P-OWN-local-bundle-hook-trust",
+        "P-OWN-policy-remote-origin-reader",
+        "P-OWN-policy-content-hash",
+        "P-OWN-mcp-registry-url-resolution",
+        "P-OWN-network-host-loopback-classification",
+    ),
+]
 
 # A clone must stay well under a second; the median pins the steady cost.
 CLONE_BUDGET_SECONDS = 0.25
@@ -122,11 +147,17 @@ def _assert_surfaces(world: World, package: str, scope: str) -> None:
         assert marker in path.read_text(encoding="utf-8"), f"{relative} lacks {marker!r}"
 
 
+def _identity(key: str, world: World) -> str:
+    """What ``apm approve`` names: the install spec, or ``owner/repo`` for remote sources."""
+    ref = world.packages[key]
+    return f"{ORG}/{ref.name}" if ref.source in ("git", "marketplace") else ref.spec
+
+
 def _install_and_approve(world: World, key: str, scope: str) -> None:
     ref = world.packages[key]
     _ok(world, ["install", ref.spec], scope)
     if ref.kinds & _GATED:
-        _ok(world, ["approve", ref.spec], scope)
+        _ok(world, ["approve", _identity(key, world)], scope)
         _ok(world, ["install"], scope)
 
 
@@ -295,7 +326,7 @@ _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
     "unreachable": "HTTP 503",
     "hash-mismatch": "Policy hash mismatch",
-    "chain-cycle": "inheritance chain",
+    "chain-cycle": "Cycle detected in policy extends chain",
 }
 
 
