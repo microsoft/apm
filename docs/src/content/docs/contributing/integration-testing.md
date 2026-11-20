@@ -176,11 +176,13 @@ collected node in that module must inherit the same classification. Function-
 or class-level behavioral markers are rejected because they would split the
 module's authority.
 
-There is no central module whitelist or exact classified-module count. New
-modules opt in by adding one module-level marker. The trade-off is deliberate:
-APM gives up the old closed-set/count ratchet in exchange for distributed
-ownership and removal of a central merge hotspot. Repository-wide collection
-still rejects empty, mixed, and multiple classifications deterministically.
+There is no central whitelist of classified modules or exact classified-module
+count. New modules classify themselves with one module-level marker. The
+trade-off is deliberate: APM gives up the old closed-set/count ratchet in
+exchange for distributed ownership and removal of a central merge hotspot.
+Repository-wide collection still rejects empty, mixed, and multiple
+classifications deterministically. New modules must be classified (see
+[Test corpus ratchets](#test-corpus-ratchets)).
 
 Directory names and `_e2e.py` suffixes are not proof of behavior.
 `test_policy_pinned_constraint_e2e.py` is `component` because it uses Click
@@ -212,6 +214,43 @@ Provisional mode is CI-only and allowed only on draft pull requests.
 Contributor commands, ready pull requests, merge queue runs, and final
 validation are strict. Do not pass the internal provisional flag manually;
 remove `provisional` metadata after remeasurement and review.
+
+### Test corpus ratchets
+
+Three no-growth ratchets run in the Architecture Ratchet Contracts job. Each
+baseline records today's debt and may only shrink.
+
+1. **Per-test duplicates.** `scripts/check_exact_test_duplicates.py`
+   fingerprints every test with algorithm `ast-body-v2`: the normalized AST of
+   its decorators, arguments and body, plus the class-level assignments around
+   it and the module-level assignments it reads. Locals are renamed, so a copy
+   with renamed variables still matches; argument names are kept. It also
+   checks that one `Class::test` name is defined in only one file per
+   directory. `tests/quality/exact_test_duplicates.json` lists the allowed
+   groups and documents the algorithm. A new copy fails with both test ids;
+   delete or differentiate it. A pure move of a baselined group only needs the
+   baseline update below.
+2. **Taxonomy and placement.** `tests/quality/taxonomy_ratchet_baseline.json`
+   lists the legacy modules and the legacy unclassified modules. A module not
+   in `legacy_modules` is new: it must declare one behavioral marker, must not
+   be `unit` under `tests/integration`, and must not spawn a process
+   (`subprocess`, `os.exec*`, `asyncio.create_subprocess_*`) under
+   `tests/unit`. Unclassified modules may not grow.
+3. **Promise links.** Every new module names at least one id from
+   `tests/quality/promise-catalog.json` (spec `req-*` ids and architecture
+   owner ids):
+
+```python
+pytestmark = [pytest.mark.unit, pytest.mark.promise("req-lk-001")]
+```
+
+If the promise is missing, add its spec requirement or owner id to the catalog
+first. Both baselines may only shrink: CI compares them with their merge-base
+copies, so hand-added entries fail. After removing debt, record the reduction:
+
+```bash
+uv run --frozen python -m tests.quality.taxonomy_ratchets --update-baseline
+```
 
 ### Keeping fixtures portable
 
@@ -448,7 +487,8 @@ environment end-to-end; for local iteration prefer the direct
 1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
 Architecture ratchet contracts and the real architecture-scaling test run in
-separate Linux jobs, each with the same five-minute setup-to-cleanup limit.
+separate Linux jobs: ten minutes for the contracts (they read full history for
+the baseline merge-base check) and five for scaling.
 Their test selections, scaling threshold and environment opt-ins are unchanged.
 The `Test Architecture Ratchets` aggregate succeeds only when both jobs succeed;
 failure, cancellation, skipping or a missing result fails it. This remains a

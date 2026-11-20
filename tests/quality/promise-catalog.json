@@ -1,0 +1,1134 @@
+{
+  "description": "Promise ids that test modules may name in pytest.mark.promise. Seeded from the OpenAPM v0.1 requirement anchors (source 'spec', <a id=\"req-...\"> in docs/src/content/docs/specs/openapm-v0.1.md) and the registered architecture owner ids (source 'architecture-owner', .apm/architecture/owners). Every id must still exist in its source. Add a new id here when its spec requirement or owner is registered.",
+  "promises": [
+    {
+      "id": "accepted-target-vocabulary",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "agent-plugin-package-projection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "agent-plugin-producer-admission",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "agent-plugin-v1-contract",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "apm-home-resolution",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "apm-package-manifest-construction",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "apply-to-hidden-tool-placement",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "artifactory-full-commit-sha-classification",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "artifactory-netrc-isolation",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "audit-finding-serialization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "audit-primitive-discovery",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "authorized-deployable-source-paths",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "behavioral-test-taxonomy-classification",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "bootstrap-project-name",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "bundle-native-layout-lowering",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "cache-cleanup-outcome",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "cached-policy-shape",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "catalog-only-marketplace-manifest",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "ci-audit-scratch-materialization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "claude-mcp-config-paths",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "cli-version-rendering",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "codex-native-plugin-lifecycle",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "compile-nested-git-boundary",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "compiled-output-writes",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "consumer-manifest-rewrite",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "copilot-cli-mcp-config-paths",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "copilot-marketplace-ownership",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "credential-origin-scope",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "cross-process-lifecycle-serialization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "dependency-cli-selection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "dependency-identity-materialization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "dependency-selection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "dependency-selection-merge",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "deployment-provenance-state",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "deterministic-atomic-text-writes",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "distributed-agents-output-preparation",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "drift-claim-membership",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "effective-install-target-selection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "effective-marketplace-output-path",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "effective-package-target-authorization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "executable-item-admission",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "executable-trust-context",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "executable-trust-fingerprint",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "file-level-deploy-sync-cleanup",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "frontmatter-bom-bounded-yaml",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "frozen-install-mutation-eligibility",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "generated-content-footer-wording",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "generated-python-artifact-membership",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "git-cache-key-normalization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "git-child-repository-isolation",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "git-clone-connect-retry",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "git-ref-freshness",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "git-semver-preflight-resolution",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "git-transport-selection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "github-api-throttle-classification",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "harness-user-root-resolution",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "host-credential-resolution",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "host-reference-coordinates",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "https-trust-policy",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "human-scope-evidence",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "immutable-dependency-requirements",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "install-command-scope-selection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "install-invocation-option-defaults",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "install-outcome",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "jetbrains-copilot-mcp-config-path",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "legacy-lockfile-parent-placement",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "legacy-mcp-ownership-key-migration",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "legacy-plugin-skill-membership",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "lifecycle-script-firing-gate",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "literal-affix-removal",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "local-authoring-catalog",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "local-bundle-compile-staging",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "local-marketplace-version-precedence",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "locked-copy-validity",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "lockfile-generator-compatibility",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "ls-remote-tag-commits",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "lsp-lifecycle",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "lsp-target-contract",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "manifest-bootstrap-writer",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "manifest-target-declaration",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-catalog-freshness",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-catalog-origin",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-dependency-confusion-admission",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-entry-ref-verification",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-locked-selection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-metadata-enrichment",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-raw-structure-diagnostics",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-source-admission",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "marketplace-tag-pattern",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "materialized-manifest-evidence",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-declaration-scope",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-lsp-plugin-root-render",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-package-launcher",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-passthrough-denylist",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-registry-url-resolution",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-remote-shape-table",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-remote-transport-normalization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "mcp-target-selection-precedence",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "native-agent-plugin-registration-admission",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "native-instruction-projection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "native-lifecycle-evidence",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "network-host-loopback-classification",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "neutral-hook-contract",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "onboarding-metadata-only",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "orphan-package-selection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "pack-plugin-manifests",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "package-format-precedence",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "plugin-root-hook-command-vocabulary",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "policy-content-hash",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "policy-mcp-transport-projection",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "policy-remote-origin-reader",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "policy-violation-subjects",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "post-uninstall-dependency-reachability",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "primitive-kind-classification",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "process-interrupt-signals",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "prospective-dry-run-install-plan",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "read-only-lockfile-path",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "release-metadata-discovery",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "req-cf-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-cf-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-ext-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-ext-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-ext-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-008",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-009",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-010",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-011",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-012",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-013",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-014",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-015",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-016",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-017",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-018",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-019",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-020",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-021",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-022",
+      "source": "spec"
+    },
+    {
+      "id": "req-lk-023",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-008",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-009",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-010",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-011",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-012",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-013",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-014",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-015",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-016",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-017",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-018",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-019",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-020",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-021",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-022",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-023",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-024",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-025",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-026",
+      "source": "spec"
+    },
+    {
+      "id": "req-mf-027",
+      "source": "spec"
+    },
+    {
+      "id": "req-na-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-na-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-na-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-na-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-na-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-na-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-na-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-008",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-009",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-010",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-011",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-012",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-013",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-014",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-015",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-016",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-017",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-018",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-019",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-020",
+      "source": "spec"
+    },
+    {
+      "id": "req-pl-021",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-pr-008",
+      "source": "spec"
+    },
+    {
+      "id": "req-rg-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-rpl-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-rpl-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-rpl-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-rpl-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-008",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-009",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-010",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-011",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-012",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-013",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-014",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-015",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-016",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-017",
+      "source": "spec"
+    },
+    {
+      "id": "req-rs-018",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-008",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-009",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-010",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-011",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-012",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-013",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-014",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-015",
+      "source": "spec"
+    },
+    {
+      "id": "req-sc-016",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-001",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-002",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-003",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-004",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-005",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-006",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-007",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-008",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-009",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-010",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-011",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-012",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-013",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-014",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-015",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-016",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-017",
+      "source": "spec"
+    },
+    {
+      "id": "req-tg-018",
+      "source": "spec"
+    },
+    {
+      "id": "resolution-replacement-activation",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "revision-pin-update-outcome",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "runtime-descriptors",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "self-update-release-resolution",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "single-file-package-materialization",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "skill-layout",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "skills-root-derivation",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "sparse-cone-symlink-validation",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "target-scoped-deployed-file-contraction",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "unix-install-ownership",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "unmanaged-skill-preflight",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "url-path-containment-decoding",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "user-facing-output-diagnostics",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "user-invocable-resolution",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "user-root-scoped-instruction-eligibility",
+      "source": "architecture-owner"
+    },
+    {
+      "id": "windows-stable-executable-path",
+      "source": "architecture-owner"
+    }
+  ],
+  "schema_version": 1
+}

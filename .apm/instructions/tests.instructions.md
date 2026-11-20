@@ -187,11 +187,12 @@ collected node in that module must inherit the same classification. Function-
 and class-level behavioral markers are rejected because they would create a
 second, mixed authority inside the module.
 
-There is deliberately no central module whitelist or exact classified-module
-count. New modules opt in by adding one module-level marker. This trades the
-old closed-set/count ratchet for distributed ownership and removes a central
-merge hotspot; repository-wide collection still rejects empty, mixed, or
-multiple classifications deterministically.
+There is deliberately no central whitelist of classified modules or exact
+classified-module count. New modules classify themselves with one module-level
+marker. This trades the old closed-set/count ratchet for distributed ownership
+and removes a central merge hotspot; repository-wide collection still rejects
+empty, mixed, or multiple classifications deterministically. New modules must
+be classified (see Test corpus ratchets).
 
 Directory names and filename suffixes are not behavioral evidence. For
 example, `test_policy_pinned_constraint_e2e.py` is `component` because it uses
@@ -225,6 +226,43 @@ Contributor commands, ready pull requests, merge queue runs, and final
 validation are strict and reject `provisional` metadata. Do not pass the
 internal provisional flag manually; remove the metadata after remeasurement
 and review.
+
+### Test corpus ratchets
+
+Three no-growth ratchets run in the Architecture Ratchet Contracts job. Each
+baseline records today's debt and may only shrink.
+
+1. **Per-test duplicates.** `scripts/check_exact_test_duplicates.py`
+   fingerprints every test with algorithm `ast-body-v2`: the normalized AST of
+   its decorators, arguments and body, plus the class-level assignments around
+   it and the module-level assignments it reads. Locals are renamed, so a copy
+   with renamed variables still matches; argument names are kept. It also
+   checks that one `Class::test` name is defined in only one file per
+   directory. `tests/quality/exact_test_duplicates.json` lists the allowed
+   groups and documents the algorithm. A new copy fails with both test ids;
+   delete or differentiate it. A pure move of a baselined group only needs the
+   baseline update below.
+2. **Taxonomy and placement.** `tests/quality/taxonomy_ratchet_baseline.json`
+   lists the legacy modules and the legacy unclassified modules. A module not
+   in `legacy_modules` is new: it must declare one behavioral marker, must not
+   be `unit` under `tests/integration`, and must not spawn a process
+   (`subprocess`, `os.exec*`, `asyncio.create_subprocess_*`) under
+   `tests/unit`. Unclassified modules may not grow.
+3. **Promise links.** Every new module names at least one id from
+   `tests/quality/promise-catalog.json` (spec `req-*` ids and architecture
+   owner ids):
+
+```python
+pytestmark = [pytest.mark.unit, pytest.mark.promise("req-lk-001")]
+```
+
+If the promise is missing, add its spec requirement or owner id to the catalog
+first. Both baselines may only shrink: CI compares them with their merge-base
+copies, so hand-added entries fail. After removing debt, record the reduction:
+
+```bash
+uv run --frozen python -m tests.quality.taxonomy_ratchets --update-baseline
+```
 
 ### Anti-patterns (will land as `recommended` findings on review)
 
