@@ -188,9 +188,10 @@ def test_codex_bundle_agent_user_scope_lifecycle(
     rendered_hash = _rendered_hash(bundle / "agents/rev.agent.md", agent)
     assert compute_file_hash(agent) == rendered_hash
     assert not (world.root / ".codex").exists()
-    # On main the -g bundle lock is $HOME/apm.lock.yaml with absolute claims.
-    lock = load_yaml(home / "apm.lock.yaml")
-    assert lock["local_deployed_file_hashes"][agent.as_posix()] == rendered_hash
+    # The user lock lives in $APM_HOME; claims under HOME are home-relative.
+    record = agent.relative_to(home).as_posix() if agent.is_relative_to(home) else agent.as_posix()
+    lock = load_yaml(world.isolated.config_root / "apm.lock.yaml")
+    assert lock["local_deployed_file_hashes"][record] == rendered_hash
     rendered = agent.read_bytes()
 
     # An edited destination is kept without --force and replaced with it.
@@ -202,17 +203,10 @@ def test_codex_bundle_agent_user_scope_lifecycle(
     assert agent.read_bytes() == rendered
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "needs #3989 user lock root (0.37 stack); remove at rebase. On main, "
-        "'apm install -g <bundle>' writes its lockfile to $HOME, not $APM_HOME."
-    ),
-)
 def test_codex_bundle_agent_user_scope_lock_and_audit(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """Only the #3989-dependent parts: $APM_HOME lock, home-relative claim, audit."""
+    """The user lock in $APM_HOME records the home-relative claim and audits clean."""
     world = _World(tmp_path, apm_binary_path)
     bundle = world.pack()
     home = world.isolated.home
