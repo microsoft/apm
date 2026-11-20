@@ -159,6 +159,17 @@ def _check_native_claude_transition(
         )
 
 
+def _sub_skill_phrase(skill_result: Any) -> str:
+    """Count promoted skills, reporting identical pre-existing copies as adopted."""
+    promoted = skill_result.sub_skills_promoted
+    raw_adopted = getattr(skill_result, "sub_skills_adopted", 0)
+    adopted = min(raw_adopted if isinstance(raw_adopted, int) else 0, promoted)
+    if adopted == promoted:
+        return f"{adopted} skill(s) adopted"
+    phrase = f"{promoted - adopted} skill(s) integrated"
+    return f"{phrase} ({adopted} adopted)" if adopted else phrase
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -652,14 +663,13 @@ def integrate_package_primitives(  # noqa: PLR0913
             _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
+        _skill_phrase = _sub_skill_phrase(skill_result)
         if _skill_expansion:
-            _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:")
+            _log_integration(f"  |-- {_skill_phrase}:")
             for line in _skill_expansion:
                 _log_integration(line)
         else:
-            _log_integration(
-                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
-            )
+            _log_integration(f"  |-- {_skill_phrase} -> {_skill_suffix}")
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
         from apm_cli.install.exec_gate import log_bin_status
 

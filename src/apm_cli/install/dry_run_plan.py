@@ -180,7 +180,10 @@ class ProspectiveInstallPlan:
         dependencies = (
             tuple(
                 selected_subtree_dependencies(
-                    self.only_packages, graph.dependency_tree, resolved_dependencies
+                    self.only_packages,
+                    graph.dependency_tree,
+                    resolved_dependencies,
+                    locked_keys=lockfile.dependencies if lockfile is not None else {},
                 )
             )
             if self.only_packages is not None

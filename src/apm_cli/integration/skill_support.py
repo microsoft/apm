@@ -97,6 +97,8 @@ class SkillIntegrationResult:
     references_copied: int
     links_resolved: int = 0
     sub_skills_promoted: int = 0
+    # Of the promoted skills, those whose identical pre-existing copy was adopted.
+    sub_skills_adopted: int = 0
     bin_deployed: int = 0
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None
