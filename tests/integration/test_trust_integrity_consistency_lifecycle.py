@@ -714,6 +714,12 @@ def _plain_dir(world: PolicyScopeWorld, name: str, *, project: bool) -> Path:
     return root
 
 
+def _ascii_output(result) -> str:
+    text = output(result)
+    assert text.isascii(), text
+    return text
+
+
 def test_unpack_records_deployed_files_in_the_project_lockfile(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -726,16 +732,25 @@ def test_unpack_records_deployed_files_in_the_project_lockfile(
         bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
     project = _plain_dir(world, "project", project=True)
     env = world.isolated.subprocess_env()
+    before = tree_snapshot(project)
 
-    run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack")
+    result = run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack")
 
+    _ascii_output(result)
+    after = tree_snapshot(project)
+    assert set(after) - set(before) == {_SKILL, "apm.lock.yaml"}
+    assert {k: v for k, v in after.items() if k in before} == before
     lock = load_yaml(project / "apm.lock.yaml")
     assert lock["local_deployed_files"] == [_SKILL]
     assert lock["local_deployed_file_hashes"][_SKILL].startswith("sha256:")
-    audit = ("audit", "--ci", "--no-drift", "--no-policy")
-    run_step(runner, audit, cwd=project, env=env, step="audit-clean")
+
+    # Converged: unpacking the same bundle again changes no bytes.
+    run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack-again")
+    assert tree_snapshot(project) == after
 
     # The record is what audit reads: altered bytes are reported.
+    audit = ("audit", "--ci", "--no-drift")
+    run_step(runner, audit, cwd=project, env=env, step="audit-clean")
     (project / _SKILL).write_text("# altered\n", encoding="utf-8")
     result = run_step(runner, audit, cwd=project, env=env, step="audit-altered", expected=1)
     assert "content-integrity" in output(result), output(result)
@@ -783,9 +798,20 @@ def test_unpack_into_a_non_project_dir_announces_and_writes_no_lockfile(
         step="unpack",
     )
 
-    text = " ".join(output(result).split())
-    assert "[i] unpack output is not tracked; use 'apm install <bundle>'" in text, text
+    text = " ".join(_ascii_output(result).split())
+    assert "[i] unpack output is not tracked: the output directory has no apm.yml." in text
     assert set(tree_snapshot(output_dir)) == {_SKILL}
+
+    # The printed hint: unpacking into an APM project records the files.
+    write(output_dir / "apm.yml", "name: restore\nversion: 1.0.0\ntargets: [claude]\n")
+    run_step(
+        runner,
+        _unpack(bundle, output_dir),
+        cwd=output_dir,
+        env=world.isolated.subprocess_env(),
+        step="unpack-into-project",
+    )
+    assert load_yaml(output_dir / "apm.lock.yaml")["local_deployed_files"] == [_SKILL]
 
 
 def test_unpack_waits_for_the_lifecycle_lock(tmp_path: Path, apm_binary_path: Path) -> None:

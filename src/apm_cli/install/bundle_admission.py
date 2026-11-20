@@ -128,7 +128,10 @@ def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -
     """
     root = unpack_record_root(output_dir)
     if root is None:
-        logger.info("unpack output is not tracked; use 'apm install <bundle>' for tracked installs")
+        logger.info(
+            "unpack output is not tracked: the output directory has no apm.yml. "
+            "Unpack into an APM project to record the deployed files."
+        )
         return
     if not files:
         return
