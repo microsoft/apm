@@ -387,7 +387,7 @@ def test_integrity_gate_failure_leaves_no_registration(
     def _boom(_ctx, _lockfile):
         raise PolicyViolationError("require_hashes: missing content hash")
 
-    monkeypatch.setattr("apm_cli.install.commit_gate.check_before_lockfile", _boom)
+    monkeypatch.setattr("apm_cli.install.pipeline.check_before_lockfile", _boom)
 
     result = _install(monkeypatch, project)
 
