@@ -765,6 +765,77 @@ def test_manifestless_skill_bundle_subset_lifecycle(
     _assert_clean_audit(project)
 
 
+@pytest.mark.parametrize("manifest", [".claude-plugin/plugin.json", "plugin.json"])
+def test_plugin_with_root_skills_subset_lifecycle(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    manifest: str,
+) -> None:
+    """A plugin with root skills/ keeps its --skill subset on fresh, cached and frozen passes.
+
+    With a plugin manifest the package is a Claude plugin collection
+    (reference/package-types.md), on the cached pass as on the fresh fetch
+    (#4270); its skills subset selection still applies (#4126).
+    """
+    fixture = _fixture(tmp_path, apm_binary_path)
+    source = fixture.packages.create("plugin-collection")
+    for name in ("find-skills", "other-skill"):
+        fixture.packages.add_skill(source, name, _skill_document(name))
+    source.manifest_path.unlink()
+    plugin_manifest = source.root / manifest
+    plugin_manifest.parent.mkdir(parents=True, exist_ok=True)
+    plugin_manifest.write_text(
+        json.dumps({"name": "plugin-collection", "version": "1.0.0"}), encoding="utf-8"
+    )
+    remote = _commit_package(
+        fixture,
+        source,
+        remote_url="https://gitlab.example.invalid/shapes/plugin-collection.git",
+    )
+    declaration = {**_git_dependency(remote), "skills": ["find-skills"]}
+    consumer = _consumer(fixture, "plugin-collection-consumer", dependencies=(declaration,))
+    child_env = fixture.repositories.url_rewrite_subprocess_env(
+        remote.repository, remote.remote_url
+    )
+    manifest_bytes = consumer.manifest_path.read_bytes()
+    project = consumer.root
+
+    def assert_selection(names: tuple[str, ...]) -> None:
+        """Check the documented type and the exact deployed selection."""
+        (locked,) = _dependencies(project)
+        assert locked["package_type"] == "marketplace_plugin"
+        assert locked["skill_subset"] == list(names)
+        assert locked["resolved_commit"] == remote.commit.sha
+        assert sorted(path.name for path in (project / ".agents/skills").iterdir()) == list(names)
+
+    _run(fixture, project, "plugin-fresh", (("install", *_TARGET_ARGS),), env=child_env)
+    assert_selection(("find-skills",))
+    _run(
+        fixture,
+        project,
+        "plugin-cached-reinstall",
+        (("install", *_TARGET_ARGS), _AUDIT_ARGS),
+        env=child_env,
+    )
+    assert_selection(("find-skills",))
+    _assert_clean_audit(project)
+    converged = _snapshot(project)
+
+    shutil.rmtree(project / "apm_modules")
+    shutil.rmtree(fixture.isolated.cache_root)
+    _run(
+        fixture,
+        project,
+        "plugin-cold-frozen",
+        (("install", *_TARGET_ARGS, "--frozen"), _AUDIT_ARGS),
+        env=child_env,
+    )
+    assert_selection(("find-skills",))
+    assert _snapshot(project).semantic_bytes == converged.semantic_bytes
+    assert consumer.manifest_path.read_bytes() == manifest_bytes
+    _assert_clean_audit(project)
+
+
 def test_tampered_local_bundle_fails_before_consumer_state_writes(
     tmp_path: Path,
     apm_binary_path: Path,
