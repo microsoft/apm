@@ -748,7 +748,7 @@ def _check_native_mcp_ownership(
     user_scope: bool,
 ) -> CheckResult:
     """Fail where ``install --frozen`` refuses a differing same-name native MCP entry (#4477)."""
-    from ..install.mcp.ownership import differing_unrecorded_native_mcp_entries
+    from ..install.mcp.native_entry import differing_unrecorded_native_mcp_entries
 
     pairs = differing_unrecorded_native_mcp_entries(
         lock,

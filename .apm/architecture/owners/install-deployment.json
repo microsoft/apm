@@ -44,7 +44,10 @@
       "id": "legacy-mcp-ownership-key-migration",
       "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption",
       "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints)",
-      "selectors": ["src/apm_cli/install/mcp/ownership.py"],
+      "selectors": [
+        "src/apm_cli/install/mcp/ownership.py",
+        "src/apm_cli/install/mcp/native_entry.py"
+      ],
       "guards": [
         "install-deployment-mcp-ownership-migration",
         "install-deployment-mcp-native-comparison"

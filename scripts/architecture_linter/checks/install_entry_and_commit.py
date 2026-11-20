@@ -69,7 +69,7 @@ _POLICY_PREFLIGHT_SITES = frozenset(
 )
 # install --mcp judges its server through the commit gate and refuses it as
 # apm install does.
-_MCP_ENTRY_GATE_CALLS = ("enforce_mcp_policy(", "refuse_blocked_mcp(logger)")
+_MCP_ENTRY_GATE_CALLS = ("enforce_mcp_policy(", "refuse_blocked_mcp(logger, exc)")
 
 # install --mcp reaches the install's MCP service stage, which records the
 # entry in the lockfile; the command keeps no integrator or lockfile writes.
