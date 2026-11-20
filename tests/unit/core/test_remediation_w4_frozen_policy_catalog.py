@@ -49,6 +49,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "missing local source misses, and install cannot restore that",
     "frozen-local-content-changed": "needs a frozen local-path dependency; covered by the "
     "frozen local content unit tests",
+    "frozen-hook-pins-stale": "covered by the hook approval pin parity lifecycle test, "
+    "which retires the stale hook with a plain install",
     "frozen-lockfile-withheld": "covered by the frozen deployed-hash lifecycle test, which "
     "re-renders a locked file with an older APM rendering",
     "frozen-operation-rejected": "usage refusal; the reported state is the flag combination, "

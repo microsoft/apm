@@ -1108,6 +1108,12 @@ UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "trac
 CONTENT_HASHES_MISSING = _entry(
     "content-hashes-missing", "apm install", "regenerate the missing content hashes"
 )
+FROZEN_HOOK_PINS_STALE = _entry(
+    "frozen-hook-pins-stale",
+    "apm install",
+    "retire the hooks their approval no longer admits (without --frozen)",
+    then="commit apm.yml and apm.lock.yaml",
+)
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
 # Advice printed by install/ drift replay, audit replay, cache pins, executable

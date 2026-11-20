@@ -318,6 +318,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         ):
             item.add_marker(_LIFECYCLE_SMOKE_MARKER)
 
+    # Bounded candidate copies (mutation harnesses) ship no tests/spec_conformance.
+    if not config.getoption("collectonly", False) and not any(
+        item.get_closest_marker("req") for item in items
+    ):
+        return
     from tests.spec_conformance.coverage_map import record
 
     record(config, items)

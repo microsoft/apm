@@ -394,8 +394,8 @@ class InstallService:
                 "--frozen: apm.lock.yaml records hooks their approval no longer admits.",
                 reasons=[f"  - {mismatch.describe()}" for mismatch in mismatches],
                 tip=(
-                    "Tip: re-approve the package, or run 'apm install' without --frozen "
-                    "to retire the hooks, then commit apm.yml and apm.lock.yaml."
+                    "Tip: re-approve the package as shown above, or "
+                    f"{remediation.FROZEN_HOOK_PINS_STALE.clause()}."
                 ),
             )
 

@@ -68,6 +68,7 @@ SERIALIZED_LIFECYCLE_ROUTES: dict[str, dict[str, str]] = {
     },
     "src/apm_cli/commands/marketplace/init.py": {"init": "serialized_lifecycle"},
     "src/apm_cli/commands/marketplace/migrate.py": {"migrate": "serialized_lifecycle_unless"},
+    "src/apm_cli/commands/pack.py": {"unpack_cmd": "serialized_lifecycle_unless"},
     "src/apm_cli/commands/marketplace/plugin/add.py": {"add": "serialized_lifecycle"},
     "src/apm_cli/commands/marketplace/plugin/remove.py": {"remove": "serialized_lifecycle"},
     "src/apm_cli/commands/marketplace/plugin/set.py": {"set_cmd": "serialized_lifecycle"},
@@ -162,14 +163,7 @@ _EXEMPT: dict[_Command, str] = {
 }
 
 # Commands whose serialization is decided by another owner still in flight.
-# apm unpack is checked after stream S lane S-4 lands its shared bundle
-# admission owner (install/bundle_admission.py, admit_bundle); this lane does
-# not serialize or edit it.
-_PENDING: dict[_Command, str] = {
-    ("src/apm_cli/commands/pack.py", "unpack_cmd"): (
-        "pending the shared bundle admission owner (install/bundle_admission.py)"
-    ),
-}
+_PENDING: dict[_Command, str] = {}
 
 _CLICK_COMMAND_DECORATOR = re.compile(r"(?:[A-Za-z_]\w*\.)*(?:command|group)(?:\(|$)")
 _SERIALIZED_DECORATOR = re.compile(r"serialized_lifecycle(?:_unless|_when)?(?:\(|$)")
