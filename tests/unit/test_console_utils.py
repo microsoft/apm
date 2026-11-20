@@ -621,3 +621,19 @@ def test_info_never_splits_a_url(monkeypatch, capsys):
     finally:
         _reset_console()
     assert url in out
+
+
+def test_truncated_cells_use_ascii_ellipsis(capsys):
+    """Rich's U+2026 ellipsis never reaches output; '...' does (#3994)."""
+    from rich.table import Table
+
+    from apm_cli.utils.console import new_console
+
+    console = new_console(width=30, force_terminal=False)
+    table = Table()
+    table.add_column("Name", overflow="ellipsis", no_wrap=True, max_width=12)
+    table.add_row("a-very-long-package-name-that-will-truncate")
+    console.print(table)
+    out = capsys.readouterr().out
+    assert "\u2026" not in out
+    assert "..." in out

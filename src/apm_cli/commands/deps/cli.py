@@ -576,7 +576,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             show_header=True,
             header_style="bold cyan",
         )
-        table.add_column("Package", style="bold white")
+        table.add_column("Package", style="bold white", overflow="fold")
         table.add_column("Version", style="yellow")
         table.add_column("Source", style="blue")
         if insecure_only:
