@@ -338,6 +338,7 @@
     "tests/integration/test_git_cache_recency_lifecycle.py",
     "tests/integration/test_git_hook_env_isolation.py",
     "tests/integration/test_git_hook_install_env_isolation_e2e.py",
+    "tests/integration/test_git_lock_content_hash_lifecycle.py",
     "tests/integration/test_git_named_repository_lifecycle.py",
     "tests/integration/test_git_object_links_lifecycle.py",
     "tests/integration/test_git_reference_resolver_resolution.py",
