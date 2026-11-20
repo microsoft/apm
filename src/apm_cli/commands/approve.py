@@ -19,6 +19,7 @@ The deny-wins precedence is resolved by
 from __future__ import annotations
 
 import sys
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -172,14 +173,28 @@ def _store_label(user_scope: bool) -> str:
     return "apm.yml"
 
 
+_ORG_POLICY_PER_COMMAND: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Return the merged org policy, routed as every other policy reader routes it.
+
+    One command resolves its policy once (#4178): the result is memoized per
+    command logger, so a miss is reported once however many trust readers ask.
 
     A blocking outcome raises :class:`PolicyViolationError`; an outcome that
     leaves no usable policy is reported and yields an empty policy.
     """
+    root = Path(project_root).resolve()
+    if logger is not None:
+        cached = _ORG_POLICY_PER_COMMAND.get(logger)
+        if cached is not None and cached[0] == root:
+            return cached[1]
     policy = resolve_trust_policy(project_root, logger=logger)
-    return policy if policy is not None else ApmPolicy()
+    policy = policy if policy is not None else ApmPolicy()
+    if logger is not None:
+        _ORG_POLICY_PER_COMMAND[logger] = (root, policy)
+    return policy
 
 
 def _report_policy_block(exc: PolicyViolationError) -> None:
@@ -255,6 +270,11 @@ def approve_cmd(
 
         apm approve -g owner/repo
     """
+    if not (packages or pending or approve_all or recommended or list_decisions):
+        # A missing package is a usage error (exit 2), like `apm deny` (#4262).
+        raise click.UsageError(
+            "Specify at least one package, or use --pending / --all / --recommended."
+        )
     logger = CommandLogger("approve")
     try:
         manifest = _find_manifest(user_scope, global_scope)
@@ -276,12 +296,6 @@ def approve_cmd(
         if approve_all:
             _approve_all_pending(manifest, user_scope, allow, deny, logger=logger)
             return
-
-        if not packages:
-            logger.refusal(
-                "Specify at least one package, or use --pending / --all / --recommended."
-            )
-            sys.exit(1)
 
         packages = _canonical_specs(manifest, packages)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
@@ -640,19 +654,52 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
     from dataclasses import replace
 
     pending = _pending_declarations(manifest, logger=logger)
-    if not pending:
+    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    bundles = _pending_bundles(manifest, ctx)
+    if not pending and not bundles:
         _rich_success("All packages with executables are approved.")
         return
 
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
-    _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
-    for decl in pending:
-        pins = _pins_for(decl)
-        _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
-        _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+    if pending:
+        _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
+        for decl in pending:
+            pins = _pins_for(decl)
+            _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
+            _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+        _rich_echo("")
+        _rich_info(
+            "Review each definition, then run 'apm approve <package>' to pin it.",
+            symbol="info",
+        )
+    if bundles:
+        _show_pending_bundles(manifest, bundles)
+
+
+def _pending_bundles(manifest: Path, ctx) -> list:
+    """Installed local bundles whose parked executables are still not approved (#4221)."""
+    from ..install.local_bundle_pending import pending_bundles
+    from ..security.executables import materialize_exec_map, package_type_approved
+
+    allow_map = materialize_exec_map(ctx)
+    return pending_bundles(
+        manifest.parent,
+        lambda key, exec_type: package_type_approved(allow_map, (key,), exec_type),
+    )
+
+
+def _show_pending_bundles(manifest: Path, bundles: list) -> None:
+    _rich_warning(f"{len(bundles)} local bundle(s) with parked executables:")
+    for bundle in bundles:
+        _rich_echo(
+            f"  local bundle '{bundle.slug}': {', '.join(bundle.exec_types)} not approved; "
+            "approval key:"
+        )
+        # The key is copied into apm.yml, so it is never wrapped.
+        _rich_echo(f'    "{bundle.approval_key}"', soft_wrap=True)
     _rich_echo("")
     _rich_info(
-        "Review each definition, then run 'apm approve <package>' to pin it.",
+        f"Review the bundle, add its approval key under executables.allow in {manifest.name}, "
+        "then rerun 'apm install <bundle>'.",
         symbol="info",
     )
 

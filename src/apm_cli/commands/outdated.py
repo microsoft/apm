@@ -6,7 +6,6 @@ For marketplace-sourced deps, checks available versions in the marketplace.
 """
 
 import logging
-import os
 import re
 import sys
 from collections.abc import Iterable
@@ -509,20 +508,13 @@ def outdated(global_, verbose, parallel_checks):
     # which is exactly the duplicate-resolution workload the L0 cache +
     # coalesce lock are designed to collapse.
     try:
-        from ..cache.git_cache import GitCache
-        from ..cache.paths import get_cache_root
+        from ..cache.git_cache import attach_persistent_git_cache
         from ..deps.tiered_ref_resolver import (
             RefFreshnessPolicy,
             build_tiered_ref_resolver,
         )
 
-        _git_cache = None
-        if not os.environ.get("APM_NO_CACHE"):
-            try:
-                _git_cache = GitCache(get_cache_root(), refresh=False)
-                downloader.persistent_git_cache = _git_cache
-            except (OSError, ValueError):
-                pass
+        _git_cache = attach_persistent_git_cache(downloader)
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=_git_cache,

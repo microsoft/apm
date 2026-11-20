@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -33,6 +36,25 @@ from apm_cli.core.scope import manifest_file
 from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_info, _rich_success, _rich_warning
 from ..utils.path_security import ensure_path_within
+
+# Messages already shown inside one ``plugin_manifest_notes_once`` scope.
+_EMITTED_NOTES: ContextVar[set[tuple[str, str]] | None] = ContextVar(
+    "apm_plugin_manifest_emitted_notes", default=None
+)
+
+
+@contextmanager
+def plugin_manifest_notes_once() -> Iterator[None]:
+    """Show each plugin-manifest note once while the block runs.
+
+    One ``apm pack`` builds a manifest per ecosystem and for the bundle; each
+    build reads the same ``.mcp.json`` and would repeat the same note (#4291).
+    """
+    token = _EMITTED_NOTES.set(set())
+    try:
+        yield
+    finally:
+        _EMITTED_NOTES.reset(token)
 
 
 def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
@@ -46,7 +68,13 @@ def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
     ``_rich_*`` console helper. *symbol* is a key into
     :data:`apm_cli.utils.console.STATUS_SYMBOLS` and is forwarded on both paths
     so a success line renders as ``[+]`` (not ``[i]``) regardless of caller.
+    Inside :func:`plugin_manifest_notes_once` a repeated message is dropped.
     """
+    emitted = _EMITTED_NOTES.get()
+    if emitted is not None:
+        if (level, message) in emitted:
+            return
+        emitted.add((level, message))
     if logger is not None:
         getattr(logger, level)(message, symbol=symbol)
         return

@@ -14,6 +14,12 @@ from ..core.scope import InstallScope, manifest_file
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+from ..deps.lockfile_write_authority import (
+    LockfileWriter,
+    flush_lockfile_writes,
+    lockfile_writer,
+    remove_lockfile,
+)
 from ..install.locking import serialized_lifecycle_unless
 from ..install.orphans import (
     InstalledPaths,
@@ -74,6 +80,7 @@ def _preflight_prune_survivors(
 )
 @click.pass_context
 @serialized_lifecycle_unless("dry_run")
+@lockfile_writer(LockfileWriter.PRUNE)
 def prune(ctx, dry_run):
     """Remove orphaned packages and repair stale deployment ownership.
 
@@ -88,6 +95,10 @@ def prune(ctx, dry_run):
     from ..deps.lockfile_generator import require_current_cli
 
     require_current_cli(Path.cwd(), command="apm prune")
+    if not dry_run:
+        from ..core.deployment_ledger import retire_receipts_of_missing_projects
+
+        retire_receipts_of_missing_projects()
     apm_modules_dir = Path(APM_MODULES_DIR)
     logger = CommandLogger("prune", dry_run=dry_run)
     registration_token = _publish_native_registration(Path.cwd())
@@ -281,6 +292,8 @@ def prune(ctx, dry_run):
             lockfile=lockfile,
             lockfile_root=project_root,
             diagnostics=logger.diagnostics,
+            # Not an integrating install: nothing was kept this run.
+            kept=(),
         )
         if lockfile is not None:
             deletion_evidence.prepare(
@@ -395,8 +408,9 @@ def prune(ctx, dry_run):
             try:
                 if lockfile_has_persisted_state(lockfile):
                     lockfile.write(lockfile_path)
+                    flush_lockfile_writes()
                 else:
-                    lockfile_path.unlink(missing_ok=True)
+                    remove_lockfile(lockfile_path)
             except Exception as e:
                 logger.render_summary()
                 logger.error(f"Failed to update apm.lock.yaml: {e}")

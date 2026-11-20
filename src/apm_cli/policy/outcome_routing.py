@@ -52,12 +52,15 @@ POLICY_DISCOVERY_OUTCOMES = frozenset(
         "empty",
         "hash_mismatch",
         "incomplete_chain",
+        "ambiguous_git_remote",
     }
 )
 
 
 # Genuine resolution failures with no policy usable by approval fallback.
 POLICY_HASH_MISMATCH_OUTCOME = "hash_mismatch"
+# Several git remotes and no ``origin``: discovery fails closed (req-pl-012).
+AMBIGUOUS_GIT_REMOTE_OUTCOME = "ambiguous_git_remote"
 POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
     {
         "cache_miss_fetch_fail",
@@ -93,6 +96,7 @@ _OUTCOME_ROUTES: dict[str, str] = {
     "garbage_response": _FETCH_FAILURE_DEFAULT,
     "hash_mismatch": _ALWAYS_BLOCK,
     "incomplete_chain": _ALWAYS_BLOCK,
+    "ambiguous_git_remote": _ALWAYS_BLOCK,
 }
 
 if set(_OUTCOME_ROUTES) != POLICY_DISCOVERY_OUTCOMES:  # pragma: no cover - import-time guard
@@ -188,6 +192,8 @@ def classify_discovery_outcome(
             f"org policy inheritance chain is incomplete (source={source}). "
             "Restore the unreachable parent policy before retrying."
         )
+    elif outcome == AMBIGUOUS_GIT_REMOTE_OUTCOME:
+        reason = getattr(fetch_result, "error", None) or "several git remotes and no 'origin'"
     else:
         reason = f"unrecognized policy discovery outcome {outcome!r} (source={source})"
     return DiscoveryRoute(outcome, _ALWAYS_BLOCK, None, block_reason=reason, unresolved=True)
@@ -248,7 +254,10 @@ def route_discovery_outcome(
                 subgroup_scoped=fetch_result.subgroup_scoped,
                 chain=fetch_result.chain_sources,
             )
-        if route.report_miss:
+        # A fetch_failure_default block raises, and the exception (which
+        # carries any hint) is its only report: the miss wording ("proceeding
+        # without policy enforcement") would contradict it (#4180).
+        if route.report_miss and not (route.from_fetch_failure_default and raise_blocking_errors):
             miss: dict = {
                 "outcome": route.outcome,
                 "source": source,

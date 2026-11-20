@@ -1021,7 +1021,9 @@ class TestLocalBundleHashFormatCrossFlow:
             targets=None,
             diagnostics=diagnostics,
             recorded_hashes=deployed_hashes,
-            evidence=DeploymentEvidence(deploy_root=project, receipts=receipts, render=None),
+            evidence=DeploymentEvidence(
+                deploy_root=project, receipts=receipts, render=None, kept=()
+            ),
         )
 
         assert not cleanup_result.skipped_user_edit, (

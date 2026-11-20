@@ -45,15 +45,16 @@ _PLUGIN_CHANGES = (
     "policy-dep-deny",
     "revoke-approval",
 )
-_PLUGIN_UNLOCKED = (
-    "#4225 the user lockfile does not record the files a native Claude plugin deployed"
-)
+_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL = {
     "G|update|definition-changed|native": _UPDATE_KEEPS_CHANGED,
     "G|update|policy-dep-deny|native": _UPDATE_IGNORES_DENY,
     **{f"G|uninstall-prune-rebuild|{change}|native": _UNINSTALL_KEEPS_GATED for change in _ALL},
     "G|audit-ci|definition-changed|native": _AUDIT_FROZEN_LOCAL_DRIFT,
-    **{f"G|native-plugin|{change}|native": _PLUGIN_UNLOCKED for change in _PLUGIN_CHANGES},
+    **{
+        f"G|native-plugin|{change}|native": _USER_ORG
+        for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
+    },
 }
 _SMOKE = {"G|install|org-enables-gate|native"}
 

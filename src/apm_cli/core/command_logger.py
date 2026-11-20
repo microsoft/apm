@@ -100,7 +100,7 @@ class CommandLogger:
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
 
-    def mcp_lookup_heartbeat(self, count: int):
+    def mcp_lookup_heartbeat(self, count: int, registry: str | None = None):
         """Emit a single batch heartbeat before MCP registry validation
         (F4, microsoft/apm#1116).
 
@@ -116,7 +116,8 @@ class CommandLogger:
         if count <= 0:
             return
         noun = "server" if count == 1 else "servers"
-        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+        where = f"registry {registry}" if registry else "registry"
+        _rich_info(f"Looking up {count} MCP {noun} in {where}...", symbol="running")
 
     def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         """Log static advisory / informational context.
@@ -285,6 +286,8 @@ class InstallLogger(CommandLogger):
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
+        # Policy banners already shown; the package and MCP phases share them.
+        self._policy_banners: set[tuple[str, ...]] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -322,6 +325,16 @@ class InstallLogger(CommandLogger):
         self._failed_install_residue_note = (
             f"{total} native target {'item' if total == 1 else 'items'} listed above "
             f"{'remains' if total == 1 else 'remain'} in place."
+        )
+
+    def kept_overwrites(self, kept: int, written: Sequence[str]) -> None:
+        """Name the files an install wrote beside the managed files it kept (#4360)."""
+        if written:
+            self.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
+            for path in written:
+                self.error_detail(f"  {path}")
+        self._failed_install_residue_note = (
+            f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
         )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
@@ -492,8 +505,12 @@ class InstallLogger(CommandLogger):
         Called from the MAIN thread by the resolver/download callback
         BEFORE network work begins; F7's parallel BFS keeps emission
         on the main thread so output ordering is deterministic even
-        when downloads are dispatched to a worker pool.
+        when downloads are dispatched to a worker pool. A ``--dry-run``
+        preview keeps it verbose-only so it lists only what it would install.
         """
+        if self.dry_run:
+            self.verbose_detail(f"Resolving {dep_name}...")
+            return
         _rich_info(f"Resolving {dep_name}...", symbol="running")
 
     def download_complete(
@@ -625,7 +642,7 @@ class InstallLogger(CommandLogger):
             color="dim",
         )
 
-    def materialize_result(self, sparse_applied: bool, consumer_size_bytes: int):
+    def materialize_result(self, dep_name: str, sparse_applied: bool, consumer_size_bytes: int):
         """Log materialization outcome and consumer dir size (verbose only).
 
         ``sparse_applied`` tells the reader whether sparse-cone fired
@@ -639,7 +656,7 @@ class InstallLogger(CommandLogger):
         size_mb = consumer_size_bytes / (1024 * 1024)
         applied = "yes" if sparse_applied else "no"
         _rich_echo(
-            f"    [i] perf: materialize sparse={applied} size={size_mb:.2f} MB",
+            f"    [i] perf: materialize {dep_name} sparse={applied} size={size_mb:.2f} MB",
             color="dim",
         )
 
@@ -733,6 +750,8 @@ class InstallLogger(CommandLogger):
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
+        if not self._first_policy_banner("resolved", source, enforcement):
+            return
         parts = [f"Policy: {source}"]
         if chain and len(chain) > 1:
             # The leaf is already the source; show its ancestors root first.
@@ -790,6 +809,8 @@ class InstallLogger(CommandLogger):
             hint: Optional discovery diagnostic (``PolicyFetchResult.
                 discovery_hint``), shown with ``absent`` in verbose mode only.
         """
+        if not self._first_policy_banner("miss", outcome, source):
+            return
         err_text = error or "unknown"
 
         if outcome == "absent":
@@ -949,13 +970,27 @@ class InstallLogger(CommandLogger):
                     err=True,
                 )
 
+    def _first_policy_banner(self, *key: str) -> bool:
+        """Record a policy banner; False when this invocation already showed it.
+
+        The package phase and the MCP phase both route the same policy
+        outcome, so every policy banner is printed once per invocation.
+        """
+        if key in self._policy_banners:
+            return False
+        self._policy_banners.add(key)
+        return True
+
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
         active.  Always visible (never silenceable) -- matches the
-        ``--allow-insecure`` pattern.
+        ``--allow-insecure`` pattern.  Shown once per invocation even when
+        several install phases check the escape hatch.
         """
+        if not self._first_policy_banner("disabled", reason):
+            return
         _rich_warning(
             f"Policy enforcement disabled by {reason} for this invocation. "
             "This does NOT bypass apm audit --ci. "

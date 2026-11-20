@@ -590,6 +590,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     generic_governed_values: frozenset[str] = frozenset(),
     user_scope: bool = False,
     completed_reintegration: CompletedReintegration | None = None,
+    retained_values: frozenset[str] = frozenset(),
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
 
@@ -646,6 +647,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
             generic_governed_values=generic_governed_values,
             completed_reintegration=completed_reintegration,
             verified_absent_values=verified_absent,
+            retained_values=retained_values,
         ),
         project_root=project_root,
         diagnostics=diagnostics,
@@ -705,6 +707,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
         live_paths=files,
+        # A departing owner (selected removal) releases a skill directory left
+        # holding only user content, as prune and install cleanup do (#4162).
+        failed_path_retained=desired_owners is None,
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
@@ -999,6 +1004,7 @@ def reconcile_project_deployed_state(
             lockfile=lockfile,
             lockfile_root=lock_path.parent,
             diagnostics=diagnostics,
+            kept=(),
         ),
         user_scope=user_scope,
     )

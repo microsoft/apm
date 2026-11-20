@@ -28,9 +28,10 @@ when:
 - run: apm update --yes
   exit: 0
   message: No APM dependencies
-  known:
-    tracking: '#4318'
-    fixed: p-exec
+  cells:
+  - rule|U8|update-leaves-a-local-bundle-untouched
+  unchanged:
+  - '*'
 - run: apm prune
   exit: 0
   message: Nothing to prune

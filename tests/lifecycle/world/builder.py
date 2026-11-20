@@ -34,6 +34,7 @@ from pathlib import Path
 import yaml
 
 from tests.lifecycle.world import registry
+from tests.lifecycle.world.clone import remove_tree
 from tests.lifecycle.world.contract import PackageRef, World
 from tests.lifecycle.world.packages import GIT_PUBLISHED, author_packages
 from tests.lifecycle.world.services import (
@@ -149,8 +150,8 @@ def _pack_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
             "apm pack",
         )
     finally:
-        shutil.rmtree(work)
-        shutil.rmtree(scratch)
+        remove_tree(work)
+        remove_tree(scratch)
     (bundle,) = sorted(output.iterdir())
     return bundle
 
@@ -184,8 +185,8 @@ def _pack_apm_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
             "apm pack --format apm",
         )
     finally:
-        shutil.rmtree(work.parent)
-        shutil.rmtree(scratch)
+        remove_tree(work.parent)
+        remove_tree(scratch)
     (bundle,) = sorted(output.iterdir())
     return bundle
 
@@ -229,6 +230,13 @@ def build_template(base: Path) -> World:
     azure_config = isolated.home / ".azure"
     env = shim_environment(env, base, azure_config, install_shims(base, azure_config))
     env = services.child_environment(env)
+    if os.name == "nt":
+        # Git for Windows defaults to schannel, which checks revocation and
+        # ignores GIT_SSL_CAINFO; the world's fixture CA has no revocation
+        # data ("schannel: the revocation status is unknown"). APM inherits
+        # http.sslBackend from the global config (#2545), so openssl applies.
+        with Path(env["GIT_CONFIG_GLOBAL"]).open("a", encoding="utf-8") as config:
+            config.write("[http]\n\tsslBackend = openssl\n")
     for user_root in (".copilot", ".claude", ".codex"):
         (isolated.home / user_root).mkdir()
 

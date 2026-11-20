@@ -273,6 +273,31 @@ class TestDiscoverScripts:
             entries = discover_scripts(project_root=str(project_dir))
         assert len(entries) == 2
 
+    def test_user_scope_manifest_is_loaded_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        apm_home = tmp_path / "apm-home"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        entries = discover_scripts(project_root=str(apm_home))
+        assert [(entry.bash, entry.source) for entry in entries] == [("echo user", "user")]
+
+    def test_user_scope_runner_skips_no_project_scripts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        apm_home = tmp_path / "apm-home"
+        _write_yaml(
+            apm_home / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+        runner = build_runner_from_context(project_root=str(apm_home))
+        assert [entry.source for entry in runner._scripts] == ["user"]
+        assert runner._skipped_project_scripts == 0
+
 
 class TestLifecycleScriptRunner:
     def _make_event(self, event_name: str = "post-install") -> LifecycleEvent:
@@ -322,6 +347,7 @@ class TestBuildRunnerFromContext:
         assert runner._scripts == []
 
     def test_deny_all_true_suppresses_all_scripts(self, tmp_path: Path, monkeypatch) -> None:
+        """deny_all suppresses scripts; one command logger gets the notice once (#4333)."""
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
         _write_yaml(
             tmp_path / "apm.yml",
@@ -333,9 +359,23 @@ class TestBuildRunnerFromContext:
         mock_fetch.policy = mock_policy
         mock_fetch.outcome = "found"
         mock_fetch.source = "org"
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.lines: list[str] = []
+
+            def warning(self, message: str) -> None:
+                self.lines.append(message)
+
+        logger = _Logger()
         with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=mock_fetch):
-            runner = build_runner_from_context(project_root=str(tmp_path))
+            runner = build_runner_from_context(project_root=str(tmp_path), logger=logger)
+            second = build_runner_from_context(project_root=str(tmp_path), logger=logger)
         assert runner._scripts == []
+        assert second._scripts == []
+        assert logger.lines == [
+            "Lifecycle scripts suppressed by org policy (executables.deny_all)."
+        ]
 
     def test_deny_all_false_does_not_suppress_user_scripts(
         self, tmp_path: Path, monkeypatch

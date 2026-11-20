@@ -256,7 +256,7 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     ),
     "src/apm_cli/security/executables.py": 'return get_apm_home() / "approvals.yml"',
     "src/apm_cli/core/deployment_ledger.py": (
-        'self.state_path = apm_home / "deployment-receipts" / f"{key}.json"'
+        'state_path = get_apm_home() / "deployment-receipts" / f"{key}.json"'
     ),
 }
 
@@ -654,7 +654,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"
@@ -757,7 +757,7 @@ def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violati
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"

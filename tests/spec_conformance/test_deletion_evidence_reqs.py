@@ -75,6 +75,7 @@ def test_receipt_or_locked_render_authorizes_deletion(tmp_path: Path, source: st
             {path.resolve().as_posix(): compute_file_hash(path)} if source == "receipt" else {}
         ),
         render=(lambda _owner: render) if source == "locked-render" else None,
+        kept=(),
     )
 
     result, _messages = _cleanup(root, evidence, path)
@@ -88,7 +89,7 @@ def test_file_differing_from_its_evidence_is_kept(tmp_path: Path) -> None:
     path = _deployed(tmp_path)
     receipts = {path.resolve().as_posix(): compute_file_hash(path)}
     path.write_text("edited by the user\n", encoding="utf-8")
-    evidence = DeploymentEvidence(deploy_root=tmp_path, receipts=receipts, render=None)
+    evidence = DeploymentEvidence(deploy_root=tmp_path, receipts=receipts, render=None, kept=())
 
     result, messages = _cleanup(tmp_path, evidence, path)
 

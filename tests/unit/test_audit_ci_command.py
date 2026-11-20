@@ -257,7 +257,7 @@ class TestCIOutputFormats:
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
             result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
         assert result.exit_code == 1
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data["passed"] is False
         assert data["summary"]["failed"] > 0
 

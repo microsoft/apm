@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from apm_cli.install.deployed_paths import deployed_path_entry
-from apm_cli.integration.base_integrator import BaseIntegrator, untrusted_baseline_message
+from apm_cli.integration.base_integrator import (
+    BaseIntegrator,
+    recovery_directory,
+    untrusted_baseline_message,
+)
 from apm_cli.integration.skill_adoption import (
     installing_commit,
     is_skill_dir_identical_to_source,
@@ -131,11 +135,15 @@ class SkillConflict:
     path: str
     targets: tuple[str, ...]
     untrusted: bool = False
+    directory: str | None = None
+    user_scope: bool = False
 
     def message(self) -> str:
         """Name the source, local file and affected targets in ordinary output."""
         if self.untrusted:
-            return printable_ascii_text(untrusted_baseline_message(self.path))
+            return printable_ascii_text(
+                untrusted_baseline_message(self.path, self.directory, user_scope=self.user_scope)
+            )
         return printable_ascii_text(
             f"Installation refused: skill '{self.skill}' from '{self.package}' "
             f"(source: {self.source}) conflicts with unmanaged file '{self.path}'. "
@@ -217,6 +225,7 @@ def find_unmanaged_conflicts(
     dependency = package_info.dependency_ref
     owner = dependency.get_unique_key() if dependency else "."
     session = integrator._materialization_session
+    user_scope = integrator.install_user_scope()
     replay_owners = integrator._replay_owners
     adopted: dict[tuple[Path, Path], dict[Path, str]] = {}
     unchanged: dict[tuple[Path, Path], bool] = {}
@@ -337,6 +346,12 @@ def find_unmanaged_conflicts(
                             relative_target,
                             affected,
                             untrusted=not unmanaged,
+                            directory=recovery_directory(
+                                deployed_path_entry(destination, project_root, [target]),
+                                destination,
+                                user_scope=user_scope,
+                            ),
+                            user_scope=user_scope,
                         )
                     )
     return tuple(conflicts)

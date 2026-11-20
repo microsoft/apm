@@ -58,12 +58,14 @@ def _receipt_evidence(root: Path):
         lockfile=None,
         lockfile_root=root,
         diagnostics=DiagnosticCollector(),
+        kept=(),
     )
 
 
-def test_receipt_outlives_checked_out_hash_without_adopting_disk(
+def test_receipt_outlives_checked_out_hash_only_while_disk_holds_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A receipt for another lock's hash vouches only for its own bytes, never the disk's."""
     root, path, lock = _fixture(tmp_path, monkeypatch)
     old_hash = compute_file_hash(path)
     session = _session(root, lock)
@@ -84,8 +86,29 @@ def test_receipt_outlives_checked_out_hash_without_adopting_disk(
     )
     assert _session(root, lock).baseline(path, [TARGET]) == old_hash
     path.write_text("user edit\n", encoding="utf-8")
-    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    assert _session(root, lock).baseline(path, [TARGET]) is None
     assert compute_file_hash(path) != old_hash
+
+
+def test_hashless_claim_trusts_a_receipt_only_while_disk_holds_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legacy claim without a hash never lets a receipt vouch for different bytes."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_hash = compute_file_hash(path)
+    session = _session(root, lock)
+    session.record({path: old_hash}, [TARGET], "pkg")
+    session.flush()
+    row = next(iter(lock.deployment_ledger.records.values()))
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger({row.locator.key: DeploymentRecord(row.locator, row.owners, "pkg", None)}),
+        lock,
+        write_legacy_views=False,
+    )
+    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    path.write_text("user edit\n", encoding="utf-8")
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+    assert path.read_text(encoding="utf-8") == "user edit\n"
 
 
 @pytest.mark.parametrize("target_name", ["claude", "hermes", "copilot-cowork"])
@@ -1023,7 +1046,7 @@ def test_non_skill_write_records_receipt_under_target_root(
     session.flush()
     state = json.loads(session.state_path.read_text(encoding="utf-8"))
     assert rule.resolve().as_posix() in state["destinations"].values()
-    assert _session(root, lock).has_receipt(rule)
+    assert rule.resolve().as_posix() in _session(root, lock).receipt_hashes()
 
 
 def test_write_outside_every_target_root_is_refused(
@@ -1035,3 +1058,37 @@ def test_write_outside_every_target_root_is_refused(
     stray.write_text("user\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Cannot record unverified materialization"):
         _session(root, lock).record({stray: compute_file_hash(stray)}, [TARGET], "pkg")
+
+
+def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monkeypatch) -> None:
+    """Only a receipt naming its own key for a root gone from a live parent goes (#4176)."""
+    import json as _json
+
+    from apm_cli.core import deployment_ledger
+
+    home = tmp_path / "apm-home"
+    receipts = home / "deployment-receipts"
+    receipts.mkdir(parents=True)
+    monkeypatch.setattr("apm_cli.core.scope.get_apm_home", lambda: home)
+    live = tmp_path / "live"
+    live.mkdir()
+
+    def receipt(root: Path, *, name: str | None = None) -> Path:
+        stem = name or deployment_ledger._receipt_key(root.as_posix(), "project")
+        path = receipts / f"{stem}.json"
+        path.write_text(_json.dumps({"root": root.as_posix(), "scope": "project"}))
+        return path
+
+    gone = receipt(tmp_path / "gone")
+    kept = {
+        "live": receipt(live),
+        "renamed": receipt(tmp_path / "other-gone", name="0" * 64),
+        "unmounted": receipt(tmp_path / "missing-volume" / "project"),
+    }
+    corrupt = receipts / f"{'1' * 64}.json"
+    corrupt.write_text("{not json")
+
+    assert deployment_ledger.retire_receipts_of_missing_projects() == 1
+    assert not gone.exists()
+    assert all(path.exists() for path in kept.values()), kept
+    assert corrupt.exists()

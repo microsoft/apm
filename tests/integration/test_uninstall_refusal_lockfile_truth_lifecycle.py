@@ -1,9 +1,9 @@
-"""A refused ``apm uninstall`` keeps apm.lock.yaml truthful (#3656).
+"""A refused ``apm uninstall`` keeps apm.lock.yaml truthful (#3656, #3701).
 
-When uninstall stops because a managed file was edited or a user file sits
-inside a managed skill directory, the files it already removed must leave
-the lockfile too: every path the lock still claims is on disk, apm.yml keeps
-the package, and a retry after resolving the listed files completes.
+When a managed file was edited since APM deployed it, uninstall refuses
+before any change: apm.yml, apm.lock.yaml and every file stay as they were,
+every path the lock claims is on disk, and a retry after resolving the
+listed files completes.
 """
 
 from __future__ import annotations
@@ -48,6 +48,9 @@ def test_refused_uninstall_lock_claims_only_files_on_disk(
     (project / _USER_FILE).write_bytes(b"Mine.\n")
     (project / _EDITED).write_bytes(b"Edited.\n")
     before = _lock_claims(project)
+    lock_before = (project / "apm.lock.yaml").read_bytes()
+    manifest_before = (project / "apm.yml").read_bytes()
+    tree_before = tree(project)
 
     refused = kit.run("uninstall", "test/kit")
 
@@ -55,15 +58,15 @@ def test_refused_uninstall_lock_claims_only_files_on_disk(
     assert refused.returncode != 0, text
     assert (project / _USER_FILE).read_bytes() == b"Mine.\n"
     assert (project / _EDITED).read_bytes() == b"Edited.\n"
-    assert "test/kit" in str(load_yaml(project / "apm.yml")["dependencies"]["apm"])
+    assert (project / "apm.yml").read_bytes() == manifest_before
+    assert (project / "apm.lock.yaml").read_bytes() == lock_before
+    assert tree(project) == tree_before
     claims = _lock_claims(project)
-    assert claims, "the retained files must stay claimed"
-    assert claims < before, "removed files must leave the lockfile"
+    assert claims == before
     missing = sorted(path for path in claims if not (project / path).exists())
     assert missing == [], f"lockfile claims removed files: {missing}"
-    assert _EDITED in claims
-    assert "records only the files still on disk" in text, text
-    assert f"[!] Retained user-edited file {_EDITED}" in text, text
+    assert "Uninstall refused" in text, text
+    assert _EDITED in text, text
 
     (project / _USER_FILE).unlink()
     (project / _EDITED).unlink()

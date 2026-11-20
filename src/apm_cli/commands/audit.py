@@ -534,6 +534,29 @@ def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
     )
 
 
+def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:
+    """Name each failed check and its details on stderr (#4224).
+
+    A structured report (json/sarif) keeps stdout machine-readable, so a
+    failing run states its verdict and next steps on stderr, as text does.
+    """
+    if ci_result.passed:
+        return
+    failed = [check for check in ci_result.checks if not check.passed and not check.warned]
+    for check in failed:
+        click.echo(
+            f"{STATUS_SYMBOLS['cross']} {check.name}: {printable_ascii_text(check.message)}",
+            err=True,
+        )
+        for detail in check.details:
+            click.echo(f"    - {printable_ascii_text(detail)}", err=True)
+    summary = ci_result.to_json()["summary"]
+    click.echo(
+        f"{STATUS_SYMBOLS['cross']} {summary['failed']} of {summary['total']} check(s) failed",
+        err=True,
+    )
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -697,6 +720,7 @@ def _audit_ci_gate(
     logger = cfg.logger
 
     from ..install.audit_replay import resolve_ci_audit_materialization
+    from ..install.exec_gate import exec_policy_from_discovery
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
@@ -735,6 +759,11 @@ def _audit_ci_gate(
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
         no_policy=no_policy,
+        policy_provider=(
+            None
+            if no_policy and not policy_source
+            else lambda: exec_policy_from_discovery(fetch_policy)
+        ),
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
@@ -888,6 +917,7 @@ def _audit_ci_gate(
             logger.success(f"CI audit report written to {cfg.output_path}")
         else:
             click.echo(output)
+        _render_ci_failures_to_stderr(ci_result)
     else:
         _render_ci_results(ci_result)
         if drift_findings:
