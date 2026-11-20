@@ -27,6 +27,9 @@ GUARD_REGISTRY_URL_SCHEME = "install-deployment-registry-url-scheme"
 
 _OWNER = "src/apm_cli/deps/registry/url_scheme.py"
 _OWNER_CALL = "registry_url_error"
+# Display-only readers that echo the configured URL (``apm config``); they
+# accept nothing, so they need no scheme decision.
+_DISPLAY_SCOPES = frozenset({("src/apm_cli/commands/config.py", "_show_all_user_config")})
 # User config (``apm config set registry.<name>.url``) is read through these.
 _REGISTRY_CONFIG_READERS = frozenset({"_get_registries_section", "get_registry_config"})
 _OWNER_NEEDLES = (
@@ -87,6 +90,8 @@ def check_registry_url_scheme(provider: FactsProvider) -> tuple[Violation, ...]:
         if index is None:
             continue
         for function in index.functions():
+            if (path, function.name) in _DISPLAY_SCOPES:
+                continue
             reads, strings, callees = _reads_registry_url(index, function)
             if not reads:
                 continue

@@ -299,8 +299,10 @@
       "keyword": "MUST",
       "section": "5.6.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[install-frozen]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_tree_sha256_canonicalisation_invariant"
       ]
     },
@@ -332,8 +334,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[install-frozen]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_reverifies_deployed_file_hashes_and_fails_closed",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_deployed_file_hash_mismatch_fails_closed"
       ]
@@ -344,8 +348,9 @@
       "keyword": "SHOULD",
       "section": "5.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
       ],
       "waivers": [
@@ -1776,9 +1781,13 @@
       "keyword": "MUST",
       "section": "10.9",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_archive_path_traversal_fails_closed"
+        "tests/spec_conformance/test_manifest_reqs.py::test_archive_path_traversal_fails_closed",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_rejected_archive_leaves_no_partial_extraction",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_unsafe_archive_entry_is_rejected[absolute]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_unsafe_archive_entry_is_rejected[dotdot]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_unsafe_archive_entry_is_rejected[symlink]"
       ]
     },
     {
@@ -1815,9 +1824,10 @@
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases"
+        "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
       ]
     },
     {
@@ -1826,7 +1836,7 @@
       "keyword": "MUST",
       "section": "4.2.3",
       "status": "active",
-      "test_count": 17,
+      "test_count": 20,
       "tests": [
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure[https-default]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure[https-openapm-v0.1]",
@@ -1844,7 +1854,10 @@
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure[rfc1918-172-openapm-v0.1]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure[rfc1918-192-default]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure[rfc1918-192-openapm-v0.1]",
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_http_registry_url_without_opt_in"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_http_registry_url_without_opt_in",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[openapm-v0.1]"
       ]
     },
     {
@@ -1853,9 +1866,12 @@
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_redacts_credential_material"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_redacts_credential_material",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files[.env]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files[id_ed25519]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files[server.pem]"
       ]
     },
     {
