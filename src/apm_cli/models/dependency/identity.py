@@ -210,20 +210,6 @@ def effective_policy_host(host: str | None, *, is_local: bool = False) -> str | 
     return normalize_policy_host(host or default_host())
 
 
-def required_package_policy_host(
-    host: str | None, is_local: bool = False, registry_prefix: str | None = None
-) -> str | None:
-    """Return the host an exact ``require`` entry must name for a dependency.
-
-    A registry-proxy host is a transport detail, not the package identity, so
-    a proxied dependency is required by its logical default-host name -- the
-    same rule :func:`build_dependency_unique_key` applies to its lockfile key.
-    """
-    if registry_prefix:
-        return effective_policy_host(None)
-    return effective_policy_host(host, is_local=is_local)
-
-
 def required_package_policy_hosts(entry: str) -> tuple[tuple[str | None, ...], str]:
     """Return ``(hosts, path)`` an exact ``require`` entry identifies.
 

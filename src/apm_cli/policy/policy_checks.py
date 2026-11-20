@@ -242,7 +242,8 @@ def _check_required_packages(
     return CheckResult(
         name="required-packages",
         passed=False,
-        message=f"{len(subjects)} required package(s) missing from manifest",
+        message=f"{len(subjects)} required package(s) missing from manifest."
+        + _wrong_host_hint(index, subjects),
         details=[subject.ref for subject in subjects],
         subjects=tuple(subjects),
     )
@@ -258,12 +259,27 @@ def _unresolved_required_subject(index: DependencyPolicyIndex, pkg_name: str) ->
     if expected is not None:
         return PolicySubject(
             pkg_name,
-            "required by org policy, but declared on another host -- a hostless "
-            "require entry names the default host; write the entry as "
-            f"'{expected}'",
+            f"required by org policy, but declared on another host -- write the "
+            f"require entry as '{expected}'",
             remedy=None,
         )
     return PolicySubject(pkg_name, "required by org policy but not declared", PolicyRemedy.ADD)
+
+
+def _wrong_host_hint(index: DependencyPolicyIndex, subjects: Iterable[PolicySubject]) -> str:
+    """Name the entry to write for each subject declared on another host.
+
+    ``apm audit --ci`` prints the message and details, not subject reasons, so
+    the expected form must be in the message to reach the user.
+    """
+    fixes = [
+        f"'{subject.ref}' as '{expected}'"
+        for subject in subjects
+        if (expected := index.expected_entry(subject.ref)) is not None
+    ]
+    if not fixes:
+        return ""
+    return f" Declared on another host -- write {', '.join(fixes)}."
 
 
 def _check_required_packages_deployed(
@@ -291,19 +307,17 @@ def _check_required_packages_deployed(
         )
 
     index = _required_policy_index(deps, dep_names)
-    lock_keys = {locked.get_unique_key() for locked in lock.dependencies.values()}
-    subjects: list[PolicySubject] = []
-    absent = 0
+    unresolved: list[PolicySubject] = []
+    absent: list[PolicySubject] = []
     for req in policy.effective_require:
         pkg_name = req.split("#", 1)[0]
         match = index.find(pkg_name)
         if match is None:
             # Never skip: the entry cannot locate its lock row by identity.
-            subjects.append(_unresolved_required_subject(index, pkg_name))
-        elif match.lock_key not in lock_keys:
+            unresolved.append(_unresolved_required_subject(index, pkg_name))
+        elif match.locked_in(lock) is None:
             # PRESENCE, not deployment: the package must appear in the lockfile.
-            absent += 1
-            subjects.append(
+            absent.append(
                 PolicySubject(
                     pkg_name,
                     "required package absent from the lockfile -- run "
@@ -312,21 +326,28 @@ def _check_required_packages_deployed(
                 )
             )
 
-    if not subjects:
+    if not unresolved and not absent:
         return CheckResult(
             name="required-packages-deployed",
             passed=True,
             message="All required packages present in lockfile",
         )
-    message = f"{len(subjects)} required package(s) absent from the lockfile."
+    messages: list[str] = []
     if absent:
-        message += (
-            " Hint: run `apm install --no-policy` to repair the lockfile, then reinstall normally."
+        messages.append(
+            f"{len(absent)} required package(s) absent from the lockfile. Hint: run "
+            "`apm install --no-policy` to repair the lockfile, then reinstall normally."
         )
+    if unresolved:
+        messages.append(
+            f"{len(unresolved)} require entry(ies) match no declared package."
+            + _wrong_host_hint(index, unresolved)
+        )
+    subjects = absent + unresolved
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
-        message=message,
+        message=" ".join(messages),
         details=[subject.ref for subject in subjects],
         subjects=tuple(subjects),
     )
@@ -358,7 +379,6 @@ def _check_required_executable_untrusted(
     from ..security.executables import TRUST_DEPLOYED
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_key = {locked.get_unique_key(): locked for locked in lock.dependencies.values()}
     untrusted: list[str] = []
     misnamed: list[PolicySubject] = []
     for req in required:
@@ -368,7 +388,7 @@ def _check_required_executable_untrusted(
             if index.expected_entry(pkg_name) is not None:
                 misnamed.append(_unresolved_required_subject(index, pkg_name))
             continue  # undeclared: presence is audited by required-packages / -deployed
-        locked = lock_by_key.get(match.lock_key)
+        locked = match.locked_in(lock)
         # Trusted when exec_status is absent (no executables declared) or when
         # the executable gate recorded a deployed state. Gated or denied
         # required executables are untrusted.
@@ -393,7 +413,10 @@ def _check_required_executable_untrusted(
             )
         messages.append(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}")
     if misnamed:
-        messages.append(f"{len(misnamed)} required executable(s) name another host.")
+        messages.append(
+            f"{len(misnamed)} required executable(s) name another host."
+            + _wrong_host_hint(index, misnamed)
+        )
     subjects = [
         PolicySubject(
             pkg,
@@ -432,16 +455,16 @@ def _check_required_package_version(
     warnings: list[PolicySubject] = []
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_key = {locked.get_unique_key(): locked for locked in lock.dependencies.values()}
 
     for _req, parts in pinned:
         pkg_name, expected_ref = parts[0], parts[1]
 
-        match = index.find(pkg_name)
         # Without a manifest dependency there is no host/source authority from
-        # which to derive casing. Preserve the legacy raw lock lookup; check 3
-        # reports the required package as absent.
-        locked = lock_by_key.get(match.lock_key if match is not None else pkg_name)
+        # which to derive casing: an undeclared name keeps the legacy raw lock
+        # lookup (check 3 reports it absent). A same-path package declared on
+        # another host is never compared; check 3 names the entry to write.
+        match = index.find_or_undeclared(pkg_name)
+        locked = match.locked_in(lock) if match is not None else None
         if locked is not None:
             actual_ref = locked.resolved_ref or ""
             if actual_ref != expected_ref:

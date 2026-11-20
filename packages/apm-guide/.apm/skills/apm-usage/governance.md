@@ -124,6 +124,8 @@ in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
 and `required-packages-deployed` (apm.lock.yaml) compare that same
 identity; an entry matching no declared package fails both, and the
 message names the entry form when the package is declared on another host.
+A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
+varies per machine, so org-wide policies should host-qualify every entry.
 
 ## Registry source governance (experimental)
 

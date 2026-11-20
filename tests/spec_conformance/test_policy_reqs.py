@@ -479,6 +479,50 @@ def test_policy_host_recognition_grammar_and_scope(monkeypatch, tmp_path):
 
 
 @pytest.mark.req("req-pl-018")
+def test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile(monkeypatch):
+    """Clause (g), require: one identity on both sides, never skipped, local
+    paths hostless, and a manifest default_host: never rebinds a hostless entry."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.models.dependency.manifest_host import ManifestHostScope
+    from apm_cli.policy.policy_checks import (
+        _check_required_packages,
+        _check_required_packages_deployed,
+    )
+    from apm_cli.policy.schema import DependencyPolicy
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+
+    def both(deps, lock, entry):
+        policy = DependencyPolicy(require=(entry,))
+        return (
+            _check_required_packages(deps, policy).passed,
+            _check_required_packages_deployed(deps, lock, policy).passed,
+        )
+
+    def locked(dep):
+        lock = LockFile()
+        lock.add_dependency(LockedDependency.from_dependency_ref(dep, None, 1, None))
+        return lock
+
+    gitlab = DependencyReference.parse("gitlab.example.com/group/sub/pkg")
+    assert both([gitlab], locked(gitlab), "gitlab.example.com/group/sub/pkg") == (True, True)
+    assert both([gitlab], locked(gitlab), "group/sub/pkg") == (False, False)
+    assert both([], LockFile(), "gitlab.example.com/group/sub/pkg") == (False, False)
+
+    local = DependencyReference.parse("./packages/local")
+    assert _check_required_packages([local], DependencyPolicy(require=("./packages/local",))).passed
+
+    with ManifestHostScope("gitlab.corp.example"):
+        shorthand = DependencyReference.parse("contoso/repo")
+    assert both([shorthand], locked(shorthand), "contoso/repo") == (False, False)
+    assert both([shorthand], locked(shorthand), "gitlab.corp.example/contoso/repo") == (
+        True,
+        True,
+    )
+
+
+@pytest.mark.req("req-pl-018")
 def test_policy_identity_casing_matches_dependency_source_semantics():
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.dependency import DependencyReference

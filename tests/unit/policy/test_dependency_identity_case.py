@@ -159,15 +159,15 @@ def test_host_qualified_pattern_matches_effective_host_case_insensitively(
         ({"host": "contoso.ghe.com"}, "contoso.ghe.com/CONTOSO/WIDGET"),
         (
             {"host": "artifacts.example.test", "source": "registry", "artifactory_prefix": "apm"},
-            "CONTOSO/WIDGET",
+            "artifacts.example.test/CONTOSO/WIDGET",
         ),
     ],
 )
 def test_enterprise_and_registry_policy_subjects_are_host_blind(
     options: dict[str, str], require: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Allow/deny hostless patterns match any host; exact require names the
-    default host (a registry proxy host is transport, not identity) (#3993)."""
+    """Allow/deny hostless patterns match any host; an exact require entry
+    names the dependency's written host, else the default host (#3993)."""
     monkeypatch.setenv("GITHUB_HOST", "ghe.enterprise.test")
     dependency = DependencyReference(repo_url="Contoso/Widget", **options)
     assert dependency.get_canonical_dependency_string() == "contoso/widget"

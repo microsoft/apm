@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..models.dependency.identity import (
     effective_policy_host,
@@ -15,6 +15,9 @@ from ..models.dependency.identity import (
     split_policy_pattern_host,
 )
 from .schema import DependencyPolicy, McpPolicy
+
+if TYPE_CHECKING:
+    from ..deps.lockfile import LockedDependency, LockFile
 
 
 class _DependencyPolicySubject(Protocol):
@@ -32,11 +35,6 @@ class _DependencyPolicySubject(Protocol):
 
     def get_canonical_dependency_string(self) -> str:
         """Return the dependency identity used by policy checks."""
-        ...
-
-    @property
-    def required_package_host(self) -> str | None:
-        """Return the host an exact ``require`` entry must name."""
         ...
 
     def get_unique_key(self) -> str:
@@ -63,6 +61,10 @@ class RequiredPackageMatch:
         if self.dependency is None:
             return self.name
         return self.dependency.get_unique_key()
+
+    def locked_in(self, lock: LockFile) -> LockedDependency | None:
+        """Return this dependency's lockfile row -- the only required-check lock read."""
+        return lock.get_dependency(self.lock_key)
 
     @property
     def require_entry(self) -> str:
@@ -99,7 +101,7 @@ class DependencyPolicyIndex:
                 name, case_insensitive_prefix_segments=prefix
             )
             index._names.setdefault(prefix, {}).setdefault(normalized, []).append(
-                RequiredPackageMatch(position, name, dependency.required_package_host, dependency)
+                RequiredPackageMatch(position, name, dependency.policy_host, dependency)
             )
         return index
 
@@ -123,6 +125,18 @@ class DependencyPolicyIndex:
         """Return the first matching canonical name without re-projecting deps."""
         match = self.find(policy_name)
         return match.name if match is not None else None
+
+    def find_or_undeclared(self, policy_name: str) -> RequiredPackageMatch | None:
+        """Return the declared match, else a byte-exact subject for an undeclared name.
+
+        The undeclared subject keeps the legacy raw lock lookup for a package
+        declared on no host at all; a same-path package declared on another
+        host returns ``None``, so its lock row is never read for this entry.
+        """
+        match = self.find(policy_name)
+        if match is not None or self.expected_entry(policy_name) is not None:
+            return match
+        return RequiredPackageMatch(0, policy_name.split("#", 1)[0], None)
 
     def expected_entry(self, policy_name: str) -> str | None:
         """Return the ``require`` spelling of a same-path dependency on another host."""
@@ -283,23 +297,8 @@ def dependency_policy_name_matches(
     dependency: _DependencyPolicySubject,
     policy_name: str,
 ) -> bool:
-    """Return whether an exact policy package name identifies *dependency*.
-
-    The single-dependency form of :meth:`DependencyPolicyIndex.find`: the
-    entry's host (default host when hostless) must equal the dependency's.
-    """
-    hosts, expected_name = required_package_policy_hosts(policy_name)
-    if dependency.required_package_host not in hosts:
-        return False
-    prefix_segments = dependency.case_insensitive_identity_prefix_segments
-    canonical_name = dependency.get_canonical_dependency_string().split("#", 1)[0]
-    return normalize_package_policy_identity(
-        canonical_name,
-        case_insensitive_prefix_segments=prefix_segments,
-    ) == normalize_package_policy_identity(
-        expected_name,
-        case_insensitive_prefix_segments=prefix_segments,
-    )
+    """Return whether an exact policy ``require`` entry identifies *dependency*."""
+    return DependencyPolicyIndex.from_dependencies((dependency,)).find(policy_name) is not None
 
 
 def check_mcp_allowed(

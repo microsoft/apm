@@ -52,7 +52,6 @@ from .identity import (
     effective_policy_host,
     is_case_insensitive_package_identity,
     normalize_package_repo_url,
-    required_package_policy_host,
 )
 from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
 from .materialization import build_materialization_path
@@ -200,11 +199,6 @@ class DependencyReference(ProviderCoordinateMixin):
     def policy_host(self) -> str | None:
         """Return the effective host compared by host-qualified policy patterns."""
         return effective_policy_host(self.host, is_local=self.is_local)
-
-    @property
-    def required_package_host(self) -> str | None:
-        """Return the host an exact policy ``require`` entry must name."""
-        return required_package_policy_host(self.host, self.is_local, self.artifactory_prefix)
 
     @property
     def ref_kind(self) -> str | None:

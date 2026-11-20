@@ -12,6 +12,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.models.dependency.manifest_host import ManifestHostScope
 from apm_cli.policy.policy_checks import (
     _check_required_executable_untrusted,
     _check_required_package_version,
@@ -74,7 +75,10 @@ def test_reporter_repro_hostless_entry_fails_both_with_expected_form() -> None:
         assert not result.passed
         assert result.details == [HOSTLESS]
         assert f"'{QUALIFIED}'" in result.subjects[0].reason
+        # `apm audit --ci` prints the message, not subject reasons.
+        assert f"'{HOSTLESS}' as '{QUALIFIED}'" in result.message
     assert manifest.subjects[0].remedy is None
+    assert "absent from the lockfile" not in deployed.message
     executables = _check_required_executable_untrusted(
         [dep], lock, ExecutablesPolicy(require=(HOSTLESS,))
     )
@@ -145,3 +149,41 @@ def test_version_pin_reads_the_host_qualified_lock_row() -> None:
 
     assert not result.passed
     assert result.details == [f"{QUALIFIED}: expected ref 'v1.0.0', got 'main'"]
+
+
+def test_manifest_default_host_never_rebinds_a_hostless_entry() -> None:
+    with ManifestHostScope("gitlab.corp.example"):
+        dep = DependencyReference.parse("contoso/pkg")
+    lock = LockFile()
+    lock.add_dependency(LockedDependency.from_dependency_ref(dep, None, 1, None))
+
+    hostless, _ = _both([dep], lock, "contoso/pkg")
+    manifest, deployed = _both([dep], lock, "gitlab.corp.example/contoso/pkg")
+
+    assert not hostless.passed
+    assert manifest.passed, manifest.message
+    assert deployed.passed, deployed.message
+
+
+def test_proxy_shaped_reference_is_identified_by_its_written_host() -> None:
+    dep = DependencyReference.parse("attacker.example/artifactory/x/acme/guardrails")
+
+    for entry in ("acme/guardrails", "github.com/acme/guardrails"):
+        assert not _check_required_packages([dep], DependencyPolicy(require=(entry,))).passed
+    assert _check_required_packages(
+        [dep], DependencyPolicy(require=("attacker.example/acme/guardrails",))
+    ).passed
+
+
+def test_version_pin_never_reads_a_same_path_row_from_another_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HOST", "ghes.corp.example")
+    dep = DependencyReference.parse("github.com/owner/repo")
+    lock = _lock("owner/repo", "github.com")
+    policy = DependencyPolicy(require=("owner/repo#v9.9.9",), require_resolution="block")
+
+    result = _check_required_package_version([dep], lock, policy)
+
+    assert result.passed
+    assert not result.subjects

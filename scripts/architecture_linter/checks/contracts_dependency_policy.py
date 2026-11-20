@@ -47,7 +47,6 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
             "normalize_policy_host",
             "split_policy_pattern_host",
             "effective_policy_host",
-            "required_package_policy_host",
             "required_package_policy_hosts",
         ),
     )
@@ -58,15 +57,15 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
             "dependency.case_insensitive_identity_prefix_segments",
             "split_policy_pattern_host(pattern)",
             "dependency.policy_host",
-            "dependency.required_package_host",
             "required_package_policy_hosts(policy_name)",
+            "lock.get_dependency(self.lock_key)",
         ),
         CHECKS: (
             "check_dependency_allowed(dep, policy)",
             "DependencyPolicyIndex.from_dependencies(deps)",
             "index.find_name(pkg_name)",
             "index.find(pkg_name)",
-            "match.lock_key",
+            "match.locked_in(lock)",
         ),
     }
     parallel_case = re.compile(
@@ -117,38 +116,41 @@ def check_policy_identity(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
-_REQUIRED_CHECKS = (
-    "_check_required_packages",
+_LOCK_CHECKS = (
     "_check_required_packages_deployed",
     "_check_required_executable_untrusted",
     "_check_required_package_version",
 )
 _NO_SKIP_CHECKS = ("_check_required_packages", "_check_required_packages_deployed")
+_RAW_LOCK_ACCESS = frozenset(
+    {"dependencies", "get_dependency", "has_dependency", "get_unique_key", "find_name"}
+)
 
 
 def _required_lock_identity_findings(tree_index) -> list[Violation]:
     """Closed world for required-package identity (#3993).
 
-    Every required-package check resolves an entry through the host-aware
-    ``DependencyPolicyIndex.find``; a check that reads the lockfile addresses
-    rows only by the matched dependency's ``lock_key``, never by a host-blind
-    name; and the two presence checks never skip an entry.
+    A required check that reads the lockfile resolves the entry through the
+    host-aware ``DependencyPolicyIndex`` and reads the row only through
+    ``RequiredPackageMatch.locked_in``; any other lock accessor or host-blind
+    name lookup is a second identity. The two presence checks never skip.
     """
     findings: list[Violation] = []
-    for name in _REQUIRED_CHECKS:
+    for name in (*_LOCK_CHECKS, *_NO_SKIP_CHECKS):
         function = tree_index.function(name)
         if function is None:
             findings.append(_summary(POLICY_RULE, CHECKS, f"{name} must exist"))
             continue
         nodes = tuple(tree_index.own_scope(function))
         attributes = {node.attr for node in nodes if isinstance(node, ast.Attribute)}
-        reads_lock = "get_unique_key" in attributes
-        if reads_lock and ("lock_key" not in attributes or "find_name" in attributes):
+        if name in _LOCK_CHECKS and (
+            "locked_in" not in attributes or attributes & _RAW_LOCK_ACCESS
+        ):
             findings.append(
                 _summary(
                     POLICY_RULE,
                     CHECKS,
-                    f"{name} must address lock rows by DependencyPolicyIndex.find(...).lock_key",
+                    f"{name} must read lock rows only via RequiredPackageMatch.locked_in",
                 )
             )
         if name in _NO_SKIP_CHECKS and any(isinstance(node, ast.Continue) for node in nodes):

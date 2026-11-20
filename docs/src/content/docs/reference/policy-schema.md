@@ -162,6 +162,8 @@ dependencies:
 
 `required-packages` (declared in `apm.yml`) and `required-packages-deployed` (present in `apm.lock.yaml`) compare the same identity. An entry that matches no declared package fails both checks; when the package is declared on another host, the message names the entry to write.
 
+A project's `default_host:` does not change what a hostless entry names, and `GITHUB_HOST` can differ between machines: for an org-wide policy, write every `require` entry with its host. Ports are ignored, as for `deny`.
+
 ## mcp
 
 Rules over MCP server references, including transitive ones declared by deep dependencies.

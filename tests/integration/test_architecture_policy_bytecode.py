@@ -59,24 +59,29 @@ def test_policy_index_guard_rejects_source_prefix_bypass() -> None:
     ("original", "mutation", "message"),
     [
         (
-            "            subjects.append(_unresolved_required_subject(index, pkg_name))\n"
-            "        elif match.lock_key not in lock_keys:",
-            "            continue\n        elif match.lock_key not in lock_keys:",
+            "            unresolved.append(_unresolved_required_subject(index, pkg_name))\n",
+            "            continue\n",
             "_check_required_packages_deployed must not skip a require entry",
         ),
         (
-            "        elif match.lock_key not in lock_keys:",
-            "        elif match.name not in lock_keys:",
-            "_check_required_packages_deployed must address lock rows by "
-            "DependencyPolicyIndex.find(...).lock_key",
+            "        elif match.locked_in(lock) is None:",
+            "        elif lock.get_dependency(match.name) is None:",
+            "_check_required_packages_deployed must read lock rows only via "
+            "RequiredPackageMatch.locked_in",
+        ),
+        (
+            "        locked = match.locked_in(lock) if match is not None else None\n",
+            "        locked = lock.dependencies.get(pkg_name)\n",
+            "_check_required_package_version must read lock rows only via "
+            "RequiredPackageMatch.locked_in",
         ),
     ],
-    ids=["skip-unresolved-entry", "host-blind-lock-lookup"],
+    ids=["skip-unresolved-entry", "host-blind-lock-lookup", "raw-version-lock-lookup"],
 )
 def test_required_package_guard_rejects_skip_and_host_blind_lock_lookup(
     original: str, mutation: str, message: str
 ) -> None:
-    """#3993: required-package presence never skips and never reads the lock host-blind."""
+    """#3993: required-package checks never skip and never read the lock host-blind."""
     path = "src/apm_cli/policy/policy_checks.py"
     source = (ROOT / path).read_text(encoding="utf-8")
     mutated = source.replace(original, mutation, 1)
