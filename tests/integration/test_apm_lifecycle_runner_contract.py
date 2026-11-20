@@ -364,8 +364,10 @@ _NON_ASCII_MUTANT = (
 )
 
 
-def test_output_oracle_kills_the_recorded_non_ascii_mutant(tmp_path: Path) -> None:
-    real = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+def test_output_oracle_kills_the_recorded_non_ascii_mutant(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    real = ApmLifecycleRunner((str(apm_binary_path),))
     assert real.run(("--version",), cwd=tmp_path, env=os.environ).returncode == 0
 
     mutant = ApmLifecycleRunner((sys.executable, str(_NON_ASCII_MUTANT)))
