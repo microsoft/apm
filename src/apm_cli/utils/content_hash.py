@@ -43,8 +43,10 @@ class PackageDigests:
         return self.framed if framed else self.legacy
 
 
-def compute_package_digests(package_path: Path, *, exclude: Collection[str] = ()) -> PackageDigests:
-    """Hash *package_path* once under both content-hash streams.
+def compute_package_digests(
+    package_path: Path, *, exclude: Collection[str] = (), legacy: bool = True
+) -> PackageDigests:
+    """Hash *package_path* once under the framed stream and, unless *legacy* is False, the legacy one.
 
     The legacy stream feeds each relative path and the file's raw bytes into
     one SHA-256. The framed stream is the encoding the native plugin pin uses
@@ -67,8 +69,8 @@ def compute_package_digests(package_path: Path, *, exclude: Collection[str] = ()
             download result or the lockfile record, never from disk, so the
             hash keeps describing the upstream payload.
     """
-    legacy, framed = _hash_package_tree(package_path, exclude, legacy=True, framed=True)
-    return PackageDigests(legacy, framed)
+    legacy_digest, framed = _hash_package_tree(package_path, exclude, legacy=legacy, framed=True)
+    return PackageDigests(legacy_digest, framed)
 
 
 def _hash_package_tree(

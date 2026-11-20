@@ -133,6 +133,7 @@ class LocalDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.install.phases.local_content import _copy_local_package
+        from apm_cli.install.source_helpers import package_digests
         from apm_cli.models.apm_package import (
             APMPackage,
             GitReferenceType,
@@ -141,7 +142,6 @@ class LocalDependencySource(DependencySource):
             ResolvedReference,
         )
         from apm_cli.models.validation import validate_apm_package
-        from apm_cli.utils.content_hash import compute_package_digests
 
         ctx = self.ctx
         dep_ref = self.dep_ref
@@ -222,7 +222,7 @@ class LocalDependencySource(DependencySource):
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
         # Hash the validated copy before synthesis or integration, as frozen preflight does.
-        local_digests = compute_package_digests(install_path)
+        local_digests = package_digests(ctx, install_path)
         materialize_marketplace_manifest(dep_ref, install_path)
         validation = validate_apm_package(
             install_path,

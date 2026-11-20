@@ -16,7 +16,7 @@ from apm_cli.deps.lockfile import (
     require_supported_lockfile_version,
 )
 from apm_cli.install.phases._redownload import _should_skip_redownload
-from apm_cli.install.phases.content_hash_stream import promote_content_hashes
+from apm_cli.install.phases.content_hash_stream import PROMOTED_MESSAGE, promote_content_hashes
 from apm_cli.install.source_helpers import record_package_digests
 from apm_cli.utils.content_hash import compute_package_digests
 
@@ -211,7 +211,6 @@ def test_cheap_blockers_stop_promotion_before_any_tree_is_hashed(tmp_path: Path)
     assert lock.to_yaml() == before
     (message,) = [call.args[0] for call in ctx.logger.verbose_detail.call_args_list]
     assert "./vendored" in message and "reinstall" in message
-    ctx.logger.info.assert_not_called()
 
 
 def test_promotion_explains_the_one_time_lockfile_change(tmp_path: Path) -> None:
@@ -219,7 +218,25 @@ def test_promotion_explains_the_one_time_lockfile_change(tmp_path: Path) -> None
     existing = _legacy_lock("1", {"acme/widgets": compute_package_digests(root).legacy})
     ctx = _ctx(tmp_path, existing)
 
-    promote_content_hashes(ctx, LockFile.from_yaml(existing.to_yaml()))
+    assert promote_content_hashes(ctx, LockFile.from_yaml(existing.to_yaml())) is True
+    assert promote_content_hashes(ctx, LockFile()) is False  # nothing to promote
+    assert 'lockfile_version "4"' in PROMOTED_MESSAGE and "APM 0.37" in PROMOTED_MESSAGE
 
-    (message,) = [call.args[0] for call in ctx.logger.info.call_args_list]
-    assert 'lockfile_version "4"' in message and "APM 0.37" in message
+
+@pytest.mark.parametrize("existing_version", [None, "4", "1"])
+def test_recording_hashes_the_legacy_stream_only_for_a_legacy_lock(
+    tmp_path: Path, existing_version: str | None
+) -> None:
+    from apm_cli.install.source_helpers import package_digests
+
+    root = _package(tmp_path, "acme/widgets", b"payload")
+    existing = None
+    if existing_version == "1":
+        existing = _legacy_lock("1", {"acme/widgets": compute_package_digests(root).legacy})
+    elif existing_version == "4":
+        existing = LockFile()
+
+    digests = package_digests(_ctx(tmp_path, existing), root)
+
+    assert digests.framed == compute_package_digests(root).framed
+    assert (digests.legacy != "") is (existing_version == "1")

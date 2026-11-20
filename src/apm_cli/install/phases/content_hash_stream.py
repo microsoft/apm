@@ -13,14 +13,17 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
 
-_PROMOTED = (
+PROMOTED_MESSAGE = (
     'Upgraded apm.lock.yaml to lockfile_version "4" (hash framing hardening); '
     "every package content_hash changes once. Commit it once CI runs APM 0.37 or later."
 )
 
 
-def promote_content_hashes(ctx: Any, lockfile: LockFile) -> None:
+def promote_content_hashes(ctx: Any, lockfile: LockFile) -> bool:
     """Put every package row of *lockfile* on one content-hash stream.
+
+    Returns True when a version 1-3 lockfile moved to the framed stream, so
+    the caller can explain the one-time change once the write succeeds.
 
     Rows recorded this run carry a framed digest from the same read. When the
     existing lockfile is already framed, its carried rows are framed too.
@@ -33,7 +36,7 @@ def promote_content_hashes(ctx: Any, lockfile: LockFile) -> None:
     recorded_framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))
     if getattr(ctx, "frozen", False) or getattr(ctx, "dry_run", False):
         lockfile.set_content_hash_stream(framed=recorded_framed)
-        return
+        return False
     recorded = getattr(ctx, "package_hashes", {})
     recorded_framed_digests = getattr(ctx, "package_framed_hashes", {})
     promoted: dict[str, str] = {}
@@ -57,13 +60,11 @@ def promote_content_hashes(ctx: Any, lockfile: LockFile) -> None:
         promoted[dep_key] = framed
     if blocked is not None:
         _keep_stream(ctx, lockfile, blocked, recorded_framed)
-        return
+        return False
     for dep_key, framed in promoted.items():
         lockfile.dependencies[dep_key].content_hash = framed
     lockfile.set_content_hash_stream(framed=True)
-    logger = getattr(ctx, "logger", None)
-    if not recorded_framed and promoted and logger is not None:
-        logger.info(_PROMOTED)
+    return not recorded_framed and bool(promoted)
 
 
 def _carried_install_path(ctx: Any, dep: LockedDependency):

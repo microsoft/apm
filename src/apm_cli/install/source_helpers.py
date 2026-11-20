@@ -161,6 +161,15 @@ def carried_licenses_for(ctx: Any, dep_key: str, locked_dep: Any) -> tuple:
     return tuple(getattr(locked_dep, "carried_licenses", ()) or ())
 
 
+def package_digests(ctx: Any, package_path: Path, exclude: Any = ()) -> Any:
+    """Digests to record: the legacy stream only while the existing lock uses it."""
+    from apm_cli.deps.lockfile import records_framed_content_hashes
+    from apm_cli.utils.content_hash import compute_package_digests
+
+    framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))
+    return compute_package_digests(package_path, exclude=exclude, legacy=not framed)
+
+
 def record_package_digests(ctx: Any, dep_key: str, digests: Any) -> str:
     """Record one package's digests in the stream the existing lockfile uses.
 
@@ -191,7 +200,6 @@ def record_carried_package_hash(
     Returns the excluded package-relative paths.
     """
     from apm_cli.deps.carried_license import carried_copies_intact, carried_license_paths
-    from apm_cli.utils import content_hash
 
     if package_info is not None:
         carried = tuple(getattr(package_info, "carried_licenses", ()) or ())
@@ -202,9 +210,7 @@ def record_carried_package_hash(
     ctx.package_carried_licenses[dep_key] = carried
     excluded = carried_license_paths(carried)
     if install_path.is_dir():
-        record_package_digests(
-            ctx, dep_key, content_hash.compute_package_digests(install_path, exclude=excluded)
-        )
+        record_package_digests(ctx, dep_key, package_digests(ctx, install_path, excluded))
     return excluded
 
 
