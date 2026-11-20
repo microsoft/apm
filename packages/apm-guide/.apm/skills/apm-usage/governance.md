@@ -124,8 +124,10 @@ in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
 and `required-packages-deployed` (apm.lock.yaml) compare that same
 identity; an entry matching no declared package fails both, and the
 message names the other host and the entry that would match it (for a
-trusted host). An explicit proxy path (`host/artifactory/...`) is identified
-by the proxy host; prefer `PROXY_REGISTRY_URL` with plain shorthand.
+trusted host). An explicit proxy path (`art.example.com/artifactory/github/acme/tools`)
+is identified by the proxy host: require `art.example.com/acme/tools`; both
+checks read the lockfile entry written under that host. Prefer
+`PROXY_REGISTRY_URL` with plain shorthand to keep default-host entries.
 A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
 varies per machine, so org-wide policies should host-qualify every entry.
 Required-package matching follows source replacement: with a root
