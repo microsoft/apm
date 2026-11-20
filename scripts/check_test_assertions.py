@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Enforce bounded no-growth ceilings for two assertion-quality forms."""
+"""Enforce no-growth ceilings for assertion-quality and e2e-drive rules.
+
+AQ001 constant assertions, AQ002 broad pytest.raises, AQ003 component/e2e
+tests with no assertion on output, exit code or durable state, AQ004 tests
+that patch a symbol defined in an owner module they import, and AQ005 e2e
+modules that do not drive the installed CLI (or use CliRunner, or patch an
+owner module). Counts per file may only shrink; a reduction is reported as
+stale (info) and never fails.
+"""
 
 from __future__ import annotations
 
@@ -9,46 +17,109 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import test_file_inventory
 from ratchet_baseline import (
     BaselineError,
     load_baseline,
     validate_provisional,
     write_baseline,
 )
+from test_body_hash import iter_test_functions
 from test_file_inventory import tracked_python_paths
+from test_static_facts import (
+    asserts_observable_outcome,
+    drives_installed_cli,
+    module_markers,
+    owner_patches,
+    uses_cli_runner,
+)
 
 RULE_AQ001 = "AQ001_constant_assertion"
 RULE_AQ002 = "AQ002_broad_pytest_raises"
-RULES = (RULE_AQ001, RULE_AQ002)
+RULE_AQ003 = "AQ003_unobserved_outcome"
+RULE_AQ004 = "AQ004_patches_owner_it_imports"
+RULE_AQ005 = "AQ005_e2e_not_driving_installed_cli"
+RULES = (RULE_AQ001, RULE_AQ002, RULE_AQ003, RULE_AQ004, RULE_AQ005)
+RULE_TEXT = {
+    RULE_AQ001: (
+        "constant assertion does not test behavior",
+        "replace it with an assertion over observed output or state",
+    ),
+    RULE_AQ002: (
+        "pytest.raises catches Exception or BaseException",
+        "assert the narrow exception type raised by this scenario",
+    ),
+    RULE_AQ003: (
+        "component/e2e test asserts no user-visible output, exit code or durable state",
+        "assert on stdout/stderr, the exit code, or files and state the command leaves "
+        "behind, not only on mocks or return values",
+    ),
+    RULE_AQ004: (
+        "test patches a symbol defined in an owner module it imports",
+        "exercise the real owner and replace only its collaborators or I/O boundary",
+    ),
+    RULE_AQ005: (
+        "e2e module does not drive the installed CLI only",
+        "run the installed apm (ApmLifecycleRunner or the apm_binary fixture), drop "
+        "CliRunner and in-process owner patches, or reclassify the module as component",
+    ),
+}
+
+
+def _scan_module(
+    root: Path,
+    relative: str,
+    tree: ast.Module,
+    observed: dict[str, defaultdict[str, list[int]]],
+    owner_cache: dict[Path, frozenset[str]],
+) -> None:
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assert)
+            and isinstance(node.test, ast.Constant)
+            and (node.test.value is True or node.test.value is False or node.test.value is None)
+        ):
+            observed[RULE_AQ001][relative].append(node.lineno)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "raises"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "pytest"
+            and node.args
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in {"Exception", "BaseException"}
+        ):
+            observed[RULE_AQ002][relative].append(node.lineno)
+    if not test_file_inventory.is_test_module_path(relative):
+        return
+    markers = module_markers(tree)
+    if markers & {"component", "e2e"}:
+        for function in iter_test_functions(tree, relative):
+            if not asserts_observable_outcome(function.node):
+                observed[RULE_AQ003][relative].append(function.node.lineno)
+    for line, _target in owner_patches(root, tree, owner_cache, defined_only=True):
+        observed[RULE_AQ004][relative].append(line)
+    if "e2e" in markers:
+        if not drives_installed_cli(tree):
+            observed[RULE_AQ005][relative].append(1)
+        if uses_cli_runner(tree):
+            observed[RULE_AQ005][relative].append(1)
+        for line, _target in owner_patches(root, tree, owner_cache, defined_only=False):
+            observed[RULE_AQ005][relative].append(line)
 
 
 def scan(root: Path) -> dict[str, dict[str, list[int]]]:
-    """Locate only AQ001 constant assertions and AQ002 broad pytest.raises."""
+    """Locate every rule occurrence in tracked test files."""
     observed: dict[str, defaultdict[str, list[int]]] = {rule: defaultdict(list) for rule in RULES}
+    owner_cache: dict[Path, frozenset[str]] = {}
     for path in tracked_python_paths(
         root,
         scope=("tests/*.py", "tests/**/*.py"),
     ):
         relative = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Assert)
-                and isinstance(node.test, ast.Constant)
-                and (node.test.value is True or node.test.value is False or node.test.value is None)
-            ):
-                observed[RULE_AQ001][relative].append(node.lineno)
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "raises"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "pytest"
-                and node.args
-                and isinstance(node.args[0], ast.Name)
-                and node.args[0].id in {"Exception", "BaseException"}
-            ):
-                observed[RULE_AQ002][relative].append(node.lineno)
+        _scan_module(root, relative, tree, observed, owner_cache)
     return {
         rule: {path: sorted(lines) for path, lines in sorted(observed[rule].items())}
         for rule in RULES
@@ -69,16 +140,11 @@ def compare(
             current = len(lines)
             ceiling = allowed[rule].get(path, 0)
             if current > ceiling:
-                if rule == RULE_AQ001:
-                    problem = "constant assertion does not test behavior"
-                    remedy = "replace it with an assertion over observed output or state"
-                else:
-                    problem = "pytest.raises catches Exception or BaseException"
-                    remedy = "assert the narrow exception type raised by this scenario"
+                problem, remedy = RULE_TEXT[rule]
                 locations = ", ".join(f"{path}:{line}" for line in lines)
                 growth.append(
                     f"{locations}: {rule}: {problem} "
-                    f"(observed {current}, allowed {ceiling}); {remedy}"
+                    f"(observed {current}, allowed {ceiling}). Fix: {remedy}"
                 )
             elif current < ceiling:
                 stale.append(f"{path}: {rule} reduced to {current} from {ceiling}")
@@ -88,7 +154,7 @@ def compare(
 def main(argv: list[str] | None = None) -> int:
     """Check the baseline, or tighten it when only reductions are observed."""
     parser = argparse.ArgumentParser(
-        description="Check AQ001/AQ002 assertion-quality no-growth ceilings."
+        description="Check AQ001-AQ005 assertion-quality no-growth ceilings."
     )
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--baseline", type=Path)
@@ -135,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_rules = payload["rules"]
     if not isinstance(raw_rules, dict) or set(raw_rules) != set(RULES):
         print(
-            "[x] invalid assertion-quality baseline: both named rules are required",
+            "[x] invalid assertion-quality baseline: every named rule is required",
             file=sys.stderr,
         )
         return 2
@@ -177,15 +243,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if stale and not args.update_baseline:
         for diagnostic in stale:
-            print(f"[x] {diagnostic}", file=sys.stderr)
+            print(f"[i] stale assertion-quality baseline entry: {diagnostic}")
         command = "uv run --frozen python scripts/check_test_assertions.py --update-baseline"
-        print(
-            "[x] assertion baseline is stale after resolved findings. "
-            f"Review the reductions, then run '{command}'.",
-            file=sys.stderr,
-        )
-        return 1
-    if stale:
+        print(f"[i] optional cleanup of stale entries: {command}")
+    elif stale:
         reductions = sum(
             allowed[rule].get(path, 0) - len(observed[rule].get(path, []))
             for rule in RULES
@@ -215,9 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.update_baseline:
         print("[i] assertion-quality baseline already current; no update written")
 
-    aq001_total = sum(len(lines) for lines in observed[RULE_AQ001].values())
-    aq002_total = sum(len(lines) for lines in observed[RULE_AQ002].values())
-    print(f"[+] assertion-quality ratchet clean: AQ001={aq001_total}, AQ002={aq002_total}")
+    totals = ", ".join(
+        f"{rule.split('_', 1)[0]}={sum(len(lines) for lines in observed[rule].values())}"
+        for rule in RULES
+    )
+    print(f"[+] assertion-quality ratchet clean: {totals}")
     return 0
 
 

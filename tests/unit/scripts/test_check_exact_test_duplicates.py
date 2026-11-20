@@ -358,3 +358,27 @@ def test_provisional_baseline_requires_explicit_allow(tmp_path: Path) -> None:
     assert provisional.stderr == ""
     assert finalized.returncode == 0
     assert finalized.stderr == ""
+
+
+def test_equal_copy_report_lists_only_d5_equal_copies(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    fixture = "import pytest\n\n@pytest.fixture\ndef value():\n    return {}\n\n"
+    body = "def test_value(value):\n    assert value == {}\n"
+    _write(root, "unit/test_a.py", fixture.replace("{}", "1") + body.replace("{}", "1"))
+    _write(root, "unit/test_b.py", fixture.replace("{}", "1") + body.replace("{}", "1"))
+    _write(root, "unit/test_c.py", fixture.replace("{}", "2") + body.replace("{}", "1"))
+    _write(
+        root,
+        "unit/test_d.py",
+        fixture.replace("{}", "1") + "@pytest.mark.slow\n" + body.replace("{}", "1"),
+    )
+    _write(root, "integration/test_e.py", fixture.replace("{}", "1") + body.replace("{}", "1"))
+    _track_tests(root)
+
+    result = _run(root, root / "unused.json", "--report-equal-copies")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "[i] equal copies of tests/unit/test_a.py::test_value: tests/unit/test_b.py::test_value",
+        "[i] equal-copy report (D5): 1 group(s), 1 deletable copy(ies); report only",
+    ]

@@ -24,6 +24,7 @@ from ratchet_baseline import (
     write_baseline,
 )
 from test_body_hash import ALGORITHM, body_digest, iter_test_functions
+from test_equal_copies import CorpusIndex, equal_copy_groups
 from test_file_inventory import tracked_python_paths
 
 SCHEMA_VERSION = 2
@@ -225,6 +226,26 @@ def _validate(payload: dict[str, object]) -> tuple[set[str], set[str]]:
     )
 
 
+def report_equal_copies(root: Path) -> int:
+    """Print every D5 equal-copy group; never fails on findings."""
+    try:
+        paths = [
+            path.relative_to(root).as_posix()
+            for path in tracked_python_paths(root, scope=tuple(SCOPE))
+        ]
+        groups = equal_copy_groups(CorpusIndex(root), paths)
+    except (OSError, UnicodeError, ValueError, SyntaxError) as error:
+        print(f"[x] equal-copy scan failed: {error}", file=sys.stderr)
+        return 2
+    for keep, copies in groups:
+        print(f"[i] equal copies of {keep}: {', '.join(copies)}")
+    print(
+        f"[i] equal-copy report (D5): {len(groups)} group(s), "
+        f"{sum(len(copies) for _keep, copies in groups)} deletable copy(ies); report only"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Check the baseline, or prune stale entries when no growth is observed."""
     parser = argparse.ArgumentParser(
@@ -233,6 +254,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--update-baseline", action="store_true")
+    parser.add_argument(
+        "--report-equal-copies",
+        action="store_true",
+        help="Report-only: list D5 equal copies (deletable twins) and exit 0.",
+    )
     parser.add_argument(
         "--allow-provisional",
         action="store_true",
@@ -246,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.baseline is not None
         else root / "tests" / "quality" / "exact_test_duplicates.json"
     )
+    if args.report_equal_copies:
+        return report_equal_copies(root)
     try:
         payload = load_baseline(baseline, label="test-duplicate")
         provisional = validate_provisional(

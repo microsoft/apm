@@ -246,6 +246,20 @@ with one entry per line; entries may only be removed.
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
 ```
 
+`scripts/check_test_assertions.py` (baseline
+`tests/quality/assertion_quality_baseline.json`) ratchets per-file counts the
+same way: AQ001 constant assertions, AQ002 `pytest.raises(Exception)`, AQ003
+component or e2e tests that assert no user-visible output, exit code or durable
+state, AQ004 tests that patch a symbol defined in an owner module they import,
+and AQ005 e2e modules that do not drive the installed CLI (they use `CliRunner`,
+patch an owner module, or never run `apm` through `ApmLifecycleRunner` or the
+`apm_binary` fixture).
+
+For consolidation, `uv run --frozen python scripts/check_exact_test_duplicates.py
+--report-equal-copies` lists equal copies that are safe to delete. A copy
+qualifies only if body, decorators, fixtures, class context, module bindings and
+CI lane all match its kept twin. The report never fails and never edits files.
+
 Moving a listed test or module to another directory under the same name keeps
 its allowance and is reported as moved. Prune stale or moved duplicate entries
 with `--update-baseline`; edit stale or moved taxonomy entries by hand.

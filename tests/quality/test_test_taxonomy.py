@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -10,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+
+from scripts.test_static_facts import module_markers
 
 RATCHET_TEST_SCOPE = "repository"
 
@@ -544,6 +547,26 @@ def test_tm012_missing_lifecycle_law_promise_fails() -> None:
         "Fix: remove it, or add the law to tests/fixtures/lifecycle_bug_ledger.json "
         "property_catalog.",
     ]
+
+
+def test_tm013_static_marker_reader_agrees_with_collection(
+    marker_inventory: TaxonomyInventory,
+) -> None:
+    disagreements = {
+        module: (sorted(static), sorted(collected))
+        for module, collected in marker_inventory.modules.items()
+        if (
+            static := set(
+                module_markers(ast.parse((REPO_ROOT / module).read_text(encoding="utf-8")))
+            )
+            & BEHAVIORAL_MARKERS
+        )
+        != set(_behavioral(collected))
+    }
+    assert disagreements == {}, (
+        "scripts/test_static_facts.py module_markers must read the same module-level "
+        f"pytestmark that pytest collects: {disagreements}"
+    )
 
 
 def test_tm006_ratchet_files_are_canonical_json() -> None:

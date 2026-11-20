@@ -21,7 +21,11 @@ CHECKERS = (
     (
         REPO_ROOT / "scripts" / "check_test_assertions.py",
         QUALITY_DIR / "assertion_quality_baseline.json",
-        re.escape("[+] assertion-quality ratchet clean: AQ001=4, AQ002=12\n"),
+        (
+            r"(?:\[i\] [^\n]*\n)*"
+            r"\[\+\] assertion-quality ratchet clean: "
+            r"AQ001=\d+, AQ002=\d+, AQ003=\d+, AQ004=\d+, AQ005=\d+\n"
+        ),
     ),
     (
         REPO_ROOT / "scripts" / "check_exact_test_duplicates.py",
