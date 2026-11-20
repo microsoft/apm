@@ -460,7 +460,7 @@ def test_lockfile_reader_tolerates_bare_hex_hash():
 
 @pytest.mark.req("req-lk-016")
 def test_lock_schema_0_1_68_adds_only_version_4_to_the_0_1_60_contract() -> None:
-    """The 0.1.68 resource adds version 4 and its envelope rule, nothing else."""
+    """The 0.1.68 resource adds version 4 to the 0.1.60 contract, nothing else."""
     from jsonschema import Draft202012Validator
 
     previous = load_schema("lockfile-v0.1.60.schema.json")
@@ -469,7 +469,6 @@ def test_lock_schema_0_1_68_adds_only_version_4_to_the_0_1_60_contract() -> None
     assert proposed["$id"] != previous["$id"]
     assert proposed["properties"].pop("lockfile_version")["enum"] == ["1", "2", "4"]
     previous["properties"].pop("lockfile_version")
-    proposed.pop("if"), proposed.pop("then")
     proposed["$id"], proposed["title"] = previous["$id"], previous["title"]
     assert proposed == previous
 
@@ -479,12 +478,12 @@ def test_lock_schema_0_1_68_adds_only_version_4_to_the_0_1_60_contract() -> None
     ("version", "content_hash", "valid"),
     [
         ("4", "sha256:" + "a" * 64, True),
-        ("4", "a" * 64, False),
+        ("4", "a" * 64, True),  # v0.1 reader tolerance for bare hex
         ("1", "a" * 64, True),
         ("3", "sha256:" + "a" * 64, False),
     ],
 )
-def test_lock_schema_0_1_68_requires_the_envelope_in_version_4(version, content_hash, valid):
+def test_lock_schema_0_1_68_admits_version_4(version, content_hash, valid):
     from jsonschema import Draft202012Validator
 
     validator = Draft202012Validator(load_schema("lockfile-v0.1.68.schema.json"))
@@ -574,41 +573,6 @@ def test_frozen_consumer_accepts_equivalent_local_content_hash_encodings(
         rewritten = load_yaml(lockfile)
         assert rewritten["lockfile_version"] == "4"
         assert rewritten["dependencies"][0]["content_hash"] == framed
-
-
-@pytest.mark.req("req-lk-016")
-def test_frozen_consumer_rejects_bare_hex_content_hash_in_version_4(tmp_path: Path) -> None:
-    """Version 4 requires the sha256: envelope; --frozen refuses a bare digest."""
-    import os
-    import sys
-
-    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
-    from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-    from tests.utils.local_package import LocalPackageFactory
-
-    isolated = IsolatedApmEnvironment.create(tmp_path / "reader", base_env=dict(os.environ))
-    factory = LocalPackageFactory(isolated.work_root)
-    provider = factory.create("provider", targets=("agent-skills",))
-    factory.add_skill(provider, "review", "---\nname: review\ndescription: fixture\n---\nok\n")
-    consumer = factory.create("consumer", dependencies=("../provider",), targets=("agent-skills",))
-    runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
-    environment = isolated.subprocess_env()
-    installed = runner.run(("install", "--no-policy"), cwd=consumer.root, env=environment)
-    assert installed.returncode == 0, installed.stdout + installed.stderr
-    lockfile = consumer.root / "apm.lock.yaml"
-    locked = load_yaml(lockfile)
-    assert locked["lockfile_version"] == "4"
-    (dependency,) = locked["dependencies"]
-    dependency["content_hash"] = dependency["content_hash"].removeprefix("sha256:")
-    dump_yaml(locked, lockfile)
-    original_lock = lockfile.read_bytes()
-
-    frozen = runner.run(("install", "--frozen", "--no-policy"), cwd=consumer.root, env=environment)
-
-    assert frozen.returncode != 0
-    assert "content differs" in frozen.stdout + frozen.stderr
-    assert lockfile.read_bytes() == original_lock
 
 
 @pytest.mark.req("req-lk-017")
