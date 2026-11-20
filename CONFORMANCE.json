@@ -1105,12 +1105,13 @@
       "keyword": "MUST",
       "section": "6.3.1",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_qualified_patterns_match_effective_host",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
-        "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile"
+        "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ]
     },
     {
@@ -1324,8 +1325,9 @@
       "keyword": "MUST",
       "section": "4.8.1",
       "status": "active",
-      "test_count": 5,
+      "test_count": 6,
       "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[changed-source]",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[missing-baseline]",
         "tests/spec_conformance/test_source_replacement_lifecycle.py::test_frozen_replacement_refuses_untrusted_content_without_rewriting[missing-source]",

@@ -149,7 +149,9 @@ that package already deployed.
 `apm approve` and `apm deny` write the project `apm.yml` by default, so the
 whole team shares the decision. `--user` writes your personal APM config
 (`~/.apm/config.json`) instead: it applies to your machine alone, cannot
-override an organization or project deny, and never turns the gate on.
+override an organization or project deny. A personal approval never turns the gate on;
+a personal deny (`apm deny --user`) does, so other unapproved executables park on your
+machine too.
 `apm audit --ci` ignores personal approvals when it checks MCP servers.
 
 If your organization publishes a recommended set, accept it with

@@ -131,7 +131,7 @@ Some registries return `201` with an empty body; APM still treats the upload as 
 
 ## Related
 
-- [Registries (guide)](../../../guides/registries/) -- declare registries, auth, default routing, and policy.
+- [Registries (guide)](../../registries/) -- declare registries, auth, default routing, and policy.
 - [`apm pack`](../pack/) -- plugin bundles and marketplace artifacts (different layout from registry publish).
 - [`apm install`](../install/) -- consumer side; installs registry packages with `resolved_hash` verification.
 - [Registry HTTP API](../../registry-http-api/) -- wire contract for `PUT .../versions/{version}`.

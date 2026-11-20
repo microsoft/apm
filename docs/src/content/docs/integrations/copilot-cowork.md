@@ -142,4 +142,4 @@ This keeps the lockfile portable across machines, users, and OneDrive tenants. A
 - Project-scope error: rerun with `--global`.
 - Non-skill primitives skipped: expected behaviour. Cowork only deploys skills.
 
-See also [IDE and Tool Integration](../ide-tool-integration/) and [apm experimental](../../reference/experimental/).
+See also [IDE and Tool Integration](../../consumer/choose-harnesses/) and [apm experimental](../../reference/experimental/).
