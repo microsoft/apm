@@ -1,8 +1,9 @@
 """Egress rows for HOST ghe.com: a GitHub Enterprise Cloud tenant (*.ghe.com).
 
-Unregistered, missing world support: E2|HOST=ghe.com|*|EGRESS=marketplace-fetch
-(the CLI reads a ghe.com catalog through a repository contents API route the
-world does not serve for this host; marketplace add finds no marketplace.json).
+The world answers the tenant's git host, its ``api.`` subdomain and
+``https://<host>/api/v3`` (contents and commits), so api-probe, policy-fetch
+and marketplace-fetch all reach the tenant's own origins. The REDIRECT
+same-origin / cross-origin and PROXY_ONLY=1 rows wait for proxy scripting.
 """
 
 from __future__ import annotations
@@ -25,11 +26,11 @@ SLICE = HostSlice(
         *(
             EgressRow(f"E2|HOST=ghe.com|CRED={cred}|EGRESS={egress}", cred, egress)
             for cred in ("PAT", "gh", "none")
-            for egress in ("api-probe", "clone", "policy-fetch")
+            for egress in ("api-probe", "clone", "marketplace-fetch", "policy-fetch")
         ),
         *(
             EgressRow(f"EP|EGRESS={egress}|HOST=ghe.com", "PAT", egress)
-            for egress in ("api-probe", "clone", "policy-fetch")
+            for egress in ("api-probe", "clone", "marketplace-fetch", "policy-fetch")
         ),
         EgressRow("EP|HOST=ghe.com|PROXY_ONLY=0", "PAT", "clone"),
         EgressRow("EP|HOST=ghe.com|REDIRECT=none", "PAT", "clone"),
