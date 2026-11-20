@@ -1,10 +1,29 @@
 {
   "partition": "train2 dedupe integration and unit residual",
-  "steps_done": [1],
-  "folds": {},
+  "steps_done": [
+    1
+  ],
+  "folds": {
+    "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists",
+    "tests/integration/test_marketplace_builder_phase3w4.py::TestResolveExplicitRef::test_tag_found_in_refs": "tests/integration/test_marketplace_builder_hermetic.py::TestResolveExplicitRef::test_tag_found_in_refs",
+    "tests/integration/test_marketplace_builder_phase3w4.py::TestResolveVersionRange::test_best_candidate_chosen": "tests/integration/test_marketplace_builder_hermetic.py::TestResolveVersionRange::test_best_candidate_chosen",
+    "tests/integration/test_pack_install_phase3w4.py::TestPackCmd::test_pack_deprecated_target_flag_warns": "tests/integration/test_pack_install_flow.py::TestPackCmd::test_pack_deprecated_target_flag_warns",
+    "tests/integration/test_pack_install_phase3w4.py::TestPackCmd::test_pack_marketplace_output_removed": "tests/integration/test_pack_install_flow.py::TestPackCmd::test_pack_marketplace_output_flag_removed",
+    "tests/integration/test_mcp_install_phase3w4.py::TestExcludeRuntime::test_exclude_all_runtimes_returns_zero": "tests/integration/test_mcp_install_flow.py::TestExcludeRuntime::test_exclude_all_runtimes_returns_zero",
+    "tests/integration/test_github_downloader_phase3w4.py::TestDownloadVirtualFilePackage::test_frontmatter_description_extracted": "tests/integration/test_github_downloader_validation_flow.py::TestDownloadVirtualFilePackage::test_frontmatter_description_extracted",
+    "tests/integration/test_github_downloader_phase3w4.py::TestDownloadSubdirectoryPersistentCache::test_persistent_cache_hit_used": "tests/integration/test_github_downloader_validation_flow.py::TestDownloadSubdirectoryPersistentCache::test_persistent_cache_hit_used",
+    "tests/integration/test_github_downloader_phase3w4.py::TestBuildNoninteractiveGitEnv::test_delegates_to_git_auth_env_builder": "tests/integration/test_github_downloader_validation_flow.py::TestBuildNoninteractiveGitEnv::test_delegates_with_downloader_git_environment"
+  },
   "decisions": [
     "Step 1: deleted 216 D5 equal copies in scope; test_install_sources_phase3w4.py left with no tests and was removed.",
-    "Step 1: for test_github_downloader_validation_flow.py vs test_github_downloader_phase3w4.py the copies were deleted from the phase3w4 file so the behavior-named module keeps the tests (D5 equality is symmetric)."
+    "Step 1: for test_github_downloader_validation_flow.py vs test_github_downloader_phase3w4.py the copies were deleted from the phase3w4 file so the behavior-named module keeps the tests (D5 equality is symmetric).",
+    "Step 2: near-twin modules test_integrators_hooks_phase3c.py, test_*_phase3w4.py (marketplace_builder, pack_install, mcp_install, github_downloader) and tests/unit/install/test_services_phase3.py deleted; owner modules kept. Unique coverage moved in: source-prefixed skill_subset parametrization (hooks_execution), invalid scratch_root test (services_branches), --marketplace-output rejection assert (pack_install_flow), sparse_paths/locked_sha propagation asserts (github_downloader_validation_flow). Remaining twin tests were weaker versions of owner tests (folds).",
+    "Pre-existing failure on base, not caused by this branch: tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_removes_managed_hook_json (also failed in the deleted phase3c twin)."
   ],
-  "counts_left": {"same_body_groups": null, "unclassified_modules": null, "placement_offenders": null, "weak_tests": null}
+  "counts_left": {
+    "same_body_groups": null,
+    "unclassified_modules": null,
+    "placement_offenders": null,
+    "weak_tests": null
+  }
 }

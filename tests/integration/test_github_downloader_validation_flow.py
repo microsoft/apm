@@ -444,6 +444,9 @@ class TestDownloadSubdirectoryPersistentCache:
         assert "GIT_CONFIG_VALUE_1" not in cache_env
         assert "GIT_CONFIG_PARAMETERS" not in cache_env
         assert "GIT_HTTP_EXTRAHEADER" not in cache_env
+        call_kwargs = persistent_cache.get_checkout.call_args.kwargs
+        assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
+        assert "locked_sha" in call_kwargs
 
     def test_persistent_cache_miss_falls_through(self, tmp_path):
         """Lines 1088-1090: cache.get_checkout raises -> falls through to clone."""
