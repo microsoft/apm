@@ -500,6 +500,15 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^  \[i\] Auth-only attempt for ado host \S+ \(no credential\)",
     ),
     KnownOutputCell(
+        "registry-environment-notice-per-server",
+        "I9",
+        "#4320",
+        _runs_any("install", "update"),
+        r"repeats a line: '(E2E test mode|CI environment) detected'",
+        # Two registry lookups back to back each print the bare environment notice.
+        output=r"^((?:E2E test mode|CI environment) detected)\n\1$",
+    ),
+    KnownOutputCell(
         "install-frozen-trust-notice-repeats",
         "I9",
         "#4256",
