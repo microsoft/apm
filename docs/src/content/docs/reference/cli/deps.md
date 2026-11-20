@@ -41,7 +41,8 @@ roots and remain visible regardless of graph depth.
 Packages on a non-default host are listed by their host-qualified key, such as
 `gitlab.example.com/org/repo`, the key `apm deps tree` shows and
 `apm uninstall` accepts. The Source column follows the declared or locked host
-type, so a self-hosted GitLab declared with `type: gitlab` shows `gitlab`.
+type, so a self-hosted GitLab declared with `type: gitlab` shows `gitlab`, and a
+host APM does not recognize as GitHub, GitLab or Azure DevOps shows `git`.
 
 Orphan status uses the same selection as [`apm prune`](../prune/). Skills
 bundled inside a declared package, such as a whole-repository skill bundle,

@@ -337,7 +337,12 @@ def _resolve_package_references(
                     # #3959: a rebound alias fails closed before any catalog I/O.
                     if existing_lockfile is None:
                         existing_lockfile = _scoped_lockfile(scope)
-                    require_locked_catalog_origin(marketplace_name, plugin_name, existing_lockfile)
+                    require_locked_catalog_origin(
+                        marketplace_name,
+                        plugin_name,
+                        existing_lockfile,
+                        user_scope=scope == _InstallScope.USER,
+                    )
                     pins_before = staged_ref_pin_keys()
                     resolution = resolve_marketplace_plugin(
                         plugin_name,

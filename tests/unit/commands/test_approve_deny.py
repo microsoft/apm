@@ -863,6 +863,62 @@ class TestDenyCmd:
             assert stored["executables"]["deny"]
 
 
+_BUNDLE_KEY = "bun#1.0.0@sha256:abc123"
+
+
+def _write_approved_local_bundle() -> None:
+    """Record an installed local bundle 'bun' whose exact-content key is approved."""
+    from apm_cli.install.local_bundle_pending import record_bundle_executables
+
+    _write_manifest(".", {"executables": {"allow": {_BUNDLE_KEY: {"hooks": True}}}})
+    record_bundle_executables(Path("."), "bun", _BUNDLE_KEY, ["hooks"])
+
+
+@pytest.mark.parametrize(
+    ("command", "verb"),
+    [(deny_cmd, "deny"), (approve_cmd, "approve")],
+)
+@pytest.mark.parametrize("name", ["bun", "_local/bun"])
+def test_local_bundle_name_names_its_exact_content_key(command, verb, name) -> None:
+    """RA-026: a local bundle's name points at its runnable content-bound key."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_approved_local_bundle()
+        before = Path("apm.yml").read_bytes()
+        result = runner.invoke(command, [name])
+        after = Path("apm.yml").read_bytes()
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        f"[x] {name}: not found in installed packages; it is a local bundle whose key "
+        f"binds its exact content. Run: apm {verb} '{_BUNDLE_KEY}'\n"
+    )
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    ("command", "verb"),
+    [(deny_cmd, "deny"), (approve_cmd, "approve")],
+)
+def test_quoted_package_argument_is_refused_without_writing(command, verb) -> None:
+    """RA-027: a key wrapped in literal quotes is refused; the store is unchanged."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_approved_local_bundle()
+        before = Path("apm.yml").read_bytes()
+        result = runner.invoke(command, [f'"{_BUNDLE_KEY}"'])
+        after = Path("apm.yml").read_bytes()
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        f'[x] "{_BUNDLE_KEY}": the package argument contains literal quote characters. '
+        f"Nothing written. Run: apm {verb} '{_BUNDLE_KEY}'\n"
+    )
+    assert after == before
+
+
 # ---------------------------------------------------------------------------
 # apm policy explain
 # ---------------------------------------------------------------------------

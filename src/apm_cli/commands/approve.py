@@ -285,6 +285,7 @@ def approve_cmd(
         )
     logger = CommandLogger("approve")
     try:
+        _reject_quoted_specs(packages, "approve", user_store=user_scope, global_scope=global_scope)
         manifest = _find_manifest(user_scope, global_scope)
 
         if list_decisions:
@@ -350,6 +351,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
 
         apm deny owner/repo
     """
+    _reject_quoted_specs(packages, "deny", user_store=user_scope, global_scope=global_scope)
     manifest = _find_manifest(user_scope, global_scope)
     packages = _canonical_specs(manifest, packages)
     allow, deny = _load_store(manifest, user_scope)
@@ -369,7 +371,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
     if unmatched:
         # Never record a deny that matches no installed package (#4189).
         for pkg in unmatched:
-            _report_not_found(declarations, pkg, manifest)
+            _report_not_found(declarations, pkg, manifest, verb="deny")
         sys.exit(1)
 
     changed = 0
@@ -881,7 +883,60 @@ def _approve_bundles(
         sys.exit(1)
 
 
-def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
+def _trust_command(
+    verb: str, argument: str, *, global_scope: bool = False, user_store: bool = False
+) -> str:
+    """Return the runnable ``apm approve`` / ``apm deny`` command for *argument*."""
+    import shlex
+
+    from ..security.trust import approve_command
+
+    if verb == "approve":
+        return approve_command(argument, user_scope=global_scope, user_store=user_store)
+    flags = ("-g " if global_scope else "") + ("--user " if user_store else "")
+    return f"apm {verb} {flags}{shlex.quote(argument)}"
+
+
+def _reject_quoted_specs(
+    specs: Sequence[str], verb: str, *, user_store: bool = False, global_scope: bool = False
+) -> None:
+    """Refuse a package argument that still carries literal quotes, before any write.
+
+    No package identity or approval key starts or ends with a quote, so such
+    an argument would only record a key that matches nothing.
+    """
+    quoted = [spec for spec in specs if spec[:1] in "\"'" or spec[-1:] in "\"'"]
+    for spec in quoted:
+        bare = spec.strip("\"'")
+        rerun = (
+            f" Run: {_trust_command(verb, bare, global_scope=global_scope, user_store=user_store)}"
+            if bare
+            else ""
+        )
+        _rich_error(
+            f"{spec}: the package argument contains literal quote characters. "
+            f"Nothing written.{rerun}",
+            symbol="error",
+        )
+    if quoted:
+        sys.exit(1)
+
+
+def _local_bundle_keys(manifest: Path, pkg: str) -> list[str]:
+    """Exact-content keys of the installed local bundles *pkg* (or ``_local/<pkg>``) names."""
+    from ..install.local_bundle_pending import pending_bundles
+
+    name = pkg.split("#", 1)[0].removeprefix("_local/")
+    # Treating nothing as approved lists every bundle an install recorded.
+    recorded = pending_bundles(manifest.parent, lambda _key, _type: False)
+    return sorted(
+        bundle.approval_key
+        for bundle in recorded
+        if name in (bundle.slug, bundle.approval_key.split("#", 1)[0])
+    )
+
+
+def _report_not_found(declarations, pkg: str, manifest: Path, *, verb: str = "approve") -> None:
     """Explain why *pkg* matched nothing and name the command that works."""
     from ..security.trust import approve_command
 
@@ -891,6 +946,18 @@ def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
     if decl is not None:
         command = approve_command(_identity(decl), user_scope=user_scope)
         _rich_error(f"{pkg}: approve the installed package by identity, not a ref: {command}")
+        return
+    bundle_keys = _local_bundle_keys(manifest, pkg)
+    if bundle_keys:
+        # A bundle grant binds its exact content, so name the key rather than guess.
+        commands = " or ".join(
+            _trust_command(verb, key, global_scope=user_scope) for key in bundle_keys
+        )
+        _rich_error(
+            f"{pkg}: not found in installed packages; it is a local bundle whose key "
+            f"binds its exact content. Run: {commands}",
+            symbol="error",
+        )
         return
     review = approve_command("--pending", user_scope=user_scope)
     _rich_error(f"{_not_found_message(declarations, pkg, user_scope=user_scope)}. Review: {review}")

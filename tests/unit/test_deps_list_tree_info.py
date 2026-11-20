@@ -388,6 +388,25 @@ class TestDepsListCommand(_DepsCmdBase):
         assert "gitlab" in out
         assert "orphaned" not in out.lower()
 
+    def test_list_labels_unrecognized_host_source_git_not_github(self, monkeypatch):
+        """RA-019: a package from a non-GitHub host shows Source ``git`` on stdout."""
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "acme", "tools", version="1.0.0")
+            (tmp / "apm.yml").write_text(
+                "name: proj\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - git: https://git.example.invalid/acme/tools.git\n",
+                encoding="utf-8",
+            )
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+        assert result.exit_code == 0, result.output
+        rows = [line for line in result.stdout.splitlines() if "acme/tools" in line]
+        assert len(rows) == 1, result.stdout
+        assert rows[0].split()[2] == "git", rows[0]
+        assert "github" not in rows[0], rows[0]
+
     def test_list_shows_gitlab_source_from_lockfile_host(self):
         """Lockfile-only dep with ``host: gitlab.com`` maps Source to ``gitlab``."""
         with self._chdir_tmp() as tmp:

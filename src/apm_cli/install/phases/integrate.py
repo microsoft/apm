@@ -366,7 +366,11 @@ def _integrate_root_project(
     _local_managed = BaseIntegrator.normalize_managed_files(_local_managed)
 
     if logger:
-        logger.download_complete("<project root>", ref_suffix="local")
+        from apm_cli.core.scope import is_user_scope
+
+        # The user scope has no project root; never label it as one (RA-020).
+        root_label = "<user scope>" if is_user_scope(ctx.scope) else "<project root>"
+        logger.download_complete(root_label, ref_suffix="local")
         logger.verbose_detail("Integrating local .apm/ content...")
     try:
         _root_result = integrate_local_content(

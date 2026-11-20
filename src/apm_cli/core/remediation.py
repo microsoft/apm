@@ -402,6 +402,13 @@ MARKETPLACE_ORIGIN_SWITCH = _entry(
     before="remove {plugin} from apm.yml",
     then="add it back and run 'apm install' again",
 )
+MARKETPLACE_ORIGIN_SWITCH_GLOBAL = _entry(
+    "marketplace-origin-switch-global",
+    "apm install -g",
+    "drop the plugin locked from the old marketplace",
+    before="remove {plugin} from ~/.apm/apm.yml",
+    then="add it back and run 'apm install -g' again",
+)
 MARKETPLACE_YML_COMPILE = _entry(
     "marketplace-yml-compile", "apm pack", "compile it to marketplace.json"
 )
