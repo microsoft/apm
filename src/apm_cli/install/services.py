@@ -19,6 +19,7 @@ from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundar
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
+from .deployed_paths import log_hook_display_payloads as _log_hook_display_payloads
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
@@ -69,40 +70,6 @@ class IntegratorBundle:
     # keep working. Production sites (template.py, integrate_local_content,
     # drift.py) pass a real CanvasIntegrator; when None the loop skips canvas.
     canvas: BaseIntegrator | None = None
-
-
-def _log_hook_display_payloads(
-    payloads: list,
-    verbose: bool,
-    log_fn: Any,
-    logger: Any,
-) -> None:
-    """Emit per-hook-file action summaries for hook transparency.
-
-    Payloads arrive once per target; a hook deployed to several targets is
-    summarized once because its line names the hook, not the target.
-    """
-    _shown: set[str] = set()
-    for _payload in payloads:
-        _src = _payload.get("source_hook_file", "hook file")
-        _actions = _payload.get("actions", [])
-        _lines = (
-            [
-                f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})"
-                for _act in _actions
-            ]
-            if _actions
-            else [f"  |   Hook file integrated: {_src}"]
-        )
-        for _line in _lines:
-            if _line not in _shown:
-                _shown.add(_line)
-                log_fn(_line)
-        if verbose and logger is not None:
-            _out_path = _payload.get("output_path", "")
-            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
-            for _jline in _payload.get("rendered_json", "").splitlines():
-                logger.verbose_detail(f"  |     {_jline}")
 
 
 def _label_and_deploy_dir(prim_name: str, mapping, target, deploy_dir: str) -> tuple[str, str]:
