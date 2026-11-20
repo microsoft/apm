@@ -32,6 +32,10 @@ GATE_CELLS_PATH = QUALITY_DIR / "gate_cell_obligations.json"
 # Required witnesses and known-failing cells of the generated obligation space
 # (security tables and journey step oracles, ``tests/lifecycle/obligation_space.py``).
 GENERATED_PATH = QUALITY_DIR / "generated_obligations.json"
+# The generated lifecycle interaction obligations (tests/lifecycle/generator, #4099).
+LIFECYCLE_PATH = QUALITY_DIR / "lifecycle_obligations.json"
+# An e2e-evidence receipt also proves an e2e obligation; unit stands apart.
+_STRENGTH_RANK = {"e2e": 1, "e2e-evidence": 2}
 # The oracle id ``oracles.check_obligation`` writes; mirrors oracles.OBLIGATION_ORACLE.
 OBLIGATION_ORACLE = "OBLIGATION"
 # The single promise catalog; every promise id resolves here and nowhere else.
@@ -53,6 +57,9 @@ class Obligation:
     cell: str | None = None
     # Required strength of a generated obligation; None for invariant and GATE rows.
     strength: str | None = None
+    # Other obligation ids whose receipts discharge this one (a machine cell that
+    # implies a generated lifecycle cell, tests/lifecycle/generator/witnesses.py).
+    aliases: tuple[str, ...] = ()
 
     @property
     def promise(self) -> str | None:
@@ -69,8 +76,8 @@ class Obligation:
         if self.strength is not None:
             return (
                 receipt.oracle_id == OBLIGATION_ORACLE
-                and receipt.params.get("obligation") == self.id
-                and receipt.params.get("strength") == self.strength
+                and receipt.params.get("obligation") in (self.id, *self.aliases)
+                and _meets(receipt.params.get("strength"), self.strength)
             )
         if self.outcome not in ("any", receipt.outcome):
             return False
@@ -149,13 +156,26 @@ def load_catalog(
     )
 
 
+def _meets(earned: object, required: str) -> bool:
+    if earned == required:
+        return True
+    return (
+        required in _STRENGTH_RANK
+        and _STRENGTH_RANK.get(str(earned), 0) >= _STRENGTH_RANK[required]
+    )
+
+
 def load_generated(
     path: Path = GENERATED_PATH,
+    lifecycle_path: Path = LIFECYCLE_PATH,
 ) -> tuple[dict[str, Obligation], dict[str, str], dict[str, str], dict[str, str]]:
     """The generated universe, its required witnesses, baseline lanes and known-failing cells.
 
-    The baseline is every generated id that is neither required nor known
-    failing, mapped to the lane that owns it; it is derived, never listed.
+    The security and journey space is derived from its model export plus the
+    required / known_failing lists of *path*: its baseline is every id that is
+    neither required nor known failing, mapped to the lane that owns it. The
+    lifecycle interaction space (*lifecycle_path*, written by
+    ``python -m tests.lifecycle.generator``) states each id's status itself.
     """
     from tests.lifecycle.obligation_space import generated_obligations
 
@@ -167,7 +187,24 @@ def load_generated(
     baseline = {
         key: lane for key, (_, lane) in rows.items() if key not in required and key not in known
     }
-    return universe, required, baseline, known
+    lifecycle = (
+        json.loads(lifecycle_path.read_text(encoding="ascii"))["obligations"]
+        if lifecycle_path.is_file()
+        else {}
+    )
+    clash = sorted(set(lifecycle) & set(universe))
+    assert not clash, f"lifecycle and security obligation ids collide: {clash[:5]}"
+    for key, entry in lifecycle.items():
+        universe[key] = Obligation(
+            key, strength=entry["strength"], aliases=tuple(entry.get("credited_by", ()))
+        )
+        if entry["status"] == "required":
+            required[key] = entry["witness"]
+        elif entry["status"] == "known-failing":
+            known[key] = entry["tracking"]
+        else:
+            baseline[key] = entry["lane"]
+    return universe, dict(sorted(required.items())), baseline, dict(sorted(known.items()))
 
 
 def uncovered(obligations: Iterable[Obligation], earned: Collection[receipts.Receipt]) -> list[str]:

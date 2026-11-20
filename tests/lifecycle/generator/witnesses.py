@@ -152,3 +152,56 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
                 node, cells[0].lane, tuple(sorted(c.id for c in cells)), issues[0]
             )
     return witnesses
+
+
+# -- scenario witnesses ----------------------------------------------------------
+
+SCENARIO_MODULES = (
+    "test_cache_presence",
+    "test_concurrency",
+    "test_failure_phase",
+    "test_graph_version",
+    "test_history_upgrade",
+    "test_ownership_siblings",
+    "test_platform",
+)
+
+
+def scenario_credits() -> list:
+    """Every ``Credit`` the scenario suites declare in their module ``CREDITS``."""
+    import importlib
+
+    found = []
+    for name in SCENARIO_MODULES:
+        module = importlib.import_module(f"tests.lifecycle.scenarios.{name}")
+        found.extend(getattr(module, "CREDITS", ()))
+    return found
+
+
+def scenario_witnesses(
+    obligations: Mapping[str, object], lanes: Mapping[str, str]
+) -> dict[str, Witness]:
+    """Obligation id -> its scenario witness, for ids in a scenario lane.
+
+    The first passing node (by node id) whose credited assignment implies the
+    id is its witness; when only strict known rows imply it, the obligation is
+    known-failing with the first owning issue. Scenario steps credit the id
+    itself (``tests/lifecycle/scenarios/_kit.py`` credit_step), so there are
+    no aliases.
+    """
+    from tests.lifecycle.scenarios._kit import SCENARIO_LANES
+
+    by_key: dict[str, list] = {}
+    for credit in scenario_credits():
+        for key in implied(credit.assignment):
+            if key in obligations and lanes.get(key) in SCENARIO_LANES:
+                by_key.setdefault(key, []).append(credit)
+    witnesses: dict[str, Witness] = {}
+    for key, found in sorted(by_key.items()):
+        passing = sorted(credit.node for credit in found if credit.tracking is None)
+        if passing:
+            witnesses[key] = Witness(passing[0], lanes[key], ())
+        else:
+            first = sorted(found, key=lambda credit: (credit.node, credit.tracking))[0]
+            witnesses[key] = Witness(first.node, lanes[key], (), first.tracking)
+    return witnesses

@@ -24,7 +24,10 @@ from tests.lifecycle.obligations import (
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-INV-I4", "P-INV-I5", "P-LAW-auth.credentials_isolated"),
+]
 
 
 def test_security_space_matches_the_reviewed_counts() -> None:

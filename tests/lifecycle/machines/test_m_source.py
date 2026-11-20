@@ -359,6 +359,8 @@ class SourceMachine(MachineBase):
     def exits(self, op: str, *, dry_run: bool = False) -> frozenset[int]:
         if op == "uninstall" and self.lsp_survives and not dry_run:
             return frozenset({0, 1})  # strict known cell #4214 owns the exit 1
+        if op == "compile" and not self.bench.lock_path.is_file():
+            return frozenset({1})  # "No APM content found to compile"
         if self.network == "offline" and self.remote() and op in ("install", "update", "lock"):
             return frozenset({0, 1})
         return frozenset({0})

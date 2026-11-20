@@ -24,10 +24,12 @@ Package names in a command line are replaced by their spec, as in rows.
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -35,13 +37,16 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
+from tests.lifecycle.generator.witnesses import implied
 from tests.lifecycle.model.expected import expected_deployed, expected_exit, expected_lock_rows
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import (
+    Evidence,
     ExpectedCell,
     Observation,
     Operation,
     check_cross_cutting,
+    check_obligation,
     operation_for,
 )
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
@@ -364,12 +369,18 @@ class Scenario:
         paired: Mapping[str, int] | None = None,
         known: Mapping[str, Known] | None = None,
         requested: ModelState | None = None,
+        credit: Iterable[Mapping[str, str]] = (),
+        keep: Mapping[str, Iterable[str]] | None = None,
         **fields: object,
     ) -> Step:
         """Run one command line through the driver and apply I1-I9.
 
         *exit* pins the exit code; otherwise the model's ``expected_exit``
         holds. *requested* overrides the model after the user's request.
+        *credit* lists the factor assignments the step proves; a successful
+        step with no strict known cell credits the generated scenario-lane
+        obligations they imply (``credit_step``). *keep* names paths per
+        root that must be present and byte-unchanged across the step.
         Extra *fields* go to ``operation_for`` (``forbidden``, ``cells``, ...).
         """
         args = self._args(line)
@@ -399,6 +410,8 @@ class Scenario:
         self._advance(op, args, requested, result)
         step = Step(" ".join(args), result, before, after)
         self.steps.append(step)
+        if not (known or exit_cell):
+            credit_step(step, credit, keep=keep, scope=self.scope)
         return step
 
     def pair(
@@ -595,3 +608,100 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
     body = f"---\nname: {name}\ndescription: Scenario skill {name}.\n---\n\nUse {name}.\n"
     factory.add_skill(package, name, body)
     return package.root
+
+
+# -- generated obligations ------------------------------------------------------
+
+OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
+# Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
+SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g"})
+NODE_ROOT = "tests/lifecycle/scenarios"
+
+
+@dataclass(frozen=True)
+class Credit:
+    """A scenario node, the factor assignment one of its steps proves, and its strict cell.
+
+    ``tests/lifecycle/generator/witnesses.py`` reads each module's ``CREDITS``:
+    every scenario-lane obligation an assignment implies is ``required`` with
+    *node* as witness, or ``known-failing`` with *tracking* when only strict
+    known rows imply it.
+    """
+
+    node: str
+    assignment: Mapping[str, str]
+    tracking: str | None = None
+
+    def __post_init__(self) -> None:
+        assert self.node.startswith(f"{NODE_ROOT}/test_"), self.node
+        assert self.tracking is None or re.fullmatch(r"#\d+", self.tracking), self.tracking
+
+
+def credits(
+    module_file: str,
+    rows: Mapping[str, Iterable[Mapping[str, str]]],
+    known: Mapping[str, str] | None = None,
+) -> tuple[Credit, ...]:
+    """``CREDITS`` of one module: test id (``name[param]``) -> the assignments it proves.
+
+    *known* maps a test id to the issue of the strict known cell it carries.
+    """
+    module = f"{NODE_ROOT}/{Path(module_file).name}"
+    known = known or {}
+    return tuple(
+        Credit(f"{module}::{test}", dict(assignment), known.get(test))
+        for test, assignments in rows.items()
+        for assignment in assignments
+    )
+
+
+@cache
+def _scenario_obligations() -> frozenset[str]:
+    data = json.loads(OBLIGATIONS_PATH.read_text(encoding="ascii"))["obligations"]
+    return frozenset(key for key, entry in data.items() if entry["lane"] in SCENARIO_LANES)
+
+
+def credited_ids(assignments: Iterable[Mapping[str, str]]) -> tuple[str, ...]:
+    """Scenario-lane obligation ids every one of *assignments* implies."""
+    lane = _scenario_obligations()
+    return tuple(sorted({key for item in assignments for key in implied(item) if key in lane}))
+
+
+def credit_step(
+    step: Step,
+    assignments: Iterable[Mapping[str, str]],
+    *,
+    keep: Mapping[str, Iterable[str]] | None = None,
+    scope: str = "project",
+) -> None:
+    """Credit the obligations *assignments* imply through ``check_obligation``.
+
+    Only a successful step credits (every scenario-lane obligation is a
+    success pair). The evidence is the step's exact changed set (present or
+    absent after it) plus the *keep* paths (present and byte-unchanged).
+    """
+    ids = credited_ids(assignments)
+    if not ids or step.result.returncode != 0:
+        return
+    present: dict[str, set[str]] = {}
+    absent: dict[str, set[str]] = {}
+    after = step.after.artifacts
+    for item in step.changed:
+        root, path = item.split(":", 1)
+        bucket = present if path in after.snapshot(root).paths else absent
+        bucket.setdefault(root, set()).add(path)
+    kept = {root: tuple(paths) for root, paths in (keep or {}).items()}
+    for root, paths in kept.items():
+        present.setdefault(root, set()).update(paths)
+    evidence = Evidence(present=present, absent=absent, unchanged=kept, exit=0, ascii_output=True)
+    strength = "e2e-evidence" if evidence.state_facts() else "e2e"
+    for key in ids:
+        check_obligation(
+            key,
+            strength=strength,
+            before=step.before,
+            after=step.after,
+            result=step.result,
+            evidence=evidence,
+            scope=scope,
+        )

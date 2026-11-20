@@ -31,7 +31,7 @@ from tests.lifecycle.generator.factors import (
 )
 from tests.lifecycle.generator.rules import RULES
 from tests.lifecycle.generator.space import Entry, Space, build_space
-from tests.lifecycle.generator.witnesses import machine_witnesses
+from tests.lifecycle.generator.witnesses import machine_witnesses, scenario_witnesses
 
 ROOT = Path(__file__).resolve().parents[3]
 OBLIGATIONS_PATH = ROOT / "tests" / "quality" / "lifecycle_obligations.json"
@@ -162,6 +162,9 @@ def generate() -> tuple[str, dict[str, str]]:
         cell: WITNESS.format(row.id) for row in rows for step in row.steps for cell in step.cells
     }
     machines = machine_witnesses(space.obligations)
+    scenarios = scenario_witnesses(
+        space.obligations, {key: lane_for(entry) for key, entry in space.obligations.items()}
+    )
     statuses, lanes, obligations = {}, {}, {}
     for key in sorted(space.obligations):
         entry = space.obligations[key]
@@ -177,6 +180,15 @@ def generate() -> tuple[str, dict[str, str]]:
             if machine.tracking:
                 statuses[key] = "known-failing"
                 record["tracking"] = machine.tracking
+            else:
+                statuses[key] = "required"
+        elif key in scenarios:
+            scenario = scenarios[key]
+            lanes[key] = scenario.lane
+            record["witness"] = scenario.node
+            if scenario.tracking:
+                statuses[key] = "known-failing"
+                record["tracking"] = scenario.tracking
             else:
                 statuses[key] = "required"
         else:
