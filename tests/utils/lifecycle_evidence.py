@@ -410,6 +410,14 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
+        "install-empty-org-policy-notice-per-phase",
+        "I9",
+        "#4241",
+        _runs("install"),
+        r"\[!\] Org policy at \S+ is present but empty",
+        output=r"\A(?=.*^\[!\] Org policy at \S+ is present but empty).*^  \[\+\] .*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
         "install-org-policy-banner-when-mcp-blocked",
         "I9",
         "#4267",
@@ -680,6 +688,35 @@ def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
         found.extend(_noise_violations(stream, text))
     return found
+
+
+def apm_args(command: Sequence[str]) -> tuple[str, ...]:
+    """The APM arguments of a full command line (after ``-m apm_cli.cli`` or the binary)."""
+    command = tuple(command)
+    for index in range(len(command), 0, -1):
+        if is_apm_entry_point(command[:index]):
+            return command[index:]
+    return ()
+
+
+def owned_duplicate_lines(result: Any, scenario_id: str = "") -> frozenset[str]:
+    """Duplicated lines of *result* that a STRICT I9 known cell owns.
+
+    The family I9 check (``tests/lifecycle/oracles.py``) excuses exactly these,
+    so one product defect has one owner; the global hook on the same command
+    still fails the cell once the defect is fixed.
+    """
+    args = apm_args(result.command)
+    violations = [v for v in output_violations(args, result) if v.law == "I9"]
+    owned: set[str] = set()
+    for cell in KNOWN_OUTPUT_CELLS:
+        if cell.law != "I9" or not cell.covers(args, scenario_id, result.stdout):
+            continue
+        for violation in violations:
+            line = re.search(r": '(.*)'$", violation.message)
+            if line and re.search(cell.message, violation.message):
+                owned.add(line.group(1))
+    return frozenset(owned)
 
 
 def check_cli_output(
