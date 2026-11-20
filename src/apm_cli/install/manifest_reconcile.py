@@ -594,9 +594,6 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
 
-    *retained_values* are prior values this run skipped, kept or refused
-    (``phases.cleanup.kept_prior_values``); they are never stale (#4230).
-
     When *apply_disk_deletion* is ``False`` (``apm lock`` / ``lockfile_only``)
     the block is reconciled without touching the working tree: every path that
     would otherwise be pruned is retained in the returned rows/hashes/ledger so
