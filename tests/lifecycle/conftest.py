@@ -1,8 +1,7 @@
 """Wiring of the lifecycle test family (#4093).
 
 - driver selection: ``lifecycle_entry_point`` (``APM_LIFECYCLE_DRIVER``);
-- world fixtures: ``tests/lifecycle/world`` (lane T-0W) when present, else
-  the fallback world;
+- world fixtures: ``tests/lifecycle/world`` (lane T-0W);
 - receipts plugin: ``ReceiptWitnessPlugin`` (session receipts directory and
   the per-witness obligation ratchet);
 - global output oracle: every driver command keeps I6, I8 and I9.
@@ -10,18 +9,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from tests.lifecycle import driver, oracles
 from tests.lifecycle.obligations import ReceiptWitnessPlugin, load_catalog
+from tests.lifecycle.world.fixtures import lifecycle_template, lifecycle_world
 from tests.utils.apm_lifecycle_runner import CommandResult
-
-if (Path(__file__).parent / "world" / "fixtures.py").is_file():
-    from tests.lifecycle.world.fixtures import lifecycle_template, lifecycle_world
-else:
-    from tests.lifecycle._fallback_world import lifecycle_template, lifecycle_world
 
 __all__ = ["lifecycle_template", "lifecycle_world"]
 

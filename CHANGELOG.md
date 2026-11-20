@@ -14,10 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 - Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
 - Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
+- Internal: lifecycle tests share one hermetic world: nine fixture packages, local git, marketplace, MCP registry and policy services, cloned per test in milliseconds. (#4142)
 
 ### Fixed
 
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
+- `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
 
 ## [0.37.0] - 2026-11-20
 
