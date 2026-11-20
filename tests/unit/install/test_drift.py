@@ -535,6 +535,15 @@ def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
     assert "Commit the regenerated apm.lock.yaml" in out
 
 
+@pytest.mark.parametrize("kind", ["modified", "unrecorded", "unmanaged-conflict", "orphaned"])
+def test_render_text_advisory_drift_never_prints_error_header(kind):
+    """Advisory drift does not fail the run, so it never renders [x] (#4191)."""
+    finding = DriftFinding(path=".claude/skills/x/SKILL.md", kind=kind)
+    out = render_drift_text([finding], advisory=True)
+    assert out.splitlines()[0] == "[!] Drift detected: 1 file(s)"
+    assert "[x]" not in out
+
+
 def test_diff_engine_100kb_inline_cap(tmp_path):
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"

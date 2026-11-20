@@ -1278,8 +1278,10 @@ def _audit_content_scan(
     # both detected drift AND a drift check that could not run (corrupt local
     # graph, unsupported replay); an advisory cache-miss SKIP stays passed=True
     # and does NOT gate. Policy is discovered only when a drift failure
-    # occurred, so the clean common case is unchanged.
-    if drift_failed and exit_code == 0 and _resolve_fail_on_drift(project_root):
+    # occurred, so the clean common case is unchanged. Advisory drift renders
+    # as a warning so an [x] drift line always comes with a failing exit.
+    drift_gates = drift_failed and _resolve_fail_on_drift(project_root)
+    if drift_gates:
         exit_code = 1
 
     if effective_format == "text":
@@ -1308,6 +1310,7 @@ def _audit_content_scan(
                     verbose=cfg.verbose,
                     lockfile=lockfile,
                     project_root=cfg.project_root,
+                    advisory=not drift_gates,
                 )
             )
     elif effective_format == "markdown":
