@@ -72,7 +72,9 @@ def run(ctx: InstallContext) -> None:
         )
     except ClaudeNativePluginError:
         if previous is not None:
+            # The rollback is durable even though this install fails.
             previous.write(lock_path)
+            flush_lockfile_writes()
         else:
             remove_lockfile(lock_path)
         raise

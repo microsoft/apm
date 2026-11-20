@@ -5,30 +5,33 @@ timestamp, no-op detection); this module decides *when* those bytes are
 persisted, and by whom.
 
 The writers form a closed set: each :class:`LockfileWriter` names one command
-entry point, which opens a write scope with :func:`lockfile_writer`.  Inside a
-scope every ``LockFile.write`` is staged in memory instead of persisted, every
-``LockFile.read`` (and :func:`lockfile_exists`) sees the staged document, and
-the outermost scope commits the final document once when it exits.  A command
-therefore writes the lockfile at most once, however many phases record state
-in it.  Nested scopes (``apm update`` running the install service) join the
-outer one.
+entry point, which declares itself with :func:`lockfile_writer`.  A command
+refuses a lockfile it may not rewrite before it records anything, so its write
+scope opens only at its first lockfile write.  Inside the scope every
+``LockFile.write`` is staged in memory, every ``LockFile.read`` (and
+:func:`lockfile_exists`) sees the staged document, and the command commits
+the final document once, when it completes.  A command therefore writes the
+lockfile at most once, however many phases record state in it.  Nested
+writers (``apm update`` running the install service) join the outer one.
 
-Two explicit commit points flush earlier: :func:`flush_lockfile_writes`
-before state outside APM's transaction must agree with the lockfile (native
-plugin registration, user lifecycle scripts).  Removal and rollback go
-through :func:`remove_lockfile` and :func:`restore_lockfile_bytes` so a staged
-document never resurrects a lockfile a writer deleted or restored.
+A command that fails or is interrupted before its commit discards what it
+staged, so the lockfile keeps its previous bytes.  Two explicit commit points
+flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
+transaction must agree with the lockfile (native plugin registration, user
+lifecycle scripts, a command's own durable checkpoint).  Removal and rollback
+go through :func:`remove_lockfile` and :func:`restore_lockfile_bytes` so a
+staged document never resurrects a lockfile a writer deleted or restored.
 
-Outside a scope (library callers, unit tests) ``LockFile.write`` persists
-immediately, exactly as before.  ``--frozen`` suppression is decided by
-``LockFile.write`` before it reaches this module, so withheld writes are
-never staged.
+Staged documents are visible only inside this process; serializing commands
+across processes stays with the lifecycle lock (``install/locking.py``).
+Outside a writer (library callers, unit tests) ``LockFile.write`` persists
+immediately.  ``--frozen`` suppression is decided by ``LockFile.write`` before
+it reaches this module, so withheld writes are never staged or flushed.
 """
 
 from __future__ import annotations
 
 import functools
-import logging
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -37,8 +40,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import ParamSpec, TypeVar
-
-_log = logging.getLogger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -71,11 +72,19 @@ _REMOVED = _Removed()
 
 @dataclass
 class _WriteScope:
+    """What one writer has staged since its first lockfile write."""
+
     writer: LockfileWriter
     pending: dict[Path, str | _Removed] = field(default_factory=dict)
 
 
-_active_scope: ContextVar[_WriteScope | None] = ContextVar("apm_lockfile_write_scope", default=None)
+@dataclass
+class _Writer:
+    writer: LockfileWriter
+    scope: _WriteScope | None = None
+
+
+_active_writer: ContextVar[_Writer | None] = ContextVar("apm_lockfile_writer", default=None)
 
 
 def _key(path: Path) -> Path:
@@ -85,45 +94,52 @@ def _key(path: Path) -> Path:
     return Path(os.path.abspath(path))
 
 
-def active_writer() -> LockfileWriter | None:
-    """Return the writer whose scope is active, or ``None`` outside a scope."""
-    scope = _active_scope.get()
-    return None if scope is None else scope.writer
+def _scope(*, open_: bool = False) -> _WriteScope | None:
+    active = _active_writer.get()
+    if active is None:
+        return None
+    if active.scope is None and open_:
+        active.scope = _WriteScope(active.writer)
+    return active.scope
+
+
+def _completed(error: BaseException) -> bool:
+    """Whether *error* is a command's successful early exit (exit code 0)."""
+    code = getattr(error, "exit_code", getattr(error, "code", 1))
+    return isinstance(error, SystemExit | _click_exit()) and code in (0, None)
+
+
+def _click_exit() -> type[BaseException]:
+    from click.exceptions import Exit
+
+    return Exit
 
 
 @contextmanager
 def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
-    """Stage lockfile writes for *writer* and commit them once on exit.
-
-    The commit runs on every exit path: a failing command keeps the lockfile
-    records of what it already deployed, as it did when each phase wrote
-    immediately.
-    """
+    """Run as *writer*: stage its lockfile writes, commit them once on success."""
     if not isinstance(writer, LockfileWriter):
         raise TypeError(f"{writer!r} is not a registered lockfile writer")
-    if _active_scope.get() is not None:
+    if _active_writer.get() is not None:
         yield
         return
-    scope = _WriteScope(writer)
-    token = _active_scope.set(scope)
+    active = _Writer(writer)
+    token = _active_writer.set(active)
     try:
         yield
-    except BaseException:
-        try:
-            _commit(scope)
-        except Exception as exc:
-            from ..utils.console import _rich_warning
-
-            _rich_warning(f"apm.lock.yaml could not be updated: {exc}", symbol="warning")
+    except BaseException as error:
+        if active.scope is not None and _completed(error):
+            _commit(active.scope)
         raise
     else:
-        _commit(scope)
+        if active.scope is not None:
+            _commit(active.scope)
     finally:
-        _active_scope.reset(token)
+        _active_writer.reset(token)
 
 
 def lockfile_writer(writer: LockfileWriter) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
-    """Decorate a command entry point as the lockfile writer *writer*."""
+    """Declare a command entry point as the lockfile writer *writer*."""
 
     def decorate(function: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(function)
@@ -137,13 +153,12 @@ def lockfile_writer(writer: LockfileWriter) -> Callable[[Callable[_P, _R]], Call
 
 
 def stage_lockfile(path: Path, serialized: str) -> bool:
-    """Stage *serialized* for *path* when a scope is active.
+    """Stage *serialized* for *path* inside a writer; ``False`` outside one.
 
-    Returns ``False`` outside a scope, telling ``LockFile.write`` to persist
-    immediately.  Refusals (symlinked or newer-generator lockfiles) were
-    already raised by ``LockFile.write`` at the call site.
+    ``LockFile.write`` already raised any refusal (symlinked or
+    newer-generator lockfile) at the call site.
     """
-    scope = _active_scope.get()
+    scope = _scope(open_=True)
     if scope is None:
         return False
     key = _key(path)
@@ -161,11 +176,11 @@ def _disk_text(path: Path) -> str | None:
 
 
 def staged_lockfile_text(path: Path) -> str | None:
-    """Return the document a scope staged for *path*, else its on-disk text.
+    """Return the document this command staged for *path*, else its on-disk text.
 
-    ``None`` means no lockfile: never written, or removed in this scope.
+    ``None`` means no lockfile: never written, or removed by this command.
     """
-    scope = _active_scope.get()
+    scope = _scope()
     if scope is not None:
         staged = scope.pending.get(_key(path))
         if isinstance(staged, _Removed):
@@ -176,8 +191,8 @@ def staged_lockfile_text(path: Path) -> str | None:
 
 
 def has_staged_lockfile(path: Path) -> bool | None:
-    """``True``/``False`` when a scope staged or removed *path*; ``None`` otherwise."""
-    scope = _active_scope.get()
+    """``True``/``False`` when this command staged or removed *path*; else ``None``."""
+    scope = _scope()
     if scope is None:
         return None
     staged = scope.pending.get(_key(path))
@@ -187,14 +202,14 @@ def has_staged_lockfile(path: Path) -> bool | None:
 
 
 def lockfile_exists(path: Path) -> bool:
-    """Whether *path* holds a lockfile, counting writes staged in this scope."""
+    """Whether *path* holds a lockfile, counting what this command staged."""
     staged = has_staged_lockfile(path)
     return path.exists() if staged is None else staged
 
 
 def remove_lockfile(path: Path) -> None:
     """Delete the lockfile at *path* and anything staged for it."""
-    scope = _active_scope.get()
+    scope = _scope(open_=True)
     if scope is not None:
         key = _key(path)
         scope.pending.pop(key, None)
@@ -206,15 +221,15 @@ def restore_lockfile_bytes(path: Path, data: bytes) -> None:
     """Roll *path* back to *data*, discarding anything staged for it."""
     from ..utils.atomic_io import atomic_write_text
 
-    scope = _active_scope.get()
+    scope = _scope()
     if scope is not None:
         scope.pending.pop(_key(path), None)
     atomic_write_text(path, data.decode("utf-8"), normalize_line_endings=False)
 
 
 def flush_lockfile_writes() -> None:
-    """Commit staged lockfile writes now; the scope stays open."""
-    scope = _active_scope.get()
+    """Commit what this command staged now; it keeps staging afterwards."""
+    scope = _scope()
     if scope is not None:
         _commit(scope)
 

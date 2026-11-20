@@ -41,6 +41,11 @@ _SERVER = {
 }
 _SKILL = "---\nname: authority-skill\ndescription: Write authority fixture\n---\n# Skill\n"
 _INSTRUCTION = "---\napplyTo: '**'\ndescription: Project rule\n---\nKeep it tidy.\n"
+_LSP = {
+    "name": "authority-language",
+    "command": "inert-language-server",
+    "extensionToLanguage": {".fixture": "fixture"},
+}
 
 
 @dataclass(frozen=True)
@@ -51,11 +56,15 @@ class _Scenario:
     environment: dict[str, str]
 
 
-def _new_scenario(root: Path, apm_binary_path: Path, targets: tuple[str, ...]) -> _Scenario:
+def _new_scenario(
+    root: Path, apm_binary_path: Path, targets: tuple[str, ...], *, lsp: bool = False
+) -> _Scenario:
     """A project with local content and a local dependency carrying a skill and MCP."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     packages = LocalPackageFactory(isolated.work_root)
-    project = packages.create("write-authority-consumer", targets=targets)
+    project = packages.create(
+        "write-authority-consumer", targets=targets, lsp_dependencies=(_LSP,) if lsp else ()
+    )
     packages.add_instruction(project, "project-rule", _INSTRUCTION)
     dependencies = LocalPackageFactory(project.root / "packages")
     dependency = dependencies.create("authority-dep", mcp_dependencies=(_SERVER,))
@@ -164,3 +173,76 @@ def test_compile_commits_the_lockfile_through_the_authority(
     assert counter.writes == 1, (counter.events, _evidence(compiled))
     contracted = _snapshot(scenario)
     assert not _claude_files(contracted), contracted.files
+
+
+@_needs_inotify
+def test_install_with_mcp_and_lsp_commits_once_and_is_byte_stable(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """MCP and LSP phases share the install's single lockfile commit."""
+    scenario = _new_scenario(
+        tmp_path / "services", apm_binary_path, ("copilot", "claude"), lsp=True
+    )
+    lock_path = scenario.project.root / _LOCKFILE
+
+    with count_lockfile_writes(scenario.project.root) as counter:
+        result = _run(scenario, _INSTALL, "services-install")
+    assert result.returncode == 0, _evidence(result)
+    lock = load_yaml(lock_path)
+    assert lock.get("mcp_servers") and lock.get("lsp_servers"), lock
+    assert counter.writes == 1, (counter.events, _evidence(result))
+
+    committed = lock_path.read_bytes()
+    with count_lockfile_writes(scenario.project.root) as counter:
+        rerun = _run(scenario, _INSTALL, "services-rerun")
+    assert rerun.returncode == 0, _evidence(rerun)
+    assert counter.writes == 0, (counter.events, _evidence(rerun))
+    assert lock_path.read_bytes() == committed
+
+
+@_needs_inotify
+def test_frozen_install_never_flushes_the_lockfile(tmp_path: Path, apm_binary_path: Path) -> None:
+    """--frozen withholds every lockfile write, so the committed bytes stay put."""
+    scenario = _new_scenario(tmp_path / "frozen", apm_binary_path, ("copilot",))
+    installed = _run(scenario, _INSTALL, "frozen-install")
+    assert installed.returncode == 0, _evidence(installed)
+    lock_path = scenario.project.root / _LOCKFILE
+    committed = lock_path.read_bytes()
+
+    with count_lockfile_writes(scenario.project.root) as counter:
+        frozen = _run(scenario, (*_INSTALL, "--frozen"), "frozen-replay")
+
+    assert frozen.returncode == 0, _evidence(frozen)
+    assert counter.writes == 0, counter.events
+    assert lock_path.read_bytes() == committed
+
+
+@_needs_inotify
+def test_failed_install_discards_its_staged_lockfile(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A failure after the lockfile phase staged new rows leaves the old lockfile."""
+    scenario = _new_scenario(tmp_path / "failed", apm_binary_path, ("copilot",))
+    installed = _run(scenario, _INSTALL, "failed-baseline")
+    assert installed.returncode == 0, _evidence(installed)
+    root = scenario.project.root
+    extra = LocalPackageFactory(root / "packages").create(
+        "late-mcp", mcp_dependencies=({**_SERVER, "name": "late-server"},)
+    )
+    scenario.packages.replace_apm_dependencies(
+        scenario.project,
+        (
+            {"path": "./packages/authority-dep", "alias": "authority-dep"},
+            {"path": "./packages/late-mcp", "alias": extra.name},
+        ),
+    )
+    # The MCP phase runs after the lockfile phase staged late-mcp; make it fail.
+    (root / ".mcp.json").unlink()
+    (root / ".mcp.json").mkdir()
+    committed = (root / _LOCKFILE).read_bytes()
+
+    with count_lockfile_writes(root) as counter:
+        failed = _run(scenario, _INSTALL, "failed-install")
+
+    assert failed.returncode != 0, _evidence(failed)
+    assert "late-server" in failed.stdout + failed.stderr, _evidence(failed)
+    assert counter.writes == 0, counter.events
+    assert (root / _LOCKFILE).read_bytes() == committed

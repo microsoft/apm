@@ -1,14 +1,16 @@
-"""Every lockfile-writing command opens its registered writer scope (#4086).
+"""Component proofs for the lockfile write authority's closed writer set (#4086).
 
-The lockfile write authority keeps a closed writer set; this proves the
-mapping from each real lock-writing command to its ``LockfileWriter`` by
-running the commands in process and recording which writer scope each one
-opened, alongside whether it committed.
+Runs every real lock-writing command in process and records which writer it
+declared, whether it opened a write scope (its first staged lockfile write),
+and how many times it persisted ``apm.lock.yaml``.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -17,11 +19,14 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.deps import lockfile_write_authority as authority
 from apm_cli.deps.lockfile_write_authority import LockfileWriter
+from apm_cli.utils import atomic_io
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-from tests.utils.local_package import LocalPackageFactory
+from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
 pytestmark = pytest.mark.integration
 
+_LOCKFILE = "apm.lock.yaml"
 _SERVER = {
     "name": "mapping-server",
     "registry": False,
@@ -29,45 +34,76 @@ _SERVER = {
     "command": "python",
     "args": ["-m", "mapping_server"],
 }
+_LSP = {
+    "name": "mapping-language",
+    "command": "inert-language-server",
+    "extensionToLanguage": {".fixture": "fixture"},
+}
 _SKILL = "---\nname: mapping-skill\ndescription: Writer mapping fixture\n---\n# Skill\n"
 _HTTP_MCP = ("--transport", "http", "--url", "https://mcp.example.invalid/mcp")
+_NO_POLICY = ("--no-policy", "--trust-transitive-mcp")
+
+
+@dataclass
+class _Recorder:
+    declared: list[LockfileWriter] = field(default_factory=list)
+    opened: list[LockfileWriter] = field(default_factory=list)
+    persisted: int = 0
+
+    def clear(self) -> None:
+        self.declared.clear()
+        self.opened.clear()
+        self.persisted = 0
 
 
 @pytest.fixture
-def opened(monkeypatch: pytest.MonkeyPatch) -> list[LockfileWriter]:
-    """Record the writer of every outermost scope a command opens."""
-    writers: list[LockfileWriter] = []
-    original = authority._WriteScope
+def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
+    """Record declared writers, opened write scopes and lockfile persists."""
+    record = _Recorder()
+    original_scope = authority.lockfile_write_scope
+    original_class = authority._WriteScope
+    original_write = atomic_io.atomic_write_text
 
-    class _RecordingScope(original):  # type: ignore[misc, valid-type]
+    @contextmanager
+    def declaring(writer: LockfileWriter) -> Iterator[None]:
+        if authority._active_writer.get() is None:
+            record.declared.append(writer)
+        with original_scope(writer):
+            yield
+
+    class _Opening(original_class):  # type: ignore[misc, valid-type]
         def __init__(self, writer: LockfileWriter) -> None:
             super().__init__(writer)
-            writers.append(writer)
+            record.opened.append(writer)
 
-    monkeypatch.setattr(authority, "_WriteScope", _RecordingScope)
-    return writers
+    def persisting(path: Path, *args: object, **kwargs: object) -> None:
+        if Path(path).name == _LOCKFILE:
+            record.persisted += 1
+        original_write(path, *args, **kwargs)
 
-
-def _invoke(root: Path, environment: dict[str, str], *args: str) -> None:
-    previous = Path.cwd()
-    os.chdir(root)
-    try:
-        result = CliRunner().invoke(cli, list(args), env=environment, catch_exceptions=False)
-    finally:
-        os.chdir(previous)
-    assert result.exit_code == 0, (args, result.output)
+    monkeypatch.setattr(authority, "lockfile_write_scope", declaring)
+    monkeypatch.setattr(authority, "_WriteScope", _Opening)
+    monkeypatch.setattr(atomic_io, "atomic_write_text", persisting)
+    return record
 
 
-def test_each_lock_writing_command_maps_to_its_registered_writer(
-    tmp_path: Path, opened: list[LockfileWriter]
-) -> None:
-    isolated = IsolatedApmEnvironment.create(tmp_path / "mapping", base_env=dict(os.environ))
-    environment = isolated.subprocess_env()
+@dataclass(frozen=True)
+class _World:
+    environment: dict[str, str]
+    packages: LocalPackageFactory
+    leaf: LocalPackage
+    project: LocalPackage
+    consumer: LocalPackage
+
+
+def _world(root: Path) -> _World:
+    isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     packages = LocalPackageFactory(isolated.work_root)
-
     leaf = packages.create("mapping-leaf", targets=("copilot",), mcp_dependencies=(_SERVER,))
     packages.add_skill(leaf, "mapping-skill", _SKILL)
-    project = packages.create("mapping-project", targets=("copilot", "claude"))
+    project = packages.create(
+        "mapping-project", targets=("copilot", "claude"), lsp_dependencies=(_LSP,)
+    )
     dependencies = LocalPackageFactory(project.root / "packages")
     dependency = dependencies.create("mapping-dep", mcp_dependencies=(_SERVER,))
     dependencies.add_skill(dependency, "mapping-skill", _SKILL)
@@ -75,11 +111,36 @@ def test_each_lock_writing_command_maps_to_its_registered_writer(
         project, ({"path": "./packages/mapping-dep", "alias": dependency.name},)
     )
     consumer = packages.create("mapping-consumer", targets=("copilot",))
-    root = project.root
-    no_policy = ("--no-policy", "--trust-transitive-mcp")
+    return _World(isolated.subprocess_env(), packages, leaf, project, consumer)
 
-    steps: list[tuple[tuple[str, ...], Path, LockfileWriter]] = [
-        (("install", *no_policy), root, LockfileWriter.INSTALL),
+
+def _invoke(root: Path, environment: dict[str, str], *args: str) -> int:
+    previous = Path.cwd()
+    os.chdir(root)
+    try:
+        result = CliRunner().invoke(cli, list(args), env=environment, catch_exceptions=False)
+    finally:
+        os.chdir(previous)
+    return result.exit_code
+
+
+def _ok(root: Path, environment: dict[str, str], *args: str) -> None:
+    assert _invoke(root, environment, *args) == 0, args
+
+
+def _bundle(world: _World) -> Path:
+    _ok(world.leaf.root, world.environment, "install", *_NO_POLICY)
+    _ok(world.leaf.root, world.environment, "pack", "-o", "dist")
+    (bundle,) = (world.leaf.root / "dist").iterdir()
+    return bundle
+
+
+def _writer_steps(
+    world: _World, bundle: Path
+) -> list[tuple[tuple[str, ...], Path, LockfileWriter]]:
+    root = world.project.root
+    return [
+        (("install", *_NO_POLICY), root, LockfileWriter.INSTALL),
         (("lock", "--no-policy"), root, LockfileWriter.LOCK),
         (("install", "--mcp", "direct-api", *_HTTP_MCP), root, LockfileWriter.INSTALL_MCP),
         (("mcp", "install", "alias-api", *_HTTP_MCP), root, LockfileWriter.INSTALL_MCP),
@@ -88,18 +149,69 @@ def test_each_lock_writing_command_maps_to_its_registered_writer(
         (("compile",), root, LockfileWriter.COMPILE),
         (("uninstall", "./packages/mapping-dep"), root, LockfileWriter.UNINSTALL),
         (("prune",), root, LockfileWriter.PRUNE),
+        (
+            ("install", str(bundle), "--no-policy"),
+            world.consumer.root,
+            LockfileWriter.INSTALL_BUNDLE,
+        ),
     ]
-    for args, cwd, writer in steps:
-        opened.clear()
-        _invoke(cwd, environment, *args)
-        assert opened == [writer], (args, opened)
 
-    _invoke(leaf.root, environment, "install", *no_policy)
-    _invoke(leaf.root, environment, "pack", "-o", "dist")
-    (bundle,) = (leaf.root / "dist").iterdir()
-    opened.clear()
-    _invoke(consumer.root, environment, "install", str(bundle), "--no-policy")
-    assert opened == [LockfileWriter.INSTALL_BUNDLE]
-    assert set(LockfileWriter) == {writer for _args, _cwd, writer in steps} | {
-        LockfileWriter.INSTALL_BUNDLE
+
+def test_each_lock_writing_command_maps_to_its_registered_writer(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    world = _world(tmp_path / "mapping")
+    steps = _writer_steps(world, _bundle(world))
+
+    for args, cwd, writer in steps:
+        recorder.clear()
+        _ok(cwd, world.environment, *args)
+        assert recorder.declared == [writer], (args, recorder.declared)
+        assert recorder.persisted <= 1, (args, recorder.persisted)
+
+    assert set(LockfileWriter) == {writer for _args, _cwd, writer in steps}
+
+
+def test_install_with_mcp_and_lsp_persists_the_lockfile_once(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    world = _world(tmp_path / "services")
+    root = world.project.root
+
+    _ok(root, world.environment, "install", *_NO_POLICY)
+
+    lock = load_yaml(root / _LOCKFILE)
+    assert lock.get("mcp_servers") and lock.get("lsp_servers"), lock
+    assert recorder.opened == [LockfileWriter.INSTALL]
+    assert recorder.persisted == 1
+
+
+def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    world = _world(tmp_path / "refusal")
+    bundle = _bundle(world)
+    _ok(world.project.root, world.environment, "install", *_NO_POLICY)
+    world.packages.set_targets(world.project, ("copilot",))
+    for root in (world.project.root, world.consumer.root):
+        path = root / _LOCKFILE
+        lock = load_yaml(path) if path.exists() else {"lockfile_version": "1", "dependencies": []}
+        lock["apm_version"] = "99.0.0"
+        dump_yaml(lock, path)
+
+    for args, cwd, writer in _writer_steps(world, bundle):
+        before = _tree(cwd)
+        recorder.clear()
+        assert _invoke(cwd, world.environment, *args) != 0, args
+        assert recorder.opened == [], (writer, recorder.opened)
+        assert recorder.persisted == 0, writer
+        assert _tree(cwd) == before, writer
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    """Every file APM could change under *root*, excluding the module store."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and "apm_modules" not in path.relative_to(root).parts
     }
