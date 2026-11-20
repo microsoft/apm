@@ -202,7 +202,9 @@ class RowReplay:
                     ]
                     if hits:
                         deployed.add(f"{package}/{kind}/{target}")
-                        managed.update(path.relative_to(project).as_posix() for path in hits)
+                        # A shared config file (MCP, LSP) is not owned by one package.
+                        if not marker:
+                            managed.update(path.relative_to(project).as_posix() for path in hits)
         cache_root = getattr(self.world, "cache_root", None) or self.world.root / "cache"
         state = LifecycleStateSnapshot.capture(
             project,
