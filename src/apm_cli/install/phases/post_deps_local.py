@@ -100,6 +100,7 @@ def run(ctx: InstallContext) -> None:
                 f"Removed stale local lockfile path {path} (target not declared in apm.yml)"
             )
 
+    from apm_cli.install.phases.cleanup import deployment_evidence
     from apm_cli.integration.cleanup import CleanupResult
 
     def _surface_local_cleanup(cleanup: CleanupResult) -> None:
@@ -119,6 +120,7 @@ def run(ctx: InstallContext) -> None:
         active_targets=ctx.targets,
         declared_targets=declared_target_profiles(ctx),
         diagnostics=ctx.diagnostics,
+        evidence=deployment_evidence(ctx),
         on_ghost_drop=_log_local_ghost_drop,
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
