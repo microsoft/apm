@@ -30,6 +30,7 @@ SLICE = HostSlice(
         EgressRow("EP|EGRESS=clone|HOST=GitLab", "PAT", "clone"),
         EgressRow("EP|HOST=GitLab|PROXY_ONLY=0", "PAT", "clone"),
         EgressRow("EP|HOST=GitLab|REDIRECT=none", "PAT", "clone"),
+        EgressRow("EP|HOST=GitLab|PROXY_ONLY=1", "PAT", "clone"),
         *(
             EgressRow(f"EP|HOST=GitLab|REDIRECT={kind}", "PAT", "clone")
             for kind in ("same-origin", "cross-origin")

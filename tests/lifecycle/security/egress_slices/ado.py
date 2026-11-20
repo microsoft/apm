@@ -66,6 +66,8 @@ SLICE = HostSlice(
         EgressRow("EP|EGRESS=clone|HOST=ADO", "PAT", "clone"),
         EgressRow("EP|HOST=ADO|PROXY_ONLY=0", "PAT", "clone"),
         EgressRow("EP|HOST=ADO|REDIRECT=none", "PAT", "clone"),
+        EgressRow("EP|HOST=ADO|PROXY_ONLY=1", "PAT", "clone"),
+        EgressRow("EP|CRED=az-bearer|PROXY_ONLY=1", "az-bearer", "clone", auth=True),
         *(
             EgressRow(f"EP|HOST=ADO|REDIRECT={kind}", "PAT", "clone")
             for kind in ("same-origin", "cross-origin")

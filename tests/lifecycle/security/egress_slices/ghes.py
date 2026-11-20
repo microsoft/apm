@@ -72,5 +72,16 @@ SLICE = HostSlice(
         ),
         *(EgressRow(f"EP|HOST=GHES|REDIRECT={kind}", "PAT", "clone") for kind in _REDIRECTS),
         *(EgressRow(f"EP|PROXY_ONLY=0|REDIRECT={kind}", "PAT", "clone") for kind in _REDIRECTS),
+        # PROXY_ONLY=1 rows: the enterprise registry proxy is the only route.
+        *(
+            EgressRow(f"EP|CRED={cred}|PROXY_ONLY=1", cred, "clone")
+            for cred in ("PAT", "gh", "helper", "none")
+        ),
+        *(EgressRow(f"EP|EGRESS={egress}|PROXY_ONLY=1", "PAT", egress) for egress in _E2),
+        EgressRow("EP|HOST=GHES|PROXY_ONLY=1", "PAT", "clone"),
+        *(
+            EgressRow(f"EP|PROXY_ONLY=1|REDIRECT={kind}", "PAT", "clone")
+            for kind in ("none", *_REDIRECTS)
+        ),
     ),
 )

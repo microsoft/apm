@@ -38,6 +38,7 @@ SLICE = HostSlice(
         EgressRow("EP|EGRESS=policy-fetch|HOST=github", "PAT", "policy-fetch"),
         EgressRow("EP|HOST=github|PROXY_ONLY=0", "PAT", "policy-fetch"),
         EgressRow("EP|HOST=github|REDIRECT=none", "PAT", "policy-fetch"),
+        EgressRow("EP|HOST=github|PROXY_ONLY=1", "PAT", "clone"),
         *(
             EgressRow(f"EP|HOST=github|REDIRECT={kind}", "PAT", "policy-fetch")
             for kind in ("same-origin", "cross-origin")

@@ -49,11 +49,20 @@ from tests.lifecycle import driver
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.security.egress_slices import EgressRow, HostSlice, slices
-from tests.lifecycle.world import World, login_azure, routes, use_policy, use_registry
+from tests.lifecycle.world import (
+    World,
+    login_azure,
+    routes,
+    use_policy,
+    use_registry,
+    use_registry_proxy,
+)
+from tests.lifecycle.world import registry as world_registry
 from tests.lifecycle.world.services import (
     ADO_BEARER,
     ADO_PAT,
     POLICY_REPO,
+    REGISTRY_HOST,
     REGISTRY_SERVER,
     policy_org,
 )
@@ -252,6 +261,15 @@ def _fields(cell_id: str) -> dict[str, str]:
     return dict(part.split("=", 1) for part in cell_id.split("|")[1:])
 
 
+# Under PROXY_REGISTRY_ONLY, a registry the operator configured is the sanctioned
+# route, not a bypass (registry/client.py _refuse_direct_egress_when_proxy_only;
+# docs enterprise/registry-proxy.md): the world's MCP registry (MCP_REGISTRY_URL)
+# and its package registry (bound in the user config).
+_SANCTIONED: Mapping[str, tuple[str, ...]] = {
+    "mcp-registry": (REGISTRY_HOST,),
+    "registry": (world_registry.HOST,),
+}
+
 # Where a REDIRECT row sends the host's requests: a path no route serves.
 _MOVED = "/lifecycle-egress-moved"
 # A redirect may break the operation; credential isolation is the subject.
@@ -288,15 +306,23 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
     }
     fields = _fields(row.id)
     redirect = fields.get("REDIRECT") in ("same-origin", "cross-origin")
+    # PROXY_ONLY=1: downloads must go through the enterprise registry proxy and
+    # every direct content host refuses (policy fetches stay direct by design).
+    proxy_only = fields.get("PROXY_ONLY") == "1"
+    if proxy_only:
+        use_registry_proxy(world, only=True)
     world.services.reset()
     if row.auth:
         world.services.require_ado_auth()
     if redirect:
         _redirect(world, host, fields["REDIRECT"])
+    sanctioned = _SANCTIONED.get(row.egress, ()) if proxy_only else ()
+    if proxy_only and not sanctioned:
+        world.services.forbid_direct()
     before = ArtifactSnapshotSet.capture(roots)
     result: CommandResult = driver.run(world, operation.command(world, host))
     after = ArtifactSnapshotSet.capture(roots)
-    exits = _REDIRECT_EXITS if redirect else row.exit
+    exits = _REDIRECT_EXITS if redirect or proxy_only else row.exit
     exits = (exits,) if isinstance(exits, int) else exits
     assert result.returncode in exits, (
         f"{row.egress} exited {result.returncode}, wanted {exits}:\n"
@@ -310,16 +336,30 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
         and (operation.belongs(request) or (redirect and request.host in routes.MIRROR_HOSTS))
     ]
     reached = {request.host for request in requests}
-    # A redirect may end the step before the operation's own requests start.
-    touched = (
-        {r.host for r in world.services.proxy.observations if r.method != "CONNECT"}
-        if redirect
-        else reached
-    )
-    assert host.git_host in touched or touched & set(host.family), (
-        f"{row.egress} never reached {host.host}: {sorted(reached)}"
-    )
     everything = world.services.proxy.observations
+    # A redirect may end the step before the operation's own requests start.
+    touched = {r.host for r in everything if r.method != "CONNECT"} if redirect else reached
+    if proxy_only:
+        direct = sorted(
+            {
+                (r.host, r.path)
+                for r in everything
+                if r.method != "CONNECT"
+                and r.host != routes.PROXY_HOST
+                and r.host not in sanctioned
+                and "/policy-" not in r.path
+            }
+        )
+        assert not direct, f"a proxy-only {row.egress} went direct: {direct}"
+        carriers = sorted({r.host for r in everything if _carried(r, (routes.PROXY_TOKEN,))})
+        assert set(carriers) <= {routes.PROXY_HOST}, f"the proxy token reached {carriers}"
+        # The proxy itself is not one of the host's origins: no credential of it may go there.
+        requests = [r for r in everything if r.method != "CONNECT"]
+        reached = {request.host for request in requests}
+    else:
+        assert host.git_host in touched or touched & set(host.family), (
+            f"{row.egress} never reached {host.host}: {sorted(reached)}"
+        )
     if fields.get("PROXY_ONLY") == "0":
         # Normal mode: every connection went to an origin the world's proxy serves.
         refused = sorted({r.host for r in everything if r.method == "CONNECT"})
@@ -332,16 +372,25 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
     if arranged.own:
         carrying = [request for request in requests if _carried(request, arranged.own)]
     else:
-        carrying = [request for request in requests if _authorized(request)]
+        # The proxy's own bearer is checked separately (it may reach only the proxy).
+        carrying = [
+            request
+            for request in requests
+            if _authorized(request) and not _carried(request, (routes.PROXY_TOKEN,))
+        ]
     others = sorted(reached - set(host.family))
     # In play: the own credential reached every own origin the operation used.
     # A redirected first request may leave before any credential is presented.
     present = (
         sorted(reached & set(host.family))
-        if row.presented and arranged.own and not redirect
+        if row.presented and arranged.own and not redirect and not proxy_only
         else []
     )
-    secrets = (*arranged.own, *arranged.foreign)
+    secrets = (
+        *arranged.own,
+        *arranged.foreign,
+        *((routes.PROXY_TOKEN,) if proxy_only else ()),
+    )
     check_obligation(
         row.id,
         strength=security_obligations()["E"][row.id],
