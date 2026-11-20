@@ -277,7 +277,8 @@ with one entry per line; entries may only be removed.
    names the promises it protects in its module-level `pytestmark`, using ids
    from `tests/quality/promise-catalog.json`: OpenAPM `req-*` ids,
    `P-OWN-<owner id>` architecture owners, `P-INV-I1`..`P-INV-I9` lifecycle
-   invariants and `P-LAW-<id>` lifecycle laws. Add a missing promise to the
+   invariants, `P-LAW-<id>` lifecycle laws and `P-DOC-<id>` documented-surface
+   promises. Add a missing promise to the
    catalog in the same pull request. A new id family (`P-<FAMILY>-<id>`) must
    first be declared in the catalog's `families`; undeclared families fail.
 

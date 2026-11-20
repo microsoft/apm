@@ -1977,6 +1977,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-locked-content-verdict",
+        rule_id="install-deployment-locked-content-verdict",
+        path="src/apm_cli/install/drift.py",
+        old=(
+            "    if locked_content_mismatch(\n"
+            "        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info\n"
+            "    ):\n"
+        ),
+        new="    if False:\n",
+        intent="The audit --ci scratch replay stops asking install's locked content verdict.",
+    ),
+    MutationCase(
         guard_id="install-deployment-locked-copy-validity",
         rule_id="install-deployment-locked-copy-validity",
         path="src/apm_cli/install/phases/integrate.py",
