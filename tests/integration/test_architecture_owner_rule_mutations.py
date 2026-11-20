@@ -3096,6 +3096,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="GitAuthEnvBuilder regains a parallel URL rewrite safety policy.",
     ),
     MutationCase(
+        guard_id="transport-platform-github-credential-class",
+        rule_id="transport-platform-github-credential-class",
+        path="src/apm_cli/core/host_providers.py",
+        old='return host.endswith(".ghe.com")',
+        new='return host.endswith((".ghe.com", ".github.io"))',
+        intent="The GitHub token chain widens beyond github.com, *.ghe.com and GITHUB_HOST.",
+    ),
+    MutationCase(
         guard_id="transport-platform-github-throttle",
         rule_id="transport-platform-github-throttle",
         path="src/apm_cli/deps/download_strategies.py",

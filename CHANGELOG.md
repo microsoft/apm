@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #PRNUM)
 - CI: merge-queue integration uses the release shard planner, and a daily alarm fails when `main` moves without a `merge_group` run. (#4149)
 - `apm unpack` applies org policy and integrity checks like `apm install <bundle>`, waits for other APM operations, and records deployed files when unpacking into an APM project. (closes #4080, #4157)
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
