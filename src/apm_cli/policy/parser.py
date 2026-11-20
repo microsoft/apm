@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from ..mcp_transport import POLICY_TRANSPORTS, canonical_transport_names
+from ..models.extension_keys import is_extension_key
 from ..utils.yaml_io import load_yaml_str
 from .schema import (
     ApmPolicy,
@@ -82,9 +83,10 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
         errors.append("Policy must be a YAML mapping")
         return errors, warnings
 
-    # Unknown top-level keys (warn, don't fail)
-    unknown = set(data.keys()) - _KNOWN_TOP_LEVEL_KEYS
-    for key in sorted(unknown):
+    # Unknown top-level keys (warn, don't fail). Vendor-extension keys are
+    # ignored, never interpreted, and do not warn (req-pl-009).
+    unknown = {key for key in data if not is_extension_key(key)} - _KNOWN_TOP_LEVEL_KEYS
+    for key in sorted(unknown, key=str):
         warnings.append(f"Unknown top-level policy key: '{key}'")
 
     for key in ("mcp", "manifest", "compilation", "registry_source", "bin_deploy"):

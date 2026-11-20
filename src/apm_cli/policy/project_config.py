@@ -136,6 +136,17 @@ def _strip_algo_prefix(value: str, declared_algo: str) -> str:
     return rest
 
 
+def _inferred_hash_algorithm(hash_raw: object) -> str:
+    """The algorithm an ``<algo>:`` digest prefix names, else the default (req-mf-018).
+
+    An explicit ``hash_algorithm`` always wins and must agree with the prefix;
+    an unsupported prefix is reported as an unsupported algorithm (#4253).
+    """
+    if isinstance(hash_raw, str) and ":" in hash_raw:
+        return hash_raw.strip().partition(":")[0]
+    return _DEFAULT_HASH_ALGORITHM
+
+
 def parse_project_policy_hash_pin(
     raw: dict[str, Any] | None,
 ) -> ProjectPolicyHashPin | None:
@@ -152,15 +163,14 @@ def parse_project_policy_hash_pin(
     if not isinstance(raw, dict):
         raise ProjectPolicyConfigError("policy: block in apm.yml must be a mapping")
 
-    algo_raw = raw.get("hash_algorithm", _DEFAULT_HASH_ALGORITHM)
+    algo_raw = raw.get("hash_algorithm", _inferred_hash_algorithm(raw.get("hash")))
     if not isinstance(algo_raw, str):
         raise ProjectPolicyConfigError("policy.hash_algorithm in apm.yml must be a string")
     algo = algo_raw.strip().lower()
     if algo not in ALLOWED_HASH_ALGORITHMS:
         allowed = ", ".join(ALLOWED_HASH_ALGORITHMS)
-        raise ProjectPolicyConfigError(
-            f"policy.hash_algorithm '{algo_raw}' is not supported. Allowed: {allowed}"
-        )
+        field = "policy.hash_algorithm" if "hash_algorithm" in raw else "policy.hash prefix"
+        raise ProjectPolicyConfigError(f"{field} '{algo_raw}' is not supported. Allowed: {allowed}")
 
     hash_raw = raw.get("hash")
     if hash_raw is None:

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci --format json` (and `sarif`) prints one document when the install replay fails on a local dependency, reporting a failed `drift` check, and keeps exit 1. (#4284)
 - Vendor target ids (`x-<vendor>-<name>`) in `apm.yml` parse; APM names each one as having no registered handler and deploys only the other targets. `--target x-...` is refused with exit 2. (#4284)
 - An `x-` key inside an object-form `dependencies.apm[]` entry is ignored instead of failing the parse, and manifest rewrites keep it; other unknown keys are still refused. (#4284)
+- `x-` vendor-extension keys at the top level of `apm-policy.yml` no longer warn and are never interpreted; other unknown top-level keys still warn. (#4284)
+- A `policy.hash` pin with a `sha384:` or `sha512:` prefix selects that algorithm when `hash_algorithm` is omitted; a prefix that contradicts an explicit `hash_algorithm` is still refused. (#4284)
 - Registry archives get the same archive limits for every accepted format, and every entry is validated before anything is written. (closes #4235, #4266)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)

@@ -56,6 +56,18 @@ def test_policy_vendor_keys_are_ignored_without_errors(tmp_path: Path) -> None:
     assert all("dependencies" not in w and "mcp" not in w for w in warnings)
 
 
+@pytest.mark.req("req-pl-009")
+def test_policy_vendor_keys_do_not_warn_but_unknown_keys_do() -> None:
+    """x- top-level policy keys never warn; other unknown keys still do; a deny holds."""
+    policy, warnings = load_policy(_POLICY_EXTENDED + "x-: bare\nbogus-key: 1\n")
+    assert warnings == [
+        "Unknown top-level policy key: 'bogus-key'",
+        "Unknown top-level policy key: 'x-'",
+    ]
+    assert policy.dependencies.deny == ("evil/*",)
+    assert policy.enforcement == "block"
+
+
 def test_manifest_top_level_and_mcp_vendor_keys_parse_without_effect(tmp_path: Path) -> None:
     """Top-level and dependencies.mcp[] x- keys parse and leave semantics unchanged."""
     server = {"name": "io.github.acme/srv", "registry": False, "transport": "stdio"}

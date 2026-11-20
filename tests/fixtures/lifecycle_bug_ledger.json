@@ -977,6 +977,21 @@
       ]
     },
     {
+      "issue": 4253,
+      "fixed_in": "Unreleased",
+      "summary": "A policy.hash pin with a sha384: or sha512: prefix and no hash_algorithm was refused because the algorithm defaulted to sha256 instead of following the prefix.",
+      "failure_modes": [
+        "reference"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_hash_prefix_lifecycle.py::test_prefixed_policy_hash_pin_is_verified_with_its_algorithm",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix"
+      ]
+    },
+    {
       "issue": 4260,
       "fixed_in": "Unreleased",
       "summary": "An x- vendor-extension key inside an object-form dependencies.apm[] entry failed the manifest parse instead of being ignored.",

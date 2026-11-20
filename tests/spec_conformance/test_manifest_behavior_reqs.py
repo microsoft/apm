@@ -258,8 +258,14 @@ def test_strong_policy_hash_algorithms_are_accepted(algorithm: str, length: int)
 
 
 @pytest.mark.req("req-mf-018")
-@pytest.mark.xfail(strict=True, reason="#4253: algorithm is not inferred from the digest prefix")
 @pytest.mark.parametrize(("algorithm", "length"), [("sha384", 96), ("sha512", 128)])
 def test_policy_hash_algorithm_is_inferred_from_digest_prefix(algorithm: str, length: int) -> None:
+    """The <algo>: prefix names the algorithm when hash_algorithm is omitted (#4253)."""
     pin = parse_project_policy_hash_pin({"hash": f"{algorithm}:" + "c" * length})
     assert (pin.algorithm, pin.digest) == (algorithm, "c" * length)
+    with pytest.raises(ProjectPolicyConfigError, match="does not match hash_algorithm 'sha256'"):
+        parse_project_policy_hash_pin(
+            {"hash_algorithm": "sha256", "hash": f"{algorithm}:" + "c" * length}
+        )
+    with pytest.raises(ProjectPolicyConfigError, match="prefix 'md5' is not supported"):
+        parse_project_policy_hash_pin({"hash": "md5:" + "c" * 32})
