@@ -500,6 +500,7 @@ def test_lock_schema_0_1_68_admits_version_4(version, content_hash, valid):
     [
         ("version4", "cached"),
         ("version4", "fresh"),
+        ("version4-bare64", "cached"),
         ("legacy-envelope", "cached"),
         ("legacy-envelope", "fresh"),
         ("legacy-bare64", "cached"),
@@ -542,7 +543,10 @@ def test_frozen_consumer_accepts_equivalent_local_content_hash_encodings(
     framed = compute_local_package_hash(provider.root)
     assert locked["lockfile_version"] == "4"
     assert dependency["content_hash"] == framed
-    if hash_format != "version4":
+    if hash_format == "version4-bare64":
+        dependency["content_hash"] = framed.removeprefix("sha256:")
+        dump_yaml(locked, lockfile)
+    elif hash_format != "version4":
         legacy = compute_local_package_hash(provider.root, framed=False)
         assert legacy != framed
         locked["lockfile_version"] = "1"
