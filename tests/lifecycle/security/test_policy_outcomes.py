@@ -946,15 +946,29 @@ SITE_SLICES["mcp-admission(trust.py)"] = SiteSlice(
     arrange=_installed_approved_exec,
     command=lambda world: "apm audit --ci",
     classes={
-        # The deployed server's consent and drift replay route the outcome (#4259).
-        "absent/block": Expect(1, (*_routed_block("absent"), _CHECK_FAILED)),
-        "empty/block": Expect(1, (*_routed_block("empty"), _CHECK_FAILED)),
-        "no_git_remote/block": Expect(1, (*_routed_block("no_git_remote"), _CHECK_FAILED)),
-        "malformed/block": Expect(1, (*_routed_block("malformed"), _CHECK_FAILED)),
-        "cache_miss_fetch_fail/block": Expect(
-            1, (*_routed_block("cache_miss_fetch_fail"), _CHECK_FAILED)
+        # The deployed server's consent and drift replay route the outcome (#4259)
+        # and keep its cause, so the refusal still says why no policy resolved.
+        "absent/block": Expect(
+            1, (*_routed_block("absent"), r"No org policy found", _CHECK_FAILED)
         ),
-        "garbage_response/block": Expect(1, (*_routed_block("garbage_response"), _CHECK_FAILED)),
+        "empty/block": Expect(1, (*_routed_block("empty"), EMPTY, _CHECK_FAILED)),
+        "no_git_remote/block": Expect(
+            1,
+            (
+                *_routed_block("no_git_remote"),
+                r"Could not determine org from git remote",
+                _CHECK_FAILED,
+            ),
+        ),
+        "malformed/block": Expect(
+            1, (*_routed_block("malformed"), r"Invalid policy", _CHECK_FAILED)
+        ),
+        "cache_miss_fetch_fail/block": Expect(
+            1, (*_routed_block("cache_miss_fetch_fail"), r"HTTP 503", _CHECK_FAILED)
+        ),
+        "garbage_response/block": Expect(
+            1, (*_routed_block("garbage_response"), r"is not a YAML mapping", _CHECK_FAILED)
+        ),
         "incomplete_chain": Expect(1, (_CHAIN_BLOCK, _CHECK_FAILED)),
         "malformed/warn": Expect(0, (_unavailable("malformed"), _CONSENT_OK)),
         "cache_miss_fetch_fail/warn": Expect(

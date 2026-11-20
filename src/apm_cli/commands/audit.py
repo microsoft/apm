@@ -62,25 +62,10 @@ class _AuditConfig:
 
 
 def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None) -> str:
-    """Render a per-outcome `cause` line for audit --ci policy-discovery messages.
+    """Render the per-outcome cause line for audit --ci policy-discovery messages."""
+    from ..policy.outcome_routing import outcome_cause
 
-    Used by both the ``warn`` (`[!]`) and ``block`` (`[x]`) branches so the
-    wording is identical; only the prefix and suffix change. Closes #1159
-    by replacing the prior silent-skip with explicit, actionable causes
-    for ``no_git_remote`` / ``absent`` / ``empty`` outcomes (and matching
-    the existing wording for fetch failures).
-    """
-    src = source or "unknown"
-    if outcome == "no_git_remote":
-        return "Could not determine org from git remote"
-    if outcome == "absent":
-        return f"No org policy found at {src}"
-    if outcome == "empty":
-        return f"Org policy at {src} is present but empty"
-    # malformed / cache_miss_fetch_fail / garbage_response (and any
-    # `error` set on the result): preserve the legacy wording so existing
-    # consumers parsing the line keep working.
-    return f"Policy fetch failed: {err_text or outcome}"
+    return outcome_cause(outcome, source, err_text)
 
 
 def _is_explicit_policy_source(policy_source: str | None) -> bool:
