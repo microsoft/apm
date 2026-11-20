@@ -431,13 +431,15 @@ def _pin_retained_ancestors(
 
     A descendant whose deployed files could not be removed stays locked under
     its recorded parent; keeping that parent chain lets the next targeted
-    install of the selected package rediscover and retry it.
+    install of the selected package rediscover and retry it. Every dropped row
+    that carries a parent identity is pinned, so rows sharing one identity (a
+    repository and its virtual children) never depend on set order (#4060).
     """
-    by_identity = {
-        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements): key
-        for key in dropped
-        if key in lockfile.dependencies
-    }
+    by_identity: dict[str, set[str]] = {}
+    for key in dropped:
+        if key in lockfile.dependencies:
+            identity = lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements)
+            by_identity.setdefault(identity, set()).add(key)
     pinned: set[str] = set()
     queue = [key for key in dropped if key in retained]
     while queue:
@@ -445,11 +447,8 @@ def _pin_retained_ancestors(
         if key in pinned or key not in lockfile.dependencies:
             continue
         pinned.add(key)
-        queue.extend(
-            by_identity[parent]
-            for parent in lockfile.dependencies[key].parent_keys
-            if parent in by_identity
-        )
+        for parent in lockfile.dependencies[key].parent_keys:
+            queue.extend(by_identity.get(parent, ()))
     return frozenset(pinned)
 
 

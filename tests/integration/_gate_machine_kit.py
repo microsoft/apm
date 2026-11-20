@@ -177,15 +177,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         ),
         match=r"^converged install-frozen exited 1$",
     ),
-    KnownCell(
-        "gate-cell-e",
-        "I7",
-        "#4045",
-        lambda machine, op, before, after, result: (
-            op.name == "uninstall" and op.cell_kinds == ("lsp",) and "lsp" in before.deployed
-        ),
-        match=r"^failed uninstall changed the (manifest|lockfile)$",
-    ),
 )
 
 
