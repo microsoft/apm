@@ -7,10 +7,17 @@
 | blocker | A common journey step fails or misleads; data loss; an executable runs without a current approval; a release headline promise is broken | audit tells you to run `apm install` to repair drift and the install does not repair it; a valid dependency deploys when a sibling dependency fails |
 | should-fix | A wrong hint, stream or exit code; one sibling cell disagrees with the others; docs and CLI disagree on a common path | `update` suggests `--no-policy`, which update does not accept; `--exclude VSCode` ignored while `--target VSCode` works |
 | nit | Wording, counts, pluralization, duplicate lines, formatting | "1 agents integrated"; "#main #main" |
+| blocker (pre-existing, security) | An approval, policy, integrity or credential defect that also reproduces on the previous release | a denied executable stays registered after reinstall on both N-1 and the candidate |
 
-A finding that already reproduces on the previous release is
-PRE-EXISTING. It is a known issue for the release notes, not a cut
+A NON-SECURITY finding that already reproduces on the previous release
+is PRE-EXISTING. It is a known issue for the release notes, not a cut
 blocker, unless the release claims to fix it.
+
+A trust, integrity or credential finding (lens L4, or any approval,
+policy, integrity or credential issue) is never a release-notes known
+issue, even when it reproduces on the previous release. Security
+findings get fixed, not reported: it routes privately and blocks the
+cut until the private fix track decides.
 
 ## Cut call (the release-gate row)
 
@@ -18,6 +25,8 @@ blocker, unless the release claims to fix it.
 
 - GO: no blocker is open, verified, still-open or changed at the exact
   SHA.
+- A pre-existing security finding counts as an open blocker until the
+  private fix track decides; a pre-existing non-security one does not.
 - NO-GO: at least one such blocker, listed by id.
 
 The row also lists blockers still awaiting verification and every
@@ -33,8 +42,9 @@ approves the row (B10) before it is published to the release gate.
    pipeline apply barrier, other(<name>).
 2. Target: the open release-train PR that touches that owner, or "new".
 3. Security and trust findings (lens L4, or any credential, approval or
-   integrity issue) go privately to the coordinator, never into public
-   issue or PR text. Public wording stays neutral.
+   integrity issue) go privately to the security lead and the
+   coordinator who started the pass, never into public issue or PR
+   text. Public wording stays neutral.
 4. Every verified finding gets a failing-before test brief for the
    apm-lifecycle-tests skill (see SKILL.md P5). The finding stays open
    until that test exists and fails on the unfixed code.
