@@ -252,11 +252,18 @@ class Scenario:
         return {**roots, **self.extra_roots}
 
     def set_targets(self, *targets: str) -> None:
+        """Declare *targets* in apm.yml (an input edit; bytes kept when already declared)."""
         manifest = self.manifest_root / "apm.yml"
         data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-        data["targets"] = list(targets)
-        manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+        if data.get("targets") != list(targets):
+            data["targets"] = list(targets)
+            manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
         self.model = self.model.with_targets(*targets)
+
+    def adopt(self, *names: str, lock: str = "consistent") -> None:
+        """The world already declares *names* (a checked-out project) with a *lock* state."""
+        self.roots |= set(names)
+        self.model = self._declared(self.roots).with_lock(lock)
 
     def source_moved(self) -> None:
         """An input outside the CLI moved (a new tag, an edited cache): not converged."""

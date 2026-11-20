@@ -19,6 +19,7 @@ the generated rows need, without changing the row schema it reads:
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
@@ -29,8 +30,9 @@ from tests.lifecycle import driver, oracles
 from tests.lifecycle.rows import Row, RowReplay, load_row
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
-# Commands that name a package by its identity, not by its install spec.
-_IDENTITY_COMMANDS = frozenset({"approve", "deny"})
+# Commands that name a package by its identity, not by its install spec
+# (`apm update lifecycle/p-skill#v1.0.0` answers "not found in apm.yml").
+_IDENTITY_COMMANDS = frozenset({"approve", "deny", "update"})
 
 
 @cache
@@ -54,6 +56,10 @@ class CoveringReplay(RowReplay):
         self.credited: list[str] = []
 
     def step(self, step: object) -> None:
+        # A pinned refusal is a new request, never a repeat of the converged
+        # command, so I2 does not apply to it; I7 and the step's own
+        # ``unchanged`` evidence still prove it wrote nothing.
+        self._refusal = isinstance(step, Mapping) and "exit" in step
         cells = step.get("cells", ()) if isinstance(step, Mapping) else ()
         if not cells:
             super().step(step)
@@ -78,6 +84,18 @@ class CoveringReplay(RowReplay):
                 scope=self.row.scope,
             )
             self.credited.append(cell)
+
+    def _requested(self, args: tuple[str, ...]):
+        """``install --mcp`` declares a server and a refusal is a new request: neither repeats."""
+        requested = super()._requested(args)
+        if "--mcp" in args or getattr(self, "_refusal", False):
+            return replace(requested, converged=False)
+        return requested
+
+    def _advance(self, op, requested, result) -> None:
+        """A dry run changes nothing, so the model stays where it was."""
+        if "DRYRUN" not in op.modifiers:
+            super()._advance(op, requested, result)
 
     def _args(self, line: str) -> tuple[str, ...]:
         args = driver.command_args(line.format(marketplace_url=self.world.services.marketplace_url))

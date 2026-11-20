@@ -18,6 +18,8 @@ graphs and tag shapes are authored inside each test.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from tests.lifecycle.scenarios._kit import (
@@ -85,7 +87,7 @@ def _scenario(world, packages, **kwargs) -> Scenario:
 
 def test_transitive_chain_deploys_every_depth(lifecycle_world) -> None:
     specs = _chain(lifecycle_world)
-    requires = {name: (child,) for name, child in zip(CHAIN, CHAIN[1:], strict=False)}
+    requires = {name: (child,) for name, child in itertools.pairwise(CHAIN)}
     kinds = dict.fromkeys(CHAIN, ("skill",))
     scenario = _scenario(lifecycle_world, specs, kinds=kinds, requires=requires)
 

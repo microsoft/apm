@@ -21,7 +21,6 @@ CELL: OP={install,prune,uninstall} SRC={git,local-path} PRIM=skill SCOPE={projec
 from __future__ import annotations
 
 import ctypes
-import os
 import sys
 import tempfile
 from pathlib import Path

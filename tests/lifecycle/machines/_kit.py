@@ -351,10 +351,9 @@ class MachineBase(RuleBasedStateMachine):
 
 
 def earned_cells(node: str, prefix: str) -> frozenset[str]:
-    """Obligation cells (``<prefix>|...``) the oracle receipts of *node* carry."""
+    """Obligation ids (``<prefix>...``) that ``check_obligation`` credited to *node*."""
     return frozenset(
-        cell
+        str(receipt.params["obligation"])
         for receipt in receipts.earned(node)
-        for cell in receipt.params.get("cells", ())
-        if str(cell).startswith(prefix)
+        if str(receipt.params.get("obligation", "")).startswith(prefix)
     )

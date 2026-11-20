@@ -43,7 +43,6 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
-    pytest.mark.skipif(os.name == "nt", reason="POSIX shell shim and signals"),
     pytest.mark.promise(
         "P-INV-I1",
         "P-INV-I2",

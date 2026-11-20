@@ -30,12 +30,15 @@ from hypothesis.stateful import initialize, precondition, rule, run_state_machin
 from tests.lifecycle.machines._kit import (
     SCOPES,
     Bench,
+    KnownCell,
     MachineBase,
+    Step,
     WorldPool,
     earned_cells,
     machine_settings,
 )
 from tests.lifecycle.model.state import ModelState
+from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.receipts import current_node
 
 pytestmark = [
@@ -89,6 +92,45 @@ _ARGS = {
 _LOCK_NAMED = re.compile(r"lockfile|apm\.lock\.yaml", re.IGNORECASE)
 
 
+def _adds_through_symlink(machine, op, before, after, result) -> bool:
+    del before, after
+    return (
+        result is not None
+        and op.name == "install"
+        and machine.current == "add"
+        and machine.lock_state == "symlink"
+        and TOGGLE not in machine.model.declared
+    )
+
+
+# Strict expected failures found on main: each must keep failing where it applies.
+KNOWN_CELLS = (
+    KnownCell(
+        "symlink-add-deploys",
+        "I1",
+        "#4168",
+        r"^deployed file is not in the lock: .*p-child/SKILL\.md$",
+        _adds_through_symlink,
+    ),
+    KnownCell(
+        "symlink-add-deploys",
+        "I5",
+        "#4168",
+        r"^read-only install wrote (project|home):\[.*p-child",
+        _adds_through_symlink,
+    ),
+    KnownCell(
+        "symlink-add-deploys",
+        "I7",
+        "#4168",
+        r"^failed install changed deployed surfaces$",
+        _adds_through_symlink,
+    ),
+)
+# T4 cells whose oracle fails on main: the strict cell above discharges them.
+KNOWN_T4 = {f"T4|add|{scope}|symlink": "#4168" for scope in SCOPES}
+
+
 def ops_for(scope: str, names: Collection[str]) -> tuple[str, ...]:
     return tuple(op for op in names if scope == "project" or op not in _PROJECT_ONLY)
 
@@ -105,12 +147,15 @@ T4_CELLS = t4_cells("project") | t4_cells("user")
 class ScopeLockMachine(MachineBase):
     """Reference model of lockfile refusal at one scope, checked against the real CLI."""
 
+    known = KNOWN_CELLS
+
     def __init__(self, bench: Bench) -> None:
         super().__init__(bench, ModelState(scope=bench.scope), KINDS)
         self.lock_state = "consistent"
         self.converged = False
         self.good: bytes | None = None
         self.good_converged = False
+        self.current = ""
 
     # -- helpers ---------------------------------------------------------------
 
@@ -142,6 +187,7 @@ class ScopeLockMachine(MachineBase):
 
     def run_op(self, op: str) -> None:
         cell = f"T4|{op}|{self.bench.scope}|{self.lock_state}"
+        self.current = op
         bad = self.lock_state != "consistent"
         read_only = bad or op in READERS
         requested = self._requested(op)
@@ -158,6 +204,9 @@ class ScopeLockMachine(MachineBase):
             mutating=op in MUTATING and not bad,
         )
         result = step.result
+        self.credit(cell, step, bad)
+        if _adds_through_symlink(self, step.op, step.before, step.after, result):
+            self.remove_leftovers(result)
         if bad and result.returncode != 0 and op in READERS:
             text = f"{result.stdout}\n{result.stderr}"
             assert _LOCK_NAMED.search(text), f"{op} failed without naming the lockfile:\n{text}"
@@ -166,6 +215,36 @@ class ScopeLockMachine(MachineBase):
         if result.returncode == 0 and not bad and op in MUTATING:
             self.model = requested
             self.converged = True
+
+    def remove_leftovers(self, result) -> None:
+        """Execute the printed hint of #4168: remove the files the failed install left."""
+        text = f"{result.stdout}\n{result.stderr}"
+        assert "Remove these files" in text, text
+        leftover = self.bench.deploy_root / ".agents" / "skills" / TOGGLE
+        self.edit("remove-leftovers", lambda: shutil.rmtree(leftover, ignore_errors=True))
+
+    def durable(self) -> dict[str, tuple[str, ...]]:
+        """Root id -> durable prefixes: manifest, lockfile, packages, deployed files."""
+        if self.bench.scope == "project":
+            project = ("apm.yml", "apm.lock.yaml", "apm_modules", ".agents", ".github")
+            return {"project": project, "outside": ("*",)}
+        home = (".apm/apm.yml", ".apm/apm.lock.yaml", ".apm/apm_modules", ".agents", ".copilot")
+        return {"home": home, "project": ("*",), "outside": ("*",)}
+
+    def credit(self, cell: str, step: Step, bad: bool) -> None:
+        """Credit the T4 cell: a bad lockfile leaves every durable byte unchanged."""
+        if cell in KNOWN_T4 and self.current == "add" and TOGGLE not in self.model.declared:
+            return
+        unchanged = self.durable() if bad or self.current in READERS else {"outside": ("*",)}
+        check_obligation(
+            cell,
+            strength="e2e-evidence",
+            before=step.before,
+            after=step.after,
+            result=step.result,
+            evidence=Evidence(unchanged=unchanged, exit=self.exits(self.current)),
+            scope=self.bench.scope,
+        )
 
     def _requested(self, op: str) -> ModelState:
         if op == "add":
@@ -289,7 +368,7 @@ def test_scope_lock_spine_refuses_every_write_and_keeps_reads(
     replay_spine(machine)
     strict = {cell.label for cell in machine.known}
     assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
-    missing = t4_cells(scope) - earned_cells(current_node(), "T4|")
+    missing = t4_cells(scope) - earned_cells(current_node(), "T4|") - set(KNOWN_T4)
     assert not missing, f"T4 cells without an oracle receipt: {sorted(missing)}"
 
 
