@@ -1,6 +1,6 @@
 """Unit tests for apm_cli.drift -- pure drift-detection helpers.
 
-These tests cover detect_ref_change, detect_orphans, detect_config_drift,
+These tests cover detect_ref_change, the install orphan decision, detect_config_drift,
 and build_download_ref.  All four functions are stateless and side-effect-free
 so no I/O or network access is required.
 """
@@ -17,11 +17,31 @@ from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import (
     build_download_ref,
     detect_config_drift,
-    detect_orphans,
     detect_ref_change,
     revision_pin_mismatch,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+
+
+def _orphan_preview(lockfile, intended, *, only_packages):
+    """Return the deployed files the install orphan decision would remove."""
+    from apm_cli.install.orphans import DeploymentClaims, OrphanOperation, decide_orphan_removal
+
+    if only_packages or not lockfile:
+        return set()
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.INSTALL,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=None,
+        resolved_keys=None,
+        intended=intended,
+        materialized=None,
+        reachability=None,
+        deployment_claims=DeploymentClaims(live_files=None, retained={}),
+    )
+    return {path for files in decision.removed_files.values() for path in files}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -234,29 +254,29 @@ class TestRevisionPinMismatch(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# detect_orphans
+# the install orphan decision
 # ---------------------------------------------------------------------------
 
 
 class TestDetectOrphans(unittest.TestCase):
-    """Tests for detect_orphans()."""
+    """Tests for the install orphan decision."""
 
     def test_partial_install_returns_empty(self):
         """Partial install must not clean up anything."""
         locked_dep = _LockedDep(repo_url="owner/orphan", deployed_files=["a.md"])
         lf = _LockFile(dependencies={"owner/orphan": locked_dep})
-        result = detect_orphans(lf, {"owner/kept"}, only_packages=["owner/kept"])
+        result = _orphan_preview(lf, {"owner/kept"}, only_packages=["owner/kept"])
         self.assertEqual(result, set())
 
     def test_no_lockfile_returns_empty(self):
         """First install has no previous lockfile."""
-        result = detect_orphans(None, {"owner/pkg"}, only_packages=[])
+        result = _orphan_preview(None, {"owner/pkg"}, only_packages=[])
         self.assertEqual(result, set())
 
     def test_all_packages_present_returns_empty(self):
         locked_dep = _LockedDep(repo_url="owner/pkg", deployed_files=["file.md"])
         lf = _LockFile(dependencies={"owner/pkg": locked_dep})
-        result = detect_orphans(lf, {"owner/pkg"}, only_packages=[])
+        result = _orphan_preview(lf, {"owner/pkg"}, only_packages=[])
         self.assertEqual(result, set())
 
     def test_orphan_files_returned(self):
@@ -264,28 +284,28 @@ class TestDetectOrphans(unittest.TestCase):
         orphan = _LockedDep(repo_url="owner/gone", deployed_files=["x.md", "y.md"])
         kept = _LockedDep(repo_url="owner/kept", deployed_files=["z.md"])
         lf = _LockFile(dependencies={"owner/gone": orphan, "owner/kept": kept})
-        result = detect_orphans(lf, {"owner/kept"}, only_packages=[])
+        result = _orphan_preview(lf, {"owner/kept"}, only_packages=[])
         self.assertEqual(result, {"x.md", "y.md"})
 
     def test_multiple_orphans_combined(self):
         a = _LockedDep(repo_url="a/a", deployed_files=["a.md"])
         b = _LockedDep(repo_url="b/b", deployed_files=["b.md"])
         lf = _LockFile(dependencies={"a/a": a, "b/b": b})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         self.assertEqual(result, {"a.md", "b.md"})
 
     def test_empty_intended_deps(self):
         """Empty manifest means all current packages are orphans."""
         dep = _LockedDep(repo_url="owner/removed", deployed_files=["f.md"])
         lf = _LockFile(dependencies={"owner/removed": dep})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         self.assertEqual(result, {"f.md"})
 
     def test_none_only_packages_treated_as_empty(self):
         """only_packages=None is treated the same as [] -- full install."""
         locked_dep = _LockedDep(repo_url="owner/orphan", deployed_files=["a.md"])
         lf = _LockFile(dependencies={"owner/orphan": locked_dep})
-        result = detect_orphans(lf, set(), only_packages=None)
+        result = _orphan_preview(lf, set(), only_packages=None)
         self.assertEqual(result, {"a.md"})
 
     def test_self_entry_never_orphaned(self):
@@ -307,7 +327,7 @@ class TestDetectOrphans(unittest.TestCase):
         )
         orphan = _LockedDep(repo_url="owner/gone", deployed_files=["gone.md"])
         lf = _LockFile(dependencies={_SELF_KEY: self_dep, "owner/gone": orphan})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         # Only the genuinely dropped package is an orphan; self-includes are not.
         self.assertEqual(result, {"gone.md"})
 
@@ -334,7 +354,7 @@ class TestDetectOrphans(unittest.TestCase):
         )
         # Manifest now empty -> only the real dropped package is an orphan;
         # the synthesized self-entry's includes are never reported.
-        result = detect_orphans(lock, set(), only_packages=[])
+        result = _orphan_preview(lock, set(), only_packages=[])
         self.assertEqual(result, {".apm/x.md"})
 
 

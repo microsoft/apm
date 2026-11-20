@@ -114,6 +114,10 @@ The integration suite uses **declarative gating** via pytest markers,
 not per-file orchestrator enumeration. Adding a new integration test
 does not require editing `scripts/test-integration.sh`.
 
+Lifecycle tests (any test that drives the real `apm` CLI through a command
+sequence and checks durable state) load the `apm-lifecycle-tests` skill
+(`.apm/skills/apm-lifecycle-tests/SKILL.md`) before authoring.
+
 ### Three independent marker axes
 
 Markers compose across three axes:

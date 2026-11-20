@@ -25,7 +25,13 @@ def test_missing_or_unsuccessful_producer_blocks_gate(lane: str) -> None:
         assert job["if"] == "always() && " + BRANCH_PUSH
         assert jobs["build-windows"]["if"] == "needs.release-plan.outputs.mode != 'push'"
         assert job["steps"] == jobs["build-windows"]["steps"]
-        expected = ["release-plan", "windows-installer", "windows-unit-1", "windows-unit-2"]
+        expected = [
+            "release-plan",
+            "windows-installer",
+            "windows-unit-1",
+            "windows-unit-2",
+            "windows-unit-3",
+        ]
         key, env = "PUSH_RESULTS", job["env"]
         prefix = ["${{ needs.release-plan.outputs.mode }}"]
         values = ["push"]
@@ -64,7 +70,7 @@ def test_push_shards_execute_the_original_suites() -> None:
         (
             release,
             "windows-unit",
-            2,
+            3,
             "Run unit tests (Windows diagnostics)",
             "tests/unit tests/test_console.py",
             "windows-unit",
