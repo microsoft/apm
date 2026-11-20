@@ -985,7 +985,7 @@ def _auto_discover(
     is_ado = is_azure_devops_hostname(host)
     masked_private_hint: str | None = None
 
-    for candidate_repo in candidates:
+    for index, candidate_repo in enumerate(candidates):
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
         if is_ado:
             result = _fetch_ado_org_policy(
@@ -1035,6 +1035,24 @@ def _auto_discover(
             if candidate_repo == ".github-private" and _is_github_host(host) and result.not_found:
                 masked_private_hint = _masked_private_policy_hint(org, candidate_repo)
             continue
+
+        if result.outcome == "cache_miss_fetch_fail" and not (is_ado or is_gitlab_hostname(host)):
+            from apm_cli.policy._cached_candidates import cached_later_candidate
+
+            # Offline, an earlier candidate that was absent when the policy was
+            # cached cannot hide the last-known policy (#4456).
+            later = [f"{org}/{repo}" for repo in candidates[index + 1 :]]
+            if host and host != "github.com":
+                later = [f"{host}/{ref}" for ref in later]
+            fallback = cached_later_candidate(
+                result,
+                later,
+                project_root,
+                expected_hash=expected_hash,
+                skip=no_cache or cache_only,
+            )
+            if fallback is not None:
+                return fallback
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
         if result.outcome == "cache_miss_fetch_fail" and _rejected_pinned_cache(
