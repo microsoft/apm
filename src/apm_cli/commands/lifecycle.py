@@ -538,6 +538,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
     name="trust",
     help="Trust the project apm.yml lifecycle: block so its scripts run.",
 )
+@serialized_lifecycle
 def lifecycle_trust() -> None:
     """Record trust for the current lifecycle: subtree of apm.yml.
 
@@ -584,6 +585,7 @@ def lifecycle_trust() -> None:
     name="untrust",
     help="Revoke trust for the project apm.yml lifecycle: block.",
 )
+@serialized_lifecycle
 def lifecycle_untrust() -> None:
     """Revoke trust for the apm.yml lifecycle: block so its scripts stop running."""
     from apm_cli.core.lifecycle_scripts import _get_project_apm_yml

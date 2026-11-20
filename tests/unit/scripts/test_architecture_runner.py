@@ -664,6 +664,7 @@ install-deployment-manifest-inheritance-includes
 install-deployment-manifest-snapshot
 install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
+install-deployment-lifecycle-serialization-closed-world
 install-deployment-mcp-admission
 install-deployment-mcp-native-comparison
 install-deployment-mcp-ownership-migration
@@ -770,6 +771,7 @@ registry_delegation.lifecycle_docs_aggregate
 registry_delegation.lockfile_version_authority
 registry_delegation.logger_redaction_attachment
 registry_delegation.manifest_schema_negotiation
+registry_delegation.module_ownership
 registry_delegation.native_locator_target_names
 registry_delegation.output_diagnostics
 registry_delegation.policy_ref_redaction

@@ -6,6 +6,7 @@ import sys
 import click
 
 from ..core.command_logger import CommandLogger
+from ..install.locking import serialized_lifecycle
 from ..runtime.registry import runtime_names
 from ..utils.console import (
     STATUS_SYMBOLS,
@@ -31,6 +32,7 @@ def runtime():
     is_flag=True,
     help="Install runtime without APM configuration (uses runtime's native defaults)",
 )
+@serialized_lifecycle
 def setup(runtime_name, version, vanilla):
     """Set up an AI runtime with APM-managed installation."""
     logger = CommandLogger("runtime setup")
@@ -127,6 +129,7 @@ def list():  # noqa: F811
     prompt="Are you sure you want to remove this runtime?",
     help="Confirm the action without prompting",
 )
+@serialized_lifecycle
 def remove(runtime_name):
     """Remove an installed runtime from APM management."""
     logger = CommandLogger("runtime remove")

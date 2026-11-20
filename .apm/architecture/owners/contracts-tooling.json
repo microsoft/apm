@@ -106,7 +106,7 @@
       "id": "lifecycle-script-firing-gate",
       "decision": "Whether a discovered lifecycle script may fire (APM_NO_SCRIPTS, org executables.deny_all, project script trust)",
       "owner": "core/lifecycle_scripts.py (build_runner_from_context is the only LifecycleScriptRunner constructor)",
-      "selectors": ["src/apm_cli/core/lifecycle_scripts.py"],
+      "selectors": ["src/apm_cli/core/lifecycle_scripts.py", "src/apm_cli/core/script_trust.py"],
       "guards": ["contracts-tooling-lifecycle-script-gate"]
     },
     {
@@ -149,6 +149,16 @@
         "scripts/architecture_linter/checks/contracts_strip_charset.py"
       ],
       "guards": ["contracts-tooling-strip-charset"]
+    },
+    {
+      "id": "module-ownership-closed-world",
+      "decision": "Which canonical owner each src/apm_cli module belongs to: exactly one owner selector, or an entry in the shrink-only unowned allowlist whose length equals its frozen ceiling",
+      "owner": ".apm/architecture/unowned-modules.json (allowlist) + scripts/architecture_linter/checks/registry_module_ownership.py (UNOWNED_MODULE_CEILING)",
+      "selectors": [
+        ".apm/architecture/unowned-modules.json",
+        "scripts/architecture_linter/checks/registry_module_ownership.py"
+      ],
+      "guards": ["registry-delegation-module-ownership"]
     }
   ]
 }

@@ -529,6 +529,22 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4091,
+      "fixed_in": "0.37.0",
+      "summary": "apm lifecycle trust and untrust wrote the script trust store outside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer could drop a recorded trust or restore a revoked one while the command reported success.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_trust_keeps_every_trust_record",
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_untrust_keeps_the_revocation"
+      ]
     }
   ],
   "lifecycle_contracts": [

@@ -1722,6 +1722,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Config mutation stops routing through the canonical lifecycle lock.",
     ),
     MutationCase(
+        guard_id="install-deployment-lifecycle-serialization-closed-world",
+        rule_id="install-deployment-lifecycle-serialization-closed-world",
+        path="src/apm_cli/commands/runtime.py",
+        old="def status():",
+        new="def status_report():",
+        intent="A CLI command lands without a lifecycle serialization classification.",
+    ),
+    MutationCase(
         guard_id="install-deployment-local-bundle-hook-trust",
         rule_id="install-deployment-local-bundle-hook-trust",
         path="src/apm_cli/install/local_bundle_hook_trust.py",
@@ -2362,6 +2370,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '    raw_targets = vars(package).get("targets")\n'
         ),
         intent="Package-target authorization re-reads the raw manifest targets field.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-module-ownership",
+        rule_id="registry_delegation.module_ownership",
+        path=".apm/architecture/unowned-modules.json",
+        old='    "src/apm_cli/__init__.py",\n',
+        new="",
+        intent="A module with no owner drops off the shrink-only unowned allowlist.",
     ),
     MutationCase(
         guard_id="registry-delegation-output-diagnostics",
