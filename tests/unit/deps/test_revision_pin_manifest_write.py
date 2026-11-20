@@ -19,7 +19,6 @@ pytestmark = pytest.mark.component
 
 OLD_SHA = "a" * 40
 NEW_SHA = "b" * 40
-TAG_OBJECT_SHA = "c" * 40
 
 
 @pytest.mark.windows_compat

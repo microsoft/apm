@@ -27,7 +27,6 @@ pytestmark = pytest.mark.component
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
-SHA_C = "c" * 40
 
 
 def _dep(repo: str = "owner/repo", ref: str = "main") -> DependencyReference:

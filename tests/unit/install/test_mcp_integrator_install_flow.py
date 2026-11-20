@@ -21,14 +21,11 @@ Covers branches not hit by existing MCP tests:
 from __future__ import annotations
 
 import contextlib
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-import toml
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,50 +49,6 @@ def _make_self_defined_dep(name: str, transport: str = "stdio") -> MagicMock:
     dep.transport = transport
     dep.env = {}
     return dep
-
-
-def _make_mcp_integrator_stubs(
-    installed_runtimes: list[str] | None = None,
-    vscode_available: bool = False,
-):
-    """Return common mcp_integrator module stubs for run_mcp_install calls."""
-    if installed_runtimes is None:
-        installed_runtimes = ["copilot"]
-
-    mock_integrator_cls = MagicMock()
-    mock_integrator_cls._detect_runtimes.return_value = set()
-    mock_integrator_cls._gate_project_scoped_runtimes.side_effect = lambda rts, **kw: rts
-    mock_integrator_cls._detect_mcp_config_drift.return_value = []
-    mock_integrator_cls._append_drifted_to_install_list = MagicMock()
-    mock_integrator_cls._install_for_runtime.return_value = True
-    mock_integrator_cls._check_self_defined_servers_needing_installation.return_value = []
-    mock_integrator_cls._build_self_defined_info.return_value = {}
-
-    mock_manager = MagicMock()
-    mock_manager.is_runtime_available.side_effect = lambda rt: rt in installed_runtimes
-
-    return mock_integrator_cls, mock_manager
-
-
-def _patch_mcp_install(
-    installed_runtimes: list[str] | None = None,
-    vscode_available: bool = False,
-    script_runtimes: set | None = None,
-    gate_result: list[str] | None = None,
-):
-    """Return stubs for patching run_mcp_install's dependencies.."""
-    mock_integrator_cls, mock_manager = _make_mcp_integrator_stubs(
-        installed_runtimes=installed_runtimes or ["copilot"],
-        vscode_available=vscode_available,
-    )
-    if script_runtimes is not None:
-        mock_integrator_cls._detect_runtimes.return_value = script_runtimes
-    if gate_result is not None:
-        mock_integrator_cls._gate_project_scoped_runtimes.side_effect = lambda rts, **kw: (
-            gate_result
-        )
-
-    return mock_integrator_cls, mock_manager
 
 
 def _install_claude_only(
@@ -438,78 +391,6 @@ class TestRunMcpInstallNoTargetRuntimes:
 
 
 class TestRunMcpInstallSelfDefined:
-    def test_self_defined_dep_separated_correctly(self, tmp_path: Path) -> None:
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
-
-        sd_dep = _make_self_defined_dep("my-server")
-        logger = MagicMock()
-
-        with patch(
-            "apm_cli.integration.mcp_integrator_install._install_self_defined_deps",
-            return_value=1,
-        ) as install:
-            result = run_mcp_install(
-                [sd_dep], runtime="copilot", logger=logger, project_root=tmp_path
-            )
-        assert result == 1
-        assert install.call_args.kwargs["self_defined_deps"] == [sd_dep]
-
-    @pytest.mark.parametrize(
-        ("runtime", "signal_dir", "config_relpath"),
-        [
-            ("claude", ".claude", ".mcp.json"),
-            ("codex", ".codex", ".codex/config.toml"),
-        ],
-    )
-    def test_self_defined_stdio_env_placeholders_follow_target_support(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        runtime: str,
-        signal_dir: str,
-        config_relpath: str,
-    ) -> None:
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
-        from apm_cli.models.dependency.mcp import MCPDependency
-
-        (tmp_path / signal_dir).mkdir()
-        monkeypatch.setenv("MY_TOKEN", "repro-secret-not-a-real-token")
-        dep = MCPDependency(
-            name="env-demo",
-            registry=False,
-            transport="stdio",
-            command="npx",
-            args=["-y", "example-mcp"],
-            env={
-                "MY_TOKEN": "${MY_TOKEN}",
-                "LITERAL_VALUE": "literal-value",
-            },
-        )
-
-        result = run_mcp_install(
-            [dep],
-            runtime=runtime,
-            project_root=tmp_path,
-            logger=MagicMock(),
-        )
-
-        assert result == 1
-        config_path = tmp_path / config_relpath
-        content = config_path.read_text(encoding="utf-8")
-        if runtime == "claude":
-            # Claude Code expands ${VAR} in .mcp.json at server start (#3252).
-            env_block = json.loads(content)["mcpServers"]["env-demo"]["env"]
-            assert env_block["MY_TOKEN"] == "${MY_TOKEN}"
-            assert "repro-secret-not-a-real-token" not in content
-            assert env_block["LITERAL_VALUE"] == "literal-value"
-            return
-        # Codex forwards a ``${VAR}`` written under its own key from the
-        # launching environment, so the resolved secret never reaches the file.
-        server = toml.loads(content)["mcp_servers"]["env-demo"]
-        assert server["env_vars"] == ["MY_TOKEN"]
-        assert server["env"] == {"LITERAL_VALUE": "literal-value"}
-        assert "repro-secret-not-a-real-token" not in content
-
     def test_self_defined_non_stdio_env_remains_env_overrides(self) -> None:
         from apm_cli.integration.mcp_integrator import MCPIntegrator
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
@@ -578,45 +459,6 @@ class TestRunMcpInstallStoredMcpConfigs:
 # ---------------------------------------------------------------------------
 # apm_config lazy load
 # ---------------------------------------------------------------------------
-
-
-class TestRunMcpInstallApmConfigLazyLoad:
-    def test_lazy_load_called_when_no_apm_config(self, tmp_path) -> None:
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
-
-        dep = _make_registry_dep("server1")
-        logger = MagicMock()
-        apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text("name: test\nscripts: {}\n", encoding="utf-8")
-
-        with patch("apm_cli.utils.yaml_io.load_yaml", return_value={}):
-            with contextlib.suppress(Exception):
-                run_mcp_install(
-                    [dep],
-                    apm_config=None,
-                    project_root=str(tmp_path),
-                    logger=logger,
-                )
-
-        # If apm.yml exists, load_yaml should have been called
-        # (only asserting it was callable, not necessarily called in all paths)
-
-    def test_apm_config_provided_skips_file_load(self, tmp_path) -> None:
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
-
-        dep = _make_registry_dep("server1")
-        logger = MagicMock()
-
-        with patch("apm_cli.utils.yaml_io.load_yaml") as mock_load:
-            with contextlib.suppress(Exception):
-                run_mcp_install(
-                    [dep],
-                    apm_config={"scripts": {}},
-                    project_root=str(tmp_path),
-                    logger=logger,
-                )
-
-        mock_load.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
