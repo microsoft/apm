@@ -90,6 +90,29 @@ def frozen_services_error(reasons: list[str]) -> Exception:
     )
 
 
+class _ParkedNoticeSilenced:
+    """A logger view for the frozen MCP checks that drops parked-server notices.
+
+    The MCP phase reports each parked server once (#4422); the frozen checks
+    keep every other line (verbose cold-cache restoration, warnings).
+    """
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    @classmethod
+    def wrap(cls, logger: Any) -> Any:
+        return None if logger is None else cls(logger)
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        if str(message).startswith("Parked MCP server"):
+            return
+        self._logger.warning(message, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
+
+
 class InstallService:
     """Application service for the APM install pipeline.
 
@@ -509,8 +532,8 @@ class InstallService:
                 lockfile,
                 modules_dir,
                 admission=admission,
-                # The hydrated check and the MCP phase report parked servers.
-                logger=None,
+                # The MCP phase is the one printer of parked servers (#4422).
+                logger=_ParkedNoticeSilenced.wrap(request.logger),
                 allow_pending=allow_pending_mcp,
             )
         )
@@ -751,7 +774,7 @@ class InstallService:
             modules_dir,
             admission=admission,
             # The MCP phase is the one printer of parked servers (#4422).
-            logger=None,
+            logger=_ParkedNoticeSilenced.wrap(logger),
             allow_pending=False,
             active_package_keys=active_package_keys,
         )
