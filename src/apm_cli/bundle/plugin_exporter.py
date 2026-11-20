@@ -16,6 +16,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
+from ..core.remediation import (
+    PACK_DEPENDENCY_UNATTESTED,
+    PACK_INSTALLED_FILES_MISSING,
+    PACK_SKILL_SUBSET_MISSING,
+)
 from ..deps.lockfile import (
     LockedDependency,
     LockFile,
@@ -842,8 +847,7 @@ def _collect_deployed_components(
         suffix = f"\n  ... and {remaining} more" if remaining else ""
         raise ValueError(
             f"Cannot pack dependency {dep.repo_url}: installed files recorded "
-            "in apm.lock.yaml are missing on disk. Run 'apm install' to "
-            "restore them, then pack again:\n"
+            f"in apm.lock.yaml are missing on disk. {PACK_INSTALLED_FILES_MISSING.sentence()}\n"
             + "\n".join(f"  - {path}" for path in shown_missing)
             + suffix
         )
@@ -1001,8 +1005,8 @@ def export_plugin_bundle(
                     raise ValueError(
                         f"Cannot pack dependency {dep.repo_url}: the skills "
                         f"recorded in apm.lock.yaml (skill_subset: {declared_skills}) "
-                        "were not found among its installed files. Run 'apm install' "
-                        "to re-deploy the expected skills, then pack again."
+                        "were not found among its installed files. "
+                        f"{PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
             elif _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
@@ -1012,8 +1016,7 @@ def export_plugin_bundle(
                     f"Cannot pack dependency {dep.repo_url}: the lockfile records "
                     "no deployed files for it, but installed content that cannot "
                     "be verified exists in the apm_modules cache (a stale or "
-                    "partial install). Run 'apm install' to record provenance in "
-                    "apm.lock.yaml, then pack again."
+                    f"partial install). {PACK_DEPENDENCY_UNATTESTED.sentence()}"
                 )
             else:
                 # No attested content and nothing packable in the cache: the

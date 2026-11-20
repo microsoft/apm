@@ -396,3 +396,68 @@ def test_command_remediation_clears_the_reported_state(
     promise = catalog()[proof.remediation_id].fixes_promise
     advice = f"'{' '.join(command)}' to {promise}"
     assert advice not in _normalized(again), _result_evidence(again)
+
+
+# -- W2 executed proofs (integration/, marketplace/, bundle/) -----------------
+# -- W2 integration proofs --
+# -- end W2 integration proofs --
+# -- W2 marketplace proofs --
+# -- end W2 marketplace proofs --
+# -- W2 bundle proofs --
+# 'apm pack' refuses an installed project whose lockfile or attested files are
+# gone or edited; the advised install restores them and the pack succeeds.
+
+
+def _tamper_deployed_file(world: _World) -> None:
+    deployed = world.consumer.root / _INSTRUCTION
+    deployed.write_text(deployed.read_text(encoding="utf-8") + "\ntampered\n", encoding="utf-8")
+
+
+def _pack(_world: _World) -> tuple[str, ...]:
+    return ("pack",)
+
+
+def _pack_apm_format(_world: _World) -> tuple[str, ...]:
+    # The default plugin format packs a lockfile-free project; the APM bundle
+    # layout requires apm.lock.yaml.
+    return ("pack", "--format", "apm")
+
+
+W2_BUNDLE_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "pack-lockfile-missing",
+        _installed_world,
+        _unlink("apm.lock.yaml"),
+        _pack_apm_format,
+        1,
+        _expect_ok,
+    ),
+    _TextProof(
+        "pack-installed-files-missing",
+        _installed_world,
+        _unlink(_INSTRUCTION),
+        _pack,
+        1,
+        _expect_ok,
+    ),
+    _TextProof(
+        "pack-installed-file-tampered",
+        _installed_world,
+        _tamper_deployed_file,
+        _pack,
+        1,
+        _expect_ok,
+        before=_unlink(_INSTRUCTION),
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W2_BUNDLE_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w2_bundle_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
+# -- end W2 bundle proofs --
+# -- end W2 executed proofs ---------------------------------------------------

@@ -22,6 +22,7 @@ is surfaced as a debug diagnostic so ``apm audit``-minded users can see it.
 import logging
 from pathlib import Path
 
+from ..core.remediation import PACK_INSTALLED_FILE_TAMPERED
 from ..utils.content_hash import compute_file_hash
 
 _logger = logging.getLogger(__name__)
@@ -59,6 +60,6 @@ def verify_attested_file(
         raise ValueError(
             f"Cannot pack dependency {dep_label}: installed file {rel_display!r} "
             "does not match the hash recorded in apm.lock.yaml. The installed "
-            "copy may be stale or tampered. Run 'apm install' to restore "
-            "attested content, then pack again."
+            "copy may be stale or tampered. "
+            f"{PACK_INSTALLED_FILE_TAMPERED.bind(path=rel_display).sentence()}"
         )

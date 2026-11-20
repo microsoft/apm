@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..core.remediation import UNPACK_CRITICAL_FINDINGS
 from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
 from ..utils.archive import (
     MAX_ZIP_ENTRIES,
@@ -232,8 +233,7 @@ def unpack_bundle(
                 f"Affected files:\n" + "\n".join(affected) + "\n\n"
                 "Next steps:\n"
                 "  - Extract the bundle and run: apm audit --file <path> to inspect\n"
-                "  - Run: apm unpack --force to deploy anyway "
-                "(not recommended)\n\n"
+                f"  - {UNPACK_CRITICAL_FINDINGS.sentence()}\n\n"
                 "Learn more: https://apm.github.io/apm/enterprise/security/"
             )
 
