@@ -1367,6 +1367,19 @@ def test_output_oracle_reports_one_violation_per_duplicated_cause() -> None:
         check_cli_output(("install",), _cli(("install",), stdout), known_cells=(policy_cell,))
 
 
+def test_output_oracle_joins_a_plain_line_wrapped_at_a_space() -> None:
+    # Rich breaks the plain #4334 restriction line at a space; the repeat must stay visible.
+    row = "Package target restriction: [copilot, cursor]; effective targets: [copilot, "
+    stdout = f"{row}\ncursor]\n{row}\ncursor]\n"
+    found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
+    assert found == [f"stdout repeats a line: '{row}cursor]'"]
+    # A long unwrapped log line ends in no space, so its repeat is never joined away.
+    log = "WARNING apm_cli.adapters.client.codex Could not read " + "x" * 40
+    stderr = f"{log}\n{log}\n"
+    found = [v.message for v in output_violations(("install",), _cli(("install",), "", stderr))]
+    assert found == [f"stderr repeats a line: '{log}'"]
+
+
 def test_known_output_cell_output_shape_narrows_where_it_is_strict() -> None:
     cell = KnownOutputCell(
         "twice-with-mcp",
