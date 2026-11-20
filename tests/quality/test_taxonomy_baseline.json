@@ -771,7 +771,6 @@
     "tests/perf/test_install_scenarios.py",
     "tests/quality/test_ci_topology.py",
     "tests/quality/test_gate_cell_obligations.py",
-    "tests/quality/test_generated_obligations.py",
     "tests/quality/test_lifecycle_bug_ledger.py",
     "tests/quality/test_promise_obligations.py",
     "tests/quality/test_quality_baselines.py",

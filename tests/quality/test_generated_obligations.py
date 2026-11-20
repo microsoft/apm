@@ -24,7 +24,10 @@ from tests.lifecycle.obligations import (
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-executable-item-admission", "P-OWN-executable-trust-context"),
+]
 
 
 def test_security_space_matches_the_reviewed_counts() -> None:
