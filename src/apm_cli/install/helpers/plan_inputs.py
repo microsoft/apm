@@ -31,7 +31,14 @@ def confirm_update_plan(
         plan = build_resolved_update_plan(ctx, lockfile)
         if not plan_callback(plan):
             return False
-    if not ctx.apm_dir or ctx.frozen or ctx.dry_run or ctx.lockfile_only:
+    from apm_cli.install.service import InstallService
+
+    if (
+        not ctx.apm_dir
+        or InstallService.frozen_disposition(ctx).replay
+        or ctx.dry_run
+        or ctx.lockfile_only
+    ):
         return True
     from apm_cli.deps.lockfile import get_lockfile_path, refuse_lockfile_before_mutation
 

@@ -75,3 +75,17 @@ def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
         )
     preview = getattr(result, "preview", None)
     return preview if isinstance(preview, PipelinePreview) else None
+
+
+def preview_declared_policy(ctx: Any, plan: Any, logger: Any) -> None:
+    """Preview org policy on the declared dependencies when no pipeline ran."""
+    from apm_cli.policy.install_preflight import run_policy_preflight
+
+    run_policy_preflight(
+        project_root=ctx.project_root,
+        apm_deps=list(plan.selected_apm_dependencies),
+        mcp_deps=list(plan.selected_mcp_dependencies) or None,
+        no_policy=ctx.no_policy,
+        logger=logger,
+        dry_run=True,
+    )

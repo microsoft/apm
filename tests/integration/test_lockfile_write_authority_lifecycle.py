@@ -218,15 +218,17 @@ def test_frozen_install_never_flushes_the_lockfile(tmp_path: Path, apm_binary_pa
 
 
 @_needs_inotify
-def test_failed_install_discards_its_staged_lockfile(tmp_path: Path, apm_binary_path: Path) -> None:
-    """A failure after the lockfile phase staged new rows leaves the old lockfile."""
+def test_failed_install_records_what_it_deployed_in_one_write(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A failure after deployment commits the lockfile once, recording what reached disk."""
     scenario = _new_scenario(tmp_path / "failed", apm_binary_path, ("copilot",))
     installed = _run(scenario, _INSTALL, "failed-baseline")
     assert installed.returncode == 0, _evidence(installed)
     root = scenario.project.root
-    extra = LocalPackageFactory(root / "packages").create(
-        "late-mcp", mcp_dependencies=({**_SERVER, "name": "late-server"},)
-    )
+    late = LocalPackageFactory(root / "packages")
+    extra = late.create("late-mcp", mcp_dependencies=({**_SERVER, "name": "late-server"},))
+    late.add_instruction(extra, "late-rule", _INSTRUCTION)
     scenario.packages.replace_apm_dependencies(
         scenario.project,
         (
@@ -234,18 +236,18 @@ def test_failed_install_discards_its_staged_lockfile(tmp_path: Path, apm_binary_
             {"path": "./packages/late-mcp", "alias": extra.name},
         ),
     )
-    # The MCP phase runs after the lockfile phase staged late-mcp; make it fail.
+    # The MCP phase runs after late-mcp's files were deployed; make it fail.
     (root / ".mcp.json").unlink()
     (root / ".mcp.json").mkdir()
-    committed = (root / _LOCKFILE).read_bytes()
 
     with count_lockfile_writes(root) as counter:
         failed = _run(scenario, _INSTALL, "failed-install")
 
     assert failed.returncode != 0, _evidence(failed)
     assert "late-server" in failed.stdout + failed.stderr, _evidence(failed)
-    assert counter.writes == 0, counter.events
-    assert (root / _LOCKFILE).read_bytes() == committed
+    assert counter.writes == 1, counter.events
+    lock = load_yaml(root / _LOCKFILE)
+    assert any("late-mcp" in key for key in _dependency_keys(lock)), lock
 
 
 _HTTP_MCP = ("--transport", "http", "--url", "https://mcp.example.invalid/mcp")

@@ -14,8 +14,12 @@ the final document once, when it completes.  A command therefore writes the
 lockfile at most once, however many phases record state in it.  Nested
 writers (``apm update`` running the install service) join the outer one.
 
-A command that fails or is interrupted before its commit discards what it
-staged, so the lockfile keeps its previous bytes.  Two explicit commit points
+A command commits what it staged when it completes, and also when it fails
+after changing state: an install that deployed files and then exits non-zero
+(a later MCP conflict, a native write failure) keeps the lockfile records of
+what reached disk.  Refusals happen before the first write, so nothing is
+staged to commit.  Only an interrupt (Ctrl-C, or a ``sys.exit`` with a
+non-zero code) discards what was staged.  Two explicit commit points
 flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
 transaction must agree with the lockfile (native plugin registration, user
 lifecycle scripts, a command's own durable checkpoint).  Removal and rollback
@@ -103,10 +107,15 @@ def _scope(*, open_: bool = False) -> _WriteScope | None:
     return active.scope
 
 
-def _completed(error: BaseException) -> bool:
-    """Whether *error* is a command's successful early exit (exit code 0)."""
-    code = getattr(error, "exit_code", getattr(error, "code", 1))
-    return isinstance(error, SystemExit | _click_exit()) and code in (0, None)
+def _commits(error: BaseException) -> bool:
+    """Whether a command ending in *error* still commits what it staged.
+
+    A failure after a state change records that change; an interrupt or a
+    non-zero ``sys.exit`` abandons the command, and a zero exit completes it.
+    """
+    if isinstance(error, SystemExit | _click_exit()):
+        return getattr(error, "exit_code", getattr(error, "code", 1)) in (0, None)
+    return isinstance(error, Exception)
 
 
 def _click_exit() -> type[BaseException]:
@@ -128,7 +137,7 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
     try:
         yield
     except BaseException as error:
-        if active.scope is not None and _completed(error):
+        if active.scope is not None and _commits(error):
             _commit(active.scope)
         raise
     else:

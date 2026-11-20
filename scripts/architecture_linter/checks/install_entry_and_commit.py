@@ -57,7 +57,7 @@ _MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
 # package. Local bundle leaves it when it routes through the pipeline.
 _POLICY_PREFLIGHT_SITES = frozenset(
     {
-        _COMMAND,
+        _ENTRY_OWNER,
         _COMMIT_GATE,
         "src/apm_cli/install/local_bundle_handler.py",
     }

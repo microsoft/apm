@@ -229,6 +229,29 @@ def test_frozen_mcp_validation_fails_before_durable_mutation(tmp_path):
 
 
 @pytest.mark.req("req-lk-006")
+def test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted(tmp_path: Path) -> None:
+    """--frozen never rewrites the lock: one owner decides, and no seam may omit it (#4012)."""
+    from types import SimpleNamespace
+
+    from apm_cli.install.context import InstallContext
+    from apm_cli.install.service import InstallService
+    from apm_cli.install.service_integration import run_service_integrations
+
+    def disposition(**fields):
+        return InstallService.frozen_disposition(
+            InstallContext(project_root=tmp_path, apm_dir=tmp_path, **fields)
+        )
+
+    frozen, normal = disposition(frozen=True), disposition()
+    assert frozen.withhold_lockfile_writes and frozen.retain_package_orphans
+    assert not normal.withhold_lockfile_writes and not normal.retain_package_orphans
+    with pytest.raises(AttributeError):
+        InstallService.frozen_disposition(SimpleNamespace())
+    with pytest.raises(TypeError, match="frozen_disposition"):
+        run_service_integrations(SimpleNamespace())
+
+
+@pytest.mark.req("req-lk-006")
 @pytest.mark.parametrize("development", [False, True])
 def test_cold_dependency_evidence_cannot_defer_direct_mcp_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, development: bool

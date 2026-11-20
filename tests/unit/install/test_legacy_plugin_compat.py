@@ -522,3 +522,26 @@ def test_verified_legacy_cache_routes_through_canonical_validator(tmp_path: Path
     assert validate.call_count == 2
     assert validate.call_args_list[-1].args == (package, package / "plugin.json")
     assert validate.call_args_list[-1].kwargs == {"source_path": package}
+
+
+@pytest.mark.parametrize("locked_type", [None, "skill_bundle"])
+def test_normalized_plugin_with_root_skills_keeps_skill_bundle_type(
+    tmp_path: Path, locked_type: str | None
+) -> None:
+    """A root skills/ bundle outranks its plugin publishing surface (--skill subsets)."""
+    from apm_cli.models.validation import validate_apm_package
+
+    root = tmp_path / "plugin-with-skills"
+    (root / ".github/plugin").mkdir(parents=True)
+    (root / ".github/plugin/plugin.json").write_text('{"name":"bundle"}', encoding="ascii")
+    (root / "skills/review").mkdir(parents=True)
+    (root / "skills/review/SKILL.md").write_text("---\nname: review\n---\nbody\n")
+    validate_apm_package(root)
+    locked = (
+        LockedDependency(repo_url="owner/repo", package_type=locked_type) if locked_type else None
+    )
+
+    assert (
+        preserve_normalized_marketplace_plugin_type(root, locked, PackageType.SKILL_BUNDLE)
+        is PackageType.SKILL_BUNDLE
+    )

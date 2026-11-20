@@ -1753,9 +1753,11 @@ def _install_apm_packages(ctx, outcome):
 
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
 
-    if ctx.frozen is True:
+    from apm_cli.install.service import InstallService
+
+    frozen_disposition = InstallService.frozen_disposition(ctx)
+    if frozen_disposition.replay:
         from apm_cli.install.request import InstallRequest
-        from apm_cli.install.service import InstallService
 
         InstallService.enforce_frozen(
             InstallRequest(
@@ -1803,7 +1805,7 @@ def _install_apm_packages(ctx, outcome):
         trust_transitive_mcp=ctx.trust_transitive_mcp,
         install_mcp=should_install_mcp,
         mcp_runtime=ctx.runtime,
-        frozen=ctx.frozen,
+        frozen=frozen_disposition.replay,
         plan_callback=ctx.plan_callback,
         skill_subset=ctx.skill_subset,
         skill_subset_from_cli=ctx.skill_subset_from_cli,
@@ -1853,17 +1855,9 @@ def _install_apm_packages(ctx, outcome):
                 apm_package=apm_package,
             )
         if preview is None:
-            # No package pipeline ran: preview policy on the declared services.
-            from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
+            from apm_cli.install.pipeline_entry import preview_declared_policy
 
-            _dr_preflight(
-                project_root=ctx.project_root,
-                apm_deps=list(prospective_plan.selected_apm_dependencies),
-                mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None,
-                no_policy=ctx.no_policy,
-                logger=logger,
-                dry_run=True,
-            )
+            preview_declared_policy(ctx, prospective_plan, logger)
 
         from apm_cli.install.presentation.dry_run import render_and_exit
 
@@ -2034,6 +2028,7 @@ def _install_apm_packages(ctx, outcome):
             claude_native_keys=(
                 install_result.claude_native_keys if install_result is not None else frozenset()
             ),
+            frozen_disposition=frozen_disposition,
         )
     except PolicyBlockError:
         refuse_blocked_mcp(logger)
