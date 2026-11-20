@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, now verified end to end against the Registry HTTP API on every PR. (#4015)
 - The CLI reference lists every deprecation with its replacement, the version that deprecated it and its removal horizon; warning text is unchanged. (closes #4019, #4035)
+- `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/` instead of skipping them; other targets still copy bundle files. (closes #3714, #4007)
 
 ### Changed
 
