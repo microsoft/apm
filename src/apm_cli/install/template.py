@@ -574,6 +574,9 @@ def _integrate_materialization(
         # Copilot loads the whole unit live -- but it is still an install.
         if int_result.get("native_plugin"):
             deltas["installed"] = 1
+        # A parked native bundle deployed nothing: it is not an install (#4154).
+        if int_result.get("parked_native"):
+            deltas["installed"] = 0
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
         from apm_cli.core.deployment_state import CompletedReintegration
 

@@ -65,6 +65,8 @@ def finalize_codex_native(
     scratch_root: Path | None,
 ) -> dict:
     """Queue the admitted source identity only after successful loose cleanup."""
+    if plugin.parked:
+        result["parked_native"] = True
     if plugin.parked and plugin.parked_reported:
         return result
     if plugin.parked:
@@ -94,6 +96,15 @@ def finalize_codex_native(
     result["native_plugin"] = True
     result["codex_source_identity"] = plugin.source_identity()
     return result
+
+
+def _replays_lock(ctx: Any) -> bool:
+    """Whether this install replays the lock (``--frozen``): a park must fail it."""
+    if ctx is None:
+        return False
+    from apm_cli.install.service import InstallService
+
+    return InstallService.frozen_disposition(ctx).replay
 
 
 def plan_native_codex_plugin(
@@ -136,14 +147,15 @@ def plan_native_codex_plugin(
         types.add(EXEC_TYPE_HOOKS)
     record_native_exec_status(ctx, dependency_key, package_info, tuple(sorted(types)))
     parked = any(not approvals.get(kind, False) for kind in types)
-    if parked and read_only:
+    if parked and (read_only or _replays_lock(ctx)):
         from apm_cli.security.trust import approve_command
 
-        command = approve_command(dependency_key, user_scope=scope is InstallScope.USER)
+        # Codex registration is user-scope only, so the approval is too.
+        command = approve_command(dependency_key, user_scope=True)
         raise CodexNativeError(
             "Codex native bundle contains executables not approved in executables.allow. "
             f"Review them, run '{command}', then retry; "
-            "APM will not drop native resources to bypass approval."
+            "APM never deploys part of a native bundle in place of the whole."
         )
     reference = getattr(package_info, "dependency_ref", None)
     resolved = getattr(package_info, "resolved_reference", None)
