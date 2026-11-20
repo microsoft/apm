@@ -96,7 +96,7 @@ _OUTCOME_ROUTES: dict[str, str] = {
     "garbage_response": _FETCH_FAILURE_DEFAULT,
     "hash_mismatch": _ALWAYS_BLOCK,
     "incomplete_chain": _ALWAYS_BLOCK,
-    AMBIGUOUS_GIT_REMOTE_OUTCOME: _ALWAYS_BLOCK,
+    "ambiguous_git_remote": _ALWAYS_BLOCK,
 }
 
 if set(_OUTCOME_ROUTES) != POLICY_DISCOVERY_OUTCOMES:  # pragma: no cover - import-time guard
