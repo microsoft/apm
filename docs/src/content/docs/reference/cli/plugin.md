@@ -52,7 +52,7 @@ apm plugin init my-skill --target copilot,claude --yes
 
 ## Migration from `apm init --plugin`
 
-`apm init --plugin` was removed in 0.37: it exits `2` without writing anything and names `apm plugin init`. Run `apm plugin init` instead, with the same `--version`, `--author` and `--description` options.
+`apm init --plugin` was removed in 0.37; see [Removed flags](../init/#removed-flags).
 
 ## Examples
 

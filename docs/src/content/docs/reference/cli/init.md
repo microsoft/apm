@@ -47,7 +47,7 @@ marketplace authoring block, use [`apm marketplace init`](../marketplace/).
 | `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and the explicit-only `hermes` and `grok-bot`; `all` expands the default stable set. |
 | `--name` | directory name | Project name written to `apm.yml` for in-place init. Same rules as `PROJECT_NAME`. Ignored, with a warning, when `PROJECT_NAME` is given. |
 | `--description` | auto-detected | Project description written to `apm.yml`. |
-| `--version` | `1.0.0` (`0.1.0` with `--plugin --yes`) | Project version written to `apm.yml`. Must not be empty. An explicit value is kept in plugin mode. |
+| `--version` | `1.0.0` | Project version written to `apm.yml`. Must not be empty. |
 | `--author` | `git config user.name` | Project author written to `apm.yml`. |
 | `-v`, `--verbose` | off | Show detailed output. |
 
@@ -88,17 +88,6 @@ $ apm init --yes --name my-app --description "Team agent setup" --version 0.1.0 
 [+] APM project initialized successfully!
 Created Files
   * apm.yml  Project configuration
-```
-
-Plugin authoring project (creates `plugin.json` plus `apm.yml` with
-`devDependencies`, version defaults to `0.1.0`):
-
-```bash
-$ apm init my-skill --plugin --yes
-[+] APM project initialized successfully!
-Created Files
-  * apm.yml      Project configuration
-  * plugin.json  Plugin metadata
 ```
 
 Pin targets up front, skip the prompt:
@@ -142,7 +131,7 @@ the author and target harness remain responsible for compliance.
     other edge cases).
   - `author` -- from `git config user.name`, fallback `Developer`.
   - `description` -- generated from project name.
-  - `version` -- `1.0.0` (or `0.1.0` with `--plugin --yes`).
+  - `version` -- `1.0.0`.
 - **Plain init with existing `apm.yml`:** prints `[!] apm.yml already exists`
   and prompts to overwrite. With `--yes`, overwrites without asking.
 - **Discovery:** reports existing admissible skill or package directories.
@@ -185,7 +174,7 @@ the author and target harness remain responsible for compliance.
     `https://github.com/microsoft/agentrc`.
   - Instructions already exist: no mention (suppressed entirely).
 - **Exit codes:** `0` on success or a declined plain-init prompt; `1` on invalid
-  project or plugin name, empty `--version`, refused discovery apply, declined discovery consent,
+  project name, empty `--version`, refused discovery apply, declined discovery consent,
   an existing legacy target with no `targets:` equivalent on a non-interactive re-init,
   or unhandled error. Discovery consent refusal leaves files unchanged.
   Invalid option combinations, including `--discover --target` and
@@ -197,16 +186,19 @@ the author and target harness remain responsible for compliance.
 Both exit `2` without writing anything and name the replacement:
 
 - [`apm plugin init`](../plugin/) replaces `apm init --plugin`, including
-  `--version`, `--author` and `--description`.
+  `--version`, `--author` and `--description`. `--name` has no equivalent:
+  pass the project name as `PROJECT_NAME`.
 - [`apm marketplace init`](../marketplace/) replaces
-  `apm init --marketplace`.
+  `apm init --marketplace`. Run it inside the project directory.
+
+The refusal prints the full replacement command, keeping your project name,
+`--yes`, `--target` and metadata flags.
 
 ## Related
 
-- [`apm plugin init`](../plugin/) -- scaffold a publishable plugin
-  (replaces `apm init --plugin`).
+- [`apm plugin init`](../plugin/) -- scaffold a publishable plugin.
 - [`apm marketplace init`](../marketplace/) -- scaffold a marketplace
-  authoring block (replaces `apm init --marketplace`).
+  authoring block.
 - [`apm install`](../install/) -- next step: install dependencies and
   deploy to targets.
 - [Quickstart](../../../quickstart/) -- guided first project.
