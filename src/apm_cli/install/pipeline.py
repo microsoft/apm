@@ -45,6 +45,7 @@ import contextlib
 import time
 from typing import TYPE_CHECKING
 
+from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 
 from ..agent_plugins.errors import AgentPluginError
@@ -661,12 +662,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         #
         # Phase 2.1 (native Copilot plugin registration capability) shares
         # this guard: it publishes the capability so the Agent Plugin
-        # deployment boundary can admit a verified plugin (issue #2703). In
-        # lockfile_only mode no primitives are deployed, so no native plugin
-        # can be admitted and resolving the capability would be pure waste.
+        # deployment boundary admits a verified plugin (#2703); lockfile_only skips it.
         # --------------------------------------------------------------
         if not lockfile_only:
-            from .phases import codex_plugins, copilot_plugins
+            from .phases import claude_plugins, codex_plugins, copilot_plugins
             from .phases import targets as _targets_phase
 
             _run_phase("targets", _targets_phase, ctx)
@@ -956,6 +955,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         if not lockfile_only:
             _run_phase("copilot_plugins", copilot_plugins, ctx)
             _run_phase("codex_plugins", codex_plugins, ctx)
+            _run_phase("claude_plugins", claude_plugins, ctx)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
@@ -963,7 +963,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return record_install_outcome(ctx, _run_phase("finalize", _finalize_phase, ctx))
 
-    except (AgentPluginError, CodexNativeError):
+    except (AgentPluginError, CodexNativeError, ClaudeNativePluginError):
         # Preserve schema-routing and native-boundary diagnostics verbatim.
         raise
     except AuthenticationError:

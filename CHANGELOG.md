@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pinned approvals in `apm.yml` need APM 0.37 or later on every machine; older clients reject them and fail closed. (#3918)
 - `hooks: true` and `mcp: true` approvals still deploy but now warn; run `apm approve <pkg>` to pin them to content. (#3918)
 - `apm lifecycle test --execute` now fires only what an install would: run `apm lifecycle trust` for project scripts; `APM_NO_SCRIPTS` and org `deny_all` apply. (#3988)
+- `apm install -g --target claude` installs Claude plugins intact through Claude settings, including MCP and LSP servers and `bin/` under one approval and org policy; plugins with `monitors/` or `workflows/` are parked with a warning, and loose Claude hooks from older installs need `apm uninstall -g <package>` then reinstall. (closes #3181, #3191, #3290)
 
 ### Added
 
@@ -44,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm approve` on a Claude plugin's hooks now takes effect on the next `apm install`; the approval and the install keyed the hook file differently, so it stayed parked. (#3290)
 - `apm install -g` and global `apm uninstall` now apply the `executables` approvals in `~/.apm/apm.yml` to hooks, MCP servers and LSP servers; they were ignored, so unapproved executables could deploy. (#3986)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native Agent Plugin is installed. (closes #3901, #3946)
 - Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)

@@ -93,10 +93,17 @@ File primitives resolve targets in this order: `--target`, manifest
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
 
-Native [Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
-does not discover or execute the Copilot CLI. APM owns deterministic
-materialization and settings projection; you provide a supported runtime when
-you use the generated registration.
+[Copilot Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
+does not discover or execute the Copilot CLI; APM owns materialization and
+target-file generation. Use a supported Copilot runtime for that registration.
+
+Plugins installed with `--global --target claude` are copied intact to
+`~/.agents/plugins/<plugin>/` and declared in Claude's `settings.json`
+(`extraKnownMarketplaces` and `enabledPlugins`); APM never runs the `claude`
+CLI. A plugin is enabled only when its executables are approved; otherwise it is
+not declared, with a warning. Rejected capabilities fail without loose-file
+fallback. See
+[Claude admission and qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
 ### Policy and trust
 
@@ -228,6 +235,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   retains recovery data; the prior package may no longer be active.
   Follow [Windows recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before retrying.
+  If updating Claude settings for native plugins fails, the settings file and
+  deployed plugin roots are left as they were and the previous lockfile is
+  restored. Registration success is not runtime proof. See
+  [Claude user plugins](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 - **Git-hook isolation.** Dependency Git operations ignore repository-locating
   hook variables, preserving the caller's branch and HEAD. APM allows safe URL
   rewrites but rejects credentials, insecure transports including `http://` and

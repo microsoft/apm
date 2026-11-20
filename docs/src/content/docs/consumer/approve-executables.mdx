@@ -127,6 +127,11 @@ executables:
 - Existing `hooks: true` and `mcp: true` grants still deploy, with a warning.
   Run `apm approve <package>` to pin them.
 
+Hook pins are keyed on the publisher's file, such as a plugin's `hooks/hooks.json`,
+so approving a Claude Code plugin's hooks takes effect on the next install. A Claude
+Code plugin installed whole at user scope gets one `plugin:` pin in `~/.apm/apm.yml`;
+run `apm approve` from `~/.apm` ([details](../install-plugins/#claude-code-plugins-at-user-scope)).
+
 A pin covers the files APM copies. Code a hook downloads when it runs
 (`npx`, `curl`) is not covered.
 

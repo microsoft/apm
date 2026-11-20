@@ -2208,3 +2208,29 @@ class TestSyntheticManifestLineEndings:
         raw = (apm_dir / "hooks" / "hooks.json").read_bytes()
         assert b"\r" not in raw
         assert json.loads(raw.decode("utf-8")) == hooks
+
+
+def test_claude_native_mcp_servers_model_claude_loader(tmp_path: Path) -> None:
+    """The native route's MCP owner unions every source Claude merges."""
+    from apm_cli.deps.plugin_parser import claude_native_mcp_servers
+
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"a": {"command": "x"}}}))
+    (tmp_path / "more.json").write_text(json.dumps({"b": {"url": "https://b.example"}}))
+    manifest = {
+        "mcpServers": [
+            "./more.json",
+            {"c": {"type": "sse", "url": "https://c.example", "command": "y"}, "d": {}},
+            "../outside.json",
+            "https://evil.example/x.mcpb",
+        ]
+    }
+    servers, unmodeled = claude_native_mcp_servers(tmp_path, manifest)
+    assert [(s["name"], s["transport"]) for s in servers] == [
+        ("a", "stdio"),
+        ("b", "http"),
+        ("c", "sse"),
+    ]
+    assert len(unmodeled) == 3
+    assert any("'d'" in entry for entry in unmodeled)
+    assert any("outside" in entry for entry in unmodeled)
+    assert any(".mcpb" in entry for entry in unmodeled)

@@ -654,6 +654,36 @@ def _check_mcp_self_defined(
     )
 
 
+def mcp_policy_checks(mcp_list: list, policy: ApmPolicy) -> list[CheckResult]:
+    """Run org MCP checks 7-10 (allow, deny, transport, self-defined) on *mcp_list*.
+
+    The one composition of the MCP checks: the install gate and the native
+    Claude plugin route (which vets the servers a plugin declares) both use it.
+    """
+    return [
+        _check_mcp_allowlist(mcp_list, policy.mcp),
+        _check_mcp_denylist(mcp_list, policy.mcp),
+        _check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp),
+        _check_mcp_self_defined(mcp_list, policy.mcp),
+    ]
+
+
+def mcp_policy_restricts(policy: ApmPolicy) -> bool:
+    """Whether checks 7-10 can reject some self-defined server.
+
+    A server APM cannot read can only be shown to comply with a policy that
+    restricts nothing; any allow, deny, transport or self-defined rule makes
+    it fail closed.
+    """
+    mcp = policy.mcp
+    return bool(
+        mcp.allow is not None
+        or mcp.deny
+        or mcp.transport.allow is not None
+        or mcp.self_defined == "deny"
+    )
+
+
 def _check_compilation_target(
     targets: tuple[str, ...] | None,
     policy: CompilationPolicy,
@@ -1493,12 +1523,7 @@ def run_dependency_policy_checks(
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
     if mcp_deps is not None:
-        mcp_checks = [
-            _check_mcp_allowlist(mcp_list, policy.mcp),
-            _check_mcp_denylist(mcp_list, policy.mcp),
-            _check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp),
-            _check_mcp_self_defined(mcp_list, policy.mcp),
-        ]
+        mcp_checks = mcp_policy_checks(mcp_list, policy)
         remaining_checks += _with_mcp_declarers(mcp_checks, mcp_list, mcp_brought_in_by)
     # Target / compilation + manifest tail checks.
     if effective_target is not None:

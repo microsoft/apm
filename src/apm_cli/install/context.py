@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.claude_plugins.admission import ClaudeNativePlugin
     from apm_cli.codex_plugins.admission import CodexNativeDeployment
     from apm_cli.core.deployment_state import CompletedReintegration
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -74,6 +75,9 @@ class InstallContext:
     trust_bin: bool | None = None
     trust_transitive_mcp: bool = False
     transaction: Any = None  # InstallTransaction
+    claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
+    # Dependency keys routed to native Claude this run, admitted or parked.
+    claude_native_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
 
     dry_run: bool = False

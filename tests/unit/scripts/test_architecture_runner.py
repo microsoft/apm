@@ -699,6 +699,7 @@ marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-freshness
 marketplace-integrations-catalog-manifest
 marketplace-integrations-catalog-origin
+marketplace-integrations-claude-ownership
 marketplace-integrations-codex-native-lifecycle
 marketplace-integrations-copilot-ownership
 marketplace-integrations-dependency-confusion

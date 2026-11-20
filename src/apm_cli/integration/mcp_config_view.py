@@ -113,6 +113,7 @@ class CurrentMcpConfigView:
         include_dependency_mcp: bool = True,
         allow_pending: bool | None = None,
         active_package_keys: frozenset[str] | None = None,
+        claude_native_keys: frozenset[str] = frozenset(),
     ) -> CurrentMcpConfigView:
         """Derive the view install, ``--frozen`` and audit compare with the lockfile.
 
@@ -134,6 +135,7 @@ class CurrentMcpConfigView:
             include_dependency_mcp=include_dependency_mcp,
             allow_pending=allow_pending,
             active_package_keys=active_package_keys,
+            claude_native_keys=claude_native_keys,
         )
         if exact:
             view = replace(view, selection_replayed=True)
@@ -154,6 +156,7 @@ class CurrentMcpConfigView:
         include_dependency_mcp: bool = True,
         allow_pending: bool | None = None,
         active_package_keys: frozenset[str] | None = None,
+        claude_native_keys: frozenset[str] = frozenset(),
     ) -> CurrentMcpConfigView:
         """Derive MCP truth for the resolver's complete active graph, when supplied.
 
@@ -178,6 +181,7 @@ class CurrentMcpConfigView:
                 include_dependency_mcp=include_dependency_mcp,
                 allow_pending=allow_pending,
                 active_package_keys=active_package_keys,
+                claude_native_keys=claude_native_keys,
             )
         # Root is the authoring project: both prod and dev MCP are intentionally
         # included here (behaviour introduced in #1780). Transitive package deps
@@ -835,8 +839,15 @@ def _collect_locked_dependencies(
     include_dependency_mcp: bool = True,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
+    claude_native_keys: frozenset[str] = frozenset(),
 ) -> _CollectedDependencies:
-    """Collect MCP declarations from only package manifests named by the lockfile."""
+    """Collect MCP declarations from only package manifests named by the lockfile.
+
+    Each server carries the runtimes that load it natively from its plugin
+    (``claude_plugins.admission.native_service_runtimes``); writers skip them.
+    """
+    from apm_cli.claude_plugins.admission import native_service_runtimes
+
     result = _CollectedDependencies()
     if lockfile is None:
         return result
@@ -1026,11 +1037,16 @@ def _collect_locked_dependencies(
                 approval_keys,
             )
             verdict = admission.admit(subject)
+            native_runtimes = native_service_runtimes(package_key, dependency, claude_native_keys)
             if not verdict.allowed:
                 omissions.setdefault(
                     mcp_dependency.name,
                     {"declaration": fingerprint, "reason": str(verdict.reason)},
                 )
+                if native_runtimes and verdict.reason == REASON_UNTRUSTED_TRANSITIVE:
+                    # The native plugin verdict applies the same refusal to
+                    # the plugin Claude loads; its diagnostic is the one shown.
+                    continue
                 message = parked_mcp_message(
                     mcp_dependency,
                     target,
@@ -1059,6 +1075,7 @@ def _collect_locked_dependencies(
                     mcp_dependency,
                     resolved_by=declarer,
                     approval_keys=approval_keys,
+                    native_runtimes=native_runtimes,
                 )
             )
             roots = direct_index.roots(package_key)
