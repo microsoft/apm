@@ -710,8 +710,11 @@ class APMDependencyResolver:
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
             # An update accepts a changed ref for the plugins it selects; an
-            # unselected plugin keeps its locked ref, so its pin is left alone.
-            enforce_ref_pins=not (self._update_refs and not update_selected),
+            # unselected plugin keeps its locked ref, and a catalog read for
+            # locked server metadata does not choose the download, so neither
+            # touches the pin.
+            enforce_ref_pins=not (self._update_refs and not update_selected)
+            and decision.reason != MARKETPLACE_CATALOG_METADATA,
             accept_ref_change=bool(self._update_refs) and update_selected,
         )
         admit_marketplace_resolution(resolution)
