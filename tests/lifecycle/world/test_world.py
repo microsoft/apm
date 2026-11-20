@@ -744,6 +744,17 @@ def test_forbid_direct_refuses_and_records_direct_content(lifecycle_world: World
     assert result.returncode != 0, result.stdout
     statuses = {e["status"] for e in world.services.egress_log() if e["host"] != PROXY_HOST}
     assert statuses == {403}, world.services.egress_log()
+    # Operator-configured registries are sanctioned routes under PROXY_REGISTRY_ONLY.
+    assert _get(world, f"https://{REGISTRY_HOST}/v0.1/servers").status_code == 200
+    registry_versions = f"{registry.URL}/v1/packages/{ORG}/p-skill/versions"
+    sanctioned = requests.get(
+        registry_versions,
+        headers={"Authorization": f"Bearer {registry.TOKEN}"},
+        proxies={"https": world.services.proxy_url},
+        verify=str(world.services.ca_path),
+        timeout=30,
+    )
+    assert sanctioned.status_code == 200, sanctioned.text
     world.services.reset()
     assert world.services.routes.direct_forbidden is False
     assert world.services.routes.scripted == []
@@ -779,6 +790,48 @@ def test_published_revision_changes_content_under_a_ref_until_reset(
         services.publish_revision(f"{ORG}/never-served", {"x": "y"})
 
 
+# -- publish / override_repository -------------------------------------------------
+
+
+def _skill_tree(world: World, dest: Path, body: str) -> Path:
+    shutil.copytree(world.packages["p-skill"].spec, dest)
+    skill = dest / "skills/p-skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + f"\n{body}\n", encoding="utf-8")
+    return dest
+
+
+def test_publish_serves_a_test_authored_repository_until_reset(
+    lifecycle_world: World, tmp_path: Path
+) -> None:
+    world = lifecycle_world
+    tree = _skill_tree(world, tmp_path / "tree", "Published by the test.")
+    world.services.publish(f"{ORG}/p-published", tree)
+    _ok(world, ["install", f"{ORG}/p-published#v1.0.0"])
+    deployed = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Published by the test." in deployed.read_text(encoding="utf-8")
+    with pytest.raises(ValueError):
+        world.services.publish(f"{ORG}/p-skill", tree)
+    world.services.reset()
+    assert _get(world, f"https://{API_HOST}/repos/{ORG}/p-published").status_code == 404
+
+
+def test_override_repository_replaces_a_world_repository_until_reset(
+    lifecycle_world: World, tmp_path: Path
+) -> None:
+    world = lifecycle_world
+    original = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/v1.0.0").json()["sha"]
+    tree = _skill_tree(world, tmp_path / "tree", "Overridden upstream.")
+    world.services.override_repository(f"{ORG}/p-skill", tree)
+    _ok(world, ["install", world.packages["p-skill:git"].spec])
+    deployed = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Overridden upstream." in deployed.read_text(encoding="utf-8")
+    world.services.reset()
+    restored = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/v1.0.0").json()["sha"]
+    assert restored == original
+    with pytest.raises(KeyError):
+        world.services.override_repository(f"{ORG}/never-served", tree)
+
+
 _POLICY_EXIT = {
     "allow": 0,
     "deny-pkg": 1,
@@ -790,12 +843,18 @@ _POLICY_EXIT = {
     "deny-lsp": 0,
     "deny-native": 0,
     "exec-gate-on": 0,
+    "malformed": 0,
+    "garbage_response": 0,
+    "cached_stale": 1,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
     "unreachable": "HTTP 503",
     "hash-mismatch": "Policy hash mismatch",
     "chain-cycle": "Cycle detected in policy extends chain",
+    "malformed": "is not valid YAML",
+    "garbage_response": "is not a YAML mapping",
+    "cached_stale": "Using stale cached policy",
 }
 
 

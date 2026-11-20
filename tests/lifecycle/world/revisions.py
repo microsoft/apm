@@ -83,3 +83,23 @@ def publish_revision(
     if tag is not None:
         _git(repository, "update-ref", f"refs/tags/{tag}", commit)
     return commit
+
+
+def create_repository(bare: Path, tree: Path, *, tag: str | None) -> Path:
+    """Initialise *bare* with one commit of every file under *tree* on main (+ *tag*)."""
+    git = shutil.which("git") or "git"
+    subprocess.run(
+        (git, "init", "-q", "--bare", "--initial-branch=main", str(bare)),
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    with tempfile.TemporaryDirectory(prefix="lifecycle-index-") as scratch:
+        env = {"GIT_INDEX_FILE": str(Path(scratch) / "index"), "GIT_WORK_TREE": str(tree)}
+        _git(bare, "add", "-A", "--", ".", env=env)
+        commit_tree = _git(bare, "write-tree", env=env)
+    commit = _git(bare, "commit-tree", commit_tree, "-m", f"publish {tree.name}")
+    _git(bare, "update-ref", "refs/heads/main", commit)
+    if tag is not None:
+        _git(bare, "update-ref", f"refs/tags/{tag}", commit)
+    return bare

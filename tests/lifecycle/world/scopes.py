@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,7 +19,14 @@ import yaml
 
 from tests.lifecycle.world import registry, routes
 from tests.lifecycle.world.contract import World
-from tests.lifecycle.world.services import ADO_BEARER, ADO_PAT, HOST_ALIASES, policy_org
+from tests.lifecycle.world.services import (
+    ADO_BEARER,
+    ADO_PAT,
+    API_HOST,
+    HOST_ALIASES,
+    POLICY_REPO,
+    policy_org,
+)
 from tests.lifecycle.world.shims import AZ_TOKEN_FILE
 
 # A sha256 no served policy has: the hash-mismatch variant pins it.
@@ -53,6 +62,8 @@ def use_policy(world: World, variant: str, host: str = "github") -> None:
     ).stdout.split()
     verb = "set-url" if "origin" in existing else "add"
     subprocess.run((*git, "remote", verb, "origin", remote), env=world.env, check=True)
+    if variant == "cached_stale":
+        _seed_stale_policy_cache(world, org)
     if variant == "hash-mismatch":
         manifest = world.project / "apm.yml"
         data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
@@ -104,3 +115,35 @@ def use_registry_proxy(world: World, *, only: bool = True) -> None:
         world.env["PROXY_REGISTRY_ONLY"] = "1"
     else:
         world.env.pop("PROXY_REGISTRY_ONLY", None)
+
+
+# Past DEFAULT_CACHE_TTL (1 h), well within MAX_STALE_TTL (7 days): policy/discovery.py.
+STALE_POLICY_AGE_SECONDS = 2 * 3600
+
+
+def _seed_stale_policy_cache(world: World, org: str) -> None:
+    """Cache *org*'s deny policy through the CLI, age it past the fresh window, take the remote down."""
+    seeded = subprocess.run(
+        (sys.executable, "-m", "apm_cli.cli", "policy", "status"),
+        cwd=world.project,
+        env=world.env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if world.cache_root is None:
+        raise RuntimeError("cached_stale needs a world cache_root")
+    metas = sorted(world.cache_root.rglob("*.meta.json"))
+    if not metas:
+        raise RuntimeError(f"policy status cached nothing: {seeded.stdout}{seeded.stderr}")
+    for meta_file in metas:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        meta["cached_at"] = time.time() - STALE_POLICY_AGE_SECONDS
+        meta_file.write_text(json.dumps(meta), encoding="utf-8")
+    # The remote is down, not deleted: a 404 would tell APM the policy is gone
+    # for good, while an outage is what makes it fall back to the stale cache.
+    world.services.script(
+        API_HOST, f"/repos/{org}/{POLICY_REPO}/", 503, {"Content-Type": "text/plain"}
+    )
+    world.services.proxy.clear()
