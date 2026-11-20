@@ -30,5 +30,8 @@ SLICE = HostSlice(
             for cred in ("PAT", "none")
             for egress in ("clone",)
         ),
+        EgressRow("EP|EGRESS=clone|HOST=ADO", "PAT", "clone"),
+        EgressRow("EP|HOST=ADO|PROXY_ONLY=0", "PAT", "clone"),
+        EgressRow("EP|HOST=ADO|REDIRECT=none", "PAT", "clone"),
     ),
 )

@@ -50,10 +50,3 @@ steps:
     exit: 0
     files: []
     key_lines: ["lifecycle/p-skill  lifecycle/p-skill@v1.0.0"]
-known_cells:
-  # O11 (vendor schema validation) has no hermetic implementation in the runner yet.
-  - id: e05-o11-not-implemented
-    law: O11
-    tracking: "#0"
-    step: 1
-    match: "O11 vendor shape has no hermetic implementation yet"

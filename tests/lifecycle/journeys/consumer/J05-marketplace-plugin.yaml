@@ -73,21 +73,11 @@ steps:
       - "[i] Deployed files verified against apm.lock.yaml."
     forbidden_lines: ["#main #<SHA40>"]
 known_cells:
-  - id: o11-vendor-shape-not-hermetic
-    law: O11
-    tracking: "#0"
-    step: 4
-    match: "no hermetic implementation"
   - id: frozen-header-repeats-ref
     law: FORBID
     tracking: "#4195"
     step: 6
     match: "#main #<SHA40>"
-  - id: runner-gap-marketplace-home-writes-install
-    law: I5
-    tracking: "#0"
-    step: 3
-    match: "install wrote home:.*\\.apm/cache/marketplace/version-pins\\.json"
   - id: failed-install-records-marketplace-pin
     law: I5
     tracking: "#4194"

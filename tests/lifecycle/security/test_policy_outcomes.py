@@ -626,30 +626,27 @@ SITE_SLICES["bundle-allow-map(getattr cache_only)"] = SiteSlice(
         "hash_mismatch": Expect(1, (TRUST_BLOCK + "policy hash mismatch",), absent=(HOOK,)),
         "absent/block": Expect(
             1,
-            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=absent\\)",),
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \(outcome=absent\)",),
             absent=(HOOK, ".mcp.json"),
         ),
         "empty/block": Expect(
             1,
-            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=empty\\)",),
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \(outcome=empty\)",),
             absent=(HOOK, ".mcp.json"),
         ),
         "no_git_remote/block": Expect(
             1,
-            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=no_git_remote\\)",),
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \(outcome=no_git_remote\)",),
             absent=(HOOK, ".mcp.json"),
         ),
         "malformed/block": Expect(
             1,
-            (TRUST_BLOCK + r"no enforceable org policy was resolved \\(outcome=malformed\\)",),
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \(outcome=malformed\)",),
             absent=(HOOK, ".mcp.json"),
         ),
         "garbage_response/block": Expect(
             1,
-            (
-                TRUST_BLOCK
-                + r"no enforceable org policy was resolved \\(outcome=garbage_response\\)",
-            ),
+            (TRUST_BLOCK + r"no enforceable org policy was resolved \(outcome=garbage_response\)",),
             absent=(HOOK, ".mcp.json"),
         ),
         "incomplete_chain": Expect(

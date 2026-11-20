@@ -86,6 +86,7 @@ from __future__ import annotations
 import difflib
 import fnmatch
 import importlib
+import json
 import os
 import re
 import shlex
@@ -145,9 +146,20 @@ _HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".
 # $APM_HOME entries that user-configuration commands own (declared write set for I5).
 _APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
     "marketplace": ("marketplaces.json", "marketplaces.lock", "cache"),
-    "lifecycle": ("scripts-trust.json", "scripts-trust.json.lock", "logs/scripts.log"),
+    "lifecycle": (
+        "scripts-trust.json",
+        "scripts-trust.json.lock",
+        "logs/scripts.log",
+        "logs/scripts.log.lock",
+    ),
     "experimental": ("config.json",),
     "config": ("config.json",),
+    # A trusted project lifecycle script run appends its log (reference/cli/lifecycle.md).
+    "install": ("logs/scripts.log", "logs/scripts.log.lock"),
+}
+# Written only by a successful command: a marketplace install records its version pin.
+_APM_HOME_WRITES_ON_SUCCESS: Mapping[str, tuple[str, ...]] = {
+    "install": ("cache/marketplace/version-pins.json",),
 }
 _UNTRACKED_ROOTS = frozenset({".git", ".apm-local"})
 _DECLARED_WRITES = ("apm.yml", "apm.lock.yaml", ".gitignore", "apm_modules/")
@@ -601,7 +613,12 @@ class JourneyRun:
         args = driver.command_args(_sub(line))
         helps = "--help" in args or "--version" in args
         mutating = args[0] in MUTATING_COMMANDS and not helps and "--dry-run" not in args
-        user_writes = self._user_writes(args)
+        model = _JourneyModel(bool(step.get("converged")), cells, self.seen)
+        before = self._observe(step)
+        command = self._execute(line, scope=scope)
+        after = self._observe(step)
+        # The declared write set may depend on the outcome (a pin is recorded only on success).
+        user_writes = self._user_writes(args, ok=command.result.returncode == 0)
         writes = bool(step.get("files")) or bool(step.get("chdir")) or bool(user_writes)
         op = operation_for(
             args,
@@ -612,16 +629,14 @@ class JourneyRun:
             read_only=not mutating and not writes,
             paired={"audit": paired.result.returncode} if paired else {},
         )
-        model = _JourneyModel(bool(step.get("converged")), cells, self.seen)
-        before = self._observe(step)
-        command = self._execute(line, scope=scope)
-        after = self._observe(step)
         check_cross_cutting(before, after, command.result, model, op)
         return command
 
-    def _user_writes(self, args: tuple[str, ...]) -> tuple[str, ...]:
-        """HOME-relative paths a user-configuration command declares it writes (I5)."""
+    def _user_writes(self, args: tuple[str, ...], *, ok: bool = True) -> tuple[str, ...]:
+        """HOME-relative paths under APM_HOME a command declares it writes (I5)."""
         names = _APM_HOME_WRITES.get(args[0], ())
+        if ok:
+            names = (*names, *_APM_HOME_WRITES_ON_SUCCESS.get(args[0], ()))
         if args[0] == "lifecycle" and args[1:2] not in (("trust",), ("untrust",)):
             names = ()
         if not names or "--help" in args:
@@ -749,8 +764,35 @@ class JourneyRun:
         return []
 
     def _o11(self, facts: _StepFacts) -> list[str]:
-        del facts
-        return ["O11 vendor shape has no hermetic implementation yet"]
+        """Vendor files match the recorded vendor shape (``_VENDOR_SHAPES``).
+
+        A step with commands checks the vendor files it wrote; a command-less
+        (manual) step checks every vendor file the project holds.
+        """
+        project = self.world.project
+        if facts.commands:
+            candidates = sorted(set(_added(facts)) | _changed(facts))
+        else:
+            candidates = sorted(
+                p.relative_to(project).as_posix() for p in project.rglob("*") if p.is_file()
+            )
+        checked: list[str] = []
+        found: list[str] = []
+        for relative in candidates:
+            if relative.split("/")[0] in (*_UNTRACKED_ROOTS, "apm_modules"):
+                continue
+            for pattern, shape in _VENDOR_SHAPES:
+                if fnmatch.fnmatchcase(relative, pattern):
+                    checked.append(relative)
+                    text = (project / relative).read_text(encoding="utf-8")
+                    found += [f"{relative}: {problem}" for problem in shape(text)]
+                    break
+        if not checked:
+            found.append("the step leaves no vendor file to validate")
+        facts.record(
+            "O11", Evidence(present={"project": checked}, expected=[], observed=list(found))
+        )
+        return found
 
     def _o1(self, facts: _StepFacts) -> list[str]:
         n = facts.step["n"]
@@ -1065,6 +1107,120 @@ class JourneyRun:
         assert not missing, f"strict expected failures that no longer fail: {missing}"
 
 
+# -- O11 recorded vendor shapes ------------------------------------------------
+# Minimal shapes from each vendor's published format: required keys and, for
+# Markdown primitives, the frontmatter keys the vendor reads.
+
+
+def _json_object(text: str) -> tuple[dict, list[str]]:
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return {}, [f"not valid JSON: {exc}"]
+    return (data, []) if isinstance(data, dict) else ({}, ["not a JSON object"])
+
+
+def _sarif_shape(text: str) -> list[str]:
+    """SARIF 2.1.0: version, runs[].tool.driver.name, results[].message.text."""
+    data, problems = _json_object(text)
+    if problems:
+        return problems
+    if data.get("version") != "2.1.0":
+        problems.append(f"version {data.get('version')!r} is not 2.1.0")
+    runs = data.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return [*problems, "runs must be a non-empty list"]
+    for run in runs:
+        if not (run.get("tool") or {}).get("driver", {}).get("name"):
+            problems.append("a run lacks tool.driver.name")
+        for result in run.get("results") or ():
+            if not (result.get("message") or {}).get("text"):
+                problems.append("a result lacks message.text")
+    return problems
+
+
+def _claude_marketplace_shape(text: str) -> list[str]:
+    """Claude Code marketplace.json: name, owner.name, plugins[] with name and source."""
+    data, problems = _json_object(text)
+    if problems:
+        return problems
+    if not isinstance(data.get("name"), str):
+        problems.append("name must be a string")
+    if not (data.get("owner") or {}).get("name"):
+        problems.append("owner.name is required")
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list):
+        return [*problems, "plugins must be a list"]
+    problems += [
+        f"plugin {index} needs name and source"
+        for index, plugin in enumerate(plugins)
+        if not (isinstance(plugin, dict) and plugin.get("name") and plugin.get("source"))
+    ]
+    return problems
+
+
+def _claude_plugin_shape(text: str) -> list[str]:
+    """Claude Code plugin.json: a string name."""
+    data, problems = _json_object(text)
+    return problems or ([] if isinstance(data.get("name"), str) else ["name must be a string"])
+
+
+def _mcp_json_shape(text: str) -> list[str]:
+    """.mcp.json: mcpServers maps names to a command or a url."""
+    data, problems = _json_object(text)
+    servers = data.get("mcpServers")
+    if problems or not isinstance(servers, dict):
+        return problems or ["mcpServers must be an object"]
+    return [
+        f"server {name} needs command or url"
+        for name, server in servers.items()
+        if not (isinstance(server, dict) and (server.get("command") or server.get("url")))
+    ]
+
+
+def _frontmatter(text: str) -> dict | None:
+    if not text.startswith("---\n"):
+        return None
+    try:
+        data = yaml.safe_load(text.split("---\n", 2)[1])
+    except (yaml.YAMLError, IndexError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _markdown_shape(required: frozenset[str], allowed: frozenset[str] | None):
+    def check(text: str) -> list[str]:
+        front = _frontmatter(text)
+        if front is None:
+            return ["no YAML frontmatter"] if required else []
+        problems = [f"frontmatter lacks {key}" for key in sorted(required - set(front))]
+        if allowed is not None:
+            problems += [
+                f"frontmatter key {key!r} is not read" for key in sorted(set(front) - allowed)
+            ]
+        return problems
+
+    return check
+
+
+_VENDOR_SHAPES = (
+    ("*.sarif", _sarif_shape),
+    ("*.claude-plugin/marketplace.json", _claude_marketplace_shape),
+    ("*.claude-plugin/plugin.json", _claude_plugin_shape),
+    (".mcp.json", _mcp_json_shape),
+    # Agent Skills: SKILL.md needs name and description.
+    ("*skills/*/SKILL.md", _markdown_shape(frozenset({"name", "description"}), None)),
+    (
+        ".claude/commands/*.md",
+        _markdown_shape(
+            frozenset(),
+            frozenset({"allowed-tools", "argument-hint", "description", "input", "model"}),
+        ),
+    ),
+    (".claude/agents/*.md", _markdown_shape(frozenset({"name", "description"}), None)),
+)
+
+
 def _unreachable(services) -> set[str]:
     """Served ``owner/repo`` slugs that answer 503 (an outage), wrapping the handlers once."""
     slugs = getattr(services, "journey_unreachable", None)
@@ -1123,6 +1279,11 @@ def _added(facts: _StepFacts) -> list[str]:
     return sorted(p for p in diff.added if p.split("/")[0] not in _UNTRACKED_ROOTS)
 
 
+def _changed(facts: _StepFacts) -> set[str]:
+    diff = facts.before.snapshot("project").diff(facts.after.snapshot("project"))
+    return {p for p in diff.changed if p.split("/")[0] not in _UNTRACKED_ROOTS}
+
+
 def _removed(facts: _StepFacts) -> list[str]:
     diff = facts.before.snapshot("project").diff(facts.after.snapshot("project"))
     return sorted(p for p in diff.removed if p.split("/")[0] not in _UNTRACKED_ROOTS)
@@ -1170,10 +1331,9 @@ def _declared(path: str, step: dict) -> bool:
 # -- tests -------------------------------------------------------------------
 
 
-# Index oracles the runner never credits: O10 runs only in the live node, O11 has no
-# hermetic implementation yet.
-_NEVER_CREDITED = frozenset({"O10", "O11"})
-_ALWAYS_RECORDED = frozenset({"O1", "O3", "O4", "O5", "O6", "O7", "O9", "O12"})
+# Index oracles the runner never credits: O10 runs only in the live node.
+_NEVER_CREDITED = frozenset({"O10"})
+_ALWAYS_RECORDED = frozenset({"O1", "O3", "O4", "O5", "O6", "O7", "O9", "O11", "O12"})
 _NODE = "tests/lifecycle/journeys/test_journeys.py::test_journey[{}]"
 
 

@@ -5,9 +5,11 @@ id, so the witness of ``G|install|local-deny|hook`` is the node
 ``...::test_gate_change_removes_on_the_next_mutating_command[G|install|local-deny|hook]``.
 A strict expected failure whose reason starts with a public issue reference
 (``#<n>``) is a known-failing cell (it discharges the obligation and earns no
-receipt); any other strict expected failure stays in the baseline. Every
-other row becomes a required witness, which the receipt plugin then holds to
-an oracle receipt for its id. Journey ids (``J|...``) come from
+receipt); any other strict expected failure stays in the baseline, and so
+does a row whose obligation definition awaits a ruling
+(``definition_pending``), which checks its facts but earns no receipt.
+Every other row becomes a required witness, which the receipt plugin then
+holds to an oracle receipt for its id. Journey ids (``J|...``) come from
 ``journey_witnesses()`` in ``tests/lifecycle/journeys/test_journeys.py``.
 
 Usage::
@@ -52,6 +54,11 @@ def collect(paths: Iterable[str] = TABLE_PATHS) -> list[pytest.Item]:
     return collector.items
 
 
+def _pending(callspec: object) -> bool:
+    """A row whose obligation definition awaits a ruling (``definition_pending``)."""
+    return any(getattr(value, "definition_pending", "") for value in callspec.params.values())
+
+
 def witnesses(
     items: Iterable[pytest.Item], universe: Mapping[str, object]
 ) -> tuple[dict[str, str], dict[str, str]]:
@@ -64,6 +71,8 @@ def witnesses(
         if key not in universe:
             continue
         assert key not in required and key not in known, f"{key} has two witnesses"
+        if _pending(callspec):
+            continue  # replays and checks its facts but earns no receipt yet
         mark = item.get_closest_marker("xfail")
         if mark is not None and mark.kwargs.get("strict"):
             issue = _ISSUE.match(str(mark.kwargs.get("reason", "")))
