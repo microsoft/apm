@@ -595,6 +595,21 @@
         "tests/integration/test_architecture_linter_session_cache.py::test_session_parses_each_file_content_at_most_once_over_full_matrix",
         "tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix"
       ]
+    },
+    {
+      "issue": 4120,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H8: every CI shard collected (imported) its whole test roots and then deselected the other shards' tests, so each shard and each xdist worker paid the full collection; shards now collect only their own explicit test file lists.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/quality/test_ci_topology.py::test_shard_file_lists_match_full_collection",
+        "tests/quality/test_ci_topology.py::test_windows_unit_shard_file_lists_match_full_collection"
+      ]
     }
   ],
   "lifecycle_contracts": [

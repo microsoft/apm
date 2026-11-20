@@ -8,6 +8,9 @@ trees live in sibling modules purely so no single check module outgrows the
 module size budget; they own no RULES of their own.
 """
 
+from scripts.architecture_linter.checks.contracts_ci_shard_file_lists import (
+    RULES as CI_SHARD_FILE_LIST_RULES,
+)
 from scripts.architecture_linter.checks.contracts_ci_topology import RULES as CI_TOPOLOGY_RULES
 from scripts.architecture_linter.checks.contracts_dependency_policy import RULES as POLICY_RULES
 from scripts.architecture_linter.checks.contracts_dependency_replacements import (
@@ -33,6 +36,7 @@ RULES = (
     *LIFECYCLE_SCRIPT_GATE_RULES,
     *CI_TOPOLOGY_RULES,
     *LINTER_CACHE_RULES,
+    *CI_SHARD_FILE_LIST_RULES,
 )
 
 __all__ = ["COLLECTORS", "RULES"]

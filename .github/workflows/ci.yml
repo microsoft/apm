@@ -124,9 +124,10 @@ jobs:
   # exercises its static-asset junction boundary.
   #
   # scripts/ci_sharding.py balances each selection by its measured seed
-  # in .github/ci-durations/ (weights, not an allowlist), keeps every
-  # module and xdist group on one shard, and fails unless the shards
-  # partition the selection exactly. The required
+  # in .github/ci-durations/ (weights, not an allowlist) and gives each
+  # shard a disjoint list of test files, so a shard imports only its own
+  # modules; tests/quality/test_ci_topology.py compares the lists with a
+  # full collect. The required
   # `Windows Compatibility Gate` aggregate needs all three results.
   windows-compat-gate-1:
     name: Windows Compatibility Gate (1/3)
@@ -181,16 +182,23 @@ jobs:
         uv run --frozen python -m scripts.ci_selections windows-unit
         --shard-count 3 --shard-index $env:SHARD
 
+    - name: Select shard test files
+      if: ${{ !cancelled() }}
+      run: >-
+        uv run --extra dev python -m scripts.ci_sharding files
+        --shard-count 3 --shard-index $env:SHARD
+        --shard-durations .github/ci-durations/windows-compat.json
+        -m windows_compat --out shard-files.txt
+        tests/integration
+
     - name: Run cross-platform contract family
       if: ${{ !cancelled() }}
       env:
         APM_E2E_TESTS: '1'
       run: >-
         uv run --extra dev python -m pytest -p no:cacheprovider -v
-        -p scripts.ci_sharding --shard-count 3 --shard-index $env:SHARD
-        --shard-durations .github/ci-durations/windows-compat.json
         -m windows_compat
-        tests/integration
+        '@shard-files.txt'
 
     - name: Diagnostics on failure
       if: failure()
@@ -460,7 +468,7 @@ jobs:
 
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
-  # Two-way sharded with pytest-split, mirroring the pattern proven in
+  # Two-way sharded by scripts/ci_sharding.py file lists, mirroring the pattern proven in
   # ci-integration.yml. Each shard is an independent runner; xdist inside
   # each shard parallelises within.
   #
@@ -475,9 +483,10 @@ jobs:
   # and is escalated to required on `merge_group`.
   #
   # scripts/ci_sharding.py balances the two shards by the measured seed in
-  # .github/ci-durations/linux-unit.json (weights, not an allowlist), keeps
-  # modules and xdist groups whole, and fails unless the shards partition
-  # the selection exactly.
+  # .github/ci-durations/linux-unit.json (weights, not an allowlist) and
+  # writes each shard's disjoint test file list, so a shard imports only its
+  # own modules; tests/quality/test_ci_topology.py compares the lists with a
+  # full collect.
   build-and-test-shard:
     name: Build & Test Shard ${{ matrix.shard }} (Linux)
     runs-on: ubuntu-24.04
@@ -532,11 +541,17 @@ jobs:
     # in the non-required `coverage-combine` job below, and is also
     # enforced on `merge_group` via ci-integration.yml -- so the union
     # gate is preserved on the path that actually merges to main.
+    - name: Select shard test files
+      run: |
+        uv run python -m scripts.ci_sharding files \
+          --shard-count 2 --shard-index ${{ matrix.shard }} \
+          --shard-durations .github/ci-durations/linux-unit.json \
+          --out shard-files.txt \
+          tests/unit tests/test_console.py tests/red_team tests/fixtures/policy
+
     - name: Run tests with coverage
       run: |
-        uv run python -m pytest tests/unit tests/test_console.py tests/red_team tests/fixtures/policy \
-          -p scripts.ci_sharding --shard-count 2 --shard-index ${{ matrix.shard }} \
-          --shard-durations .github/ci-durations/linux-unit.json \
+        uv run python -m pytest @shard-files.txt \
           -n auto --dist worksteal \
           --cov --cov-report= --cov-fail-under=60
 
@@ -776,8 +791,9 @@ jobs:
   # The growing corpus exhausted this cap on run 39737354179. Four shards
   # retain the full selection and xdist affinity without increasing the cap.
   # scripts/ci_sharding.py balances them by the measured Linux x86_64
-  # integration seed (weights, not an allowlist), keeps every module and
-  # xdist group whole, and fails unless the shards partition the selection.
+  # integration seed (weights, not an allowlist) and writes each shard's
+  # disjoint test file list; the drift guard below compares them with a
+  # full collect.
   # The required aggregate checks every explicit job result independently.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
@@ -818,6 +834,14 @@ jobs:
     - name: Install dependencies
       run: uv sync --frozen --extra dev
 
+    - name: Select shard test files
+      run: |
+        uv run --extra dev python -m scripts.ci_sharding files \
+          --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
+          --shard-durations .github/ci-durations/linux-x86_64.json \
+          -m 'lifecycle_smoke and not lifecycle_merge_group' --out shard-files.txt \
+          tests/integration
+
     - name: Run required lifecycle smoke subset
       env:
         APM_E2E_TESTS: "1"
@@ -825,10 +849,8 @@ jobs:
         printf 'Runner logical CPUs: '
         nproc
         uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-          -p scripts.ci_sharding --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
-          --shard-durations .github/ci-durations/linux-x86_64.json \
           -n 4 --dist loadgroup --durations=20 \
-          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+          -m 'lifecycle_smoke and not lifecycle_merge_group' @shard-files.txt
 
     # The M-GATE spines write their visited cells to build/gate-cells/;
     # gate-cell-coverage merges every shard's set.

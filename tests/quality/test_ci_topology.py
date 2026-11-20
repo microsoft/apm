@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import re
 import shlex
@@ -14,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import ci_sharding
 from scripts.test_file_inventory import is_test_module_path
 from tests.quality.repository_python_inventory import (
     INVENTORY_CALLS,
@@ -70,6 +73,9 @@ REQUIRED_SHARD_ROOTS = (
 # The full marker family stays merge-group covered while the required release
 # expression excludes explicitly merge-group-only contracts to remain bounded.
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
+# Sharded jobs write their shard's test files here first (#4120).
+SHARD_SELECT_STEP = "Select shard test files"
+SHARD_FILE_LIST = "shard-files.txt"
 LIFECYCLE_SMOKE_SHARD_JOBS = (
     "lifecycle-smoke-shard-1",
     "lifecycle-smoke-shard-2",
@@ -215,15 +221,17 @@ def _pytest_targets(job: WorkflowNode) -> tuple[str, ...]:
     targets: list[str] = []
     for step in _run_steps(job):
         run = step.get("run")
-        if not isinstance(run, str) or "pytest" not in run:
+        if not isinstance(run, str) or ("pytest" not in run and "scripts.ci_sharding" not in run):
             continue
         for tokens in shell_commands(step):
-            if "pytest" not in tokens:
+            if "pytest" in tokens:
+                start = tokens.index("pytest") + 1
+            elif "scripts.ci_sharding" in tokens and "files" in tokens:
+                # A shard file-list emitter: its roots are the job's selection.
+                start = tokens.index("files") + 1
+            else:
                 continue
-            pytest_index = tokens.index("pytest")
-            targets.extend(
-                token for token in tokens[pytest_index + 1 :] if token.startswith("tests/")
-            )
+            targets.extend(token for token in tokens[start:] if token.startswith("tests/"))
     return tuple(targets)
 
 
@@ -800,11 +808,14 @@ def _assert_pr_windows_units(ci: WorkflowNode, release: WorkflowNode) -> None:
         assert compat.get("if") == "${{ !cancelled() }}"
         assert "continue-on-error" not in compat
         [command] = [c for c in _test_commands(compat) if _pytest_roots(c)]
-        pairs = set(pairwise(command))
+        assert ("-m", "windows_compat") in set(pairwise(command))
+        assert _pytest_roots(command) == [f"@{SHARD_FILE_LIST}"]
+        select = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+        pairs = set(pairwise(select))
         assert ("-m", "windows_compat") in pairs
         assert ("--shard-count", str(count)) in pairs
         assert ("--shard-index", "$env:SHARD") in pairs
-        assert _pytest_roots(command) == ["tests/integration"]
+        assert _shard_list_roots(select) == ["tests/integration"]
 
 
 @pytest.fixture
@@ -843,7 +854,7 @@ def test_pr_windows_unit_drift_fails(
 ) -> None:
     shard = workflow_job(provisional_ci, WINDOWS_GATE_SHARD_JOBS[-1])
     steps = shard["steps"]
-    compat = workflow_step(shard, WINDOWS_COMPAT_STEP)
+    compat = workflow_step(shard, SHARD_SELECT_STEP)
     if mutation == "marker-only-units":
         # The pre-#4115 selection: windows_compat units only.
         steps.remove(workflow_step(shard, WINDOWS_UNIT_STEP))
@@ -858,7 +869,7 @@ def test_pr_windows_unit_drift_fails(
     elif mutation == "tolerate-unit-failure":
         workflow_step(shard, WINDOWS_UNIT_STEP)["continue-on-error"] = True
     elif mutation == "skip-compat-step":
-        compat["if"] = "success()"
+        workflow_step(shard, WINDOWS_COMPAT_STEP)["if"] = "success()"
     elif mutation == "unit-root-in-compat":
         compat["run"] = compat["run"].replace("tests/integration", "tests/integration tests/unit")
     elif mutation == "compat-root-dropped":
@@ -925,6 +936,10 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     )
     worker_flags = [token for token in tokens if token.startswith(("-n", "--numprocesses"))]
     assert worker_flags == ["-n"], "lifecycle-smoke must use four bounded xdist workers"
+    assert not any(token.startswith("--shard") for token in tokens), (
+        "lifecycle-smoke must run its shard file list, not re-shard the collection"
+    )
+    assert "scripts.ci_sharding" not in tokens
     worker_index = tokens.index("-n")
     assert tokens[worker_index : worker_index + 2] == ["-n", "4"], (
         "lifecycle-smoke must use four bounded xdist workers"
@@ -936,18 +951,21 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     assert tokens[scheduler_index : scheduler_index + 2] == ["--dist", "loadgroup"], (
         "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
     )
-    pairs = [tokens[index : index + 2] for index in range(len(tokens) - 1)]
-    assert ["-p", "scripts.ci_sharding"] in pairs, (
-        "lifecycle-smoke must load the affinity-aware duration sharder"
-    )
+    emitter = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    pairs = [emitter[index : index + 2] for index in range(len(emitter) - 1)]
     for flag, value in (
         ("--shard-count", str(len(LIFECYCLE_SMOKE_SHARD_JOBS))),
         ("--shard-index", "$LIFECYCLE_SHARD"),
         ("--shard-durations", LIFECYCLE_SMOKE_DURATIONS),
+        ("-m", LIFECYCLE_SMOKE_REQUIRED_EXPRESSION),
+        ("--out", SHARD_FILE_LIST),
     ):
-        assert tokens.count(flag) == 1 and [flag, value] in pairs, (
-            f"lifecycle-smoke must select one shard with {flag} {value}"
+        assert emitter.count(flag) == 1 and [flag, value] in pairs, (
+            f"lifecycle-smoke must select one shard's files with {flag} {value}"
         )
+    assert _shard_list_roots(emitter) == [LIFECYCLE_SMOKE_ROOT], (
+        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
+    )
     assert not any(token.startswith(("--splits", "--group")) for token in tokens)
     assert not any(
         token.startswith(("--deselect", "--ignore", "--maxfail")) or token == "-k"
@@ -956,10 +974,17 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     assert "-m" in tokens
     marker_index = tokens.index("-m")
     assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
-    targets = [token for token in tokens if token.startswith("tests/")]
-    assert targets == [LIFECYCLE_SMOKE_ROOT], (
-        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
+    targets = [token for token in tokens if token.startswith(("tests", "@"))]
+    assert targets == [f"@{SHARD_FILE_LIST}"], (
+        "lifecycle-smoke must run only its shard's explicit test file list"
     )
+
+
+def _replace_in_lifecycle_commands(job: WorkflowNode, before: str, after: str) -> None:
+    """Apply one edit to the shard's file-list step and its pytest step."""
+    for name in (SHARD_SELECT_STEP, LIFECYCLE_SMOKE_RUN_STEP):
+        step = workflow_step(job, name)
+        step["run"] = step["run"].replace(before, after)
 
 
 def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
@@ -1072,23 +1097,19 @@ def _collect_lifecycle_nodes(expression: str, shard: int | None = None) -> tuple
             "-q",
             "--collect-only",
             "--strict-markers",
-            *(
-                [
-                    "-p",
-                    "scripts.ci_sharding",
-                    "--shard-count",
-                    str(len(LIFECYCLE_SMOKE_SHARD_JOBS)),
-                    "--shard-index",
-                    str(shard),
-                    "--shard-durations",
-                    LIFECYCLE_SMOKE_DURATIONS,
-                ]
-                if shard is not None
-                else []
-            ),
             "-m",
             expression,
-            LIFECYCLE_SMOKE_ROOT,
+            *(
+                [LIFECYCLE_SMOKE_ROOT]
+                if shard is None
+                else ci_sharding.shard_test_files(
+                    [LIFECYCLE_SMOKE_ROOT],
+                    expression,
+                    len(LIFECYCLE_SMOKE_SHARD_JOBS),
+                    ci_sharding.load_durations(REPO_ROOT / LIFECYCLE_SMOKE_DURATIONS),
+                    REPO_ROOT,
+                ).shards[shard - 1]
+            ),
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -1150,7 +1171,10 @@ def _assert_merge_group_full_lifecycle_path() -> None:
     assert step["env"][LIFECYCLE_SMOKE_E2E_ENV] == LIFECYCLE_SMOKE_E2E_VALUE
     assert "uv run ./scripts/test-integration.sh" in step["run"]
     script = MERGE_GROUP_INTEGRATION_SCRIPT.read_text(encoding="utf-8")
-    assert "pytest tests/integration/ -v" in script
+    # Without PYTEST_TARGETS the script runs the whole root; the merge group
+    # passes each shard's file list (guarded by the shard file-list drift test).
+    assert "target_args=(${PYTEST_TARGETS:-tests/integration/})" in script
+    assert 'python -m pytest "${target_args[@]}" -v' in script
 
 
 def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
@@ -1302,7 +1326,8 @@ def test_lifecycle_shard_binding_drift_fails(
     [
         ("python -m pytest", "pytest"),
         ('--shard-index "$LIFECYCLE_SHARD"', ""),
-        ("-p scripts.ci_sharding", ""),
+        (f"@{SHARD_FILE_LIST}", LIFECYCLE_SMOKE_ROOT),
+        ("--durations=20", "--durations=20 -p scripts.ci_sharding --shard-count 4"),
         ('--shard-index "$LIFECYCLE_SHARD"', "--shard-index 1"),
         ("--shard-count 4", "--shard-count 3"),
         (f"--shard-durations {LIFECYCLE_SMOKE_DURATIONS}", ""),
@@ -1313,8 +1338,7 @@ def test_lifecycle_shard_binding_drift_fails(
 def test_lifecycle_shard_command_drift_fails(
     provisional_lifecycle_job: WorkflowNode, before: str, after: str
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace(before, after)
+    _replace_in_lifecycle_commands(provisional_lifecycle_job, before, after)
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
 
@@ -1370,8 +1394,8 @@ def test_lifecycle_smoke_timeout_drift_fails(
 def test_lifecycle_smoke_exclusion_dropped_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace(
+    _replace_in_lifecycle_commands(
+        provisional_lifecycle_job,
         LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
         LIFECYCLE_SMOKE_FULL_EXPRESSION,
     )
@@ -1383,8 +1407,8 @@ def test_lifecycle_smoke_exclusion_dropped_fails(
 def test_lifecycle_smoke_marker_expression_substitution_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace(
+    _replace_in_lifecycle_commands(
+        provisional_lifecycle_job,
         LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
         "lifecycle_smoke or lifecycle_merge_group",
     )
@@ -1396,8 +1420,7 @@ def test_lifecycle_smoke_marker_expression_substitution_fails(
 def test_lifecycle_smoke_unbounded_root_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace("tests/integration", "tests")
+    _replace_in_lifecycle_commands(provisional_lifecycle_job, "tests/integration", "tests")
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
@@ -1650,7 +1673,9 @@ def _assert_unit_shard_layout(ci: WorkflowNode) -> None:
     assert job["strategy"]["matrix"]["shard"] == [1, 2]
     tokens = shlex.split(workflow_step(job, UNIT_SHARD_STEP)["run"].replace("\\\n", " "))
     pairs = list(pairwise(tokens))
-    assert ("--shard-count", "2") in pairs
+    assert ("--shard-count", "2") in pairwise(
+        shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    )
     worker_flags = [t for t in tokens if t.startswith(("-n", "--numprocesses", "--dist"))]
     assert worker_flags == ["-n", "--dist"], "PR unit shards must set xdist exactly once"
     assert ("-n", "auto") in pairs and ("--dist", "worksteal") in pairs
@@ -1735,8 +1760,10 @@ def test_shard_layout_matches_issue_4030() -> None:
 def test_unit_shard_layout_drift_fails(
     provisional_ci: WorkflowNode, before: str, after: str
 ) -> None:
-    step = workflow_step(workflow_job(provisional_ci, "build-and-test-shard"), UNIT_SHARD_STEP)
-    step["run"] = step["run"].replace(before, after)
+    job = workflow_job(provisional_ci, "build-and-test-shard")
+    for name in (SHARD_SELECT_STEP, UNIT_SHARD_STEP):
+        step = workflow_step(job, name)
+        step["run"] = step["run"].replace(before, after)
     with pytest.raises(AssertionError):
         _assert_unit_shard_layout(provisional_ci)
 
@@ -1782,6 +1809,271 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
         jobs[MACOS_ARM_BUILD_JOB]["steps"].append({"run": MACOS_UNIT_COMMAND})
     with pytest.raises((AssertionError, KeyError)):
         _assert_macos_arm_split(release_workflow)
+
+
+# Shard file lists (#4120, PERF-H8). Every sharded job runs an explicit,
+# disjoint list of test files (or, for a module too heavy for one shard, its
+# top-level test node IDs) written by `python -m scripts.ci_sharding files`,
+# so a shard imports only its own modules. The drift guard collects every
+# sharded root once on this SHA and requires each job's shards to cover
+# every selected node exactly once.
+SHARD_SEED_DIR = ".github/ci-durations/"
+# Sharded jobs whose shard count is planned at run time: check the planner's cap.
+PLANNED_SHARD_COUNTS = {"integration-linux-x86": 8, "integration-linux-arm": 6}
+SHARD_FILE_LIST_JOBS = (
+    ("ci.yml", "windows-compat-gate-1"),
+    ("ci.yml", "build-and-test-shard"),
+    ("ci.yml", "lifecycle-smoke-shard-1"),
+    ("build-release.yml", "integration-linux-x86"),
+    ("build-release.yml", "integration-linux-arm"),
+    ("ci-integration.yml", "integration-tests-shard"),
+)
+SHARDED_ROOTS = (
+    "tests/unit",
+    "tests/integration",
+    "tests/test_console.py",
+    "tests/red_team",
+    "tests/fixtures/policy",
+)
+
+
+def shard_file_list_args(step: WorkflowNode) -> list[str]:
+    """Arguments of the one `scripts.ci_sharding files` command in a step.
+
+    A `${{ ... }}` expression stays one token (its inner spaces dropped).
+    """
+    run = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda match: "${{" + match.group(1) + "}}", step["run"])
+    commands = [
+        tokens for tokens in shell_commands({**step, "run": run}) if "scripts.ci_sharding" in tokens
+    ]
+    assert len(commands) == 1, f"{step.get('name')!r} must run the shard file-list emitter once"
+    command = commands[0]
+    index = command.index("scripts.ci_sharding")
+    assert command[index + 1 : index + 2] == ["files"], "the emitter must run its files mode"
+    return command[index + 2 :]
+
+
+def _shard_list_roots(args: Sequence[str]) -> list[str]:
+    return list(ci_sharding._files_parser().parse_args([*_resolved_index(args)]).targets)
+
+
+def _resolved_index(args: Sequence[str]) -> list[str]:
+    tokens = list(args)
+    if "--shard-index" in tokens:
+        tokens[tokens.index("--shard-index") + 1] = "1"
+    return tokens
+
+
+def _resolve_job_tokens(args: Sequence[str], job: WorkflowNode, job_id: str) -> list[str]:
+    """Bind the workflow expressions an emitter command uses to checkable values."""
+    env = {key: str(value) for key, value in (job.get("env") or {}).items()}
+    resolved: list[str] = []
+    for token in _resolved_index(args):
+        for key in sorted(env, key=len, reverse=True):
+            token = token.replace("${{env." + key + "}}", env[key]).replace("$" + key, env[key])
+        if token.startswith("${{ needs.integration-plan.outputs."):
+            token = str(PLANNED_SHARD_COUNTS[job_id])
+        # scripts/ci-shard-durations.sh seeds shard-plan/ from the committed seeds.
+        resolved.append(token.replace("shard-plan/", SHARD_SEED_DIR))
+    return resolved
+
+
+def _job_shards(workflow: str, job_id: str) -> tuple[argparse.Namespace, list[tuple[str, ...]]]:
+    """Every shard's file list for one sharded job, through the canonical emitter."""
+    job = workflow_job(load_workflow(REPO_ROOT / ".github/workflows" / workflow), job_id)
+    raw = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    args = ci_sharding._files_parser().parse_args(_resolve_job_tokens(raw, job, job_id))
+    plan = ci_sharding.shard_test_files(
+        args.targets,
+        args.marker_expression,
+        args.shard_count,
+        ci_sharding.load_durations(REPO_ROOT / args.shard_durations),
+        REPO_ROOT,
+    )
+    return args, [tuple(shard) for shard in plan.shards]
+
+
+def _windows_unit_shards() -> list[tuple[str, ...]]:
+    from scripts import ci_selections
+
+    shards: list[tuple[str, ...]] = []
+    for index in range(1, len(WINDOWS_GATE_SHARD_JOBS) + 1):
+        args = ci_selections.shard_pytest_args(
+            "windows-unit",
+            ["--shard-count", str(len(WINDOWS_GATE_SHARD_JOBS)), "--shard-index", str(index)],
+        )
+        shards.append(tuple(arg for arg in args if arg.startswith("tests/")))
+    return shards
+
+
+def _selected_nodes(
+    inventory: dict[str, list[str]], roots: Sequence[str], expression: str | None
+) -> set[str]:
+    from _pytest.mark.expression import Expression
+
+    compiled = Expression.compile(expression) if expression else None
+    selected: set[str] = set()
+    for node, markers in inventory.items():
+        path = node.split("::", 1)[0]
+        if not any(path == root or path.startswith(root.rstrip("/") + "/") for root in roots):
+            continue
+        if compiled is None or compiled.evaluate(_marker_matcher(set(markers))):
+            selected.add(node)
+    return selected
+
+
+def _marker_matcher(names: set[str]):
+    return lambda name, /, **_kwargs: name in names
+
+
+def _assert_shard_entries_partition(
+    selected: set[str],
+    collected: set[str],
+    shards: Sequence[Sequence[str]],
+    label: str,
+) -> None:
+    """Every selected node runs on exactly one shard; every node ID entry exists."""
+    owners: dict[str, list[int]] = {}
+    for index, shard in enumerate(shards, 1):
+        assert shard, f"{label}: shard {index} has no test files"
+        for entry in shard:
+            assert entry not in owners, f"{label}: {entry} is listed on two shards"
+            owners[entry] = [index]
+            if "::" in entry:
+                assert any(
+                    node == entry or node.startswith((entry + "::", entry + "["))
+                    for node in collected
+                ), f"{label}: shard {index} names {entry}, which pytest does not collect"
+    dropped: list[str] = []
+    duplicated: list[str] = []
+    for node in sorted(selected):
+        module, _, rest = node.partition("::")
+        top = re.split(r"::|\[", rest, maxsplit=1)[0]
+        hits = [owner for key in (module, f"{module}::{top}") for owner in owners.get(key, [])]
+        if not hits:
+            dropped.append(node)
+        elif len(hits) > 1:
+            duplicated.append(node)
+    assert not dropped, (
+        f"{label}: shard file lists drop {len(dropped)} selected tests a full collect "
+        f"finds, e.g. {dropped[:3]}; add their modules to the selection"
+    )
+    assert not duplicated, f"{label}: tests run on two shards, e.g. {duplicated[:3]}"
+
+
+@pytest.fixture(scope="module")
+def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[str]]:
+    """One full collect of every sharded root on this SHA, with each node's markers."""
+    out = tmp_path_factory.mktemp("shard-inventory") / "inventory.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "--collect-only",
+            "-p",
+            "scripts.ci_sharding",
+            "--shard-inventory-out",
+            str(out),
+            # Override addopts' -m so every job's own expression is evaluated here.
+            "-m",
+            "",
+            *SHARDED_ROOTS,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+        env={
+            **{key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
+            LIFECYCLE_SMOKE_E2E_ENV: LIFECYCLE_SMOKE_E2E_VALUE,
+        },
+    )
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(("workflow", "job_id"), SHARD_FILE_LIST_JOBS)
+def test_shard_file_lists_match_full_collection(
+    full_collection: dict[str, list[str]], workflow: str, job_id: str
+) -> None:
+    args, shards = _job_shards(workflow, job_id)
+    _assert_shard_entries_partition(
+        _selected_nodes(full_collection, args.targets, args.marker_expression),
+        set(full_collection),
+        shards,
+        f"{workflow}:{job_id}",
+    )
+
+
+def test_windows_unit_shard_file_lists_match_full_collection(
+    full_collection: dict[str, list[str]],
+) -> None:
+    from scripts.ci_selections import selection_roots
+
+    _assert_shard_entries_partition(
+        _selected_nodes(full_collection, selection_roots("windows-unit"), None),
+        set(full_collection),
+        _windows_unit_shards(),
+        "ci_selections:windows-unit",
+    )
+
+
+@pytest.mark.parametrize(("workflow", "job_id"), SHARD_FILE_LIST_JOBS)
+def test_sharded_jobs_run_their_file_list(workflow: str, job_id: str) -> None:
+    """The pytest step runs the emitted list, never a whole root or a node-level re-shard."""
+    job = workflow_job(load_workflow(REPO_ROOT / ".github/workflows" / workflow), job_id)
+    emitter = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    assert emitter[emitter.index("--out") + 1] == SHARD_FILE_LIST
+    runs = [
+        (step, tokens)
+        for step in _run_steps(job)
+        for tokens in (shell_commands(step) if "run" in step else [])
+        if "pytest" in tokens or "./scripts/test-integration.sh" in tokens
+    ]
+    assert len(runs) == 1, f"{job_id} must run one sharded pytest command"
+    step, tokens = runs[0]
+    if "pytest" in tokens:
+        targets = [
+            token
+            for token in tokens[tokens.index("pytest") + 1 :]
+            if token.startswith(("tests", "@"))
+        ]
+        extra = tokens
+    else:
+        targets = [step["env"]["PYTEST_TARGETS"]]
+        extra = str(step["env"].get("PYTEST_EXTRA_ARGS", "")).split()
+    assert targets == [f"@{SHARD_FILE_LIST}"], f"{job_id} must pass only its shard file list"
+    assert not any(
+        flag in extra for flag in ("--shard-count", "--shard-index", "--splits", "--group")
+    )
+
+
+@pytest.mark.parametrize(
+    "drift", ["dropped-file", "dropped-test", "two-shards", "missing-node", "empty-shard"]
+)
+def test_shard_file_list_drift_fails(drift: str) -> None:
+    selected = {"tests/a.py::t", "tests/b.py::T::t[1]", "tests/c.py::u"}
+    collected = {*selected, "tests/b.py::Other::t"}
+    baseline = [["tests/a.py", "tests/b.py::T"], ["tests/c.py"]]
+    _assert_shard_entries_partition(selected, collected, baseline, "baseline")
+    shards = deepcopy(baseline)
+    if drift == "dropped-file":
+        shards[1] = ["tests/d.py"]
+    elif drift == "dropped-test":
+        shards[0][1] = "tests/b.py::Other"
+    elif drift == "two-shards":
+        shards[1].append("tests/a.py")
+    elif drift == "missing-node":
+        shards[1].append("tests/c.py::gone")
+    else:
+        shards.append([])
+    with pytest.raises(AssertionError):
+        _assert_shard_entries_partition(selected, collected, shards, "drift")
 
 
 # Opt-in full integration before the queue (#4116): ci-integration.yml runs on

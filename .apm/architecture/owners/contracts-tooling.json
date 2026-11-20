@@ -166,15 +166,21 @@
     },
     {
       "id": "ci-validation-topology",
-      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs",
-      "owner": "scripts/ci_selections.py (SELECTIONS)",
+      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs; each sharded CI job's explicit per-shard test file list (scripts/ci_sharding.py shard_test_files), checked against a full collect on the same SHA",
+      "owner": "scripts/ci_selections.py (SELECTIONS) + scripts/ci_sharding.py (shard_test_files)",
       "selectors": [
         "scripts/ci_selections.py",
+        "scripts/ci_sharding.py",
         "scripts/architecture_linter/checks/contracts_ci_topology.py",
+        "scripts/architecture_linter/checks/contracts_ci_shard_file_lists.py",
         ".github/workflows/ci.yml",
-        ".github/workflows/build-release.yml"
+        ".github/workflows/build-release.yml",
+        ".github/workflows/ci-integration.yml"
       ],
-      "guards": ["contracts-tooling-ci-validation-topology"]
+      "guards": [
+        "contracts-tooling-ci-shard-file-lists",
+        "contracts-tooling-ci-validation-topology"
+      ]
     }
   ]
 }
