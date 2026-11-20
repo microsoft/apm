@@ -51,6 +51,7 @@ from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
+from ..deps.lockfile_write_authority import after_lockfile_commit
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -919,8 +920,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
             if materialization_session is not None:
-                materialization_session.bind_committed_claims(
-                    LockFile.read(get_lockfile_path(ctx.apm_dir))
+                after_lockfile_commit(
+                    lambda: materialization_session.bind_committed_claims(
+                        LockFile.read(get_lockfile_path(ctx.apm_dir))
+                    )
                 )
 
         # ------------------------------------------------------------------
