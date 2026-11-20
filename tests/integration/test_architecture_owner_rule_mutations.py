@@ -1838,6 +1838,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
+        guard_id="install-deployment-bundle-admission-owner",
+        rule_id="install-deployment-bundle-admission-owner",
+        path="src/apm_cli/commands/pack.py",
+        old="            admit=apm_bundle_admission(Path(output), logger, dry_run=dry_run),\n",
+        new="            admit=lambda candidate: None,\n",
+        intent="apm unpack deploys a bundle without the shared bundle admission owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-bundle-compile-staging",
         rule_id="install-deployment-bundle-compile-staging",
         path="src/apm_cli/install/local_bundle_handler.py",
@@ -1932,6 +1940,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    def enforce_frozen(",
         new="    def enforce_frozen_disabled(",
         intent="InstallService stops owning the frozen-install mutation preflight.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-hook-pin-frozen-audit-parity",
+        rule_id="install-deployment-hook-pin-frozen-audit-parity",
+        path="src/apm_cli/install/service.py",
+        old="mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)",
+        new="mismatches = []",
+        intent="install --frozen stops verifying locked hook pins while audit --ci still does.",
     ),
     MutationCase(
         guard_id="install-deployment-immutable-requirements",
@@ -2310,6 +2326,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='    return bool(commit not in (None, "", "cached") and commit == locked_commit)\n',
         new="    return False\n",
         intent="apm update treats every locked commit as moved and skips the content-hash check.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-update-registry-integrity",
+        rule_id="install-deployment-update-registry-integrity",
+        path="src/apm_cli/install/sources.py",
+        old="                    package_info = download_registry_package(\n",
+        new="                    package_info = _registry_resolver.download_package(\n",
+        intent="A registry update download skips the locked-hash check for an unchanged version.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
@@ -2802,6 +2826,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    elif outcome.is_verified_rejection:",
         new="    elif outcome.is_auth_failure:",
         intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-credential-value-rendering",
+        rule_id="transport-platform-credential-value-rendering",
+        path="src/apm_cli/commands/config.py",
+        old='                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n',
+        new=(
+            '                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n'
+            '                click.echo(body["token"])\n'
+        ),
+        intent="apm config echoes a stored registry token outside the owner's mask.",
     ),
     MutationCase(
         guard_id="transport-platform-git-cache-identity",
@@ -3310,6 +3345,36 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="skip, adopted = self._check_adopt_or_skip(",
         new="skip, adopted = self._local_collision_check(",
         intent="Rendered rules bypass the shared adopt-or-skip collision owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/commands/approve.py",
+        old="                declaration = native_declaration(declaration, package_dir)\n",
+        new="                pass\n",
+        intent="apm approve no longer sees a native plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/install/exec_gate.py",
+        old=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            "    )\n    if ctx is not None:"
+        ),
+        new=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            '        extra_types=("mcp",),\n    )\n    if ctx is not None:'
+        ),
+        intent="Install adds native plugin types the approve views cannot see (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/security/trust.py",
+        old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
+        new="",
+        intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
     ),
 )
 

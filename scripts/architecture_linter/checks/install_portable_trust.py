@@ -1,6 +1,6 @@
 """Portable executable-trust guards (#3902, #4018).
 
-Three owners keep "may this dependency run code here?" single-sourced:
+These guards keep "may this dependency run code here?" single-sourced:
 
 * item admission  -- ``security/trust.py`` alone reads pinned item grants,
   and across the whole inventory no adapter looks approvals up itself,
@@ -8,7 +8,9 @@ Three owners keep "may this dependency run code here?" single-sourced:
   input (closed world, not a caller list);
 * fingerprint     -- ``security/trust_fingerprint.py`` alone hashes;
 * MCP admission   -- every ``CurrentMcpConfigView.derive`` call passes the
-  owner's ``admission=``; no command passes a literal trust boolean.
+  owner's ``admission=``; no command passes a literal trust boolean;
+* hook pin parity -- ``install --frozen`` and ``audit --ci`` verify locked
+  hook approval pins through one owner route, and nothing else does (#4188).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from scripts.architecture_linter.models import Rule, Violation
 GUARD_ITEM_ADMISSION = "install-deployment-executable-item-admission"
 GUARD_TRUST_FINGERPRINT = "install-deployment-trust-fingerprint"
 GUARD_MCP_ADMISSION = "install-deployment-mcp-admission"
+GUARD_HOOK_PIN_PARITY = "install-deployment-hook-pin-frozen-audit-parity"
 
 _SRC = "src/apm_cli/"
 _TRUST = "src/apm_cli/security/trust.py"
@@ -51,15 +54,26 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
         "def package_type_verdicts(",
         "def admit_native_plugin(",
         "current = native_plugin_fingerprint(Path(plugin_root))",
+        "def agent_plugin_exec_types(",
+        "found.update(dict.fromkeys(agent_plugin_exec_types(root)))",
+        "exec_types = native_plugin_exec_types(plugin_root)",
     ),
     _EXECUTABLES: (
         "return entry.get(exec_type, False) is True",
         "if matches and entry.get(exec_type, False) is True:",
         "project_allow, project_items = split_item_grants(project_raw_allow)",
     ),
-    # The one grant writer outside security/ pins what it approves.
-    "src/apm_cli/commands/approve.py": ("narrowed = record_pins(allow, identity",),
+    # The one grant writer outside security/ pins what it approves, and it
+    # lists native plugins with the trust owner's type set (#4042).
+    "src/apm_cli/commands/approve.py": (
+        "narrowed = record_pins(allow, identity",
+        "declaration = native_declaration(declaration, package_dir)",
+        "decl = native_declaration(decl, pkg_dir)",
+    ),
 }
+# A native plugin's executable types come from security/trust.py alone
+# (#4042): no caller derives or adds types the approve views cannot see.
+_NATIVE_TYPE_TOKENS = ("extra_types=", "native_declared_types(", "def agent_plugin_exec_types(")
 # Type-level resolvers cannot see pins; outside security/ every per-type
 # verdict comes from trust.package_type_verdicts.
 _PIN_BLIND = ("resolve_exec_decision(", "exec_status_for_declaration(")
@@ -130,6 +144,23 @@ _MCP_ROUTES: dict[str, tuple[str, ...]] = {
     _TRUST: ("class McpAdmission:", "def for_project(", "def admit_all("),
     _MCP_VIEW: ("admission: McpAdmission,", "verdict = admission.admit(subject)"),
     "src/apm_cli/install/service.py": ("admission=admission,",),
+}
+
+
+_EXEC_GATE = "src/apm_cli/install/exec_gate.py"
+_SERVICE = "src/apm_cli/install/service.py"
+_CI_CHECKS = "src/apm_cli/policy/ci_checks.py"
+_HOOK_PIN_ROUTES: dict[str, tuple[str, ...]] = {
+    _TRUST: ("def recorded_hook_pin_mismatches(",),
+    _EXEC_GATE: ("def locked_hook_pin_mismatches(", "recorded_hook_pin_mismatches("),
+    _SERVICE: ("mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)",),
+    "src/apm_cli/install/phases/integrate.py": ("InstallService.enforce_frozen_hook_pins(",),
+    _CI_CHECKS: ("mismatches = locked_hook_pin_mismatches(", "_check_hook_approval_pins("),
+}
+# Closed world: the owner call and its lock walk have exactly these callers.
+_HOOK_PIN_CALLERS: dict[str, frozenset[str]] = {
+    "recorded_hook_pin_mismatches(": frozenset({_TRUST, _EXEC_GATE}),
+    "locked_hook_pin_mismatches(": frozenset({_EXEC_GATE, _SERVICE, _CI_CHECKS}),
 }
 
 
@@ -357,10 +388,26 @@ def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
     """Pinned item grants are read only by security/trust.py."""
     findings = _missing(provider, GUARD_ITEM_ADMISSION, _ITEM_ROUTES)
     for path in _python_paths(provider, _SRC):
-        if path in _ITEM_PRODUCERS:
+        if path == _TRUST:
             continue
         facts, failures = _facts_for(provider, path, GUARD_ITEM_ADMISSION)
         if failures:
+            continue
+        native = [
+            token
+            for token in _NATIVE_TYPE_TOKENS
+            if any(token in line and not line.lstrip().startswith("#") for line in _lines(facts))
+        ]
+        if native:
+            findings.append(
+                _summary(
+                    GUARD_ITEM_ADMISSION,
+                    path,
+                    "Native plugin executable types come from security/trust.py "
+                    "(native_plugin_exec_types); remove " + ", ".join(native),
+                )
+            )
+        if path in _ITEM_PRODUCERS:
             continue
         found = [token for token in _ITEM_TOKENS if _present(facts, token)]
         if not path.startswith(_SECURITY):
@@ -449,6 +496,30 @@ def check_mcp_admission(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+def check_hook_pin_parity(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Frozen install and audit --ci verify hook pins through one owner route."""
+    findings = _missing(provider, GUARD_HOOK_PIN_PARITY, _HOOK_PIN_ROUTES)
+    for path in _python_paths(provider, _SRC):
+        facts, failures = _facts_for(provider, path, GUARD_HOOK_PIN_PARITY)
+        if failures:
+            continue
+        stray = [
+            token
+            for token, callers in _HOOK_PIN_CALLERS.items()
+            if path not in callers and _present(facts, token)
+        ]
+        if stray:
+            findings.append(
+                _summary(
+                    GUARD_HOOK_PIN_PARITY,
+                    path,
+                    "Locked hook pins are verified only for install --frozen and audit --ci "
+                    "through install/exec_gate.py; remove " + ", ".join(stray),
+                )
+            )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
     _rule(
         GUARD_ITEM_ADMISSION,
@@ -464,6 +535,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_MCP_ADMISSION,
         "Every MCP view derivation passes the trust owner's admission.",
         check_mcp_admission,
+    ),
+    _rule(
+        GUARD_HOOK_PIN_PARITY,
+        "install --frozen and audit --ci verify locked hook approval pins through one owner.",
+        check_hook_pin_parity,
     ),
 )
 
