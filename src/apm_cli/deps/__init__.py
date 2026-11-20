@@ -27,7 +27,23 @@ _EXPORTS: dict[str, str] = {
     "verify_dependencies": ".verifier",
 }
 
-__all__ = sorted(_EXPORTS)
+__all__ = [
+    "APMDependencyResolver",
+    "CircularRef",
+    "ConflictInfo",
+    "DependencyGraph",
+    "DependencyNode",
+    "DependencyTree",
+    "FlatDependencyMap",
+    "GitHubPackageDownloader",
+    "LockFile",
+    "LockedDependency",
+    "PackageValidator",
+    "get_lockfile_path",
+    "install_missing_dependencies",
+    "load_apm_config",
+    "verify_dependencies",
+]
 
 if TYPE_CHECKING:
     from .apm_resolver import APMDependencyResolver
