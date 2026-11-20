@@ -187,7 +187,7 @@ KEPT_FILE_OVERWRITE = _entry("kept-file-overwrite", "apm install --force", "over
 LEGACY_RENDER_MIGRATE = _entry(
     "legacy-render-migrate",
     "apm install",
-    "re-render them for this version and record deployment receipts",
+    "re-render them for this version",
 )
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
