@@ -93,8 +93,8 @@ def scrub_url(url: str) -> str:
     parameters carry no provenance value for an inventory export and are a known
     credential-leak vector (``?access_token=``, ``?token=``, SAS ``?sig=``...),
     so they are dropped wholesale rather than allow-listed. Scheme, host, port,
-    path, and fragment are preserved verbatim. Returns the URL unchanged when it
-    carries neither userinfo nor a query string.
+    path, and fragment are preserved, except ``key=value`` fragment values,
+    which are masked. Returns the URL unchanged when it carries none of these.
     """
     return redact_url_userinfo(url, drop_query=True)
 

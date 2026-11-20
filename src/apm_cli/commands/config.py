@@ -47,7 +47,9 @@ def _parse_bool_value(value: str) -> bool:
         return True
     if normalized in _BOOLEAN_FALSE_VALUES:
         return False
-    raise ValueError(f"Invalid value '{value}'. Use 'true' or 'false'.")
+    raise ValueError(
+        f"Invalid value '{render_config_value('value', value)}'. Use 'true' or 'false'."
+    )
 
 
 def _get_config_setters():
@@ -136,6 +138,11 @@ def _reject_unknown_key(logger: CommandLogger, key: str, *, unset: bool = False)
 def _echo_setting(key: str, value: object, *, indent: str = "") -> None:
     """Print one ``key: value`` line; the value renders through the owner."""
     click.echo(f"{indent}{key}: {render_config_value(key, value)}")
+
+
+def _add_table_row(table, category: str, setting: str, value: object) -> None:
+    """Add one ``apm config`` table row; the value renders through the owner."""
+    table.add_row(category, setting, render_config_value(setting, value))
 
 
 def _show_all_user_config(logger: CommandLogger) -> None:
@@ -272,10 +279,11 @@ def config(ctx):
             # Show apm.yml if in project
             if Path(APM_YML_FILENAME).exists():
                 apm_config = _load_apm_config()
-                config_table.add_row("Project", "Name", apm_config.get("name", "Unknown"))
-                config_table.add_row("", "Version", apm_config.get("version", "Unknown"))
-                config_table.add_row("", "Entrypoint", apm_config.get("entrypoint", "None"))
-                config_table.add_row(
+                _add_table_row(config_table, "Project", "Name", apm_config.get("name", "Unknown"))
+                _add_table_row(config_table, "", "Version", apm_config.get("version", "Unknown"))
+                _add_table_row(config_table, "", "Entrypoint", apm_config.get("entrypoint", "None"))
+                _add_table_row(
+                    config_table,
                     "",
                     "MCP Dependencies",
                     str(len(apm_config.get("dependencies", {}).get("mcp", []))),
@@ -284,27 +292,32 @@ def config(ctx):
                 # Show compilation configuration
                 compilation_config = apm_config.get("compilation", {})
                 if compilation_config:
-                    config_table.add_row(
+                    _add_table_row(
+                        config_table,
                         "Compilation",
                         "Output",
                         compilation_config.get("output", "AGENTS.md"),
                     )
-                    config_table.add_row(
+                    _add_table_row(
+                        config_table,
                         "",
                         "Chatmode",
                         compilation_config.get("chatmode", "auto-detect"),
                     )
-                    config_table.add_row(
+                    _add_table_row(
+                        config_table,
                         "",
                         "Resolve Links",
                         str(compilation_config.get("resolve_links", True)),
                     )
                 else:
-                    config_table.add_row("Compilation", "Status", "Using defaults (no config)")
+                    _add_table_row(
+                        config_table, "Compilation", "Status", "Using defaults (no config)"
+                    )
             else:
-                config_table.add_row("Project", "Status", "Not in an APM project directory")
+                _add_table_row(config_table, "Project", "Status", "Not in an APM project directory")
 
-            config_table.add_row("Global", "APM CLI Version", get_version())
+            _add_table_row(config_table, "Global", "APM CLI Version", get_version())
 
             from ..config import get_allow_protocol_fallback as _get_apf
             from ..config import get_github_auth_first as _get_gaf
@@ -315,13 +328,14 @@ def config(ctx):
 
             _temp_dir_val = _get_temp_dir()
             if _temp_dir_val:
-                config_table.add_row("", "Temp Directory", _temp_dir_val)
+                _add_table_row(config_table, "", "Temp Directory", _temp_dir_val)
             _self_update_channel_val = _get_self_update_channel_cfg()
             if _self_update_channel_val != "stable":
-                config_table.add_row("", "Self-update Channel", _self_update_channel_val)
+                _add_table_row(config_table, "", "Self-update Channel", _self_update_channel_val)
             _self_update_install_dir_val = _get_self_update_install_dir_cfg()
             if _self_update_install_dir_val:
-                config_table.add_row(
+                _add_table_row(
+                    config_table,
                     "",
                     "Self-update Install Dir",
                     _self_update_install_dir_val,
@@ -333,11 +347,11 @@ def config(ctx):
             _prefer_ssh = _get_prefer_ssh_cfg()
             _gaf = _get_gaf()
             if _apf:
-                config_table.add_row("", "Allow Protocol Fallback", "true")
+                _add_table_row(config_table, "", "Allow Protocol Fallback", "true")
             if _prefer_ssh:
-                config_table.add_row("", "Prefer SSH Transport", "true")
+                _add_table_row(config_table, "", "Prefer SSH Transport", "true")
             if _gaf:
-                config_table.add_row("", "GitHub Auth-first", "true")
+                _add_table_row(config_table, "", "GitHub Auth-first", "true")
 
             from ..core.experimental import is_enabled as _is_enabled
 
@@ -345,7 +359,8 @@ def config(ctx):
                 from ..config import get_copilot_cowork_skills_dir as _get_csd
 
                 _csd_val = _get_csd()
-                config_table.add_row(
+                _add_table_row(
+                    config_table,
                     "",
                     "Cowork Skills Dir",
                     _csd_val if _csd_val else "Not set (using auto-detection)",
@@ -498,7 +513,10 @@ def set(key, value):  # noqa: F811
 
         try:
             set_copilot_cowork_skills_dir(value)
-            logger.success(f"Cowork skills directory set to: {get_copilot_cowork_skills_dir()}")
+            logger.success(
+                "Cowork skills directory set to: "
+                f"{render_config_value(key, get_copilot_cowork_skills_dir())}"
+            )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -507,7 +525,9 @@ def set(key, value):  # noqa: F811
     if key == "temp-dir":
         try:
             set_temp_dir(value)
-            logger.success(f"Temporary directory set to: {get_temp_dir()}")
+            logger.success(
+                f"Temporary directory set to: {render_config_value(key, get_temp_dir())}"
+            )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -519,7 +539,7 @@ def set(key, value):  # noqa: F811
         try:
             parsed = set_install_target(value)
             rendered = _render_target_value(parsed)
-            logger.success(f"Default install target set to: {rendered}")
+            logger.success(f"Default install target set to: {render_config_value(key, rendered)}")
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -530,7 +550,7 @@ def set(key, value):  # noqa: F811
 
         try:
             channel = set_self_update_channel(value)
-            logger.success(f"Self-update channel saved: {channel}")
+            logger.success(f"Self-update channel saved: {render_config_value(key, channel)}")
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -542,10 +562,12 @@ def set(key, value):  # noqa: F811
         try:
             install_dir = set_self_update_install_dir(value)
             if self_update_command._is_windows_platform():
-                logger.success(f"Self-update install directory saved: {install_dir}")
+                logger.success(
+                    f"Self-update install directory saved: {render_config_value(key, install_dir)}"
+                )
             else:
                 logger.success(
-                    f"Self-update launcher directory preference saved: {install_dir} "
+                    f"Self-update launcher directory preference saved: {render_config_value(key, install_dir)} "
                     "(must match the existing Unix installation)"
                 )
         except ValueError as exc:
@@ -569,10 +591,7 @@ def set(key, value):  # noqa: F811
         try:
             set_mcp_registry_url(value)
             configured_url = get_mcp_registry_url()
-            logger.success(
-                "MCP registry URL set to: "
-                f"{render_config_value('mcp-registry-url', configured_url)}"
-            )
+            logger.success(f"MCP registry URL set to: {render_config_value(key, configured_url)}")
             if configured_url and configured_url.startswith("http://"):
                 logger.warning(
                     "This endpoint uses plaintext HTTP; registry traffic is not encrypted. "
@@ -596,7 +615,9 @@ def set(key, value):  # noqa: F811
 
         try:
             set_audit_on_install(value)
-            logger.success(f"Install-time audit set to: {get_audit_on_install()}")
+            logger.success(
+                f"Install-time audit set to: {render_config_value(key, get_audit_on_install())}"
+            )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
