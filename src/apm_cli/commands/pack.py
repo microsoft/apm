@@ -496,7 +496,11 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             if source != ConfigSource.NONE:
                 from ..marketplace.migration import load_marketplace_config
 
-                gate_config = load_marketplace_config(project_root)
+                # The build above loaded this config and already reported its
+                # warnings; this second load must not repeat them (#4046).
+                gate_config = load_marketplace_config(
+                    project_root, warn_callback=lambda _message: None
+                )
         except MarketplaceYmlError as exc:
             _emit_json_error_or_raise(
                 ctx, json_output, "build_error", str(exc), warnings=authoring_warnings
