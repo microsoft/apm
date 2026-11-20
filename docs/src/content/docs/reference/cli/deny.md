@@ -45,8 +45,9 @@ hooks and removes the hook entries and scripts it deployed earlier from every
 harness config. Removing an approval while the gate is on has the same effect.
 Until then, `apm audit --ci` reports the leftover hooks as drift.
 `apm install --frozen` also removes them, but cannot update `apm.lock.yaml`,
-so it exits `1` naming each retired file and the decision that retired it.
-Run `apm install` without `--frozen` and commit `apm.lock.yaml`.
+so it exits `1` naming each retired file and the decision that retired it,
+or the package whose recorded decision changed. Run `apm install` without
+`--frozen` and commit `apm.lock.yaml`.
 `apm install --dry-run` previews the retirement without removing anything.
 
 ## Examples

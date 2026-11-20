@@ -36,6 +36,7 @@ first failure to skip expensive I/O.
 | `ref-consistency` | block | `ci_checks.py` | yes |
 | `deployment-ledger-owners` | block | `ci_checks.py` | yes |
 | `deployed-files-present` | block | `ci_checks.py` | yes |
+| `exec-status-current` | block | `ci_checks.py` | yes |
 | `no-orphaned-packages` | block | `ci_checks.py` | yes |
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
@@ -127,6 +128,12 @@ the [policy schema](../policy-schema/).
   declared, gated, and dynamic target set. Then commit the updated lockfile:
   `git add apm.lock.yaml && git commit`.
 
+### `exec-status-current`
+
+- **What it verifies.** That each locked package's recorded `exec_status` is still the executables gate's decision under the current `apm.yml` and org policy. It uses the same staleness test as `apm update` and `apm install --frozen`.
+- **Fails when.** `apm deny` or an org policy change gates a package the lockfile records with a different decision, for example `recorded deployed, now denied`. This includes Claude `settings.json` hooks, where no recorded file goes missing. The decision depends on org policy, so the check is not evaluated under `--no-policy` (without `--policy`), and an org policy that cannot be resolved (for example no cache and an unreachable source) or an unreadable package reports it as not verified instead of failing.
+- **Remediation.** Run `apm install` (without `--frozen`) and commit `apm.lock.yaml`.
+
 ### `no-orphaned-packages`
 
 - **What it verifies.** That every dependency in the lockfile is still declared in `apm.yml` (in either `dependencies.apm` or `devDependencies.apm`). The synthesized self-entry is excluded.
@@ -182,7 +189,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `exec-status-current`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 
