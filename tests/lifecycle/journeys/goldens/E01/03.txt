@@ -1,0 +1,32 @@
+# apm journey golden v1: E01 step 3
+$ apm audit --ci --policy org
+[exit 0]
+--- stdout
+                                      [>] APM Policy Compliance
++---------------------------------------------------------------------------------------------------+
+| Status   | Check                    | Message                                                     |
+|----------+--------------------------+-------------------------------------------------------------|
+| [+]      | lockfile-exists          | Lockfile present                                            |
+| [+]      | ref-consistency          | All dependency refs match lockfile                          |
+| [+]      | deployment-ledger-owners | All deployment ledger owners are valid                      |
+| [+]      | deployed-files-present   | All deployed files present on disk                          |
+| [+]      | no-orphaned-packages     | No orphaned packages in lockfile                            |
+| [+]      | skill-subset-consistency | Skill subset selections match lockfile                      |
+| [+]      | config-consistency       | No MCP configs to check                                     |
+| [+]      | content-integrity        | No critical hidden Unicode or hash drift detected           |
+| [+]      | local-bundle-hooks       | Local bundle hooks are approved                             |
+| [+]      | hook-approval-pins       | Deployed hooks match their approval pins                    |
+| [+]      | includes-consent         | No local content deployed -- includes consent check skipped |
+| [!]      | dependency-allowlist     | 1 dependency(ies) not in allow list (enforcement: warn)     |
+| [+]      | drift                    | no drift detected against lockfile                          |
++---------------------------------------------------------------------------------------------------+
+
+  dependency-allowlist details:
+    - github.com/github/awesome-copilot/skills/review-and-refactor: not in allowed sources
+
+13 check(s) passed; 1 reports violations under 'enforcement: warn' and fail once the policy switches to block.
+--- stderr
+[>] Replaying install (cache-only)...
+[+] Replayed 2 package(s)
+[>] Diffing scratch vs working tree...
+[+] No drift detected

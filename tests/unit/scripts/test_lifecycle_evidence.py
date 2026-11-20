@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,8 +32,18 @@ from scripts.lifecycle_contracts import (
     validate_contracts,
     validate_execution,
 )
+from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.isolated_apm_environment import DURABLE_ENVIRONMENT_ROOTS, IsolatedApmEnvironment
-from tests.utils.lifecycle_evidence import LifecycleEvidencePlugin, _physical_roots, snapshot
+from tests.utils.lifecycle_evidence import (
+    KnownOutputCell,
+    LifecycleEvidencePlugin,
+    OutputOracleError,
+    _physical_roots,
+    check_cli_output,
+    expect_output_violation,
+    output_violations,
+    snapshot,
+)
 
 pytestmark = pytest.mark.component
 pytest_plugins = ["pytester"]
@@ -79,7 +90,7 @@ def _sample() -> tuple[dict[str, Any], dict[str, Any]]:
 def test_immutable_witnesses_and_current_inventory() -> None:
     """Pin obligations independently of both implementation constants and ledger rows."""
     required = "tests/integration/test_required_lifecycle_state_machine.py::"
-    generated = "tests/integration/test_generated_lifecycle_state_machine.py::"
+    generated = "tests/lifecycle/machines/test_m_spine.py::"
     expected = {
         required + "test_required_global_audit_rule_matrix_for_external_roots[False]",
         required + "test_required_global_audit_rule_matrix_for_external_roots[True]",
@@ -1236,3 +1247,189 @@ def test_observer_requires_real_runner_and_hypothesis_execution(pytester: pytest
     assert record["events"]
     assert all(event["model"] == 1 and event["returncode"] == 0 for event in record["events"])
     assert record["phases"] == {"setup": "passed", "call": "passed", "teardown": "passed"}
+
+
+_APM = (sys.executable, "-m", "apm_cli.cli")
+
+
+def _cli(args: tuple[str, ...], stdout: str = "", stderr: str = "", code: int = 0, prefix=_APM):
+    return CommandResult((*prefix, *args), code, stdout, stderr, Path("."))
+
+
+@pytest.mark.parametrize(
+    ("args", "stdout", "stderr", "code", "law"),
+    [
+        (("install",), "[+] Installed \u2713\n", "", 0, "I6: stdout has characters outside"),
+        (("install",), "", "\x1b[31m[x] failed\n", 1, "I6: stderr has characters outside"),
+        (("audit", "--format", "json"), "[i] not json\n", "", 0, "I6: JSON mode printed invalid"),
+        (("list", "--json"), "", "", 1, "I6: JSON mode printed invalid"),
+        (("install",), "", "Traceback (most recent call last):\n", 1, "I9: stderr has a Python"),
+        (("install",), "", "", 3, "I8: exit code 3 is outside [0, 1, 2]"),
+        (("pack",), "", "", 6, "I8: exit code 6 is outside [0, 1, 2, 3, 4, 5]"),
+        (("install",), "[+] a\n  copied\n  copied\n", "", 0, "I9: stdout repeats a line"),
+        (("install",), "[!] Skipped x\n[+] b\n[!] Skipped x\n", "", 0, "I9: stdout repeats a"),
+        (("install",), "[+] p\n  |-- 1 skill\n  [i] n\n  |-- 1 skill\n", "", 0, "I9: stdout"),
+        (("install",), "[i] t\n  [+] p\n  [+] q\n  [+] p\n", "", 0, "I9: stdout repeats a"),
+        (
+            ("install",),
+            "[!] Policy: org:a/b (cached, fetched 3s ago)\n[+] p\n"
+            "[!] Policy: org:a/b (cached, fetched 4s ago)\n",
+            "",
+            0,
+            "I9: stdout repeats a diagnostic: '[!] Policy: org:a/b (cached, fetched <AGE> ago)'",
+        ),
+        (
+            ("install",),
+            "[!] Policy off. This\ndoes not\n[i] x\n[!] Policy off. This\ndoes not\n",
+            "",
+            0,
+            "I9: stdout repeats a",
+        ),
+    ],
+)
+def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, code, law) -> None:
+    with pytest.raises(OutputOracleError, match=re.escape(law)):
+        check_cli_output(args, _cli(args, stdout, stderr, code))
+
+
+_LOG_TWICE = (
+    "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"
+    "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"
+)
+
+
+def test_logging_records_repeat_freely_on_a_verbose_run(monkeypatch) -> None:
+    """A run that asked for diagnostics may repeat Python logging records on stderr."""
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    args = ("install", "--verbose")
+    check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE))
+
+
+def test_logging_records_still_fail_i9_on_a_default_run(monkeypatch) -> None:
+    """Without --verbose or APM_DEBUG the same repeated record is user-visible noise."""
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    args = ("install",)
+    with pytest.raises(OutputOracleError, match=r"I9: stderr repeats a line: 'DEBUG apm_cli"):
+        check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE))
+
+
+@pytest.mark.parametrize(
+    ("args", "stdout", "code", "prefix"),
+    [
+        (
+            ("install",),
+            "[+] p1\n  |-- 1 skill integrated\n[+] p2\n  |-- 1 skill integrated\n",
+            0,
+            _APM,
+        ),
+        (
+            ("install",),
+            "[i] Targets\n  [+] p1\n  |-- 1 skill integrated\n  [+] p2\n  |-- 1 skill integrated\n",
+            0,
+            _APM,
+        ),
+        (("deps", "list"), "+------+\n|  a   |\n+------+\n+------+\n", 0, _APM),
+        (("install",), "[>] Resolving \n/tmp/work/a...\n[>] Resolving \n/tmp/work/b...\n", 0, _APM),
+        (("audit", "--json"), '{"ok": true}\n', 3, ("/opt/bin/apm",)),
+        (("audit", "--format", "json", "--output", "r.json"), "[+] wrote r.json\n", 0, _APM),
+        (("audit", "--json"), "", 2, _APM),
+        (
+            ("--version",),
+            "\u2713 Traceback (most recent call last)\n",
+            9,
+            (sys.executable, "-c", "x"),
+        ),
+    ],
+)
+def test_output_oracle_accepts_contract_output_and_ignores_non_apm_commands(
+    args, stdout, code, prefix
+) -> None:
+    check_cli_output(args, _cli(args, stdout, code=code, prefix=prefix))
+
+
+def test_known_output_cell_is_a_strict_expected_failure() -> None:
+    cell = KnownOutputCell(
+        "sample-cell", "I6", "#1", lambda args, _scenario: args[:1] == ("install",), "stdout"
+    )
+    bad = _cli(("install",), "\u2713\n")
+    check_cli_output(("install",), bad, known_cells=(cell,))
+    with pytest.raises(OutputOracleError, match="I8: exit code 7"):
+        check_cli_output(("install",), _cli(("install",), "\u2713\n", code=7), known_cells=(cell,))
+    with pytest.raises(
+        OutputOracleError, match=r"sample-cell \(#1\) did not fail.*remove the cell"
+    ):
+        check_cli_output(("install",), _cli(("install",), "ok\n"), known_cells=(cell,))
+    check_cli_output(("compile",), _cli(("compile",), "ok\n"), known_cells=(cell,))
+
+
+def test_expect_output_violation_suspends_only_the_named_laws() -> None:
+    crash = _cli(("install",), "", "Traceback (most recent call last):\n", 1)
+    with expect_output_violation("I9", reason="the test asserts crash rendering"):
+        check_cli_output(("install",), crash)
+        with pytest.raises(OutputOracleError, match="I8"):
+            check_cli_output(("install",), _cli(("install",), code=9))
+    with pytest.raises(OutputOracleError, match="I9"):
+        check_cli_output(("install",), crash)
+    with pytest.raises(ValueError, match="reason"), expect_output_violation("I9", reason=" "):
+        pass
+
+
+def test_output_oracle_reports_one_violation_per_duplicated_cause() -> None:
+    stdout = "[!] Policy off\n[i] a\n[!] Policy off\n[i] Targeting x\n[i] Targeting x\n"
+    found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
+    assert found == [
+        "stdout repeats a line: '[i] Targeting x'",
+        "stdout repeats a diagnostic: '[!] Policy off'",
+    ]
+    policy_cell = KnownOutputCell(
+        "policy-twice", "I9", "#1", lambda args, _scenario: True, "Policy off"
+    )
+    with pytest.raises(OutputOracleError, match=r"I9: stdout repeats a line: '\[i\] Targeting x'"):
+        check_cli_output(("install",), _cli(("install",), stdout), known_cells=(policy_cell,))
+
+
+def test_known_output_cell_output_shape_narrows_where_it_is_strict() -> None:
+    cell = KnownOutputCell(
+        "twice-with-mcp",
+        "I9",
+        "#1",
+        lambda args, _scenario: args[:1] == ("install",),
+        "Policy off",
+        output=r"^\+- MCP Servers",
+    )
+    twice = "[!] Policy off\n[i] a\n[!] Policy off\n+- MCP Servers (1)\n"
+    check_cli_output(("install",), _cli(("install",), twice), known_cells=(cell,))
+    check_cli_output(("install",), _cli(("install",), "[!] Policy off\n"), known_cells=(cell,))
+    with pytest.raises(OutputOracleError, match=r"twice-with-mcp \(#1\) did not fail"):
+        check_cli_output(
+            ("install",),
+            _cli(("install",), "[!] Policy off\n+- MCP Servers (1)\n"),
+            known_cells=(cell,),
+        )
+
+
+def test_known_output_cells_are_well_formed() -> None:
+    from tests.utils.lifecycle_evidence import KNOWN_OUTPUT_CELLS
+
+    ids = [cell.id for cell in KNOWN_OUTPUT_CELLS]
+    assert len(ids) == len(set(ids))
+    for cell in KNOWN_OUTPUT_CELLS:
+        assert cell.law in {"I6", "I8", "I9"}, cell.id
+        assert re.fullmatch(r"#[1-9][0-9]*", cell.issue), cell.id
+        re.compile(cell.message)
+        re.compile(cell.output)
+
+
+def test_output_oracle_does_not_join_a_plain_line_after_a_short_status_line() -> None:
+    stdout = "[!] Policy off.\nPhase: gate\n[i] a\n[!] Policy off.\nPhase: mcp\n"
+    found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
+    assert found == ["stdout repeats a diagnostic: '[!] Policy off.'"]
+
+
+def test_output_oracle_allows_non_ascii_characters_of_the_test_own_path() -> None:
+    world = Path("/tmp/iso w\u00f6rld \u00e9/work")
+    echo = CommandResult((*_APM, "install"), 0, f"[*] Updated {world}/apm.yml\n", "", world)
+    check_cli_output(("install",), echo)
+    product = CommandResult((*_APM, "install"), 0, "[+] done \u2713\n", "", world)
+    with pytest.raises(OutputOracleError, match=r"I6: stdout has characters outside"):
+        check_cli_output(("install",), product)

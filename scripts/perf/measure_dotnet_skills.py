@@ -36,8 +36,7 @@ from apm_cli.cache.paths import (  # noqa: E402
 )
 
 DEFAULT_DEP = (
-    "github.com/dotnet/skills/plugins/dotnet-diag/"
-    "skills/analyzing-dotnet-performance#main"
+    "github.com/dotnet/skills/plugins/dotnet-diag/skills/analyzing-dotnet-performance#main"
 )
 APM_YML_TEMPLATE = """\
 name: perf-harness
@@ -173,9 +172,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="apm-perf-") as td:
         project = Path(td) / "project"
         project.mkdir()
-        (project / "apm.yml").write_text(
-            APM_YML_TEMPLATE.format(dep=dep), encoding="utf-8"
-        )
+        (project / "apm.yml").write_text(APM_YML_TEMPLATE.format(dep=dep), encoding="utf-8")
 
         print(f"[i] Harness project: {project}")
         print(f"[i] Dep: {dep}")
@@ -199,10 +196,7 @@ def main() -> int:
         print("=" * 64)
         print(f"{'metric':<28} {'cold':>15} {'warm':>15}")
         print("-" * 64)
-        print(
-            f"{'wall_time (s)':<28} "
-            f"{cold['wall_time']:>15.2f} {warm['wall_time']:>15.2f}"
-        )
+        print(f"{'wall_time (s)':<28} {cold['wall_time']:>15.2f} {warm['wall_time']:>15.2f}")
         print(
             f"{'bare cache':<28} "
             f"{_fmt_bytes(cold['bare_bytes']):>15} "

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile, lockfile_parent_identity
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def test_legacy_parent_identity_ignores_declared_casing() -> None:

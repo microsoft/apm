@@ -107,6 +107,7 @@ def run(ctx: InstallContext) -> None:
                 ctx.content_hash_verified_deps.add(_pd_key)
             if _pd_proof is not None:
                 continue
+            _report_cache_mismatch(ctx, _pd_key, _pd_locked_chk, _pd_path)
         # Build download ref (use locked commit for reproducibility).
         # build_download_ref() uses the manifest ref when ref_changed is True.
         _pd_dlref = build_download_ref(
@@ -146,3 +147,31 @@ def run(ctx: InstallContext) -> None:
 
     ctx.pre_download_results = _pre_download_results
     ctx.pre_downloaded_keys = builtins.set(_pre_download_results.keys())
+
+
+def _report_cache_mismatch(ctx: InstallContext, dep_key: str, locked_dep, path) -> None:
+    """Name an apm_modules copy whose bytes contradict the lock before re-downloading."""
+    from apm_cli.install.source_helpers import (
+        locked_content_mismatch,
+        locked_content_mismatch_line,
+        observed_package_hash,
+    )
+
+    if not (locked_dep and locked_dep.content_hash and path.is_dir()):
+        return
+    if not locked_content_mismatch(dep_key, locked_dep, path, lockfile=ctx.existing_lockfile):
+        return
+    message = (
+        locked_content_mismatch_line(
+            dep_key, locked_dep.content_hash, observed_package_hash(locked_dep, path)
+        )
+        + " Re-downloading from the locked source."
+    )
+    reported = getattr(ctx, "cache_mismatch_reported", None)
+    if isinstance(reported, set):
+        reported.add(dep_key)
+    if ctx.diagnostics is not None:
+        ctx.diagnostics.warn(message, package=dep_key)
+    logger = getattr(ctx, "logger", None)
+    if logger is not None:
+        logger.progress(message)

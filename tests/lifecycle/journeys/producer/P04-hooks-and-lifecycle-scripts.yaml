@@ -1,0 +1,54 @@
+# P04 Author hooks and lifecycle scripts, nightly (#4110). Schema: test_journeys.py.
+# The world project installs the world package lifecycle/p-skill first, so
+# "apm install" has work to do and fires post-install. Step 2 points the
+# scaffolded script at "touch lifecycle-ran"; "test -f" probes whether it ran.
+# Commands follow reference/cli/lifecycle.md (enterprise/lifecycle-scripts.md
+# is docs_unresolved in the index).
+schema: 1
+id: P04
+persona: producer
+title: Author hooks and lifecycle scripts
+docs: [producer/write-primitives.md]
+world:
+  setup:
+    - apm install lifecycle/p-skill#v1.0.0
+steps:
+  - n: 1
+    run: [apm lifecycle init, apm lifecycle validate]
+    exit: 0
+    files: [apm.yml]
+    key_lines: ["[+] Injected lifecycle: block into apm.yml.", "[+] All 2 script file(s) valid (1 script(s) configured)."]
+    forbidden_lines: ["[x]", "[!]"]
+  - n: 2
+    edit:
+      - replace: apm.yml
+        old: "command: 'echo ''apm lifecycle: edit this entry'''"
+        new: "command: touch lifecycle-ran"
+    run: [apm lifecycle test post-install, test ! -e lifecycle-ran]
+    exit: 0
+    files: []
+    key_lines:
+      - "[*] Dry-run: 'post-install' would fire 1 script(s) (no commands or requests are run)."
+      - "Trust status: [untrusted -- run: apm lifecycle trust]"
+      - "- command  touch lifecycle-ran (project)"
+    forbidden_lines: ["[x]"]
+  - n: 3
+    run: [apm install, test ! -e lifecycle-ran]
+    exit: 0
+    files: []
+    key_lines: ["[!] Skipped 1 untrusted project script(s). Run 'apm lifecycle trust' to enable them."]
+    forbidden_lines: ["[x]"]
+  - n: 4
+    run: [apm lifecycle trust, apm install, test -f lifecycle-ran, rm lifecycle-ran]
+    exit: 0
+    note: the step-3 advice 'apm lifecycle trust' makes the next install run the script.
+    key_lines: ["[+] Trusted apm.yml lifecycle: (", "Its scripts will now run."]
+    forbidden_lines: ["[x]", Skipped 1 untrusted project script]
+  - n: 5
+    run: [apm lifecycle untrust, apm install, test ! -e lifecycle-ran]
+    exit: 0
+    files: []
+    key_lines:
+      - "[+] Revoked trust for apm.yml lifecycle:. Its scripts will no longer run."
+      - "[!] Skipped 1 untrusted project script(s). Run 'apm lifecycle trust' to enable them."
+    forbidden_lines: ["[x]"]

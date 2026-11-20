@@ -18,7 +18,11 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.install import validation
+
+pytestmark = pytest.mark.unit
 
 
 class TestProxyBypassGuard:

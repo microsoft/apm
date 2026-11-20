@@ -4,10 +4,12 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
+
+pytestmark = pytest.mark.component
 
 
 class TestMathematicalGuarantees:

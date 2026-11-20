@@ -26,6 +26,8 @@ from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.primitives.models import Instruction
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers -- synthetic git ls-remote output
 # ---------------------------------------------------------------------------

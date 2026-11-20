@@ -26,6 +26,8 @@ from apm_cli.deps.registry.resolver import RegistryResolution
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def write_apm_yml(tmp_path):

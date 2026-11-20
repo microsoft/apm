@@ -10,6 +10,8 @@ from apm_cli.marketplace.errors import MarketplaceOriginConflictError
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.marketplace.source_identity import same_marketplace_origin
 
+pytestmark = pytest.mark.unit
+
 _A = "https://git.example.com/team/catalog-a"
 _B = "https://git.example.com/team/catalog-b"
 

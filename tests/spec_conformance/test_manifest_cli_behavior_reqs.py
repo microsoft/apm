@@ -18,7 +18,11 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_package import LocalPackageFactory
 
-pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("req-mf-002", "req-mf-003", "req-mf-004", "req-mf-006"),
+]
 
 # semver 2.0.0 Section 9 reference regular expression (spec req-mf-004).
 _SEMVER = re.compile(

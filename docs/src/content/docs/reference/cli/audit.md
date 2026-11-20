@@ -57,8 +57,9 @@ otherwise the concrete target identities recorded by install. An unrelated
 Grok Cloud installation, and `.grok/` alone does not relabel it as Grok Build.
 Older lockfiles without a recorded `deployments` section retain directory
 discovery; identities inferred from legacy file paths do not narrow it.
-The saved `apm config target` is an install/update default, not a request to
-retarget an existing installation during audit.
+The saved `target` config value (`apm config set target`) is an
+install/update default, not a request to retarget an existing installation
+during audit.
 
 Experimental targets remain opt-in. If a selected target's experiment is
 disabled, audit exits with code `3` and an enable instruction on stderr, such

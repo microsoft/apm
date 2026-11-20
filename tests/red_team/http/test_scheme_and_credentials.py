@@ -28,6 +28,8 @@ from apm_cli.core.script_executors import _redact_url_credentials
 
 from .conftest import make_event, make_http_script
 
+pytestmark = pytest.mark.component
+
 REJECTED_SCHEMES = [
     ("plain-http", "http://insecure.example.com/hook"),
     ("file", "file:///etc/passwd"),

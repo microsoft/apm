@@ -9,12 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI: merge-queue integration uses the release shard planner, and a daily alarm fails when `main` moves without a `merge_group` run. (#4149)
 - `apm unpack` applies org policy and integrity checks like `apm install <bundle>`, waits for other APM operations, and records deployed files when unpacking into an APM project. (closes #4080, #4157)
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
+- User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4158)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 - Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
+- Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
+- Internal: lifecycle tests share one hermetic world: nine fixture packages, local git, marketplace, MCP registry and policy services, cloned per test in milliseconds. (#4142)
+- Internal: lifecycle tests add source and scope-lock state machines, a generated covering-replay obligation set and seven scenario suites. (#4227)
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
+- Internal: lifecycle tests add security tables and all 25 documented user journeys, each credited only through oracle receipts. (#4156)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 
 ### Fixed
@@ -26,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Top-level `x-` vendor extension keys in `apm.lock.yaml` are kept when a command rewrites the lockfile. (#4283)
 - `apm approve --pending` lists local bundle executables that an install parked, with the exact approval key to add. (#4283)
 - Reinstalling a local bundle re-evaluates the hooks it deployed earlier against current approvals, deny lists and org policy, and retires the ones no longer admitted, with their scripts and lock rows. (#4283)
+- With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
+- MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
 - `apm install` lists each hook once in its summary when the project targets several harnesses. (#4283)
 - `apm install` prints the org policy status line once, also when it installs MCP servers. (#4283)
@@ -64,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install <pkg>` also locks declared local-path dependencies missing from `apm.lock.yaml`, and reports byte-identical pre-existing skills as adopted (#4217)
 - `apm update` lists a moved SHA pin once (under Revision pin updates) and its Total line counts only changed dependencies. (#4217)
 - After `apm deny`, `apm install` names each hook file it removes and no longer reports those removed files as retained historical claims (#4217)
+- `apm audit --ci` and `apm install --frozen` now reach the same verdict on locked package content hashes. (closes #4187, #<PR>)
 - `apm config` and related output show credential values such as registry tokens redacted. (closes #4171, #4240)
 - `apm audit --ci` drift replay and lifecycle scripts now apply org policy outcomes as `apm install` does. (#4079, #4151)
 - `apm audit --ci` and `apm approve` now handle every org policy outcome as `apm install` does; `apm approve` exits 1 when the policy outcome blocks. (#4084, #4151)

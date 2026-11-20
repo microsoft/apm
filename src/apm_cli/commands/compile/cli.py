@@ -9,12 +9,14 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
     from ...integration.targets import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
-from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
+from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...core.target_catalog import (
     TARGET_CAPABILITIES,
@@ -342,7 +344,7 @@ def _resolve_effective_target(
 
     _root = source_root or Path(".")
     config_target = None
-    apm_yml_path = _root / APM_YML_FILENAME
+    apm_yml_path = manifest_file(_root)
     if apm_yml_path.exists():
         config_target = package_target_selection(APMPackage.from_apm_yml(apm_yml_path))
         if isinstance(config_target, list) and len(config_target) == 1:
@@ -387,7 +389,7 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
     from ...integration.targets import KNOWN_TARGETS
     from ...models.manifest_targets import read_manifest_target_declaration
 
-    declaration = read_manifest_target_declaration(source_root / APM_YML_FILENAME)
+    declaration = read_manifest_target_declaration(manifest_file(source_root))
     if declaration is None or declaration.spelling is None:
         return list(KNOWN_TARGETS.values()), None
     declared = declaration.restriction(strict=True)
@@ -429,7 +431,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
     try:
         compile_targets, declared_targets = _global_compile_targets(source_root)
     except TargetResolutionError as exc:
-        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        display_path = _display_user_path(manifest_file(source_root))
         summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
         logger.error(
             f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
@@ -437,7 +439,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         )
         return 1
     except yaml.YAMLError as exc:
-        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        display_path = _display_user_path(manifest_file(source_root))
         logger.error(
             f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
             symbol="error",
@@ -447,7 +449,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         logger.error(f"{exc}", symbol="error")
         return 1
     except OSError as exc:
-        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        display_path = _display_user_path(manifest_file(source_root))
         logger.error(
             f"Failed to read {display_path}: {exc}. "
             "Ensure it is a readable YAML file and rerun 'apm compile -g'.",
@@ -466,7 +468,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             if declared_names == target_names
             else f"{declared_names} -> {target_names}"
         )
-        selection_source = _display_user_path(source_root / APM_YML_FILENAME)
+        selection_source = _display_user_path(manifest_file(source_root))
     logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
 
     results = compile_user_root_contexts(
@@ -584,7 +586,7 @@ def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -
     from ...core.lifecycle_scripts import build_runner_from_context, event_for_dependencies
     from ...models.apm_package import APMPackage
 
-    manifest = source_root / APM_YML_FILENAME
+    manifest = manifest_file(source_root)
     if not manifest.exists():
         return
     project_root = str(source_root)
@@ -635,7 +637,7 @@ def _validate_project(
     from ...compilation.constitution import find_constitution
     from ...core.scope import InstallScope, get_modules_dir
 
-    if not (source_root / APM_YML_FILENAME).exists():
+    if not manifest_file(source_root).exists():
         logger.error("Not an APM project - no apm.yml found")
         logger.progress(" To initialize an APM project, run:")
         logger.progress("   apm init")
@@ -714,7 +716,7 @@ def _run_validation_mode(logger: CommandLogger, verbose: bool, source_root: Path
     try:
         from ...models.apm_package import APMPackage
 
-        apm_pkg = APMPackage.from_apm_yml(source_root / APM_YML_FILENAME)
+        apm_pkg = APMPackage.from_apm_yml(manifest_file(source_root))
         mcp_count = len(apm_pkg.get_mcp_dependencies())
         if mcp_count > 0:
             logger.progress(f"  * {mcp_count} MCP dependencies")

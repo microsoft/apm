@@ -11,6 +11,8 @@ from apm_cli.core.auth import AuthResolver
 from apm_cli.install.pipeline import _preflight_auth_check
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 _SENTINEL = "INHERITED_AUTH_SENTINEL"
 
 

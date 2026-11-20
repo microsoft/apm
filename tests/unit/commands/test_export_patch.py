@@ -33,6 +33,8 @@ from apm_cli.commands.export_patch import (
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.drift import CacheMissError, DriftFinding
 
+pytestmark = pytest.mark.component
+
 _COMMIT = "a" * 40
 
 

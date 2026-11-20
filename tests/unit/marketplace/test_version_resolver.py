@@ -4,12 +4,16 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import urlparse
 
+import pytest
+
 from apm_cli.marketplace.errors import NoMatchingVersionError
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.version_resolver import (
     is_version_constraint,
     resolve_version_constraint,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_tag_ref(tag_name: str, sha: str = "a" * 40) -> RemoteRef:

@@ -24,6 +24,8 @@ from apm_cli.marketplace.resolver import (
     resolve_plugin_source,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

@@ -11,6 +11,8 @@ from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 
+pytestmark = pytest.mark.component
+
 _DISCOVER = "apm_cli.policy.discovery.discover_policy_with_chain"
 
 

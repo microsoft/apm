@@ -17,6 +17,8 @@ import pytest
 
 from apm_cli.security.file_scanner import FileScanResult
 
+pytestmark = pytest.mark.component
+
 
 def _make_cfg(tmp_path):
     from apm_cli.commands.audit import _AuditConfig

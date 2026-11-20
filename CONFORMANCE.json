@@ -287,10 +287,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 3,
+      "test_count": 2,
       "tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_rewrite_keeps_top_level_vendor_keys",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
       ]
     },
@@ -300,10 +299,12 @@
       "keyword": "MUST",
       "section": "5.6.4",
       "status": "active",
-      "test_count": 3,
+      "test_count": 5,
       "tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[audit-ci]",
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_package_content_fails_closed_naming_the_entry[install-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source[install-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[audit-ci]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_locked_content_hash_is_recomputed_and_names_both_envelopes[install-frozen]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_tree_sha256_canonicalisation_invariant"
       ]
     },
@@ -313,8 +314,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 12,
+      "test_count": 14,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[1-False]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_audit_ci_verifies_locked_content_hash_like_install[4-True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-bare64-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-cached]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_consumer_accepts_equivalent_local_content_hash_encodings[legacy-envelope-fresh]",
@@ -769,9 +772,8 @@
       "keyword": "MUST",
       "section": "4.8",
       "status": "active",
-      "test_count": 2,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_top_level_workspaces_key_warns_reserved_and_installs",
         "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_must_not_use_in_v0_1"
       ]
     },
@@ -1646,9 +1648,8 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_conflict_resolution_nest_refuses_install_and_writes_nothing",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_fails_closed_on_ambiguous_resolution"
       ]
     },

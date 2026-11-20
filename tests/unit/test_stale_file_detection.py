@@ -6,7 +6,11 @@ single package.  It is purely set-difference semantics -- the caller owns
 filesystem side effects.
 """
 
+import pytest
+
 from src.apm_cli.drift import detect_stale_files
+
+pytestmark = pytest.mark.unit
 
 
 def test_empty_old_and_new_returns_empty_set():

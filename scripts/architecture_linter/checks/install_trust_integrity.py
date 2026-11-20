@@ -75,8 +75,10 @@ _DISCOVERY_CALLERS = frozenset(
     }
 )
 _TRUST_READERS: dict[str, str] = {
-    _EXECUTABLES: "policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)",
-    _EXEC_GATE: "policy = resolve_trust_policy(self._project_root, announce=False)",
+    _EXECUTABLES: (
+        "manifest_root(project_root, user_scope=user_scope), no_policy=no_policy, logger=logger"
+    ),
+    _EXEC_GATE: "manifest_root(self._project_root, user_scope=self._user_scope), announce=False",
     _LOCAL_BUNDLE: "policy = resolve_trust_policy(",
     "src/apm_cli/commands/approve.py": "policy = resolve_trust_policy(project_root, logger=logger)",
     # The ``apm audit --ci`` drift replay reuses the run's one discovery.
