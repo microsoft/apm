@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from apm_cli.core.remediation import HIDDEN_CHARACTERS_FLAGGED
 from apm_cli.security.audit_report import (
     detect_format_from_extension,
     findings_to_json,
@@ -215,4 +216,4 @@ class TestMarkdownReport:
     def test_strip_hint_present(self):
         findings = {"test.md": [_make_finding(file="test.md")]}
         md = findings_to_markdown(findings, files_scanned=1)
-        assert "`apm audit --strip`" in md
+        assert HIDDEN_CHARACTERS_FLAGGED.sentence() in md

@@ -404,5 +404,82 @@ def test_command_remediation_clears_the_reported_state(
 # -- W3 plugins-runtime proofs --
 # -- end W3 plugins-runtime proofs --
 # -- W3 core-models proofs --
+
+_GHOST_OWNER = "removed/ghost-kit"
+
+
+def _colliding_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create(
+        "advice-consumer", dependencies=(source.dependency,), targets=("copilot",)
+    )
+    authored = consumer.root / _INSTRUCTION
+    authored.parent.mkdir(parents=True, exist_ok=True)
+    authored.write_text("USER authored instructions\n", encoding="ascii")
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _ghost_deployment_owner(world: _World) -> None:
+    from dataclasses import replace
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import DeploymentLocator, DeploymentRecord, LocatorKind
+    from apm_cli.deps.lockfile import LockFile
+
+    path = world.consumer.root / "apm.lock.yaml"
+    lockfile = LockFile.read(path)
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="copilot",
+        value=".github/instructions/ghost.instructions.md",
+        runtime=None,
+        scope="project",
+    )
+    ghost = DeploymentRecord(
+        locator=locator,
+        owners=(_GHOST_OWNER,),
+        active_owner=_GHOST_OWNER,
+        content_hash=f"sha256:{'a' * 64}",
+    )
+    records = {**ledger.records, locator.key: ghost}
+    DeploymentLedgerCodec.apply_to_lockfile(replace(ledger, records=records), lockfile)
+    lockfile.write(path)
+
+
+def _user_file_overwritten(world: _World, result) -> None:
+    _expect_ok(world, result)
+    text = (world.consumer.root / _INSTRUCTION).read_text(encoding="utf-8")
+    assert "USER authored" not in text, text
+
+
+W3_CORE_MODELS_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "local-files-collide",
+        _colliding_world,
+        lambda _world: None,
+        lambda _world: _INSTALL_ARGS,
+        0,
+        _user_file_overwritten,
+    ),
+    _TextProof(
+        "deployment-owners-invalid",
+        _installed_world,
+        _ghost_deployment_owner,
+        lambda _world: ("audit",),
+        1,
+        _expect_ok,
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W3_CORE_MODELS_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w3_core_models_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
 # -- end W3 core-models proofs --
 # -- end W3 executed proofs ---------------------------------------------------

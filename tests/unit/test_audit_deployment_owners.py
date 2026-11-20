@@ -168,7 +168,7 @@ def test_default_text_names_owner_locator_and_remediation(tmp_path: Path) -> Non
     assert result.exit_code == 1
     assert _GHOST_OWNER in result.output
     assert _GHOST_PATH in result.output
-    assert DEPLOYMENT_OWNER_REMEDIATION in result.output
+    assert DEPLOYMENT_OWNER_REMEDIATION in " ".join(result.output.split())
 
 
 def test_strip_preserves_content_while_owner_integrity_fails(tmp_path: Path) -> None:
