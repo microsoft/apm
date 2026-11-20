@@ -124,6 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack` shows each plugin-manifest note once per command. (closes #4291, #4412)
 - `apm install` lists a missing required package once in the policy warning block, and the count matches. (closes #4307, #4412)
 - `apm install` no longer prints a bare `CI environment detected` line for each registry MCP server. (closes #4320, #4412)
+- A partly successful `apm install` of marketplace plugins records ref pins only for the plugins it installs. (closes #4322, #4419)
+- The repository not-found diagnostic names every credential source tried, in order, never their values. (#4322, #4419)
 
 ## [0.37.0] - 2026-11-20
 
