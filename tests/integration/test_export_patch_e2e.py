@@ -231,7 +231,9 @@ def test_install_points_local_edits_at_export_patch(
         raise _StopBeforeDownload("stop before download")
 
     monkeypatch.setattr("apm_cli.install.phases.download.run", _stop)
-    result = CliRunner().invoke(cli, ["install", "--frozen"])
+    # Not --frozen: frozen installs refuse drifted deployed files before the
+    # hint runs, and that refusal names 'apm export-patch' itself.
+    result = CliRunner().invoke(cli, ["install"])
 
     output = " ".join(result.output.split())
     assert output.count("apm export-patch") == 1, result.output
