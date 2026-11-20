@@ -49,7 +49,7 @@ def _statement_findings(provider: FactsProvider) -> list[Violation]:
                 violation(
                     RULE_ID,
                     _STATEMENT,
-                    f"{req_id} is reported active with only text/shape tests; "
+                    f"{req_id} is reported {entry['status']} with only text/shape tests; "
                     "report it text-only or bind a behavioral test",
                 )
             )
