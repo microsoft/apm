@@ -12,7 +12,7 @@ from apm_cli.cli import cli
 from apm_cli.deps.transport_selection import ProtocolPreference
 from apm_cli.utils.git_env import GitUrlRewriteProbeError
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-transport-selection")]
 
 
 def _write_cli_manifest(root: Path) -> None:

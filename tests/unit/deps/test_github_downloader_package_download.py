@@ -20,7 +20,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
 
 
 @pytest.fixture(autouse=True)

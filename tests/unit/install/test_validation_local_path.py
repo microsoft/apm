@@ -7,7 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-single-file-package-materialization"),
+]
 
 # ---------------------------------------------------------------------------
 # _is_tls_failure

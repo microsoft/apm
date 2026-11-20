@@ -16,7 +16,7 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-transport-selection")]
 
 
 def test_clone_engine_threads_failed_ssh_scheme_into_diagnostic(tmp_path: Path) -> None:

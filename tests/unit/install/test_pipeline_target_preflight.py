@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-LAW-transaction.failed_command_preserves_state"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers shared across tests

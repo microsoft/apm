@@ -10,7 +10,7 @@ import pytest
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-prospective-dry-run-install-plan")]
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ from apm_cli.install.errors import (
     install_failure_message,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-install-outcome")]
 
 
 def test_install_conflict_message_remains_canonical(tmp_path):

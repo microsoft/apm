@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import toml
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-mcp-target-selection-precedence")]
 
 # ---------------------------------------------------------------------------
 # Helpers

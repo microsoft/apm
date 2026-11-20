@@ -2,7 +2,7 @@
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-resolution-replacement-activation")]
 
 # ---------------------------------------------------------------------------
 # Happy path: valid replace blocks

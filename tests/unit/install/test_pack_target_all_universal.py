@@ -6,7 +6,7 @@ import pytest
 
 from apm_cli.bundle.local_bundle import check_target_mismatch
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
 
 # ---------------------------------------------------------------------------
 # Minimal fixtures -- intentionally lighter than the air-gap E2E suite.

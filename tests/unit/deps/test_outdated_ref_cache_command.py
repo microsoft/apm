@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "sr
 
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-ref-freshness")]
 
 
 def _tag(name: str, sha: str = "abc123") -> RemoteRef:

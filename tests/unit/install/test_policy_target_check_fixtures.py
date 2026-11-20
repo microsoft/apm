@@ -20,7 +20,7 @@ from apm_cli.policy.schema import (
     CompilationTargetPolicy,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-policy-violation-subjects")]
 
 # Path to fixtures
 FIXTURES_DIR = Path(__file__).resolve().parent.parent.parent / "fixtures" / "policy"

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-user-facing-output-diagnostics")]
 
 
 def test_install_exception_handlers_do_not_render_directly() -> None:

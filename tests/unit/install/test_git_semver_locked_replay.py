@@ -9,7 +9,7 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-semver-preflight-resolution")]
 
 
 def _make_dep_ref(*, reference="^1.2.0", source="github", is_local=False, artifactory_prefix=None):

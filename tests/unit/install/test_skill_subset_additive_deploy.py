@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from apm_cli.install.deployment_plan import prepare_package_deployment
 from apm_cli.install.services import integrate_package_primitives
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-dependency-selection")]
 
 # ---------------------------------------------------------------------------
 # Unit: the additive-union helper

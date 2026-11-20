@@ -11,7 +11,7 @@ from apm_cli.core.command_logger import InstallLogger
 from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.install.mcp import run_mcp_integration
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-declaration-scope")]
 
 
 _PATCH_TARGET = "apm_cli.integration.mcp_integrator.MCPIntegrator"

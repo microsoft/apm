@@ -16,7 +16,7 @@ from apm_cli.deps.github_downloader_validation import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-child-repository-isolation")]
 
 # ---------------------------------------------------------------------------
 # Helpers

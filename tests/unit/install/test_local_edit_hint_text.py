@@ -9,7 +9,7 @@ from apm_cli.install.local_edits import (
     local_edit_hint,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-user-facing-output-diagnostics")]
 
 
 class TestLocalEditHint:

@@ -9,7 +9,7 @@ import requests
 
 from apm_cli.install import validation
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-https-trust-policy")]
 
 
 class TestTlsFailureGuidanceThroughCli:

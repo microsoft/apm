@@ -8,7 +8,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
 
 
 class TestResolverConstruction:

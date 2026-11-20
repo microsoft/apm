@@ -11,7 +11,7 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-package-content-hash")]
 
 _SKILL = ".agents/skills/helper/SKILL.md"
 _STAGED = "apm_modules/bundler/.apm/instructions/glob.instructions.md"

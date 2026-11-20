@@ -23,7 +23,7 @@ from apm_cli.deps.tiered_ref_resolver import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-ref-freshness")]
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40

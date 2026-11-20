@@ -12,7 +12,7 @@ from apm_cli.install.replay_transport import DeclaredTransportIndex
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-git-transport-selection")]
 
 _SHA = "a" * 40
 

@@ -10,7 +10,7 @@ from apm_cli.deps import github_downloader_validation as gdv
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-filesystem.open_world_observation")]
 
 
 def _make_subdir_dep(

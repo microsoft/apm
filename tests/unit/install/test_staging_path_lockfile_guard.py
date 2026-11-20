@@ -12,7 +12,7 @@ from apm_cli.utils.staging_guard import (
     StagingPathLeakError,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-portability.byte_deterministic")]
 
 _STAGED_SCRIPT = f"/home/dev/.apm/apm_modules/{STAGING_DIR_NAME}/abc123/replacements/de/start.mjs"
 _REFUSAL = "references the resolution staging directory"

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-locked-copy-validity")]
 
 # ---------------------------------------------------------------------------
 # Helpers: lightweight stubs

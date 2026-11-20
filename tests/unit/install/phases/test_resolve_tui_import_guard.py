@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-user-facing-output-diagnostics")]
 
 
 def test_resolve_module_imports_tui_attr_safely() -> None:

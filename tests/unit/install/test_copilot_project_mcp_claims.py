@@ -15,7 +15,7 @@ from apm_cli.install.mcp.retired_destinations import (
 )
 from apm_cli.models.manifest_targets import ManifestTargetDeclaration
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-legacy-mcp-ownership-key-migration")]
 
 
 def test_peer_claim_is_adopted_and_refreshed_after_a_peer_write() -> None:

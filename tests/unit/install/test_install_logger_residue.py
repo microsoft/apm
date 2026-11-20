@@ -12,7 +12,7 @@ from apm_cli.install.failure_residue import (
 )
 from apm_cli.models.results import InstallDisposition
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-install-outcome")]
 
 _ROLLBACK_WORDING = ("rolled back", "roll back", "rollback", "restored", "restore", "reverted")
 

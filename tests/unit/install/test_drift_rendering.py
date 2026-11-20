@@ -20,7 +20,7 @@ from apm_cli.install.drift import (
     render_drift_text,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-user-facing-output-diagnostics")]
 
 # ---------------------------------------------------------------------------
 # _assert_scratch_bound

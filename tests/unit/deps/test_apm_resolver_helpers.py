@@ -10,7 +10,10 @@ from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-git-ref-freshness", "P-OWN-host-reference-coordinates"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

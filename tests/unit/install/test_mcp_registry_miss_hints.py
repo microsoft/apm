@@ -15,7 +15,7 @@ from apm_cli.integration.mcp_integrator_install import (
 from apm_cli.registry.client import SimpleRegistryClient, is_valid_mcp_server_name
 from apm_cli.registry.operations import MCPServerOperations
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-registry-url-resolution")]
 
 # A second populated registry the user picks by hand when replaying the hint.
 DOCS_HOST = urlparse(CHOOSING_MCP_REGISTRY_DOCS_URL).hostname

@@ -14,7 +14,7 @@ from apm_cli.deps.registry_proxy import RegistryConfig
 from apm_cli.install.errors import InstallFailureAlreadyRendered
 from apm_cli.install.pipeline import run_install_pipeline
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-outcome.status_matches_state")]
 
 
 def _registry_only_config() -> RegistryConfig:

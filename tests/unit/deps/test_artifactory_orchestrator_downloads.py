@@ -17,7 +17,7 @@ from apm_cli.deps.artifactory_orchestrator import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
 
 
 def _dep(

@@ -14,7 +14,7 @@ from apm_cli.deps.download_strategies import DownloadDelegate
 from apm_cli.utils.archive import safe_extract_zip
 from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-artifactory-netrc-isolation")]
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

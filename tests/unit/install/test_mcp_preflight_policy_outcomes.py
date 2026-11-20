@@ -29,7 +29,11 @@ from apm_cli.policy.schema import (
 
 
 # Registry MCP servers resolve as stdio packages (mcp.transport.allow).
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("stdio_mcp_registry")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("stdio_mcp_registry"),
+    pytest.mark.promise("P-OWN-policy-mcp-transport-projection"),
+]
 
 
 def _make_fetch_result(

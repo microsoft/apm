@@ -20,7 +20,11 @@ from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 # -- Fixtures / helpers -----------------------------------------------
 
 # Registry MCP servers resolve as stdio packages (mcp.transport.allow).
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("stdio_mcp_registry")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("stdio_mcp_registry"),
+    pytest.mark.promise("P-OWN-trust-policy-outcome"),
+]
 
 
 def _make_mcp_dep(

@@ -10,7 +10,7 @@ import pytest
 from apm_cli.install.phases.integrate import _resolve_download_strategy
 from apm_cli.models.apm_package import GitReferenceType
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-locked-copy-validity")]
 
 # ----------------------------------------------------------------------
 # Helpers

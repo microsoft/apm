@@ -12,7 +12,7 @@ from apm_cli.install.package_resolution import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-install-command-scope-selection")]
 
 
 def _local_ref(path: str) -> DependencyReference:

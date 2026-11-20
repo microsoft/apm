@@ -13,7 +13,7 @@ from apm_cli.deps.lock_parent_placement import (
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-legacy-lockfile-parent-placement")]
 
 
 def _virtual(path: str, depth: int, resolved_by: str | None = None) -> LockedDependency:

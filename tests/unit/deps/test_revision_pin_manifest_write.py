@@ -15,7 +15,7 @@ from apm_cli.deps.revision_pins import (
     apply_revision_pin_updates,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-revision-pin-update-outcome")]
 
 OLD_SHA = "a" * 40
 NEW_SHA = "b" * 40

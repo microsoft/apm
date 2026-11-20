@@ -17,7 +17,7 @@ from apm_cli.install.drift import (
     render_drift_text,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-drift-claim-membership")]
 
 # ---------------------------------------------------------------------------
 # Normalization helpers

@@ -6,7 +6,7 @@ import pytest
 
 from apm_cli.integration.targets import KNOWN_TARGETS
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-harness-user-root-resolution")]
 
 
 # ---------------------------------------------------------------------------

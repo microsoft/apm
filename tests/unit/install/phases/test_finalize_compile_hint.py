@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-user-facing-output-diagnostics")]
 
 # ---------------------------------------------------------------------------
 # Helpers

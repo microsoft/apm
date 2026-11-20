@@ -17,7 +17,7 @@ from apm_cli.policy.install_preflight import (
 from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.schema import ApmPolicy
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-prospective-dry-run-install-plan")]
 
 # -- Fixtures / helpers ---------------------------------------------------
 
