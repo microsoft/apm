@@ -34,6 +34,8 @@ from apm_cli.deps.host_backends import (
     backend_for_host,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------

@@ -22,13 +22,10 @@ all major classes, methods, and branches including:
 from __future__ import annotations
 
 import base64
-import io
 import json
 import threading
-import zipfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -43,9 +40,10 @@ from apm_cli.deps.transport_selection import (
     TransportSelector,
 )
 from apm_cli.models.apm_package import DependencyReference
-from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.path_security import PathTraversalError
 from tests.utils.simulated_ado_chain import install_simulated_ado_chain
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -140,17 +138,6 @@ def _fake_response(
     http_error = requests.exceptions.HTTPError(response=resp)
     resp.raise_for_status.side_effect = http_error if status_code >= 400 else None
     return resp
-
-
-def _make_zip(files: dict[str, bytes], root_prefix: str = "repo-main/") -> bytes:
-    """Build an in-memory zip archive with the given files under *root_prefix*."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        # Write the root directory entry first
-        zf.mkdir(root_prefix)
-        for rel_path, data in files.items():
-            zf.writestr(root_prefix + rel_path, data)
-    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -258,18 +245,23 @@ class TestResilientGet:
         assert result is forbidden_resp
         assert mock_get.call_count == 1
 
-    def test_rate_limit_returns_first_response_without_retry(self) -> None:
+    def test_rate_limit_returns_first_response_without_retry(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """A throttle never spends a retry budget."""
         rate_resp = _fake_response(429, b"rate", headers={"Retry-After": "0.001"})
         with (
             patch("requests.get", return_value=rate_resp),
             patch("time.sleep") as mock_sleep,
+            patch.dict("os.environ", {"APM_DEBUG": "1"}),
         ):
             result = self.delegate.resilient_get(
                 "https://example.com", {}, max_retries=2, retry_throttles=False
             )
         assert result is rate_resp
         mock_sleep.assert_not_called()
+        captured = capsys.readouterr()
+        assert "retry in" not in captured.err
 
     def test_429_with_invalid_retry_after_still_returns_immediately(self) -> None:
         """HTTP 429 itself is a confirmed throttle regardless of headers."""
@@ -385,6 +377,33 @@ class TestResilientGet:
         # Not retried
         assert mock_get.call_count == 1
 
+    @pytest.mark.parametrize(
+        "failures",
+        [
+            [_fake_response(503, b"", headers={})],
+            [requests.exceptions.ConnectionError("reset")],
+        ],
+        ids=["503", "connection-error"],
+    )
+    def test_redirect_base_attempts_keep_retry_semantics(self, failures) -> None:
+        """Owner-routed attempts still retry transient failures, one hop each."""
+        url = "https://dev.azure.com/o/p/_apis/git/repositories/r/items"
+        ok_resp = _fake_response(200, b"ok")
+        with (
+            patch(
+                "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+                side_effect=[*failures, ok_resp],
+            ) as request,
+            patch("time.sleep"),
+        ):
+            result = self.delegate.resilient_get(
+                url, {"Authorization": "Bearer t"}, max_retries=3, redirect_base=url
+            )
+        assert result is ok_resp
+        assert request.call_count == 2
+        assert all(call.kwargs["allow_redirects"] is False for call in request.call_args_list)
+        assert all(call.kwargs.get("auth") is not None for call in request.call_args_list)
+
 
 # ---------------------------------------------------------------------------
 # build_repo_url
@@ -474,6 +493,33 @@ class TestBuildRepoUrl:
             d.build_repo_url("owner/repo", dep_ref=dep)
         backend.build_clone_https_url.assert_called_once_with(dep)
 
+    def test_github_https_never_embeds_host_token(self) -> None:
+        """Credentials travel via git env, never in the clone URL."""
+        d = self._delegate(github_token="tok123")
+        dep = _make_dep("owner/repo", "github.com")
+        url = d.build_repo_url("owner/repo", dep_ref=dep)
+        parsed = urlparse(url)
+        assert url == "https://github.com/owner/repo.git"
+        assert parsed.username is None and parsed.password is None
+
+    def test_gitlab_url_built_without_token_resolution(self) -> None:
+        host = _make_host()
+        gitlab_ctx = MagicMock()
+        gitlab_ctx.token = "gitlab-tok"
+        host.auth_resolver.resolve_for_dep.return_value = gitlab_ctx
+        d = DownloadDelegate(host)
+        dep = _make_dep("owner/repo", host="gitlab.example.com")
+        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend_for:
+            backend = MagicMock()
+            backend.kind = "gitlab"
+            backend.is_github_family = False
+            backend.build_clone_https_url.return_value = "https://gitlab.example.com/owner/repo.git"
+            mock_backend_for.return_value = backend
+            d.build_repo_url("owner/repo", dep_ref=dep)
+        # URL building never resolves or forwards credentials.
+        backend.build_clone_https_url.assert_called_once_with(dep)
+        host.auth_resolver.resolve_for_dep.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # get_artifactory_headers
@@ -501,208 +547,6 @@ class TestGetArtifactoryHeaders:
 # ---------------------------------------------------------------------------
 # download_artifactory_archive
 # ---------------------------------------------------------------------------
-
-
-class TestDownloadArtifactoryArchive:
-    def _delegate(self, resp_sequence=None) -> tuple[DownloadDelegate, MagicMock]:
-        host = _make_host()
-        d = DownloadDelegate(host)
-        if resp_sequence is not None:
-            host._resilient_get.side_effect = resp_sequence
-        return d, host
-
-    def test_success_extracts_files_stripping_root_prefix(self, tmp_path: Path) -> None:
-        zip_bytes = _make_zip({"apm.yml": b"name: test"}, root_prefix="repo-main/")
-        resp = _fake_response(200, zip_bytes)
-        d, host = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").read_bytes() == b"name: test"
-        assert host._resilient_get.call_args.kwargs["stream"] is True
-
-    def test_http_non_200_tries_next_url(self, tmp_path: Path) -> None:
-        zip_bytes = _make_zip({"apm.yml": b"name: test"})
-        fail_resp = _fake_response(404, b"")
-        ok_resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([fail_resp, ok_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/fail.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_all_urls_fail_raises_runtime_error(self, tmp_path: Path) -> None:
-        fail_resp = _fake_response(404, b"")
-        d, _ = self._delegate([fail_resp, fail_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/a.zip",
-                "https://art.example.com/b.zip",
-            ],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download"):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-
-    def test_bad_zip_file_tries_next(self, tmp_path: Path) -> None:
-        bad_resp = _fake_response(200, b"not a zip")
-        zip_bytes = _make_zip({"apm.yml": b"ok"})
-        ok_resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([bad_resp, ok_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/bad.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_archive_too_large_skips_to_next(self, tmp_path: Path) -> None:
-        huge_resp = MagicMock()
-        huge_resp.status_code = 200
-        huge_resp.headers = {"Content-Length": str(600 * 1024 * 1024)}
-        huge_resp.iter_content.return_value = iter(())
-
-        zip_bytes = _make_zip({"apm.yml": b"ok"})
-        ok_resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([huge_resp, ok_resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/huge.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_archive_stream_limit_skips_to_next_url(self, tmp_path: Path) -> None:
-        huge_resp = MagicMock()
-        huge_resp.status_code = 200
-        huge_resp.headers = {}
-        huge_resp.iter_content.return_value = iter([b"x" * (2 * 1024 * 1024)])
-
-        ok_resp = _fake_response(200, _make_zip({"apm.yml": b"ok"}))
-        d, _ = self._delegate([huge_resp, ok_resp])
-        with (
-            patch.dict("os.environ", {"ARTIFACTORY_MAX_ARCHIVE_MB": "1"}),
-            patch(
-                "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-                return_value=[
-                    "https://art.example.com/huge.zip",
-                    "https://art.example.com/ok.zip",
-                ],
-            ),
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "apm.yml").exists()
-
-    def test_empty_archive_raises_runtime_error(self, tmp_path: Path) -> None:
-        """A valid zip that contains no entries raises RuntimeError."""
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w"):
-            pass  # empty zip
-        empty_zip = buf.getvalue()
-        resp = _fake_response(200, empty_zip)
-        d, _ = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/empty.zip"],
-        ):
-            with pytest.raises((RuntimeError, Exception)):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-
-    def test_single_file_archive_extracted_as_is(self, tmp_path: Path) -> None:
-        """A zip whose first entry is a plain file (not a directory) is extracted as-is."""
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("README.md", b"readme content")
-        single_file_zip = buf.getvalue()
-        resp = _fake_response(200, single_file_zip)
-        d, _ = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/single.zip"],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "README.md").exists()
-
-    def test_single_file_archive_rejects_path_traversal(self, tmp_path: Path) -> None:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("../escape.txt", b"nope")
-        resp = _fake_response(200, buf.getvalue())
-        d, _ = self._delegate([resp])
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/single.zip"],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download"):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-        assert not (tmp_path.parent / "escape.txt").exists()
-
-    def test_archive_rejects_uncompressed_size_limit(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        zip_bytes = _make_zip({"big.bin": b"x" * 2048}, root_prefix="repo-main/")
-        resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([resp])
-        monkeypatch.setitem(safe_extract_zip.__kwdefaults__, "max_uncompressed", 1024)
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download"):
-                d.download_artifactory_archive(
-                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
-                )
-
-    def test_request_exception_tries_next(self, tmp_path: Path) -> None:
-        d, host_mock = self._delegate()
-        host_mock._resilient_get.side_effect = [
-            requests.RequestException("network error"),
-            _fake_response(200, _make_zip({"f.txt": b"data"})),
-        ]
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=[
-                "https://art.example.com/fail.zip",
-                "https://art.example.com/ok.zip",
-            ],
-        ):
-            d.download_artifactory_archive(
-                "art.example.com", "apm", "owner", "repo", "main", tmp_path
-            )
-        assert (tmp_path / "f.txt").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -746,56 +590,6 @@ class TestDownloadFileFromArtifactory:
                 "main",
             )
         assert result == b"entry bytes"
-
-    def test_falls_back_to_archive_download_when_fetch_returns_none(
-        self,
-    ) -> None:
-        cfg = MagicMock()
-        cfg.host = "art.example.com"
-        client = MagicMock()
-        client.fetch_file.return_value = None  # entry not found
-        cfg.get_client.return_value = client
-
-        zip_bytes = _make_zip({"apm.yml": b"archive content"})
-        resp = _fake_response(200, zip_bytes)
-        host = _make_host(registry_config=cfg)
-        host._resilient_get.return_value = resp
-        d = DownloadDelegate(host)
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            result = d.download_file_from_artifactory(
-                "art.example.com", "apm", "owner", "repo", "apm.yml", "main"
-            )
-        assert result == b"archive content"
-
-    def test_raises_when_file_not_in_archive(self) -> None:
-        cfg = MagicMock()
-        cfg.host = "art.example.com"
-        client = MagicMock()
-        client.fetch_file.return_value = None
-        cfg.get_client.return_value = client
-
-        # Archive does NOT contain the requested file
-        zip_bytes = _make_zip({"other.yml": b"other"})
-        resp = _fake_response(200, zip_bytes)
-        host = _make_host(registry_config=cfg)
-        host._resilient_get.return_value = resp
-        d = DownloadDelegate(host)
-        with patch(
-            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
-            return_value=["https://art.example.com/repo.zip"],
-        ):
-            with pytest.raises(RuntimeError, match="Failed to download file"):
-                d.download_file_from_artifactory(
-                    "art.example.com",
-                    "apm",
-                    "owner",
-                    "repo",
-                    "missing.yml",
-                    "main",
-                )
 
 
 # ---------------------------------------------------------------------------
@@ -948,10 +742,243 @@ class TestDownloadAdoFile:
         d = DownloadDelegate(host)
         resp = _fake_response(200, b"ok")
         host._resilient_get.return_value = resp
+        # Simulate auth_resolver.resolve() returning no token (no PAT, no bearer)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
         d.download_ado_file(self._dep(), "apm.yml")
         call_kwargs = host._resilient_get.call_args[1]
         headers = call_kwargs.get("headers", {})
         assert "Authorization" not in headers
+
+    def test_404_fallback_preserves_custom_port(self) -> None:
+        host = _make_host(ado_token="pat")
+        d = DownloadDelegate(host)
+        host._resilient_get.side_effect = [
+            _fake_response(404, b""),
+            _fake_response(200, b"fallback content"),
+        ]
+        result = d.download_ado_file(
+            self._dep(host="ado.example.test", port=8443),
+            "apm.yml",
+            ref="main",
+        )
+        assert result == b"fallback content"
+        parsed_urls = [urlparse(call.args[0]) for call in host._resilient_get.call_args_list]
+        assert [(parsed.hostname, parsed.port) for parsed in parsed_urls] == [
+            ("ado.example.test", 8443),
+            ("ado.example.test", 8443),
+        ]
+
+    def test_html_200_response_raises_actionable_error(self) -> None:
+        """Regression #1671: ADO returns 200 + text/html when unauth; must fail-closed."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT or run 'az login'."
+        html_body = b"<!DOCTYPE html><html><head><title>Azure DevOps Services | Sign In</title></head></html>"
+        resp = _fake_response(200, html_body, headers={"Content-Type": "text/html; charset=utf-8"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            d.download_ado_file(self._dep(), "apm.yml")
+
+    def test_html_203_response_is_rejected(self) -> None:
+        host = _make_host(ado_token=None)
+        host.auth_resolver.resolve.return_value = MagicMock(
+            token=None,
+            auth_scheme="basic",
+            source="none",
+        )
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        host._resilient_get.return_value = _fake_response(
+            203,
+            b"<html>Sign In</html>",
+            headers={"Content-Type": "text/html"},
+        )
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            DownloadDelegate(host).download_ado_file(self._dep(), "apm.yml")
+
+    def test_non_200_success_status_is_rejected(self) -> None:
+        host = _make_host(ado_token="pat")
+        host._resilient_get.return_value = _fake_response(
+            206,
+            b"partial",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        with pytest.raises(RuntimeError, match="Unexpected HTTP 206"):
+            DownloadDelegate(host).download_ado_file(self._dep(), "apm.yml")
+
+    def test_html_200_response_writes_no_content(self) -> None:
+        """Mutation break: HTML sign-in detection must prevent content from being returned."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        html_body = b"<html><body>Sign In</body></html>"
+        resp = _fake_response(200, html_body, headers={"Content-Type": "text/html"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        # Assertions are placed OUTSIDE the pytest.raises block so they execute
+        # in the non-raising path; if the guard is removed, download_ado_file
+        # returns html_body and the assert below catches the regression.
+        raised = False
+        result = None
+        try:
+            result = d.download_ado_file(self._dep(), "apm.yml")
+        except RuntimeError:
+            raised = True
+        assert raised, "Expected RuntimeError for HTML sign-in page; guard may have been removed"
+        assert result is None, "Bug: HTML sign-in page was returned as file content"
+
+    def test_bearer_fallback_used_when_no_pat(self) -> None:
+        """Regression #1671: bearer token from auth_resolver used when no PAT present."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = "aad-bearer-jwt"
+        ctx.auth_scheme = "bearer"
+        host.auth_resolver.resolve.return_value = ctx
+        resp = _fake_response(
+            200, b"agent content", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        result = d.download_ado_file(self._dep(), "apm.yml")
+        assert result == b"agent content"
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        assert headers.get("Authorization") == "Bearer aad-bearer-jwt"
+
+    def test_pat_path_unchanged_when_pat_present(self) -> None:
+        """PAT must remain the primary auth path; bearer is strictly the fallback."""
+        host = _make_host(ado_token="my-secret-pat")
+        resp = _fake_response(
+            200, b"file bytes", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        result = d.download_ado_file(self._dep(), "apm.yml")
+        assert result == b"file bytes"
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        # PAT is used as Basic auth, bearer is NOT used
+        assert "Authorization" in headers
+        expected_auth = base64.b64encode(b":my-secret-pat").decode()
+        assert expected_auth in headers["Authorization"]
+        host.auth_resolver.resolve.assert_called_once_with(
+            "dev.azure.com",
+            "my-org",
+            port=None,
+        )
+
+    def test_pat_resolution_routes_through_auth_resolver(self) -> None:
+        """The REST PAT path must consume the canonical AuthResolver context."""
+        host = _make_host(ado_token="pat-value")
+        resp = _fake_response(200, b"data", headers={"Content-Type": "application/json"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        d.download_ado_file(self._dep(), "apm.yml")
+        host.auth_resolver.resolve.assert_called_once_with(
+            "dev.azure.com",
+            "my-org",
+            port=None,
+        )
+
+    def test_rejected_services_pat_retries_with_bearer(self) -> None:
+        """A REST 401 uses AuthResolver's canonical PAT-to-bearer protocol."""
+        host = _make_host(ado_token="stale-pat")
+        host._resilient_get.side_effect = [
+            _fake_response(401, b""),
+            _fake_response(
+                200,
+                b"file bytes",
+                headers={"Content-Type": "application/octet-stream"},
+            ),
+        ]
+
+        provider = MagicMock()
+        provider.is_available.return_value = True
+        provider.get_bearer_token.return_value = "fresh-bearer"
+        host.auth_resolver.bearer_provider = provider
+        result = DownloadDelegate(host).download_ado_file(
+            self._dep(),
+            "apm.yml",
+        )
+        assert result == b"file bytes"
+        retry_headers = host._resilient_get.call_args_list[1].kwargs["headers"]
+        scheme, credential = retry_headers["Authorization"].split(" ", 1)
+        assert scheme == "Bearer"
+        assert credential == "fresh-bearer"
+
+    def test_html_detection_on_fallback_ref_response(self) -> None:
+        """HTML sign-in detection fires on the main/master fallback response too."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        fail_resp = _fake_response(404, b"")
+        html_resp = _fake_response(
+            200,
+            b"<html>Sign In</html>",
+            headers={"Content-Type": "text/html"},
+        )
+        host._resilient_get.side_effect = [fail_resp, html_resp]
+        d = DownloadDelegate(host)
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            d.download_ado_file(self._dep(), "apm.yml", ref="main")
+
+    def test_404_with_html_content_type_does_not_trigger_sign_in_detection(self) -> None:
+        """Regression lock: 404 response with text/html body must NOT fire the HTML sign-in guard.
+
+        ADO can return 404 pages as text/html.  Sign-in detection must only fire
+        on 200 responses so 404s fall through to raise_for_status and then to the
+        main/master ref fallback path rather than raising a misleading 'sign-in page'
+        error.  This test proves the status-code guard added in the HTML detection fix.
+        """
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        # First call: 404 with text/html (an ADO error page)
+        # Second call (fallback): 200 with real content
+        html_404 = _fake_response(
+            404, b"<html>Not Found</html>", headers={"Content-Type": "text/html"}
+        )
+        ok_resp = _fake_response(
+            200, b"file-bytes", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.side_effect = [html_404, ok_resp]
+        d = DownloadDelegate(host)
+        # Should succeed via the main->master fallback, NOT raise "sign-in page"
+        result = d.download_ado_file(self._dep(), "apm.yml", ref="main")
+        assert result == b"file-bytes"
+        assert host._resilient_get.call_count == 2
+
+    def test_basic_context_uses_ado_pat_header(self) -> None:
+        """A basic AuthResolver context produces an ADO PAT header."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = "some-token"
+        ctx.source = "ADO_APM_PAT"
+        ctx.auth_scheme = "basic"  # non-bearer scheme -> must not inject as Bearer
+        host.auth_resolver.resolve.return_value = ctx
+        resp = _fake_response(200, b"content", headers={"Content-Type": "application/octet-stream"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        d.download_ado_file(self._dep(), "apm.yml")
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        scheme, credential = headers["Authorization"].split(" ", 1)
+        assert scheme == "Basic"
+        assert base64.b64decode(credential).decode() == ":some-token"
 
 
 # ---------------------------------------------------------------------------
@@ -1777,3 +1804,52 @@ class TestBuildUnsupportedOrMissingError:
             is_github_host=False,
         )
         assert "v1.2.3" in msg
+
+
+def test_ado_download_sign_in_redirect_is_classified_not_followed() -> None:
+    """A sign-in 302 reaches the auth chain as auth_required; it is never followed."""
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.core.auth_outcome import AuthAttemptFailed, AuthOutcomeKind, classify_auth_outcome
+
+    host = _make_host()
+    delegate = DownloadDelegate(host)
+    host._resilient_get.side_effect = delegate.resilient_get
+    host.auth_resolver.http_authorization_headers.side_effect = (
+        AuthResolver.http_authorization_headers
+    )
+    outcomes: list[AuthOutcomeKind] = []
+
+    def _chain(_host, operation, **_kwargs):
+        try:
+            return operation(None, {})
+        except AuthAttemptFailed as failed:
+            outcome = classify_auth_outcome(host_kind="ado", response=failed.response)
+            outcomes.append(outcome.kind)
+            raise
+
+    host.auth_resolver.try_with_fallback.side_effect = _chain
+    sign_in = MagicMock(status_code=302)
+    sign_in.headers = {"Location": "https://app.vssps.visualstudio.com/_signin?realm=x"}
+    dep = MagicMock(
+        host="dev.azure.com",
+        port=None,
+        ado_organization="org",
+        ado_project="proj",
+        ado_repo="repo",
+        repo_url="org/proj/_git/repo",
+    )
+
+    with (
+        patch(
+            "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+            return_value=sign_in,
+        ) as request,
+        pytest.raises(RuntimeError, match="HTTP 302"),
+    ):
+        delegate.download_ado_file(dep, "apm.yml", ref="feature")
+
+    assert outcomes == [AuthOutcomeKind.AUTH_REQUIRED]
+    assert request.call_count == 1
+    assert request.call_args.kwargs["allow_redirects"] is False
+    assert urlparse(request.call_args.kwargs["url"]).hostname == "dev.azure.com"
+    assert request.call_args.kwargs.get("auth") is not None

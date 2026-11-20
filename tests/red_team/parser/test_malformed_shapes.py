@@ -14,6 +14,8 @@ import pytest
 
 from .conftest import write_apm_yml
 
+pytestmark = pytest.mark.component
+
 
 def _parse(tmp_path, content):
     from apm_cli.core.lifecycle_scripts import parse_apm_yml_lifecycle

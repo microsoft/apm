@@ -5,9 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.utils.diagnostics import DiagnosticCollector
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

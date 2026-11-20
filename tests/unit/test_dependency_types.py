@@ -12,6 +12,8 @@ No I/O; all tests are pure-Python.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.models.dependency.types import (
     GitReferenceType,
     RemoteRef,
@@ -19,6 +21,8 @@ from apm_cli.models.dependency.types import (
     VirtualPackageType,
     parse_git_reference,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # GitReferenceType

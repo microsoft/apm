@@ -14,6 +14,8 @@ import pytest
 from apm_cli.install.request import InstallRequest
 from apm_cli.install.service import InstallService
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def fake_apm_package():

@@ -13,6 +13,8 @@ from apm_cli.deps.plugin_root_render import legacy_absolute_equivalent
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.component
+
 _AUTHORED = {
     "name": "db",
     "registry": False,

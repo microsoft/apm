@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.commands.outdated import (
     OutdatedRow,
@@ -16,6 +16,8 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

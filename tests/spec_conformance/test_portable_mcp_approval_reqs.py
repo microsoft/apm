@@ -20,6 +20,8 @@ from apm_cli.security.trust_fingerprint import mcp_definition_fingerprint
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.spec_conformance._helpers import assert_spec_contains
 
+pytestmark = pytest.mark.component
+
 SERVER = {"name": "leaf-server", "registry": False, "transport": "stdio", "command": "npx"}
 
 
