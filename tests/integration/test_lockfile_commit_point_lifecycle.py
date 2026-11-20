@@ -396,7 +396,12 @@ def _assert_user_lock_equals_disk(world: FaultWorld) -> LockFile:
     deps = lock.get_package_dependencies()
     records = {dep.native_plugin.name: dep.native_plugin for dep in deps if dep.native_plugin}
     plugins = home / ".agents/plugins"
-    on_disk = {path.name for path in plugins.iterdir()} if plugins.exists() else set()
+    # .claude-plugin/ holds APM's marketplace manifest, not a plugin.
+    on_disk = (
+        {path.name for path in plugins.iterdir() if path.name != ".claude-plugin"}
+        if plugins.exists()
+        else set()
+    )
     assert on_disk == set(records), (on_disk, records)
     settings_path = home / ".claude/settings.json"
     settings = json.loads(settings_path.read_text("utf-8")) if settings_path.exists() else {}
@@ -435,6 +440,9 @@ def test_a_failed_mcp_reconcile_after_native_registration_keeps_the_lock_equal_t
     failed = _user(world, "install", "-g", "--no-policy")
 
     assert failed.returncode != 0, evidence(failed)
+    output = " ".join((failed.stdout + failed.stderr).split())
+    assert "conflicts with the existing claude connection" in output, evidence(failed)
+    assert f"MCP installation incomplete: {_COLLIDING_SERVER} (claude)" in output, evidence(failed)
     lock = _assert_user_lock_equals_disk(world)
     assert any(dep.native_plugin for dep in lock.get_package_dependencies()), evidence(failed)
     audit = _user_audit(world)
