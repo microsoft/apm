@@ -401,9 +401,6 @@ class GateRetirements(NamedTuple):
     denied_packages: dict[str, str]
     parked_servers: dict[str, str]
     hook_pins: dict[str, str]
-    # The org policy is unavailable and its fetch-failure posture is block:
-    # install's policy gate, not this view, decides (#4458).
-    policy_blocks: bool = False
 
 
 def gate_retirements(
@@ -417,9 +414,8 @@ def gate_retirements(
     (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
     revoked approval or a changed definition -- and recorded hook files whose
     pinned approval no longer admits them (:func:`locked_hook_pin_mismatches`,
-    the ``--frozen`` and audit owner). When the org policy is unavailable,
-    ``policy_blocks`` tells a blocking posture (the caller runs install's
-    policy gate) and ``None`` a warning one (nothing to judge against).
+    the ``--frozen`` and audit owner). ``None`` when the org policy blocks or
+    is unresolved: install's policy preflight owns that outcome.
     """
     from apm_cli.core.scope import manifest_root
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
@@ -430,9 +426,7 @@ def gate_retirements(
     if lockfile is None:
         return GateRetirements({}, {}, {})
     route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
-    if route.blocks:
-        return GateRetirements({}, {}, {}, policy_blocks=True)
-    if route.unresolved:
+    if route.blocks or route.unresolved:
         return None
     denied = policy_denied_locked_packages(lockfile, route.policy)
     # recorded=None, as install selects: folding recorded omissions in first

@@ -2957,16 +2957,6 @@
         "tests/integration/test_native_plugin_retirement_lifecycle.py::test_uninstalling_another_package_retires_a_disallowed_native_plugin",
         "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
       ]
-    },
-    {
-      "issue": 4458,
-      "fixed_in": "Unreleased",
-      "summary": "apm update with nothing to change runs install's policy gate when the org policy is unavailable and the fetch-failure posture is block, or when the resolved policy denies an installed dependency, so it exits 1 with the policy reason instead of exiting 0.",
-      "failure_modes": ["outcome"],
-      "properties": ["outcome.status_matches_state"],
-      "regression_tests": [
-        "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome"
-      ]
     }
   ],
   "lifecycle_contracts": [

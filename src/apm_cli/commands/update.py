@@ -192,7 +192,7 @@ def _executables_need_reconcile(
 def _gate_retirements_pending(
     lockfile: LockFile | None, modules_dir: Path, scope: InstallScope, apm_package: Any
 ) -> bool:
-    """Whether the current gates no longer allow something deployed (#4444, #4445, #4458).
+    """Whether the current gates no longer allow something deployed (#4444, #4445).
 
     Asked once the resolver restaged local packages, so a changed local
     definition is judged as install judges it: a policy-denied dependency or
@@ -213,8 +213,7 @@ def _gate_retirements_pending(
         )
     except (OSError, ValueError):
         return False
-    # A blocking unavailable policy runs install's policy gate (#4458); a
-    # warning one leaves nothing to judge against.
+    # An unresolved or blocking org policy is the policy preflight's outcome.
     return retirements is not None and any(retirements)
 
 

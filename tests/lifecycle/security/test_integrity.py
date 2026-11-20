@@ -1085,10 +1085,8 @@ POLICY_HASH_PIN = ArtifactSlice(
         ("bundle-install", "upstream-or-proxy"): Expect(
             1, (_HASH_MISMATCH,), unchanged=_PIN_STATE, policy_fetch=True
         ),
-        # Update with nothing to change still runs install's policy gate (#4458).
-        ("update", "upstream-or-proxy"): Expect(
-            1, (_HASH_MISMATCH,), unchanged=_PIN_STATE, policy_fetch=True
-        ),
+        # Update with nothing to change consults no policy and writes nothing.
+        ("update", "upstream-or-proxy"): Expect(0, unchanged=_PIN_STATE),
     },
 )
 
