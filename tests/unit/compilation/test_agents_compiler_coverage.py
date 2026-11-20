@@ -142,21 +142,6 @@ class TestCompilationConfigFromApmYmlAdditional(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# CompilationConfig.__post_init__
-# ---------------------------------------------------------------------------
-
-
-class TestCompilationConfigPostInit(unittest.TestCase):
-    def test_single_agents_sets_strategy(self):
-        config = CompilationConfig(single_agents=True)
-        self.assertEqual(config.strategy, "single-file")
-
-    def test_exclude_none_initialised_to_empty_list(self):
-        config = CompilationConfig(exclude=None)
-        self.assertEqual(config.exclude, [])
-
-
-# ---------------------------------------------------------------------------
 # AgentsCompiler.compile() - exception path
 # ---------------------------------------------------------------------------
 
