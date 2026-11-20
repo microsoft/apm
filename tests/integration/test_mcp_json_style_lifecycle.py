@@ -21,6 +21,7 @@ from tests.integration._mcp_chain_kit import Chain
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-OWN-mcp-json-config-writer"),
 ]
