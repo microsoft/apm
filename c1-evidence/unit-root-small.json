@@ -4,7 +4,8 @@
   1,
   2,
   3,
-  4
+  4,
+  5
  ],
  "folds": {
   "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_legacy_optional_hint_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_skipped[codex]",
@@ -201,12 +202,14 @@
   "env: test_public_release_metadata unix cases fail identically in tests/unit and tests/integration when run as root (installer refuses admin install); shepherd gate fixtures fail on forced commit signing",
   "step5: AQ003 after classification is dominated by pure-logic tests in modules marked component only because some tests or helpers touch the filesystem/process/CLI boundary; such modules are split by AST taint analysis (test text, its fixtures, class helpers and module helpers reached): the larger half keeps the module name, the smaller half moves under the same test names to <stem>_io.py (component) or <stem>_logic.py (unit); no assertion changed; unreferenced helper copies dropped",
   "test_outdated_marketplace_detection: the MagicMock stand-in dep now sets source_url=None like LockedDependency, so the [mock] variant no longer depends on which test first imported catalog_origin under a registry patch (surfaced by the split under xdist)",
-  "step5: for 11 of the moved modules (drift_detection, tls_trust, ref_resolver, transport_selection, auth_command, git_transport_policy, public_github_anonymous_first, performance_scan_regressions, copilot_app_project, cli_lazy_dispatch, integration_binary_path_contract) the pure-logic tests returned to their original tests/unit path (marked unit, original node ids restored); only the process-spawning tests stay in tests/integration/<same name>; test_tls_custom_ca docstring reverted, development-guide lists both scan-regression modules"
+  "step5: for 11 of the moved modules (drift_detection, tls_trust, ref_resolver, transport_selection, auth_command, git_transport_policy, public_github_anonymous_first, performance_scan_regressions, copilot_app_project, cli_lazy_dispatch, integration_binary_path_contract) the pure-logic tests returned to their original tests/unit path (marked unit, original node ids restored); only the process-spawning tests stay in tests/integration/<same name>; test_tls_custom_ca docstring reverted, development-guide lists both scan-regression modules",
+  "step5 left: 3205 AQ003 in scope (0 AQ001, 0 AQ002); they are filesystem-touching component tests (tmp_path/tempfile/CliRunner/subprocess setups) whose outcome is a returned value; not bulk-edited to avoid contrived durable-state assertions",
+  "ratchets: the 158 modules created by splits or by split-back (same-name tests/integration halves) carry no pytest.mark.promise and the AQ baseline grows by the classification; both need the integrator baseline regeneration (same as c1/unit-deps-install); taxonomy, duplicate and lint checks otherwise pass"
  ],
  "counts_left": {
   "same_body_groups": 14,
   "unclassified_modules": 41,
   "placement_offenders": 3,
-  "weak_tests": null
+  "weak_tests": 3205
  }
 }
