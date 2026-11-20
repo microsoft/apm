@@ -1042,12 +1042,10 @@ def _auto_discover(
             # A recorded resolution lets an unreachable candidate that was absent
             # when the policy was cached fall through to that policy (#4456).
             refs = resolved.candidate_refs(org, host, candidates)
-            may_use_cache = not (no_cache or cache_only)
-            if may_use_cache and (
-                fallback := resolved.after_failure(result, refs, index, project_root, expected_hash)
-            ):
-                return fallback
             resolved.record(result, refs, index, project_root)
+            if not (no_cache or cache_only):
+                fallback = resolved.after_failure(result, refs, index, project_root, expected_hash)
+                result = fallback or result
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
         if result.outcome == "cache_miss_fetch_fail" and _rejected_pinned_cache(
