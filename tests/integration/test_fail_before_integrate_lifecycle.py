@@ -26,8 +26,14 @@ pytestmark = [
 ]
 
 
+# A generic git host: pre-install validation probes it with git ls-remote,
+# which honors the fixture's insteadOf rewrite (a github.com ref would be
+# probed through the REST API instead and 404 outside the network guard).
+_HOST = "git.fixture.invalid"
+
+
 def _url(name: str) -> str:
-    return f"https://github.com/test/{name}.git"
+    return f"https://{_HOST}/test/{name}.git"
 
 
 def test_failed_direct_dependency_integrates_nothing(tmp_path, apm_binary_path) -> None:
@@ -52,13 +58,16 @@ def test_failed_direct_dependency_integrates_nothing(tmp_path, apm_binary_path) 
     (project / ".claude").mkdir()
     install = ("install", "--no-policy", "--parallel-downloads", "0")
 
-    failed = runner.run((*install, "test/good#v1", "test/notapkg#v1"), cwd=project, env=env)
+    failed = runner.run(
+        (*install, f"{_HOST}/test/good#v1", f"{_HOST}/test/notapkg#v1"), cwd=project, env=env
+    )
 
     assert failed.returncode != 0, output(failed)
+    assert "notapkg" in output(failed), output(failed)
     assert not (project / ".claude/skills/good").exists(), output(failed)
     assert not (project / "apm.lock.yaml").exists()
 
-    retry = runner.run((*install, "test/good#v1"), cwd=project, env=env)
+    retry = runner.run((*install, f"{_HOST}/test/good#v1"), cwd=project, env=env)
 
     assert retry.returncode == 0, output(retry)
     assert (project / ".claude/skills/good/SKILL.md").is_file()

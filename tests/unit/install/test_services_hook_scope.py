@@ -34,6 +34,7 @@ from apm_cli.install.services import IntegratorBundle, integrate_package_primiti
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.skill_integrator import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
@@ -118,6 +119,7 @@ def _call(scope: InstallScope, project_root: Path) -> MagicMock:
         managed_files=None,
         diagnostics=DiagnosticCollector(),
         scope=scope,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
     return hook_integrator
 
@@ -220,6 +222,7 @@ def test_non_hook_integrators_never_receive_user_scope(tmp_path: Path) -> None:
         managed_files=None,
         diagnostics=DiagnosticCollector(),
         scope=InstallScope.USER,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     command_integrator.integrate_commands_for_target.assert_called_once()

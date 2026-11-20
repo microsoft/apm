@@ -294,7 +294,7 @@ def test_three_level_extends_chain_enforces_root_deny(
         pytest.param((), "1", "APM_POLICY_DISABLE=1", id="policy-disable-env"),
     ],
 )
-def test_policy_bypass_installs_denied_dependency_with_loud_warning(
+def test_policy_opt_out_installs_denied_dependency_with_loud_warning(
     tmp_path: Path,
     apm_binary_path: Path,
     flag: tuple[str, ...],
@@ -308,7 +308,7 @@ def test_policy_bypass_installs_denied_dependency_with_loud_warning(
         if env_disable is not None:
             env["APM_POLICY_DISABLE"] = env_disable
         before = gov.snapshot()
-        result = gov.install(*flag, step="install-bypass", expected=0, env=env)
+        result = gov.install(*flag, step="install-opt-out", expected=0, env=env)
 
         out = _flat(output(result))
         assert reason in out, out
