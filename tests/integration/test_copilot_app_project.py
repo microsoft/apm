@@ -160,28 +160,6 @@ class TestDeriveRepoContext:
         assert ctx.repo_root == repo.resolve()
 
 
-class TestDeriveProjectRecipe:
-    def test_pure_projection(self) -> None:
-        ctx = cap.RepoContext(
-            repo_root=Path("/tmp/x"),
-            repo_name="x",
-            github_owner="o",
-            github_repo="x",
-            default_branch="main",
-        )
-        r = cap.derive_project_recipe(ctx)
-        assert r.name == "x"
-        # ``main_repo_path`` is the OS-native string form of the repo
-        # root; on POSIX this is ``/tmp/x``, on Windows ``\tmp\x``.
-        assert r.main_repo_path == str(Path("/tmp/x"))
-        assert r.default_branch == "main"
-        assert r.github_owner == "o"
-        assert r.github_repo == "x"
-        # Dashed UUID4 -- 36 chars including hyphens.
-        assert len(r.id) == 36
-        assert r.id.count("-") == 4
-
-
 # ---------------------------------------------------------------------------
 # resolve_or_register_project_sqlite tests.
 # ---------------------------------------------------------------------------

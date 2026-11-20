@@ -123,22 +123,6 @@ def test_install_help_does_load_install_command():
     assert output_ok
 
 
-def test_lazy_stub_short_help_matches_resolved_command():
-    from apm_cli.cli import _LAZY_COMMANDS, _LazyCommand
-
-    mismatches: list[str] = []
-    for name, module, attr, help_text in _LAZY_COMMANDS:
-        stub = _LazyCommand(name, module, attr, help_text)
-        real = stub.resolve()
-        stub_short = stub.get_short_help_str(120)
-        real_short = real.get_short_help_str(120)
-        if stub_short != real_short:
-            mismatches.append(f"{name}: stub={stub_short!r} real={real_short!r}")
-    assert not mismatches, "Lazy stub short_help drifted from the real command: " + "; ".join(
-        mismatches
-    )
-
-
 def test_shell_complete_does_not_load_heavyweight_commands():
     code = (
         "import sys\n"

@@ -4,7 +4,7 @@ Spins up a loopback HTTPS server whose leaf certificate is signed by a
 freshly generated private CA (never present in any trust store), then
 exercises the real ``requests`` -> ``urllib3`` -> ``ssl`` stack that APM uses
 for the Contents API. This is the end-to-end counterpart to the unit tests in
-``tests/integration/test_tls_trust.py`` and covers the additive behaviour from
+``tests/unit/core/test_tls_trust.py`` and covers the additive behaviour from
 #2034 as well as the original #2004 trust-store contract:
 
 - an untrusted custom CA is genuinely rejected (verification is on),
