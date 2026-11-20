@@ -3238,8 +3238,9 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         ),
         (
             "src/apm_cli/commands/uninstall/engine.py",
+            "                fail_on_write_error=True,\n"
             "                stored_configs=lockfile.mcp_configs,\n",
-            "",
+            "                fail_on_write_error=True,\n",
         ),
         (
             "src/apm_cli/core/conflict_detector.py",
