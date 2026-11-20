@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -13,6 +17,7 @@ from apm_cli.install import orphans
 from apm_cli.install.package_selection import previous_selected_subtree_keys
 from apm_cli.install.phases import cleanup
 from apm_cli.install.phases.lockfile import LockfileBuilder
+from apm_cli.install.presentation import dry_run
 from apm_cli.models.dependency.reference import DependencyReference
 
 pytestmark = pytest.mark.component
@@ -195,16 +200,91 @@ def test_pinned_nested_package_survives_parent_module_removal(tmp_path):
     _materialize(tmp_path, "acme/repo", "acme/repo/skills/child")
     ctx = _module_ctx(tmp_path, lock)
     decision = _targeted_decision(tmp_path, lock, retained=[child.get_unique_key()])
-    # Parent and child share a lock parent identity, so which row the pin
-    # walk reaches is hash-seed dependent (pre-existing; follow-up of #4011).
-    # Either way the decision partitions exactly the dropped pair.
-    assert decision.retained_keys in (
-        {child.get_unique_key()},
-        {parent.get_unique_key(), child.get_unique_key()},
-    )
-    assert decision.removed_keys == {parent.get_unique_key()} - decision.retained_keys
+    # Parent and child share a lock parent identity; both stay pinned (#4060).
+    assert decision.retained_keys == {parent.get_unique_key(), child.get_unique_key()}
+    assert decision.removed_keys == frozenset()
+    assert dry_run._preview_orphan_files(
+        lock, SimpleNamespace(only_packages=("acme/top",)), MagicMock()
+    ) == {path for files in decision.removed_files.values() for path in files}
     cleanup._remove_dropped_package_dirs(ctx, decision)
     assert (tmp_path / "acme/repo/skills/child").is_dir()
+    assert (tmp_path / "acme/repo").is_dir()
+
+
+_SEEDED_DECISIONS = """
+import json, sys
+from pathlib import Path
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install import orphans
+
+def decide(entries, retained):
+    lock = LockFile()
+    for entry in entries:
+        lock.dependencies[entry.get_unique_key()] = entry
+    decision = orphans.decide_orphan_removal(
+        operation=orphans.OrphanOperation.TARGETED_INSTALL,
+        roots=("acme/top",),
+        candidate_universe=lock,
+        installed_paths=orphans.InstalledPaths(root=Path(sys.argv[1]), packages=None),
+        resolved_keys=frozenset(),
+        intended=None,
+        materialized=[],
+        reachability=None,
+        deployment_claims=orphans.DeploymentClaims(
+            live_files=frozenset(), retained={key: {} for key in retained}
+        ),
+    )
+    return [sorted(decision.retained_keys), sorted(decision.removed_keys)]
+
+top = {"depth": 2, "resolved_by": "acme/top"}
+print(json.dumps({
+    "shared-identity": decide(
+        [
+            LockedDependency(repo_url="acme/repo", **top),
+            LockedDependency(repo_url="acme/repo", virtual_path="skills/child",
+                             is_virtual=True, depth=3, resolved_by="acme/repo"),
+        ],
+        ["acme/repo/skills/child"],
+    ),
+    "distinct-identities": decide(
+        [
+            LockedDependency(repo_url="acme/a", **top),
+            LockedDependency(repo_url="acme/b", depth=3, resolved_by="acme/a"),
+            LockedDependency(repo_url="acme/c", **top),
+        ],
+        ["acme/b"],
+    ),
+    "no-dropped-ancestor": decide(
+        [LockedDependency(repo_url="acme/x", **top), LockedDependency(repo_url="acme/y", **top)],
+        ["acme/x"],
+    ),
+}, sort_keys=True))
+"""
+
+
+def test_shared_identity_retention_is_independent_of_hash_seed(tmp_path):
+    """The pin walk keeps the same partition under every PYTHONHASHSEED (#4060)."""
+    results = {}
+    for seed in range(12):
+        env = {**os.environ, "PYTHONHASHSEED": str(seed)}
+        completed = subprocess.run(
+            [sys.executable, "-c", _SEEDED_DECISIONS, str(tmp_path)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+            check=True,
+        )
+        results[seed] = json.loads(completed.stdout)
+
+    assert results == {
+        seed: {
+            "distinct-identities": [["acme/a", "acme/b"], ["acme/c"]],
+            "no-dropped-ancestor": [["acme/x"], ["acme/y"]],
+            "shared-identity": [["acme/repo", "acme/repo/skills/child"], []],
+        }
+        for seed in range(12)
+    }
 
 
 def test_unresolved_marketplace_declaration_does_not_block_module_removal(tmp_path):
