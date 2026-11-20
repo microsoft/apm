@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -382,6 +383,55 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
         assert _kept_lines(out + err) == [_unproven_line(_C3_EDITED)]
         assert world._git("status", "--porcelain", "--", _C3_EDITED) == git_status
         _assert_kept_partial_apply(world, out + err, kept_entry_before, edited_bytes)
+
+
+def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A lock whose two hash copies disagree is normalized to the ledger's record (RA-009).
+
+    Forging only ``deployed_file_hashes`` (not the deployment ledger row) leaves
+    the lock inconsistent. The ledger owns deployment evidence, so the install
+    projects its unchanged row into ``deployed_file_hashes``, keeps the edited
+    file, and both read-only verifiers then report the edit.
+    """
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    world = _stamped_world(tmp_path, apm_binary_path, "v0.36.1")
+    target = world.project / _C3_EDITED
+    recorded = compute_file_hash(target)
+    target.write_bytes(target.read_bytes() + _USER_EDIT.encode("ascii"))
+    edited_bytes = target.read_bytes()
+    lock_path = world.project / "apm.lock.yaml"
+    lock_text = lock_path.read_text(encoding="utf-8")
+    pattern = f"{_C3_EDITED}: {recorded}"
+    assert lock_text.count(pattern) == 1, "expected one deployed_file_hashes line"
+    lock_path.write_text(
+        lock_text.replace(pattern, f"{_C3_EDITED}: {compute_file_hash(target)}"), "utf-8"
+    )
+    _hash_before, rows_before = _kept_entry(world, _C3_EDITED)
+    assert rows_before == [recorded], rows_before
+
+    code, out, err = world.run("install")
+
+    assert code == 1, f"{out}\n{err}"
+    assert target.read_bytes() == edited_bytes
+    # The kept file's lock entry keeps APM's evidence: the unchanged ledger hash.
+    assert _kept_entry(world, _C3_EDITED) == (recorded, [recorded])
+    assert _kept_lines(err) == [_unproven_line(_C3_EDITED)]
+    assert _kept_lines(out) == []
+    flat = " ".join((out + err).split())
+    wrote = re.search(r"\[i\] This install wrote (\d+) file\(s\)", flat)
+    recorded_part = f"records the {wrote.group(1)} written file(s) and " if wrote else ""
+    sentence = f"apm.lock.yaml {recorded_part}keeps the previous entries of the 1 kept file(s)."
+    assert sentence in flat, flat
+    audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
+    assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
+    assert target.read_bytes() == edited_bytes
+    # Move-aside remedy: the next install restores the render and converges.
+    target.rename(world.project.parent / "kept-aside")
+    world.ok("install")
+    _assert_lock_matches_disk(world)
 
 
 def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_path: Path) -> None:
