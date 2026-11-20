@@ -223,6 +223,31 @@ def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install
     assert world.lockfile_bytes() != lock
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="#4282: a killed audit-gated install leaves its deploy snapshot under APM_HOME",
+)
+def test_the_next_install_reaps_a_killed_installs_deploy_snapshot(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = build_world(tmp_path, apm_binary_path)
+    enabled = world.apm("experimental", "enable", "external_scanners")
+    assert enabled.returncode == 0, evidence(enabled)
+    delta = world.write_package("delta")
+    with expect_output_violation("I8", reason="the process is killed at its commit point"):
+        killed = world.runner.run(
+            ("install", "--no-policy", "--audit", "block", delta),
+            cwd=world.project,
+            env=dict(world.env, APM_TEST_LOCK_COMMIT="kill"),
+        )
+    assert killed.returncode == 137, evidence(killed)
+    snapshots = world.isolated.config_root / "install-snapshots"
+    assert any(snapshots.glob("deploy-*")), "the killed install left no snapshot to reap"
+
+    world.assert_converges()
+    assert not any(snapshots.glob("deploy-*")), sorted(snapshots.iterdir())
+
+
 def _mcp_collision_world(tmp_path: Path, apm_binary_path: Path) -> tuple[FaultWorld, Path]:
     world = build_world(
         tmp_path,
