@@ -1170,6 +1170,63 @@ def _declared(path: str, step: dict) -> bool:
 # -- tests -------------------------------------------------------------------
 
 
+# Index oracles the runner never credits: O10 runs only in the live node, O11 has no
+# hermetic implementation yet.
+_NEVER_CREDITED = frozenset({"O10", "O11"})
+_ALWAYS_RECORDED = frozenset({"O1", "O3", "O4", "O5", "O6", "O7", "O9", "O12"})
+_NODE = "tests/lifecycle/journeys/test_journeys.py::test_journey[{}]"
+
+
+def _credited(step: dict, law: str) -> bool:
+    """Whether a green run credits *law* on *step* (mirrors ``_step_oracles`` and ``_credits``)."""
+    if law in _NEVER_CREDITED or not step.get("run"):
+        return False
+    docs = step.get("docs") or {}
+    if law in ORACLE_LAWS or law in _ALWAYS_RECORDED:
+        return True
+    if law == "O2":
+        return any(str(line).strip() != "..." for line in docs.get("output") or ())
+    if law == "O8":
+        return any(
+            line.split()[0] == "apm" and code != 0
+            for line, code in zip(step["run"], _exits(step), strict=True)
+        )
+    if law == "O13":
+        return bool(docs.get("commands"))
+    return False
+
+
+def journey_witnesses() -> tuple[dict[str, str], dict[str, str]]:
+    """``(required, known_failing)`` journey obligation ids, decided statically.
+
+    required: ``J|<J>|<n>|<O>`` ids a green run of ``test_journey[<J>]`` credits,
+    mapped to that node. known_failing: ids owned by a strict known cell of the
+    same law with a public issue (``#<n>``, n > 0), mapped to the issue. Cells
+    tracked as ``#0`` and oracles the runner cannot credit stay in the baseline.
+    """
+    index = {j["id"]: j for j in load_index()["journeys"]}
+    required: dict[str, str] = {}
+    known: dict[str, str] = {}
+    for path in journey_files():
+        journey = load_journey(path)
+        jid = journey["id"]
+        cells = journey.get("known_cells") or ()
+        for step, spec in zip(journey["steps"], index[jid]["steps"], strict=True):
+            n = step["n"]
+            cell_laws = {c["law"] for c in cells if c["step"] == n}
+            for law in spec["oracles"]:
+                key = f"J|{jid}|{n}|{law}"
+                owners = [c for c in cells if c["step"] == n and c["law"] == law]
+                public = [
+                    c["tracking"] for c in owners if re.fullmatch(r"#[1-9]\d*", c["tracking"])
+                ]
+                if public:
+                    known[key] = public[0]
+                elif law not in cell_laws and _credited(step, law):
+                    required[key] = _NODE.format(jid)
+    return dict(sorted(required.items())), dict(sorted(known.items()))
+
+
 def _params() -> list:
     golden = {j["id"] for j in load_index()["journeys"] if j.get("golden")}
     params = []
