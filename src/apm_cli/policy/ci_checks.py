@@ -1300,7 +1300,7 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     Returns :class:`CIAuditResult` with individual check results.
     """
-    from ..deps.lockfile import get_lockfile_path
+    from ..deps.lockfile import LockFile, get_lockfile_path
     from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()

@@ -246,29 +246,19 @@ class UnsupportedLockfileVersionError(LockfileFormatError):
     def __init__(self, message: str, *, version: str = "", remediations: tuple = ()) -> None:
         super().__init__(message)
         self.version = version
-        # The structured remedies (core.remediation) the message names, when known.
         self.remediations = remediations
 
+    def for_path(self, path: Path) -> UnsupportedLockfileVersionError:
+        """Name both remedies for *path*: regenerate it, or upgrade APM (#4233, req-lk-004)."""
+        from ..core import remediation
+        from ..core.scope import is_user_scope_root
 
-def _unsupported_version_with_remedy(
-    exc: UnsupportedLockfileVersionError, path: Path
-) -> UnsupportedLockfileVersionError:
-    """Name both remedies for *path*: regenerate it, or upgrade APM (#4233, req-lk-004)."""
-    from ..core.remediation import (
-        LOCKFILE_VERSION_UNSUPPORTED,
-        LOCKFILE_VERSION_UPGRADE_APM,
-        either_sentence,
-    )
-    from ..core.scope import is_user_scope_root
-
-    regenerate = LOCKFILE_VERSION_UNSUPPORTED.bind(path=path.name)
-    if is_user_scope_root(path.parent):
-        regenerate = regenerate.with_command("apm lock -g")
-    upgrade = LOCKFILE_VERSION_UPGRADE_APM.bind(version=repr(exc.version))
-    remedy = either_sentence(regenerate, upgrade)
-    return UnsupportedLockfileVersionError(
-        f"{exc}. {remedy}", version=exc.version, remediations=(regenerate, upgrade)
-    )
+        regen = remediation.LOCKFILE_VERSION_UNSUPPORTED.bind(path=path.name)
+        if is_user_scope_root(path.parent):
+            regen = regen.with_command("apm lock -g")
+        upgrade = remediation.LOCKFILE_VERSION_UPGRADE_APM.bind(version=repr(self.version))
+        remedy = remediation.either_sentence(regen, upgrade)
+        return type(self)(f"{self}. {remedy}", version=self.version, remediations=(regen, upgrade))
 
 
 class LockfileConflictError(LockfileFormatError):
@@ -1809,7 +1799,7 @@ class LockFile:
                     )
                 except UnsupportedLockfileVersionError as exc:
                     if legacy_timestamp_present:
-                        raise _unsupported_version_with_remedy(exc, path) from exc
+                        raise exc.for_path(path) from exc
                     existing = None
                 except LockfileFormatError:
                     existing = None
@@ -1855,7 +1845,7 @@ class LockFile:
                 raise LockfileConflictError(path)
             lock = cls.from_yaml(text)
         except UnsupportedLockfileVersionError as exc:
-            raise _unsupported_version_with_remedy(exc, path) from exc
+            raise exc.for_path(path) from exc
         except LockfileFormatError:
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:

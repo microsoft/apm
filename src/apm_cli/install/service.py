@@ -435,11 +435,8 @@ class InstallService:
         for unscoped API callers) and checks package dependencies and the canonical
         current MCP config view. Any miss raises before install mutation.
         """
-        from apm_cli.deps.lockfile import (
-            LockFile,
-            LockfileConflictError,
-            UnsupportedLockfileVersionError,
-        )
+        from apm_cli.deps import lockfile as lockfile_module
+        from apm_cli.deps.lockfile import LockFile, LockfileConflictError
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import (
             lockfile_satisfies_manifest,
@@ -463,8 +460,7 @@ class InstallService:
                 f"--frozen cannot read the lockfile. {e}\nFor CI, commit the resolved lockfile.",
                 tip="",
             ) from e
-        except UnsupportedLockfileVersionError as e:
-            # The error names both remedies: regenerate the lock, or upgrade APM (#4233).
+        except lockfile_module.UnsupportedLockfileVersionError as e:
             raise FrozenInstallError(f"--frozen could not read apm.lock.yaml: {e}", tip="") from e
         except Exception as e:
             raise FrozenInstallError(
