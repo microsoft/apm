@@ -176,6 +176,7 @@ def _reconcile_mcp_entry(
     which installs only ``command.mcp_entry`` and records it in the lockfile.
     """
     from ...models.apm_package import APMPackage
+    from ..service import InstallService
     from ..service_integration import run_service_integrations
 
     # Migrate before creating apm.lock.yaml so legacy state is not shadowed.
@@ -198,6 +199,7 @@ def _reconcile_mcp_entry(
         diagnostics=None,
         explicit_target=explicit_target,
         target_decision=target_decision,
+        frozen_disposition=InstallService.frozen_disposition(command),
     )
 
 
