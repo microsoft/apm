@@ -69,8 +69,11 @@ def _receipt_key(root: str, scope: str) -> str:
     return hashlib.sha256(f"{Path(root)}|{scope}".encode()).hexdigest()
 
 
-def collect_orphaned_receipts(limit: int = _RECEIPT_COLLECTION_LIMIT) -> int:
+def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) -> int:
     """Best effort: delete receipts whose recorded project root is gone (#4176).
+
+    Receipts are not packages: this never selects package removals, which
+    stay with install/orphans.py.
 
     A receipt goes only when its file name is the key of the root and scope it
     records, that root is absolute and no longer exists, and the root's parent
