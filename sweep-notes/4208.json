@@ -1,0 +1,17 @@
+{
+  "changelog": "`apm update` lists a moved SHA pin once (under Revision pin updates) and its Total line counts only changed dependencies. (#4217)",
+  "ledger_row": {
+    "issue": 4208,
+    "fixed_in": "Unreleased",
+    "summary": "apm update listed a moved SHA-pinned package under both Revision pin updates and Update plan, and the Total line counted unchanged dependencies as changes.",
+    "failure_modes": ["observation", "outcome"],
+    "properties": ["outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_revision_pin_update_lifecycle.py::test_update_plan_lists_each_package_once_with_exact_count"
+    ]
+  },
+  "red": "APM_E2E_TESTS=1 APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_revision_pin_update_lifecycle.py -k each_package_once -n 0 -p no:cacheprovider -q -> 2 failed at `assert sorted(rows) == sorted(expected_rows), dry_run.stdout` ([~] apm-fixture-org/released listed twice; `[i] Total: 1 revision pin rewrite + 3 dependency changes.`)",
+  "green": "same command -> 2 passed; module tests/integration/test_revision_pin_update_lifecycle.py -> 6 passed; tests/unit/commands/test_update_command.py tests/unit/install/test_plan.py + update/plan/pin coverage modules -> 320 passed (1 unrelated pre-existing failure tests/unit/deps/test_shared_clone_cache.py::TestMaterializeFromBare::test_materialize_pins_autocrlf_false also fails on origin/main in this environment)",
+  "owner": "src/apm_cli/install/plan.py (UpdatePlan.excluding) used by src/apm_cli/commands/update.py plan callback for rendering and the Total line",
+  "notes": "The final 'Updated N APM dependencies and M revision pins' success line is unchanged (it reports changed dependencies plus pin rewrites, which is accurate). Journey known cells J07 s2/s3 O4 update-plan-lists-pinned-package-twice(-apply) should flip. Test scenario helper _new_scenario gained an opt-in branch-tracked dependency."
+}
