@@ -44,6 +44,11 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
+    pytest.mark.promise(
+        "P-OWN-cached-policy-shape",
+        "P-LAW-outcome.status_matches_state",
+        "P-LAW-transaction.failed_command_preserves_state",
+    ),
 ]
 
 _POLICY = {"name": "contoso-policy", "version": "1.0.0", "enforcement": "block"}
