@@ -28,8 +28,8 @@ from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import serialized_lifecycle
 
 from ..core.command_logger import CommandLogger
-from ..policy import outcome_routing as policy_outcomes
-from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+from ..install.errors import PolicyViolationError
+from ..policy.outcome_routing import resolve_trust_policy
 from ..policy.schema import ApmPolicy
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 
@@ -37,16 +37,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..security.executables import ExecutableDeclaration
-
-_POLICY_RESOLUTION_WARNING = (
-    "Org policy could not be resolved; approval is proceeding without org "
-    "restrictions. Run 'apm policy status --no-cache' to diagnose."
-)
-_POLICY_HASH_MISMATCH_WARNING = (
-    "Policy hash verification failed; this may indicate policy tampering. "
-    "Approval is proceeding without org restrictions. "
-    "Run 'apm policy status --no-cache' to verify the policy source."
-)
 
 
 def _find_manifest(user_scope: bool = False) -> Path:
@@ -107,27 +97,27 @@ def _store_label(user_scope: bool) -> str:
 
 
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
-    """Best-effort load of the merged org policy. Returns a default on failure."""
-    warning: str | None = None
-    try:
-        from ..policy.discovery import discover_policy_with_chain
+    """Return the merged org policy, routed as every other policy reader routes it.
 
-        result = discover_policy_with_chain(project_root)
-        if getattr(result, "policy", None) is not None:
-            return result.policy
-        if result.outcome == policy_outcomes.POLICY_HASH_MISMATCH_OUTCOME:
-            warning = _POLICY_HASH_MISMATCH_WARNING
-        elif result.outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
-            warning = _POLICY_RESOLUTION_WARNING
-    except Exception:
-        warning = _POLICY_RESOLUTION_WARNING
-    if warning is not None and logger is not None:
-        logger.warning(warning)
-    return ApmPolicy()
+    A blocking outcome raises :class:`PolicyViolationError`; an outcome that
+    leaves no usable policy is reported and yields an empty policy.
+    """
+    policy = resolve_trust_policy(project_root, logger=logger)
+    return policy if policy is not None else ApmPolicy()
+
+
+def _report_policy_block(exc: PolicyViolationError) -> None:
+    """Announce a blocking policy outcome; nothing was written."""
+    _rich_error(str(exc))
+    _rich_info(
+        "Nothing was written. Run 'apm policy status --no-cache' to diagnose "
+        "the org policy source, fix it, then re-run the command.",
+        symbol="info",
+    )
 
 
 def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
-    """Public wrapper for best-effort merged org policy loading."""
+    """Public wrapper for routed merged org policy loading."""
     return _load_org_policy(project_root, logger=logger)
 
 
@@ -207,6 +197,9 @@ def approve_cmd(
             sys.exit(1)
 
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
+    except PolicyViolationError as exc:
+        _report_policy_block(exc)
+        sys.exit(1)
     finally:
         logger.render_summary()
 
@@ -958,6 +951,8 @@ def _is_native_plugin(
     Claude plugin under the user-scope native route (#3290)."""
     if package_type == "agent_plugin":
         return True
+    if package_type is None and _is_agent_plugin(package_dir):
+        return True
     if (package_dir / ".codex-plugin" / "plugin.json").is_file():
         return True
     return (
@@ -965,6 +960,21 @@ def _is_native_plugin(
         and package_type in (None, "marketplace_plugin")
         and (package_dir / ".claude-plugin" / "plugin.json").is_file()
     )
+
+
+def _is_agent_plugin(package_dir: Path) -> bool:
+    """Whether the canonical loader reads *package_dir* as an Agent Plugin.
+
+    Without a lockfile there is no recorded ``package_type`` to consult.
+    """
+    from ..agent_plugins.errors import AgentPluginError
+    from ..agent_plugins.loader import detect_agent_plugin
+
+    try:
+        detection = detect_agent_plugin(package_dir)
+    except (AgentPluginError, OSError):
+        return False
+    return detection is not None and detection.plugin is not None
 
 
 def scan_installed_executable_packages(manifest: Path) -> list:
@@ -975,7 +985,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
         locked_dependency_approval,
         scan_package_executables,
     )
-    from ..security.trust import installed_content_matches_lock
+    from ..security.trust import installed_content_matches_lock, native_declaration
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
@@ -1037,6 +1047,9 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 parent_name=locked.resolved_by if locked.depth > 1 else None,
                 original_identity=approval.original_identity,
             )
+            native = _is_native_plugin(locked.package_type, package_dir, user_scope=user_scope)
+            if native:
+                declaration = native_declaration(declaration, package_dir)
             if declaration.has_executables:
                 results.append(
                     replace(
@@ -1044,9 +1057,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         install_path=str(package_dir),
                         depth=locked.depth,
                         content_verified=installed_content_matches_lock(locked, package_dir),
-                        native_plugin=_is_native_plugin(
-                            locked.package_type, package_dir, user_scope=user_scope
-                        ),
+                        native_plugin=native,
                     )
                 )
         return results
@@ -1082,12 +1093,15 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 version,
                 manifest_data=manifest_data,
             )
+            native = _is_native_plugin(None, pkg_dir, user_scope=user_scope)
+            if native:
+                decl = native_declaration(decl, pkg_dir)
             if decl.has_executables:
                 results.append(
                     replace(
                         decl,
                         install_path=str(pkg_dir),
-                        native_plugin=_is_native_plugin(None, pkg_dir, user_scope=user_scope),
+                        native_plugin=native,
                     )
                 )
 

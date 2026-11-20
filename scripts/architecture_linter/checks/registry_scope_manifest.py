@@ -70,6 +70,7 @@ _POLICY_READERS = frozenset(
         "discover_policy_with_chain",
         "discover_policy",
         "discover_trust_policy",
+        "classify_project_policy",
         "resolve_trust_policy",
         "read_project_fetch_failure_default",
         "read_project_policy_hash_pin",
@@ -105,7 +106,7 @@ _SCOPE_ROOT_CONSUMERS: dict[str, tuple[str, ...]] = {
     "src/apm_cli/install/local_bundle_handler.py": (
         "project_root=manifest_root(source_root, user_scope=global_),",
     ),
-    "src/apm_cli/security/trust.py": ("result = discover_policy_with_chain(policy_root)",),
+    "src/apm_cli/security/trust.py": ("route = classify_project_policy(policy_root)",),
     "src/apm_cli/commands/policy.py": (
         "project_root = manifest_root(Path.cwd(), user_scope=global_)",
     ),

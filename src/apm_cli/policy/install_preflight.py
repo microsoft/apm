@@ -131,7 +131,7 @@ def run_policy_preflight(
     if fetch_result is None:
         fetch_result = discover_policy_with_chain(project_root)
 
-    # -- Route the outcome through the shared 9-outcome table ---------
+    # -- Route the outcome through the policy-outcome routing owner ---
     # Logging + fail-closed gating live in ``policy/outcome_routing.py``
     # so this preflight and the install-pipeline gate stay aligned.
     from .project_config import read_project_fetch_failure_default

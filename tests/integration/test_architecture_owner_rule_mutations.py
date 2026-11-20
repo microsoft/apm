@@ -1036,6 +1036,13 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "        fetch_result = discover_trust_policy(root)\n",
             "        fetch_result = discover_policy_with_chain(root)\n",
         ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/commands/audit.py",
+            "        return resolve_trust_policy(cfg.project_root, announce=False, "
+            "fetch_result=fetch_policy())\n",
+            '        return getattr(fetch_policy(), "policy", None)\n',
+        ),
     ],
 )
 def test_trust_and_integrity_owners_reject_bypasses(
@@ -1491,6 +1498,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="authorizes_implementation: false",
         new="authorizes_implementation: true",
         intent="Advisory evidence starts claiming implementation authority.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-lifecycle-policy-errors",
+        rule_id="contracts-tooling-lifecycle-policy-errors",
+        path="src/apm_cli/core/lifecycle_scripts.py",
+        old=(
+            '        _logger.debug("Lifecycle org-policy check failed", exc_info=True)\n'
+            '        suppressed_reason = "org policy could not be enforced"\n'
+        ),
+        new='        _logger.debug("Lifecycle org-policy check failed", exc_info=True)\n',
+        intent="An org-policy read error lets lifecycle scripts fire with the org ceiling unread.",
     ),
     MutationCase(
         guard_id="contracts-tooling-lifecycle-script-gate",
@@ -2067,12 +2085,28 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A command reads APM_POLICY_DISABLE directly instead of the single helper.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-field-types",
+        rule_id="install-deployment-policy-field-types",
+        path="src/apm_cli/policy/parser.py",
+        old="        if not isinstance(value, str) or value not in valid:\n",
+        new="        if value not in valid:\n",
+        intent="A list-valued enum field reaches the membership test and crashes the parser.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-mcp-transport-projection",
         rule_id="install-deployment-policy-mcp-transport-projection",
         path="src/apm_cli/policy/policy_checks.py",
         old="_check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp)",
         new="_check_mcp_transport({m.name: frozenset({m.transport}) for m in mcp_list}, policy.mcp)",
         intent="Policy check 9 reads the raw declared transport instead of the effective one.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-policy-outcome-routing",
+        rule_id="install-deployment-policy-outcome-routing",
+        path="src/apm_cli/commands/audit.py",
+        old="    elif route.blocks:\n",
+        new='    elif route.blocks or fetch_result.outcome in ("malformed", "empty"):\n',
+        intent="audit --ci classifies policy outcomes with its own list beside the routing owner.",
     ),
     MutationCase(
         guard_id="install-deployment-policy-remote-origin-owner",
@@ -2770,6 +2804,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
     ),
     MutationCase(
+        guard_id="transport-platform-credential-value-rendering",
+        rule_id="transport-platform-credential-value-rendering",
+        path="src/apm_cli/commands/config.py",
+        old='                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n',
+        new=(
+            '                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n'
+            '                click.echo(body["token"])\n'
+        ),
+        intent="apm config echoes a stored registry token outside the owner's mask.",
+    ),
+    MutationCase(
         guard_id="transport-platform-egress-route-policy",
         rule_id="transport-platform-egress-route-policy",
         path="src/apm_cli/install/pipeline.py",
@@ -3344,6 +3389,36 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="CredentialScopedSession(ambient_credentials=False)",
         new="CredentialScopedSession()",
         intent="The MCP registry client lets requests attach ambient netrc credentials.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/commands/approve.py",
+        old="                declaration = native_declaration(declaration, package_dir)\n",
+        new="                pass\n",
+        intent="apm approve no longer sees a native plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/install/exec_gate.py",
+        old=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            "    )\n    if ctx is not None:"
+        ),
+        new=(
+            '        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),\n'
+            '        extra_types=("mcp",),\n    )\n    if ctx is not None:'
+        ),
+        intent="Install adds native plugin types the approve views cannot see (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-item-admission",
+        rule_id="install-deployment-executable-item-admission",
+        path="src/apm_cli/security/trust.py",
+        old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
+        new="",
+        intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
     ),
 )
 

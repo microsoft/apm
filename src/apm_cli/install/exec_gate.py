@@ -163,7 +163,7 @@ def _native_approval(
         closed_exec_map,
         scan_package_executables,
     )
-    from apm_cli.security.trust import REASON_DENIED, admit_native_plugin
+    from apm_cli.security.trust import REASON_DENIED, admit_native_plugin, native_declaration
 
     install = Path(package_info.install_path)
     verdict = admit_native_plugin(
@@ -171,14 +171,18 @@ def _native_approval(
         candidate_keys,
         install,
         transitive=_is_transitive(package_info, ctx),
-        extra_types=native_declared_types(package_info),
         one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),
     )
     if ctx is not None:
         if not verdict.allowed:
             ctx.blocked_executables.append(
                 replace(
-                    scan_package_executables(install, package_name, "", approval_identity=pkg_key),
+                    native_declaration(
+                        scan_package_executables(
+                            install, package_name, "", approval_identity=pkg_key
+                        ),
+                        install,
+                    ),
                     install_path=str(install),
                 )
             )
@@ -202,20 +206,6 @@ def _is_transitive(package_info: Any, ctx: InstallContext | None) -> bool:
         return False
     depth = getattr(tree.get_node(dep_ref.get_unique_key()), "depth", 1)
     return isinstance(depth, int) and depth > 1
-
-
-def native_declared_types(package_info: Any) -> tuple[str, ...]:
-    """Exec types a native plugin's IR or manifest declares beyond its files."""
-    from apm_cli.install.native_plugin_admission import agent_plugin_exec_types
-    from apm_cli.security.executables import EXEC_TYPE_HOOKS, EXEC_TYPE_MCP
-
-    types = list(agent_plugin_exec_types(package_info))
-    manifest = getattr(getattr(package_info, "package", None), "codex_plugin", None)
-    if getattr(manifest, "has_mcp", False):
-        types.append(EXEC_TYPE_MCP)
-    if getattr(manifest, "has_hooks", False):
-        types.append(EXEC_TYPE_HOOKS)
-    return tuple(dict.fromkeys(types))
 
 
 def native_install(package_info: Any) -> bool:
@@ -292,7 +282,6 @@ def native_plugin_verdict(
         keys,
         Path(package_info.install_path),
         transitive=_is_transitive(package_info, ctx),
-        extra_types=native_declared_types(package_info),
         one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),
     )
 
@@ -348,7 +337,7 @@ def current_exec_decision(
     install = Path(package_info.install_path)
     native = native_install(package_info)
     if native:
-        exec_types = native_plugin_exec_types(install, native_declared_types(package_info))
+        exec_types = native_plugin_exec_types(install)
     else:
         exec_types = scan_package_executables(
             install, package_name, "", approval_identity=pkg_key
@@ -532,12 +521,32 @@ def bin_deploy_denial(package_info: Any, policy: Any) -> str | None:
     return "bin_deploy.deny" if package_key in denied else None
 
 
+def executable_skip_reason(
+    ctx: InstallContext | None, package_name: str, label: str, exec_type: str, kind: str
+) -> str:
+    """Return why *kind* of *package_name* was skipped, with the next step.
+
+    The gate records hard-denied types in ``ctx.package_denied_exec_types``;
+    a denied type points to ``apm policy explain`` because approving cannot
+    lift a deny. Any other skip is approvable.
+    """
+    denied = getattr(ctx, "package_denied_exec_types", None) or {}
+    if exec_type in denied.get(package_name, frozenset()):
+        return (
+            f"{kind} skipped (denied). Run 'apm policy explain {label}' to see which deny applies."
+        )
+    return (
+        f"{kind} skipped (not approved in executables.allow). Run 'apm approve {label}' to approve."
+    )
+
+
 def log_bin_status(
     skill_result: Any,
     suffix: str,
     package_name: str,
     package_info: Any,
     log_fn,
+    ctx: InstallContext | None = None,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
     from apm_cli.utils.diagnostics import printable_ascii_text
@@ -558,10 +567,12 @@ def log_bin_status(
             "  |-- plugin ships executables; no active Claude Code skills target to receive them"
         )
     elif skill_result.bin_skipped_reason == "not_approved":
-        log_fn(
-            f"  |-- bin/ executables skipped (not approved in executables.allow). "
-            f"Run 'apm approve {package_label}' to approve."
+        from apm_cli.security.executables import EXEC_TYPE_BIN
+
+        reason = executable_skip_reason(
+            ctx, package_name, package_label, EXEC_TYPE_BIN, "bin/ executables"
         )
+        log_fn(f"  |-- {reason}")
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
             "  |-- bin/ executables skipped (not trusted). "
@@ -595,18 +606,8 @@ def log_hooks_skip(
     from apm_cli.security.executables import EXEC_TYPE_HOOKS
 
     label = package_name or getattr(package_info, "name", "unknown")
-    denied = getattr(ctx, "package_denied_exec_types", None) or {}
-    if EXEC_TYPE_HOOKS in denied.get(package_name, frozenset()):
-        message = (
-            f"{label}: hooks skipped (denied). "
-            f"Run 'apm policy explain {label}' to see which deny applies."
-        )
-    else:
-        message = (
-            f"{label}: hooks skipped (not approved in executables.allow). "
-            f"Run 'apm approve {label}' to approve."
-        )
-    logger.warning(message, symbol="warning")
+    reason = executable_skip_reason(ctx, package_name, label, EXEC_TYPE_HOOKS, "hooks")
+    logger.warning(f"{label}: {reason}", symbol="warning")
 
 
 class ReplayExecAllowMap:

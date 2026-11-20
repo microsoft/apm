@@ -65,7 +65,7 @@ The table and JSON renderers expose the same fields:
 | Field | Meaning |
 |---|---|
 | `scope` | `project`, or `user` with `-g`. |
-| `outcome` | Discovery result: `found`, `absent`, `disabled`, `no_git_remote`, `cache_miss_fetch_fail`, ... |
+| `outcome` | Discovery result, one of: `found`, `absent`, `empty`, `disabled`, `no_git_remote`, `cached_stale`, `cache_miss_fetch_fail`, `garbage_response`, `malformed`, `hash_mismatch`, `incomplete_chain`. Every command that reads policy handles an outcome the same way. |
 | `source` | Resolved source label (e.g. `org:owner/repo`, `url:https://...`, `file:./path`). |
 | `enforcement` | Effective enforcement mode: `block`, `warn`, or `off`. |
 | `cache_age_human` | Age of the cached policy entry, with stale / refresh-failure context. |
