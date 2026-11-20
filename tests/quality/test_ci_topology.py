@@ -2297,3 +2297,27 @@ def test_exactly_one_job_provisions_and_requires_codex() -> None:
     assert effective_env(workflow, job, run)["APM_REQUIRE_CODEX"] == "1"
     assert "tests/lifecycle" in run["run"].split()
     assert names.index("Install the pinned Codex CLI") < names.index("Run the full lifecycle suite")
+
+
+def test_every_quality_module_runs_in_some_workflow_job() -> None:
+    """A tests/quality module that no job collects is a contract CI never checks."""
+    workflows = REPO_ROOT / ".github" / "workflows"
+    targets: set[str] = set()
+    for path in sorted(workflows.glob("*.yml")):
+        if path.name.endswith(".lock.yml"):
+            continue
+        for job in (load_workflow(path).get("jobs") or {}).values():
+            if isinstance(job, dict):
+                targets.update(target.rstrip("/") for target in _pytest_targets(job))
+    from apm_cli.utils.paths import portable_relpath
+
+    modules = sorted(
+        portable_relpath(path, REPO_ROOT)
+        for path in (REPO_ROOT / "tests" / "quality").glob("test_*.py")
+    )
+    orphans = [
+        module
+        for module in modules
+        if not any(module == target or module.startswith(f"{target}/") for target in targets)
+    ]
+    assert orphans == [], f"no workflow job runs these modules: {orphans}"
