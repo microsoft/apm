@@ -34,6 +34,9 @@ from scripts.architecture_linter.checks.marketplace_dependency_confusion import 
 from scripts.architecture_linter.checks.marketplace_locked_evidence import (
     RULES as _LOCKED_EVIDENCE_RULES,
 )
+from scripts.architecture_linter.checks.marketplace_pack_credential_files import (
+    RULES as _PACK_CREDENTIAL_FILE_RULES,
+)
 from scripts.architecture_linter.checks.marketplace_pack_plugin_manifests import (
     RULES as _PACK_PLUGIN_MANIFEST_RULES,
 )
@@ -60,6 +63,7 @@ RULES = (
     + _CATALOG_FRESHNESS_RULES
     + _PACK_PLUGIN_MANIFEST_RULES
     + _DEPENDENCY_CONFUSION_RULES
+    + _PACK_CREDENTIAL_FILE_RULES
 )
 COLLECTORS = (
     _TAG_VERSION_COLLECTORS
