@@ -332,18 +332,18 @@ class TestApproveCmd:
         logger = MagicMock(spec=CommandLogger)
         with runner.isolated_filesystem():
             with patch("apm_cli.commands.approve.CommandLogger", return_value=logger):
-                result = runner.invoke(approve_cmd, [])
+                result = runner.invoke(approve_cmd, ["owner/repo"])
 
         assert result.exit_code == 1
         assert isinstance(result.exception, SystemExit)
         logger.render_summary.assert_called_once_with()
 
-    def test_no_args_shows_error(self) -> None:
+    def test_no_args_is_a_usage_error(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_manifest(".")
             result = runner.invoke(approve_cmd, [])
-            assert result.exit_code != 0
+            assert result.exit_code == 2
             assert "Specify at least one package" in result.output
 
     def test_pending_no_packages(self) -> None:

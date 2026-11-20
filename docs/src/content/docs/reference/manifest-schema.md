@@ -173,6 +173,8 @@ actionable nudge (the authoring path only).
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
+A vendor target id of the form `x-<vendor>-<name>` (for example `x-acme-foo`) parses ([req-tg-004](../../specs/openapm-v01/#req-tg-004)). APM registers no vendor handlers: your project `apm.yml` prints one warning naming each such id, and APM deploys only the other targets. `--target x-...` is refused with exit 2.
+
 :::caution[Deprecated: the singular `target:` key]
 `target:` is deprecated in favor of `targets:` (a YAML list) and will be removed in a future release.
 When your project `apm.yml` (or `~/.apm/apm.yml`) uses it, APM prints one warning per run
@@ -397,6 +399,8 @@ For full client semantics - auth, lockfile fields, and routing rules - see the [
 Any top-level key matching `x-[a-z][a-z0-9-]*` is a vendor extension. The CLI keeps these keys, in declaration order, on the parsed package. It does not validate or interpret the values. Normative contract: [req-ext-001](../../specs/openapm-v01/#req-ext-001) and [req-ext-003](../../specs/openapm-v01/#req-ext-003).
 
 When a dependency's `apm.yml` declares keys matching `x-[a-z][a-z0-9-]*`, `apm lock` records them on that dependency's entry in `apm.lock.yaml` under `extensions`. The field is omitted when the dependency declares none, so existing lockfiles stay unchanged.
+
+An `x-` key inside an object-form `dependencies.apm[]` entry is also kept and ignored; any other unknown key in such an entry fails the parse.
 
 Any other unknown top-level key is ignored. The CLI prints one warning that names each ignored key and does not fail because of that key. An install dry-run reports the source manifest's warning once, not again for its prospective dependency edit. Warning paths use forward slashes on Windows too. Rename the key to match `x-[a-z][a-z0-9-]*` to keep it, or remove it.
 

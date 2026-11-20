@@ -19,6 +19,7 @@ The deny-wins precedence is resolved by
 from __future__ import annotations
 
 import sys
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -105,8 +106,27 @@ def _store_label(user_scope: bool) -> str:
     return "apm.yml"
 
 
+_ORG_POLICY_PER_COMMAND: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
-    """Best-effort load of the merged org policy. Returns a default on failure."""
+    """Best-effort load of the merged org policy. Returns a default on failure.
+
+    One command resolves its policy once (#4178): the result is memoized per
+    command logger, so a miss is reported once however many trust readers ask.
+    """
+    root = Path(project_root).resolve()
+    if logger is not None:
+        cached = _ORG_POLICY_PER_COMMAND.get(logger)
+        if cached is not None and cached[0] == root:
+            return cached[1]
+    policy = _resolve_org_policy(root, logger)
+    if logger is not None:
+        _ORG_POLICY_PER_COMMAND[logger] = (root, policy)
+    return policy
+
+
+def _resolve_org_policy(project_root: Path, logger: CommandLogger | None) -> ApmPolicy:
     warning: str | None = None
     try:
         from ..policy.discovery import discover_policy_with_chain
@@ -177,6 +197,11 @@ def approve_cmd(
 
         apm approve --user owner/repo
     """
+    if not (packages or pending or approve_all or recommended or list_decisions):
+        # A missing package is a usage error (exit 2), like `apm deny` (#4262).
+        raise click.UsageError(
+            "Specify at least one package, or use --pending / --all / --recommended."
+        )
     logger = CommandLogger("approve")
     try:
         manifest = _find_manifest(user_scope)
@@ -198,12 +223,6 @@ def approve_cmd(
         if approve_all:
             _approve_all_pending(manifest, user_scope, allow, deny, logger=logger)
             return
-
-        if not packages:
-            logger.refusal(
-                "Specify at least one package, or use --pending / --all / --recommended."
-            )
-            sys.exit(1)
 
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
     finally:

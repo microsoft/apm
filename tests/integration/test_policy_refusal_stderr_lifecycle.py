@@ -1,7 +1,8 @@
 """Policy refusals and approve usage errors land on stderr (#3992).
 
 Under a blocking org policy, ``install``, ``install --frozen`` and ``update``
-refuse with exit 1, and a bare ``apm approve`` refuses with exit 1. A caller
+refuse with exit 1, and a bare ``apm approve`` is a usage error with exit 2
+(#4262), like ``apm deny`` with no package. A caller
 collecting errors with ``2>`` must receive the violation; stdout keeps only
 progress. Exit codes are unchanged.
 """
@@ -67,5 +68,7 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
             if args[0] == "update":
                 assert "--no-policy" not in result.stdout + result.stderr, step
 
-        usage = run_step(runner, ("approve",), cwd=project, env=env, step="5-approve", expected=1)
-        _assert_refusal_on_stderr(usage, "Specify at least one package")
+        usage = run_step(runner, ("approve",), cwd=project, env=env, step="5-approve", expected=2)
+        _assert_refusal_on_stderr(
+            usage, "Error: Specify at least one package", "Try 'apm approve --help'"
+        )

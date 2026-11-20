@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm approve` with no package and no selector is a usage error and exits 2, like `apm deny`. (#4284)
+- `apm update <pkg>` refuses a package `apm.yml` does not declare with exit 1, also when `apm.yml` declares no APM dependencies, and names `apm install <pkg>` as the next step. (#4284)
+- `apm install` prints the blocking org policy line once when the MCP phase re-checks the merged MCP set. (#4284)
+- `apm approve <pkg>` resolves the org policy once per command, so an unreachable policy is reported once. (#4284)
+- An install blocked by `policy.fetch_failure_default: block` no longer also says it proceeds without policy enforcement. (#4284)
+- `apm audit --ci --format json` (and `sarif`) prints one document when the install replay fails on a local dependency, reporting a failed `drift` check, and keeps exit 1. (#4284)
+- Vendor target ids (`x-<vendor>-<name>`) in `apm.yml` parse; APM names each one as having no registered handler and deploys only the other targets. `--target x-...` is refused with exit 2. (#4284)
+- An `x-` key inside an object-form `dependencies.apm[]` entry is ignored instead of failing the parse, and manifest rewrites keep it; other unknown keys are still refused. (#4284)
 - Registry archives get the same archive limits for every accepted format, and every entry is validated before anything is written. (closes #4235, #4266)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)

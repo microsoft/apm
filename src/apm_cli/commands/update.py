@@ -391,6 +391,22 @@ def _run_mcp_lsp_integration(
     )
 
 
+def _resolve_only_packages(packages: tuple[str, ...], declared: list) -> list[str] | None:
+    """Resolve named packages to declared keys, or refuse with exit 1."""
+    try:
+        return resolve_requested_packages(packages, declared)
+    except UnknownPackageError as e:
+        _rich_error(f"Package '{e.token}' not found in apm.yml")
+        if e.available:
+            _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
+        else:
+            _rich_info(
+                f"No APM dependencies are declared. Run 'apm install {e.token}' to add it.",
+                symbol="info",
+            )
+        sys.exit(1)
+
+
 def _handle_service_only_update(
     *,
     apm_package: Any,
@@ -747,6 +763,13 @@ def _run_dep_update_locked(
     logger = InstallLogger(
         verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
     )
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    # Map any positional [PACKAGES] to canonical dependency keys for the
+    # engine's only_packages filter; None means "refresh everything". A named
+    # package must be declared even when apm.yml declares no APM dependencies
+    # (#4263), so this runs before any reconcile or service-only path.
+    only_packages = _resolve_only_packages(packages, project_manifest_dependencies(apm_package))
     from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
 
     reconcile_scope_bundle_hooks(scope, apm_package, logger=logger, dry_run=dry_run)
@@ -766,21 +789,7 @@ def _run_dep_update_locked(
     # pipeline must resolve against the new SHAs, but declined/dry-run paths
     # should not mutate the APMPackage instance parsed from the on-disk manifest.
     staged_apm_package = copy.deepcopy(apm_package)
-    from ..models.dependency.replacement import project_manifest_dependencies
-
     all_declared_deps = project_manifest_dependencies(staged_apm_package)
-
-    # Map any positional [PACKAGES] to canonical dependency keys for the
-    # engine's only_packages filter; None means "refresh everything".
-    try:
-        only_packages = resolve_requested_packages(
-            packages,
-            all_declared_deps,
-        )
-    except UnknownPackageError as e:
-        _rich_error(f"Package '{e.token}' not found in apm.yml")
-        _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
-        sys.exit(1)
 
     revision_pin_resolution = _resolve_and_stage_revision_pin_updates(
         all_declared_deps=all_declared_deps,

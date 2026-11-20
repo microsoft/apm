@@ -7,7 +7,6 @@ compatibility.
 """
 
 import logging
-import re
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -25,6 +24,7 @@ from .dependency import (
     ResolvedReference,
     parse_git_reference,
 )
+from .extension_keys import is_extension_key
 from .manifest_targets import (
     _LEGACY_ALL_TARGET,
     _MANIFEST_TARGET_KEYS,
@@ -367,13 +367,7 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "schemaVersion",
     }
 )
-# OpenAPM req-ext-001. A bare ``x-`` prefix is not an extension.
-_EXTENSION_KEY_RE = re.compile(r"^x-[a-z][a-z0-9-]*$")
-
-
-def _is_extension_key(key: object) -> bool:
-    """True when *key* matches OpenAPM req-ext-001 (``x-[a-z][a-z0-9-]*``)."""
-    return isinstance(key, str) and _EXTENSION_KEY_RE.fullmatch(key) is not None
+_is_extension_key = is_extension_key
 
 
 def _ascii_token(value: object) -> str:
@@ -537,6 +531,12 @@ class APMPackage:
         elif isinstance(self.target, str):
             raw_targets.append(self.target)
         self.canonical_targets = canonical_target_names(raw_targets)
+
+    @property
+    def vendor_targets(self) -> tuple[str, ...]:
+        """Declared ``x-<vendor>-<name>`` targets (req-tg-004); never deployed."""
+        declaration = self.target_declaration
+        return declaration.vendor_targets if declaration is not None else ()
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -27,6 +28,19 @@ class TargetCapability:
 
 
 _TARGET_COMMANDS = frozenset({"compile", "install", "update"})
+
+# OpenAPM req-mf-005 / req-tg-004: the ``x-<vendor>-<name>`` target form.
+_VENDOR_TARGET_RE = re.compile(r"^x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*$")
+
+
+def is_vendor_target_id(token: object) -> bool:
+    """True for a vendor-extension target identifier (``x-<vendor>-<name>``).
+
+    Such an identifier parses; APM registers no vendor handler, so every
+    consumer reports it as unsupported instead of ignoring it (#4251).
+    """
+    return isinstance(token, str) and _VENDOR_TARGET_RE.fullmatch(token) is not None
+
 
 # Deprecated target aliases, mapped to the target they select. ``vscode``
 # (#3866) selects ``copilot`` exactly, including its project MCP destination
@@ -333,7 +347,7 @@ def advertised_manifest_target_names() -> frozenset[str]:
 
 def normalize_target_name(name_or_alias: str) -> str:
     """Normalize a target spelling to its native capability name."""
-    if name_or_alias == "all":
+    if name_or_alias == "all" or is_vendor_target_id(name_or_alias):
         return name_or_alias
     return get_target_capability(name_or_alias).name
 

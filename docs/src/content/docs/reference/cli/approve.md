@@ -200,6 +200,9 @@ Re-approving replaces the package's pins with the current definitions.
 - an item cannot be pinned, for example a transitive registry server while the
   MCP registry is unreachable (`needs registry access to pin`).
 
+`apm approve` with no package and no `--pending`, `--all`, `--recommended`
+or `--list` is a usage error (exit 2).
+
 It exits 1 when any requested package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
 approval that was not recorded. The first pinned approval in a project also

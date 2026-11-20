@@ -1005,6 +1005,7 @@ def _check_drift(
         run_replay,
     )
     from ..install.errors import PolicyViolationError
+    from ..install.phases.local_content import LocalPackageError
     from ..integration.targets import resolve_audit_targets
 
     logger = CheckLogger(verbose=verbose)
@@ -1052,6 +1053,18 @@ def _check_drift(
                         f"drift replay failed: corrupt local dependency graph in the "
                         f"lockfile ({exc}). Fix the resolved_by chain or re-run 'apm install'."
                     ),
+                ),
+                [],
+            )
+        except LocalPackageError as exc:
+            # A failed check, not an uncaught error: JSON and SARIF output
+            # still carry one document with the failure (#4287).
+            return (
+                CheckResult(
+                    name="drift",
+                    passed=False,
+                    message=f"drift replay failed: {exc}",
+                    details=[str(exc)],
                 ),
                 [],
             )

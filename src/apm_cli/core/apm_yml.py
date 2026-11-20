@@ -23,6 +23,7 @@ from apm_cli.core.errors import (
 from apm_cli.core.target_catalog import (
     canonical_target_token,
     get_target_capability,
+    is_vendor_target_id,
     manifest_target_names,
 )
 
@@ -101,6 +102,8 @@ def _warn_legacy_all_once() -> None:
 def _validate_canonical(tokens: list[str]) -> None:
     """Validate every token is in CANONICAL_TARGETS. Raises UnknownTargetError."""
     for token in tokens:
+        if is_vendor_target_id(token):
+            continue
         try:
             capability = get_target_capability(token)
         except KeyError:

@@ -285,6 +285,9 @@ class InstallLogger(CommandLogger):
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
+        # Policy lines already shown; a later phase that re-resolves the
+        # policy (the MCP preflight) does not announce it again (#4267).
+        self._policy_lines_shown: set[tuple] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -752,6 +755,10 @@ class InstallLogger(CommandLogger):
         parts.append(f"-- enforcement={enforcement}")
 
         message = " ".join(parts)
+        shown_key = (source, enforcement, tuple(chain or ()))
+        if shown_key in self._policy_lines_shown:
+            return
+        self._policy_lines_shown.add(shown_key)
 
         if enforcement == "block":
             # Always visible — blocking installs is a big deal

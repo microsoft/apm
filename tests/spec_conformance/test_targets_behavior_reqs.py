@@ -67,9 +67,11 @@ def test_explicit_only_targets_are_never_auto_detected_or_in_all(tmp_path: Path)
 
 
 @pytest.mark.req("req-tg-004")
-@pytest.mark.xfail(strict=True, reason="#4251: x-<vendor>-<name> targets are rejected at parse")
 def test_vendor_target_identifier_parses(tmp_path: Path) -> None:
+    """x-<vendor>-<name> parses (#4251); an arbitrary unknown token does not."""
     assert parse_target_field("x-acme-foo") == "x-acme-foo"
+    with pytest.raises(ValueError, match="bogus"):
+        parse_target_field("bogus")
 
 
 # --- req-tg-010: Claude project hooks are anchored to the project -------------

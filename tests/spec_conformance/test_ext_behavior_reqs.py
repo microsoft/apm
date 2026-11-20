@@ -79,10 +79,6 @@ def test_manifest_top_level_and_mcp_vendor_keys_parse_without_effect(tmp_path: P
 
 
 @pytest.mark.req("req-ext-001")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4260: x- keys in object-form dependencies.apm[] entries fail the parse",
-)
 @pytest.mark.parametrize(
     "entry",
     [
@@ -92,7 +88,10 @@ def test_manifest_top_level_and_mcp_vendor_keys_parse_without_effect(tmp_path: P
     ids=["git", "path"],
 )
 def test_apm_dependency_entry_vendor_keys_are_ignored(tmp_path: Path, entry: dict) -> None:
-    """An x- key inside a dependencies.apm[] mapping neither errors nor changes the entry."""
+    """An x- key inside a dependencies.apm[] mapping neither errors nor changes the entry.
+
+    A non-x- unknown key is still refused (#4260).
+    """
     (plain,) = _load(tmp_path, {**_BASE, "dependencies": {"apm": [entry]}}).get_apm_dependencies()
     extended_entry = {**entry, "x-acme-pin": "keep"}
     (extended,) = _load(
@@ -100,3 +99,5 @@ def test_apm_dependency_entry_vendor_keys_are_ignored(tmp_path: Path, entry: dic
     ).get_apm_dependencies()
     assert extended.to_canonical() == plain.to_canonical()
     assert extended.reference == plain.reference
+    with pytest.raises(ValueError, match="bogus-pin"):
+        _load(tmp_path, {**_BASE, "dependencies": {"apm": [{**entry, "bogus-pin": "no"}]}})

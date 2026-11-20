@@ -167,18 +167,22 @@ def route_discovery_outcome(
     # UX F1/F2/F4).
     if outcome in _NON_FOUND_LOGGED_OUTCOMES:
         hint = fetch_result.discovery_hint
-        if logger is not None:
+        blocks = (
+            raise_blocking_errors
+            and outcome in _OUTCOMES_HONORING_FETCH_FAILURE_DEFAULT
+            and fetch_failure_default == "block"
+        )
+        # A blocking outcome raises and the exception is the only report; the
+        # miss wording ("proceeding without policy enforcement") would
+        # contradict it (#4180).
+        if logger is not None and not blocks:
             logger.policy_discovery_miss(
                 outcome=outcome,
                 source=source,
                 error=fetch_result.error or fetch_result.fetch_error,
                 hint=hint,
             )
-        if (
-            raise_blocking_errors
-            and outcome in _OUTCOMES_HONORING_FETCH_FAILURE_DEFAULT
-            and fetch_failure_default == "block"
-        ):
+        if blocks:
             raise PolicyViolationError(
                 f"{blocked_label}: no enforceable org policy was resolved "
                 f"(outcome={outcome}) and project apm.yml has "

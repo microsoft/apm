@@ -84,14 +84,17 @@ def test_unknown_target_token_is_rejected_naming_the_token(tmp_path: Path, spell
 
 
 @pytest.mark.req("req-mf-005")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4251: x-<vendor>-<name> target identifiers are rejected at parse time",
-)
 def test_vendor_extension_target_identifier_is_accepted(tmp_path: Path) -> None:
-    """The x-<vendor>-<name> form is accepted, unlike an arbitrary unknown token."""
-    package = _load(tmp_path, {"name": "p", "version": "1.0.0", "targets": ["x-acme-foo"]})
-    assert "x-acme-foo" in package.canonical_targets
+    """The x-<vendor>-<name> form is accepted, unlike an arbitrary unknown token (#4251).
+
+    APM registers no vendor handler, so the identifier is kept as a vendor
+    target and never selects a deployable target.
+    """
+    package = _load(
+        tmp_path, {"name": "p", "version": "1.0.0", "targets": ["copilot", "x-acme-foo"]}
+    )
+    assert package.vendor_targets == ("x-acme-foo",)
+    assert package.canonical_targets == ("copilot",)
 
 
 # --- req-mf-007: string-form dependency grammar -------------------------

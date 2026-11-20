@@ -7,6 +7,7 @@ from collections.abc import Collection
 from typing import Any
 
 from ...utils.path_security import PathTraversalError, validate_path_segments
+from ..extension_keys import is_extension_key
 from .subsets import parse_skill_subset, parse_target_subset
 
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
@@ -52,8 +53,11 @@ def reject_unknown_fields(
     allowed: Collection[str],
     dependency_type: str,
 ) -> None:
-    """Reject inert typos in object-form dependency declarations."""
-    unknown = sorted(set(entry) - allowed)
+    """Reject inert typos in object-form dependency declarations.
+
+    Vendor-extension keys (req-ext-001) are ignored, never interpreted (#4260).
+    """
+    unknown = sorted(key for key in set(entry) - set(allowed) if not is_extension_key(key))
     if unknown:
         fields = ", ".join(repr(field) for field in unknown)
         raise ValueError(f"Unsupported field(s) for {dependency_type} dependency: {fields}")
