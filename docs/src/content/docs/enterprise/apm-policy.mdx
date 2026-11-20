@@ -15,12 +15,11 @@ targeted. It governs what gets installed, not what
 an agent does at runtime. Every field is in the [policy schema](../../reference/policy-schema/).
 
 :::caution[Project installs only]
-Org policy applies to project installs, where APM finds it from the project's git remote.
-It does not apply to user-scope installs: `apm install -g`, `update -g` and `uninstall -g`
-do not use a project's git remote, so they run without org policy, including
-`executables.deny_all`, even when you run them from inside a governed project.
-A user-scope policy source is tracked in
-[#3703](https://github.com/microsoft/apm/issues/3703).
+Org policy does not govern user-scope (`-g`) installs in 0.37; local approvals and denies
+still apply. APM finds org policy from the project's git remote, and `apm install -g`,
+`update -g` and `uninstall -g` do not use it, even when you run them from inside a governed
+project. [#3703](https://github.com/microsoft/apm/issues/3703) tracks user-scope org policy
+for 0.38.
 :::
 
 ## Write and roll out the policy
