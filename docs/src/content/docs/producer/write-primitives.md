@@ -58,6 +58,12 @@ Copilot gets `.github/instructions/python.instructions.md`; Claude Code gets
 and OpenCode read one combined file instead: `apm compile` builds `AGENTS.md` or
 `GEMINI.md`, and consumers see a reminder after install.
 
+Claude Code gets always-on rules (`applyTo: "**"` or no `applyTo`) and
+single-directory rules (for example `src/test/**`) through `AGENTS.md`
+instead: `apm compile` writes them there, plus a `CLAUDE.md` that imports
+`@AGENTS.md`. Only path-scoped rules, like the one above, become
+`.claude/rules/` files.
+
 **Gotcha:** without `applyTo`, some harnesses do not know when to load the rule;
 Cursor may skip it. Use `applyTo: "**"` for a rule that always applies.
 
