@@ -3,7 +3,8 @@
 PROMISE: outcome.status_matches_state -- every spec form approve, deny and policy
 explain accept names the installed package's store identity, or the command
 exits 1 without writing; a deny by install spec retires deployed executables
-(source: issues #4189, #4245, #4246).
+(source: issues #4189, #4245, #4246). A deny an older APM keyed by the raw
+spec is honored after upgrade and stays honored through update and --frozen.
 CELL: OP=approve,deny,explain,install SRC=marketplace(local catalog) PRIM=hook
 SCOPE={project, user (APM_HOME outside HOME)} GATE=executables.allow={}
 owner: executable-trust-context (security/executables.py canonical_approval_spec)
@@ -18,6 +19,7 @@ import pytest
 import yaml
 
 from tests.integration.test_approve_parked_native_plugin_lifecycle import _evidence, _World
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
@@ -122,3 +124,74 @@ def test_unresolvable_install_spec_exits_1_without_writing(
     assert result.returncode == 1, _evidence(result)
     assert "absent@loc" in result.stdout + result.stderr
     assert world.manifest.read_bytes() == before, "a refused spec wrote the approval store"
+
+
+def _snapshots(world: _World) -> tuple[ArtifactSnapshot, ArtifactSnapshot]:
+    deploy = world.home if world.scope == "user" else world.project
+    return ArtifactSnapshot.capture(deploy / ".claude"), ArtifactSnapshot.capture(
+        world.manifest.parent
+    )
+
+
+def _approved_and_deployed(tmp_path: Path, apm_binary_path: Path, scope: str) -> _World:
+    world = _installed(tmp_path, apm_binary_path, scope)
+    approved = world.apm("approve", *world.flags, _SPEC)
+    assert approved.returncode == 0, _evidence(approved)
+    deployed = world.apm("install", *world.flags)
+    assert deployed.returncode == 0 and _deployed(world), _evidence(deployed)
+    return world
+
+
+def _assert_retired_and_converged(world: _World) -> None:
+    """The hook stays retired through install, update and --frozen (I2, I4)."""
+    retired = world.apm("install", *world.flags)
+    assert retired.returncode == 0, _evidence(retired)
+    assert not _deployed(world), _evidence(retired)
+    settings = _settings(world)
+    assert not settings.is_file() or _MARKER not in settings.read_text(encoding="utf-8")
+    before = _snapshots(world)
+    for argv in (("update", "--yes", *world.flags), ("install", "--frozen", *world.flags)):
+        result = world.apm(*argv)
+        assert result.returncode == 0, _evidence(result)
+        assert not _deployed(world), _evidence(result)
+        after = _snapshots(world)
+        assert_unchanged(before[0], after[0])
+        assert_unchanged(before[1], after[1])
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_deny_by_install_spec_stays_retired_through_update_and_frozen(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    world = _approved_and_deployed(tmp_path, apm_binary_path, scope)
+    hooked = _snapshots(world)
+
+    denied = world.apm("deny", *world.flags, _SPEC)
+    assert denied.returncode == 0, _evidence(denied)
+    _assert_retired_and_converged(world)
+    # The snapshot records the removal: the hook config changed.
+    assert _snapshots(world)[0] != hooked[0]
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_install_spec_deny_from_an_older_apm_is_honored_after_upgrade(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    """History: a deny an older APM keyed by the raw install spec still retires the hook."""
+    world = _approved_and_deployed(tmp_path, apm_binary_path, scope)
+    manifest = yaml.safe_load(world.manifest.read_text(encoding="utf-8"))
+    types = {"hooks": True, "mcp": True, "lsp": True, "bin": True, "canvas": True}
+    manifest["executables"]["deny"] = {_SPEC: types}
+    world.manifest.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    upgraded = world.apm("install", *world.flags)
+    assert upgraded.returncode == 0, _evidence(upgraded)
+    assert not _deployed(world), _evidence(upgraded)
+    notes = [line for line in upgraded.stdout.splitlines() if "names an install spec" in line]
+    assert len(notes) == 1, _evidence(upgraded)
+    _assert_retired_and_converged(world)
+
+    # The next store write records the deny under the package identity.
+    rewritten = world.apm("deny", *world.flags, _SPEC)
+    assert rewritten.returncode == 0, _evidence(rewritten)
+    assert _SPEC not in _store(world)["deny"], _store(world)
