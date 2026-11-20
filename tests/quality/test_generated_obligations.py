@@ -38,11 +38,24 @@ pytestmark = [
 def test_security_space_matches_the_reviewed_counts() -> None:
     export = obligation_space.load_export()
     space = obligation_space.security_obligations(export)
+    excluded = obligation_space.excluded_obligations(export)
     counts = {key: len(ids) for key, ids in space.items()}
+    counts["G"] += sum(key.startswith("G|") for key in excluded)
     assert counts == obligation_space.EXPECTED_COUNTS == export["counts"]
     assert counts == {"G": 244, "P": 224, "I": 116, "E": 281, "M": 38, "C": 22}
     every = [key for ids in space.values() for key in ids]
-    assert len(every) == len(set(every)) == 925
+    assert len(every) == len(set(every)) == 925 - len(excluded) == 889
+
+
+def test_each_excluded_id_names_a_kept_witness_of_its_space() -> None:
+    export = obligation_space.load_export()
+    space = obligation_space.security_obligations(export)
+    excluded = obligation_space.excluded_obligations(export)
+    assert len(excluded) == 36
+    for key, record in excluded.items():
+        assert key in export["ids"]["G"]["e2e-evidence"], key
+        assert record["rules"] == ["U-BIN"], key
+        assert record["witness"] in space["G"], (key, record["witness"])
 
 
 def test_security_ids_are_ascii_and_carry_their_space() -> None:
