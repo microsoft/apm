@@ -428,7 +428,6 @@ def _resolve_dependencies(
 
     # 5. Download callback for transitive resolution
     scope = ctx.scope
-    project_root = ctx.project_root
     # Local-path package references in apm.yml are relative to the
     # manifest's location (source_root), not the deploy override.
     # source_root is required on InstallContext; equals project_root

@@ -2361,6 +2361,22 @@
       ]
     },
     {
+      "issue": 4153,
+      "fixed_in": "Unreleased",
+      "summary": "A user-scope install refused every relative local_path, including one declared by a dependency, and dropped that transitive dependency without a diagnostic while exiting 0; an unresolvable transitive local dependency also exited 0 at project scope.",
+      "failure_modes": [
+        "outcome",
+        "reference"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_transitive_relative_local_path_lifecycle.py::test_transitive_relative_local_paths_anchor_on_the_declaring_package",
+        "tests/integration/test_transitive_relative_local_path_lifecycle.py::test_unresolvable_transitive_local_path_fails_the_install"
+      ]
+    },
+    {
       "issue": 4171,
       "fixed_in": "Unreleased",
       "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",
