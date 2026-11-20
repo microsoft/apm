@@ -128,6 +128,30 @@ your Git configuration. Generic HTTP fetches suppress credential channels, HTTPS
 to-HTTP rewrites are rejected, and generic SSH stays token-free. See the
 [full transport policy](https://microsoft.github.io/apm/getting-started/authentication/#generic-marketplace-git-transport).
 
+## Private hosted marketplace catalogs
+
+A hosted `marketplace.json` URL registered with `--name` authenticates with
+its own variables. `{NAME}` is that name, uppercased, `-`/`.` -> `_`.
+
+| Env var(s) | Sent as |
+|------------|---------|
+| `APM_MARKETPLACE_TOKEN_{NAME}` | `Authorization: Bearer <token>` |
+| `APM_MARKETPLACE_USER_{NAME}` + `APM_MARKETPLACE_PASS_{NAME}` | `Authorization: Basic <base64(user:pass)>` |
+
+```bash
+export APM_MARKETPLACE_TOKEN_CORP=your_token
+apm marketplace add https://catalog.example.com/team/marketplace.json --name corp
+```
+
+- Only `--name` binds a name to the URL; re-adding it with another URL fails
+  until `apm marketplace remove NAME`. Names mapping to the same variables
+  are rejected.
+- Sent only within the registered origin, directory and query, checked on
+  every redirect; HTTPS-to-HTTP is refused. No Git, registry or `.netrc`
+  fallback, and never sent with package downloads.
+- 401, 403 or a sign-in redirect: `Access to marketplace 'NAME' was denied`
+  naming the variable, exit 1, never served from cache.
+
 ## GitLab hosts
 
 `gitlab.com` is detected automatically. For self-managed GitLab, set
