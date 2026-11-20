@@ -306,7 +306,7 @@ def test_plaintext_registry_url_needs_insecure_or_private_host(
 def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
     deployed = [".github/instructions/rules.md", f".github/skills/tool/{name}"]
     project = _setup_project(tmp_path, deployed, target="vscode")
-    with pytest.raises(Exception, match=re.escape(name)):
+    with pytest.raises(ValueError, match=re.escape(name)):
         pack_bundle(project, tmp_path / "build", fmt="apm")
     assert not (tmp_path / "build").exists()
 
