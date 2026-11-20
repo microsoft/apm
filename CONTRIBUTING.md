@@ -201,10 +201,10 @@ New and changed functions must meet the Stage 2 complexity limits; existing
 violators are grandfathered in a shrink-only baseline. See the
 [complexity ratchet instructions](docs/src/content/docs/contributing/development-guide.md#complexity-ratchet).
 
-### Running the bounded mutation pilot
+### Mutation kill-rate floors
 
-See the [mutation pilot instructions](docs/src/content/docs/contributing/development-guide.md#running-the-bounded-mutation-pilot),
-including how to review survivor-baseline changes.
+See the [mutation floor instructions](docs/src/content/docs/contributing/development-guide.md#mutation-kill-rate-floors),
+including how to kill survivors and when a mutant may be listed as equivalent.
 
 ### How to add an experimental feature flag
 

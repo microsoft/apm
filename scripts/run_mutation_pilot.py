@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Run the bounded mutation-testing pilot and enforce its survivor baseline."""
+"""Run owner-scoped mutation testing and enforce per-owner kill-rate floors.
+
+``tests/mutation/floors.json`` is the single source of truth for which owner
+functions are mutated, which test seams may kill them, the recorded floor per
+owner, and the reviewed equivalent mutants (with reasons).
+"""
 
 from __future__ import annotations
 
 import argparse
 import fnmatch
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -15,16 +21,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ratchet_baseline import BaselineError, load_baseline, write_baseline
+from ratchet_baseline import BaselineError, load_baseline, load_baseline_at_ref, write_baseline
 
 from apm_cli.utils.atomic_io import atomic_write_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASELINE = REPO_ROOT / "tests" / "mutation" / "baseline.json"
-DEFAULT_OUTPUT = REPO_ROOT / "build" / "mutation-pilot" / "report.json"
+DEFAULT_FLOORS = REPO_ROOT / "tests" / "mutation" / "floors.json"
+DEFAULT_OUTPUT = REPO_ROOT / "build" / "mutation-floors" / "report.json"
 MUTMUT_VERSION = "3.6.0"
 CLASS_NAME_SEPARATOR = chr(0x01C1)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+KILL_RATE_DEFINITION = "(killed + timeout) / (total - equivalent)"
 
 STATUS_BY_EXIT_CODE = {
     None: "not_checked",
@@ -45,19 +52,36 @@ STATUS_BY_EXIT_CODE = {
     152: "timeout",
     255: "timeout",
 }
+DETECTED_STATUSES = frozenset({"killed", "timeout"})
+UNDETECTED_STATUSES = frozenset({"no_tests", "survived"})
 FATAL_STATUSES = frozenset(
     {
         "interrupted",
-        "no_tests",
         "not_checked",
         "segfault",
         "skipped",
         "suspicious",
         "terminated",
-        "timeout",
         "type_checked",
         "unknown",
     }
+)
+EQUIVALENT_CLASSES = frozenset(
+    {"defensive-unreachable", "semantic-equivalent", "unobservable-diagnostic-text"}
+)
+# User-facing error, warning and remediation text is a promise: only
+# debug-level or log-only text may be declared unobservable.
+DIAGNOSTIC_REASON_PREFIXES = ("debug:", "log-only:")
+OWNER_KEYS = frozenset(
+    {"architecture_owner", "equivalents", "floor", "measured", "targets", "test_seams"}
+)
+MEASURED_KEYS = (
+    "equivalent",
+    "killed",
+    "no_tests",
+    "survived",
+    "timeout",
+    "total",
 )
 SENSITIVE_ENVIRONMENT_NAMES = frozenset(
     {
@@ -74,14 +98,16 @@ SENSITIVE_ENVIRONMENT_NAMES = frozenset(
 )
 
 
-@dataclass(frozen=True)
-class Owner:
-    """One canonical owner included in the mutation pilot."""
+class PilotError(RuntimeError):
+    """Raised when mutation evidence cannot be trusted."""
 
-    key: str
+
+@dataclass(frozen=True)
+class Target:
+    """One source file and the exact functions mutated in it."""
+
     source: str
     functions: tuple[str, ...]
-    test_seams: tuple[str, ...]
 
     @property
     def module(self) -> str:
@@ -90,7 +116,7 @@ class Owner:
 
     @property
     def patterns(self) -> tuple[str, ...]:
-        """Return exact mutmut function patterns for this owner."""
+        """Return exact mutmut function patterns for this target."""
         patterns = []
         for function in self.functions:
             class_name, separator, function_name = function.partition(".")
@@ -100,96 +126,119 @@ class Owner:
                 )
             else:
                 mangled = f"x_{function}"
-            patterns.append(f"{self.module}.{mangled}*")
+            patterns.append(f"{self.module}.{mangled}__mutmut_*")
         return tuple(patterns)
 
 
-OWNERS = (
-    Owner(
-        key="subset-selection",
-        source="src/apm_cli/models/dependency/subsets.py",
-        functions=(
-            "skill_subset_filter_tokens",
-            "parse_skill_subset",
-            "parse_target_subset",
-            "_closest_target",
-            "_levenshtein_distance",
-        ),
-        test_seams=(
-            "tests/unit/test_skill_subset_persistence.py",
-            "tests/unit/test_dep_targets_persistence.py",
-        ),
-    ),
-    Owner(
-        key="update-plan",
-        source="src/apm_cli/install/plan.py",
-        functions=("build_update_plan",),
-        test_seams=("tests/unit/install/test_plan.py",),
-    ),
-    Owner(
-        key="policy-serialization",
-        source="src/apm_cli/policy/discovery.py",
-        functions=("_policy_to_dict",),
-        test_seams=(
-            "tests/unit/policy/test_cache_merged_effective.py"
-            "::test_policy_serializer_covers_every_dataclass_leaf",
-            "tests/unit/policy/test_cache_merged_effective.py"
-            "::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
-            "tests/unit/policy/test_cache_merged_effective.py"
-            "::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip",
-        ),
-    ),
-    Owner(
-        key="link-projection",
-        source="src/apm_cli/compilation/link_resolver.py",
-        functions=("UnifiedLinkResolver._resolve_in_package_asset_link",),
-        test_seams=(
-            "tests/unit/compilation/test_link_resolver.py",
-            "tests/unit/compilation/test_link_resolver_phase3.py",
-            "tests/unit/compilation/test_link_resolver_resolution.py",
-        ),
-    ),
-    Owner(
-        # Scoped to the two fail-closed field normalizers ONLY -- this
-        # owner does NOT cover LockedDependency.to_dict/from_dict/
-        # to_dependency_ref. mutmut 3.6.0 structurally skips every method
-        # of a `@dataclass`-decorated class (file_mutation.py's
-        # `_skip_node_and_children` returns True for any decorated
-        # ClassDef), and both LockedDependency and LockFile carry
-        # `@dataclass` -- so their methods can never be mutated regardless
-        # of `only_mutate`/pattern configuration. Confirmed empirically:
-        # `mutmut run` filtered to those method patterns raises
-        # `AssertionError: Filtered for specific mutants, but nothing
-        # matches`, and a minimal reproduction without `@dataclass`
-        # restores normal per-mutant trampolining.
-        #
-        # This is a RECORDED FOLLOW-UP CONSTRAINT, not a gap this owner
-        # silently ignores: PR #2246 added seven manual mutation-break
-        # twins in the test seam below (see
-        # test_*_fail_closed_property_breaks_if_normalizer_is_bypassed and
-        # siblings) that hand-assert against specific mutation scenarios
-        # for the decorated-dataclass methods mutmut cannot reach. Those
-        # twins are the current defense for that surface; automated
-        # coverage there remains blocked on the upstream mutmut limitation
-        # above, not on missing test authorship.
-        key="lockfile-normalization",
-        source="src/apm_cli/deps/lockfile.py",
-        functions=(
-            "_normalize_lockfile_host_type",
-            "_normalize_exec_status",
-        ),
-        test_seams=("tests/unit/deps/test_lockfile_field_properties.py",),
-    ),
-)
+@dataclass(frozen=True)
+class Owner:
+    """One mutation-floor owner recorded in floors.json."""
 
+    key: str
+    architecture_owner: str | None
+    targets: tuple[Target, ...]
+    test_seams: tuple[str, ...]
+    floor: float
+    equivalents: dict[str, dict[str, str]]
 
-class PilotError(RuntimeError):
-    """Raised when mutation evidence cannot be trusted."""
+    @property
+    def patterns(self) -> tuple[str, ...]:
+        """Return every mutmut pattern owned by this entry."""
+        return tuple(pattern for target in self.targets for pattern in target.patterns)
 
 
 def _ascii(text: str) -> str:
     """Return printable ASCII for terminal-safe diagnostics."""
     return text.encode("ascii", errors="backslashreplace").decode("ascii")
+
+
+def _string_list(value: object, *, where: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value or not all(isinstance(v, str) for v in value):
+        raise BaselineError(f"invalid mutation floors: {where} must be a non-empty string list")
+    if len(set(value)) != len(value):
+        raise BaselineError(f"invalid mutation floors: {where} must be unique")
+    return tuple(value)
+
+
+def _parse_targets(key: str, raw: object) -> tuple[Target, ...]:
+    if not isinstance(raw, list) or not raw:
+        raise BaselineError(f"invalid mutation floors: {key} targets must be a non-empty list")
+    targets = []
+    for item in raw:
+        if not isinstance(item, dict) or set(item) != {"functions", "source"}:
+            raise BaselineError(f"invalid mutation floors: {key} target is malformed")
+        source = item["source"]
+        if not isinstance(source, str) or not source.startswith("src/"):
+            raise BaselineError(f"invalid mutation floors: {key} target source must be under src/")
+        functions = _string_list(item["functions"], where=f"{key} {source} functions")
+        targets.append(Target(source=source, functions=functions))
+    return tuple(targets)
+
+
+def _parse_equivalent(key: str, item: object) -> tuple[str, dict[str, str]]:
+    if not isinstance(item, dict) or set(item) != {"class", "mutant", "reason"}:
+        raise BaselineError(f"invalid mutation floors: {key} equivalent is malformed")
+    mutant, kind, reason = item["mutant"], item["class"], item["reason"]
+    if not isinstance(mutant, str) or "__mutmut_" not in mutant:
+        raise BaselineError(f"invalid mutation floors: {key} equivalent mutant name")
+    if kind not in EQUIVALENT_CLASSES:
+        raise BaselineError(f"invalid mutation floors: {key} {mutant} class {kind!r}")
+    if not isinstance(reason, str) or len(reason.strip()) < 20:
+        raise BaselineError(f"invalid mutation floors: {key} {mutant} needs a reason")
+    if kind == "unobservable-diagnostic-text" and not reason.startswith(
+        DIAGNOSTIC_REASON_PREFIXES
+    ):
+        raise BaselineError(
+            f"invalid mutation floors: {key} {mutant} diagnostic-text reason must start "
+            "with 'debug:' or 'log-only:' and name where it is emitted"
+        )
+    return mutant, {"class": kind, "reason": reason}
+
+
+def _parse_equivalents(key: str, raw: object) -> dict[str, dict[str, str]]:
+    if not isinstance(raw, list):
+        raise BaselineError(f"invalid mutation floors: {key} equivalents must be a list")
+    parsed = [_parse_equivalent(key, item) for item in raw]
+    names = [name for name, _ in parsed]
+    if names != sorted(set(names)):
+        raise BaselineError(f"invalid mutation floors: {key} equivalents must be sorted, unique")
+    return dict(parsed)
+
+
+def _parse_floor(key: str, raw: object) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not 0 <= raw <= 1:
+        raise BaselineError(f"invalid mutation floors: {key} floor must be within [0, 1]")
+    return float(raw)
+
+
+def _parse_owner(key: str, entry: object) -> Owner:
+    if not isinstance(entry, dict) or set(entry) != OWNER_KEYS:
+        raise BaselineError(f"invalid mutation floors: malformed owner {key}")
+    architecture_owner = entry["architecture_owner"]
+    if architecture_owner is not None and not isinstance(architecture_owner, str):
+        raise BaselineError(f"invalid mutation floors: {key} architecture_owner")
+    return Owner(
+        key=key,
+        architecture_owner=architecture_owner,
+        targets=_parse_targets(key, entry["targets"]),
+        test_seams=_string_list(entry["test_seams"], where=f"{key} test_seams"),
+        floor=_parse_floor(key, entry["floor"]),
+        equivalents=_parse_equivalents(key, entry["equivalents"]),
+    )
+
+
+def parse_floors(payload: dict[str, object]) -> tuple[Owner, ...]:
+    """Validate a floors document and return its owners in key order."""
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        raise BaselineError("invalid mutation floors: unsupported schema_version")
+    if payload.get("tool") != {"name": "mutmut", "version": MUTMUT_VERSION}:
+        raise BaselineError("invalid mutation floors: tool version mismatch")
+    if payload.get("kill_rate_definition") != KILL_RATE_DEFINITION:
+        raise BaselineError("invalid mutation floors: kill_rate_definition mismatch")
+    owners = payload.get("owners")
+    if not isinstance(owners, dict) or not owners:
+        raise BaselineError("invalid mutation floors: owners must be a non-empty object")
+    return tuple(_parse_owner(key, owners[key]) for key in sorted(owners))
 
 
 def _canonical_mutant_name(raw_name: str) -> str:
@@ -198,8 +247,7 @@ def _canonical_mutant_name(raw_name: str) -> str:
     if not separator:
         raise PilotError(f"invalid mutmut name: {_ascii(raw_name)}")
     if key.startswith("x_"):
-        function_mutant = key[2:]
-        return f"{module}.{function_mutant}"
+        return f"{module}.{key[2:]}"
     class_prefix = f"x{CLASS_NAME_SEPARATOR}"
     if key.startswith(class_prefix) and CLASS_NAME_SEPARATOR in key[len(class_prefix) :]:
         class_name, function_mutant = key[len(class_prefix) :].split(
@@ -209,9 +257,7 @@ def _canonical_mutant_name(raw_name: str) -> str:
     raise PilotError(f"invalid mutmut name: {_ascii(raw_name)}")
 
 
-def _load_exit_codes(owner: Owner, repo_root: Path) -> dict[str, int | None]:
-    """Load and scope one owner's mutmut metadata."""
-    meta_path = repo_root / "mutants" / f"{owner.source}.meta"
+def _read_meta(meta_path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
     except (
@@ -222,147 +268,81 @@ def _load_exit_codes(owner: Owner, repo_root: Path) -> dict[str, int | None]:
         json.JSONDecodeError,
     ) as error:
         raise PilotError(f"invalid mutmut metadata {meta_path}: {error}") from error
-
     if not isinstance(payload, dict):
         raise PilotError(f"invalid mutmut metadata {meta_path}: root must be an object")
     exit_codes = payload.get("exit_code_by_key")
     if not isinstance(exit_codes, dict):
         raise PilotError(f"invalid mutmut metadata {meta_path}: exit_code_by_key missing")
+    return exit_codes
 
+
+def _load_exit_codes(owner: Owner, repo_root: Path) -> dict[str, int | None]:
+    """Load and scope one owner's mutmut metadata across its targets."""
     scoped: dict[str, int | None] = {}
-    for raw_name, exit_code in exit_codes.items():
-        if not isinstance(raw_name, str):
-            raise PilotError(f"invalid mutmut metadata {meta_path}: non-string mutant name")
-        if not any(fnmatch.fnmatchcase(raw_name, pattern) for pattern in owner.patterns):
-            continue
-        if exit_code is not None and (
-            not isinstance(exit_code, int) or isinstance(exit_code, bool)
-        ):
-            raise PilotError(f"invalid mutmut metadata {meta_path}: invalid exit code")
-        canonical_name = _canonical_mutant_name(raw_name)
-        if canonical_name in scoped:
-            raise PilotError(f"duplicate canonical mutant name: {canonical_name}")
-        scoped[canonical_name] = exit_code
-
+    for target in owner.targets:
+        meta_path = repo_root / "mutants" / f"{target.source}.meta"
+        for raw_name, exit_code in _read_meta(meta_path).items():
+            if not isinstance(raw_name, str):
+                raise PilotError(f"invalid mutmut metadata {meta_path}: non-string mutant name")
+            if not any(fnmatch.fnmatchcase(raw_name, pattern) for pattern in target.patterns):
+                continue
+            if exit_code is not None and (
+                not isinstance(exit_code, int) or isinstance(exit_code, bool)
+            ):
+                raise PilotError(f"invalid mutmut metadata {meta_path}: invalid exit code")
+            canonical_name = _canonical_mutant_name(raw_name)
+            if canonical_name in scoped:
+                raise PilotError(f"duplicate canonical mutant name: {canonical_name}")
+            scoped[canonical_name] = exit_code
     if not scoped:
         raise PilotError(f"no mutants matched owner allowlist: {owner.key}")
     return scoped
 
 
-def _owner_report(owner: Owner, repo_root: Path) -> dict[str, Any]:
-    """Build deterministic outcomes for one owner."""
+def _outcomes(exit_codes: dict[str, int | None]) -> dict[str, list[str]]:
     outcomes: dict[str, list[str]] = {}
-    for mutant_name, exit_code in sorted(_load_exit_codes(owner, repo_root).items()):
+    for mutant_name, exit_code in sorted(exit_codes.items()):
         status = STATUS_BY_EXIT_CODE.get(exit_code, "unknown")
         outcomes.setdefault(status, []).append(mutant_name)
-    counts = {status: len(names) for status, names in sorted(outcomes.items())}
-    counts["total"] = sum(counts.values())
+    return outcomes
+
+
+def _measure(owner: Owner, outcomes: dict[str, list[str]]) -> dict[str, Any]:
+    """Compute counts and the kill rate for one owner's outcomes."""
+    undetected = {name for status in UNDETECTED_STATUSES for name in outcomes.get(status, [])}
+    equivalent = sorted(undetected & set(owner.equivalents))
+    counts = {key: 0 for key in MEASURED_KEYS}
+    for status, names in outcomes.items():
+        if status in counts:
+            counts[status] = len(names)
+    counts["total"] = sum(len(names) for names in outcomes.values())
+    counts["equivalent"] = len(equivalent)
+    detected = counts["killed"] + counts["timeout"]
+    denominator = counts["total"] - counts["equivalent"]
+    counts["kill_rate"] = round(detected / denominator, 4) if denominator else 1.0
+    return counts
+
+
+def owner_report(owner: Owner, outcomes: dict[str, list[str]]) -> dict[str, Any]:
+    """Build the deterministic comparison of one owner against its floor."""
+    measured = _measure(owner, outcomes)
+    undetected = {name for status in UNDETECTED_STATUSES for name in outcomes.get(status, [])}
+    present = {name for names in outcomes.values() for name in names}
+    fatal = {
+        status: outcomes[status] for status in sorted(FATAL_STATUSES) if outcomes.get(status)
+    }
+    below_floor = measured["kill_rate"] < owner.floor
     return {
-        "counts": counts,
-        "functions": list(owner.functions),
+        "architecture_owner": owner.architecture_owner,
+        "fatal_outcomes": fatal,
+        "floor": owner.floor,
+        "killed_equivalents": sorted((set(owner.equivalents) & present) - undetected),
+        "measured": measured,
         "outcomes": {status: names for status, names in sorted(outcomes.items())},
-        "source": owner.source,
-        "test_seams": list(owner.test_seams),
+        "stale_equivalents": sorted(set(owner.equivalents) - present),
+        "status": "regression" if (below_floor or fatal) else "accepted",
+        "unlisted_survivors": sorted(undetected - set(owner.equivalents)),
     }
-
-
-def _baseline_payload(owner_reports: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Create an explicit survivor allowlist from current outcomes."""
-    owners: dict[str, Any] = {}
-    for owner in OWNERS:
-        report = owner_reports[owner.key]
-        fatal = sorted(
-            mutant_name
-            for status in FATAL_STATUSES
-            for mutant_name in report["outcomes"].get(status, [])
-        )
-        if fatal:
-            fatal_counts = {
-                status: len(report["outcomes"].get(status, []))
-                for status in sorted(FATAL_STATUSES)
-                if report["outcomes"].get(status)
-            }
-            raise PilotError(
-                f"cannot baseline {owner.key}: non-survivor failures present: {fatal_counts}"
-            )
-        owners[owner.key] = {
-            "accepted_survivors": report["outcomes"].get("survived", []),
-            "functions": report["functions"],
-            "source": report["source"],
-            "test_seams": report["test_seams"],
-        }
-    return {
-        "owners": owners,
-        "schema_version": SCHEMA_VERSION,
-        "tool": {"name": "mutmut", "version": MUTMUT_VERSION},
-    }
-
-
-def _validate_baseline(payload: dict[str, object]) -> dict[str, dict[str, Any]]:
-    """Validate the baseline schema and owner allowlist."""
-    if payload.get("schema_version") != SCHEMA_VERSION:
-        raise BaselineError("invalid mutation baseline: unsupported schema_version")
-    if payload.get("tool") != {"name": "mutmut", "version": MUTMUT_VERSION}:
-        raise BaselineError("invalid mutation baseline: tool version mismatch")
-    owners = payload.get("owners")
-    if not isinstance(owners, dict) or set(owners) != {owner.key for owner in OWNERS}:
-        raise BaselineError("invalid mutation baseline: owner set mismatch")
-
-    validated: dict[str, dict[str, Any]] = {}
-    for owner in OWNERS:
-        entry = owners.get(owner.key)
-        if not isinstance(entry, dict):
-            raise BaselineError(f"invalid mutation baseline: malformed owner {owner.key}")
-        expected_contract = {
-            "functions": list(owner.functions),
-            "source": owner.source,
-            "test_seams": list(owner.test_seams),
-        }
-        for key, expected in expected_contract.items():
-            if entry.get(key) != expected:
-                raise BaselineError(
-                    f"invalid mutation baseline: {owner.key} {key} does not match allowlist"
-                )
-        accepted = entry.get("accepted_survivors")
-        if not isinstance(accepted, list) or not all(isinstance(name, str) for name in accepted):
-            raise BaselineError(
-                f"invalid mutation baseline: {owner.key} accepted_survivors must be strings"
-            )
-        if accepted != sorted(set(accepted)):
-            raise BaselineError(
-                f"invalid mutation baseline: {owner.key} accepted_survivors must be sorted and unique"
-            )
-        validated[owner.key] = entry
-    return validated
-
-
-def _compare_with_baseline(
-    owner_reports: dict[str, dict[str, Any]],
-    baseline_owners: dict[str, dict[str, Any]],
-) -> tuple[dict[str, Any], bool]:
-    """Compare current outcomes with the explicit survivor allowlist."""
-    comparisons: dict[str, Any] = {}
-    failed = False
-    for owner in OWNERS:
-        report = owner_reports[owner.key]
-        accepted = set(baseline_owners[owner.key]["accepted_survivors"])
-        survivors = set(report["outcomes"].get("survived", []))
-        unexpected_survivors = sorted(survivors - accepted)
-        resolved_survivors = sorted(accepted - survivors)
-        fatal_outcomes = {
-            status: report["outcomes"].get(status, [])
-            for status in sorted(FATAL_STATUSES)
-            if report["outcomes"].get(status)
-        }
-        owner_failed = bool(unexpected_survivors or fatal_outcomes)
-        failed |= owner_failed
-        comparisons[owner.key] = {
-            "fatal_outcomes": fatal_outcomes,
-            "resolved_survivors": resolved_survivors,
-            "status": "regression" if owner_failed else "accepted",
-            "unexpected_survivors": unexpected_survivors,
-        }
-    return comparisons, failed
 
 
 def _sanitized_environment() -> dict[str, str]:
@@ -373,14 +353,16 @@ def _sanitized_environment() -> dict[str, str]:
     return environment
 
 
-def _run_mutmut(*, max_children: int, reuse_cache: bool, repo_root: Path) -> float:
-    """Execute exactly the allowlisted mutmut patterns."""
+def _run_mutmut(
+    owners: tuple[Owner, ...], *, max_children: int, reuse_cache: bool, repo_root: Path
+) -> float:
+    """Execute exactly the owners' function patterns."""
     if not reuse_cache:
         shutil.rmtree(repo_root / "mutants", ignore_errors=True)
     executable = shutil.which("mutmut")
     if executable is None:
         raise PilotError("mutmut is not installed; run uv sync --extra dev")
-    patterns = [pattern for owner in OWNERS for pattern in owner.patterns]
+    patterns = [pattern for owner in owners for pattern in owner.patterns]
     command = [executable, "run", "--max-children", str(max_children), *patterns]
     started = time.monotonic()
     result = subprocess.run(  # noqa: S603 - fixed executable and owner patterns
@@ -393,7 +375,7 @@ def _run_mutmut(*, max_children: int, reuse_cache: bool, repo_root: Path) -> flo
     )
     elapsed = time.monotonic() - started
     # mutmut 3.6.0 returns zero for completed runs even when mutants survive;
-    # individual outcomes are authoritative in the metadata read below.
+    # individual outcomes are authoritative in the metadata read afterwards.
     if result.returncode != 0:
         output = "\n".join(part for part in (result.stdout, result.stderr) if part)
         raise PilotError(
@@ -403,16 +385,7 @@ def _run_mutmut(*, max_children: int, reuse_cache: bool, repo_root: Path) -> flo
 
 
 def _write_report(path: Path, payload: dict[str, Any]) -> None:
-    """Atomically write canonical mutation evidence.
-
-    Routes through :func:`apm_cli.utils.atomic_io.atomic_write_text`, the
-    single canonical atomic-write primitive, so the on-disk bytes use LF
-    line endings on every platform (Windows text-mode writes would
-    otherwise translate ``\\n`` to ``\\r\\n``, see microsoft/apm#2233).
-    The payload is serialized with ``ensure_ascii=True`` so the resulting
-    text -- and therefore its UTF-8 encoding -- contains only printable
-    ASCII bytes.
-    """
+    """Atomically write canonical, printable-ASCII mutation evidence (LF endings)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
     try:
@@ -421,11 +394,70 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
         raise PilotError(f"failed to write mutation report {path}: {error}") from error
 
 
-def _parse_args() -> argparse.Namespace:
+def truncated_floor(kill_rate: float) -> float:
+    """Return the kill rate truncated (never rounded up) to two decimals."""
+    return math.floor(kill_rate * 100 + 1e-9) / 100
+
+
+def updated_floors_payload(
+    payload: dict[str, Any], reports: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Record measured rates; floors only ever rise."""
+    updated = json.loads(json.dumps(payload))
+    for key, report in reports.items():
+        if report["fatal_outcomes"]:
+            raise PilotError(f"cannot update floors for {key}: non-survivor failures present")
+        entry = updated["owners"][key]
+        measured = report["measured"]
+        entry["measured"] = measured
+        entry["floor"] = max(float(entry["floor"]), truncated_floor(measured["kill_rate"]))
+    return updated
+
+
+def check_floor_ratchet(current: dict[str, Any], base: dict[str, Any] | None) -> list[str]:
+    """Return ratchet violations: floors never lower and owners never disappear."""
+    parse_floors(current)
+    if base is None:
+        return []
+    base_owners = base.get("owners")
+    if not isinstance(base_owners, dict):
+        return []
+    current_owners = current["owners"]
+    problems = []
+    for key, base_entry in sorted(base_owners.items()):
+        entry = current_owners.get(key)
+        if entry is None:
+            problems.append(f"{key}: owner removed from mutation floors")
+            continue
+        base_floor = base_entry.get("floor") if isinstance(base_entry, dict) else None
+        if isinstance(base_floor, (int, float)) and entry["floor"] < base_floor:
+            problems.append(f"{key}: floor lowered from {base_floor} to {entry['floor']}")
+    return problems
+
+
+def negative_control(owner: Owner, outcomes: dict[str, list[str]]) -> dict[str, Any]:
+    """Simulate a test-suite regression by turning every detected mutant into a survivor."""
+    simulated = {
+        status: list(names)
+        for status, names in outcomes.items()
+        if status not in DETECTED_STATUSES
+    }
+    flipped = [name for status in sorted(DETECTED_STATUSES) for name in outcomes.get(status, [])]
+    simulated["survived"] = sorted([*simulated.get("survived", []), *flipped])
+    return owner_report(owner, simulated)
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
+    parser.add_argument("--floors", type=Path, default=DEFAULT_FLOORS)
     parser.add_argument("--max-children", type=int, default=2)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--owner",
+        action="append",
+        default=[],
+        help="Restrict the run to this floors.json owner key (repeatable).",
+    )
     parser.add_argument(
         "--report-only",
         action="store_true",
@@ -437,82 +469,147 @@ def _parse_args() -> argparse.Namespace:
         help="Reuse the local mutants directory instead of starting fresh.",
     )
     parser.add_argument(
-        "--update-baseline",
+        "--update-floors",
         action="store_true",
-        help="Replace the survivor allowlist with the current clean outcomes.",
+        help="Record measured rates and raise (never lower) each floor.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--negative-control",
+        metavar="OWNER",
+        help="Prove the comparator fails when OWNER loses every kill; exit 0 if detected.",
+    )
+    parser.add_argument(
+        "--check-floor-ratchet",
+        action="store_true",
+        help="Validate floors.json and reject floor decreases against --base-ref.",
+    )
+    parser.add_argument("--base-ref", help="Git ref holding the previous floors.json.")
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    """Run the pilot, write its report, and enforce the checked-in baseline."""
-    args = _parse_args()
-    if args.max_children < 1:
-        print("[x] --max-children must be at least 1", file=sys.stderr)
-        return 2
+def _select_owners(owners: tuple[Owner, ...], keys: list[str]) -> tuple[Owner, ...]:
+    if not keys:
+        return owners
+    known = {owner.key: owner for owner in owners}
+    unknown = sorted(set(keys) - set(known))
+    if unknown:
+        raise PilotError(f"unknown mutation owner(s): {', '.join(unknown)}")
+    return tuple(known[key] for key in sorted(set(keys)))
 
-    try:
-        elapsed = 0.0
-        if args.report_only:
-            print("[!] Report-only mode reuses existing mutmut metadata without executing tests.")
-        else:
-            mode = "cached" if args.reuse_cache else "fresh"
-            print(f"[i] Starting {mode} mutation execution.")
-            elapsed = _run_mutmut(
-                max_children=args.max_children,
-                reuse_cache=args.reuse_cache,
-                repo_root=REPO_ROOT,
-            )
-        owner_reports = {owner.key: _owner_report(owner, REPO_ROOT) for owner in OWNERS}
 
-        if args.update_baseline:
-            baseline_payload = _baseline_payload(owner_reports)
-            args.baseline.parent.mkdir(parents=True, exist_ok=True)
-            write_baseline(args.baseline, baseline_payload, label="mutation")
+def _run_ratchet(args: argparse.Namespace) -> int:
+    current = load_baseline(args.floors, label="mutation floors")
+    base = None
+    if args.base_ref:
+        base = load_baseline_at_ref(
+            REPO_ROOT, args.floors, args.base_ref, label="mutation floors"
+        )
+    problems = check_floor_ratchet(current, base)
+    for problem in problems:
+        print(f"[x] Mutation floor ratchet: {_ascii(problem)}", file=sys.stderr)
+    if problems:
+        return 1
+    print(f"[+] Mutation floors valid; no floor lowered ({len(current['owners'])} owners).")
+    return 0
 
-        baseline_payload = load_baseline(args.baseline, label="mutation")
-        baseline_owners = _validate_baseline(baseline_payload)
-        comparisons, failed = _compare_with_baseline(owner_reports, baseline_owners)
-        report = {
-            "comparisons": comparisons,
-            "owners": owner_reports,
+
+def _run_negative_control(owners: tuple[Owner, ...], key: str) -> int:
+    owner = _select_owners(owners, [key])[0]
+    report = negative_control(owner, _outcomes(_load_exit_codes(owner, REPO_ROOT)))
+    rate = report["measured"]["kill_rate"]
+    if report["status"] == "regression":
+        print(
+            f"[+] Negative control detected: {key} kill rate {rate} "
+            f"is below floor {owner.floor}; the floor check fails as designed."
+        )
+        return 0
+    print(
+        f"[x] Negative control NOT detected: {key} kill rate {rate} vs floor {owner.floor}",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _print_summary(reports: dict[str, dict[str, Any]], elapsed: float | None) -> None:
+    total = sum(r["measured"]["total"] for r in reports.values())
+    runtime = "metadata only" if elapsed is None else f"{elapsed:.1f}s runtime"
+    print(f"[i] Mutation floors: {len(reports)} owners, {total} mutants, {runtime}")
+    for key, report in reports.items():
+        measured = report["measured"]
+        symbol = "[+]" if report["status"] == "accepted" else "[x]"
+        print(
+            f"{symbol} {key}: kill_rate={measured['kill_rate']} floor={report['floor']} "
+            f"total={measured['total']} killed={measured['killed']} "
+            f"timeout={measured['timeout']} survived={measured['survived']} "
+            f"no_tests={measured['no_tests']} equivalent={measured['equivalent']}"
+        )
+        for label in ("unlisted_survivors", "killed_equivalents", "stale_equivalents"):
+            if report[label]:
+                print(f"[!] {key}: {len(report[label])} {label.replace('_', ' ')}")
+
+
+def _run_floors(args: argparse.Namespace, payload: dict[str, Any], owners: tuple[Owner, ...]) -> int:
+    selected = _select_owners(owners, args.owner)
+    elapsed = None
+    if args.report_only:
+        print("[!] Report-only mode reuses existing mutmut metadata without executing tests.")
+    else:
+        print(f"[i] Starting {'cached' if args.reuse_cache else 'fresh'} mutation execution.")
+        elapsed = _run_mutmut(
+            selected,
+            max_children=args.max_children,
+            reuse_cache=args.reuse_cache,
+            repo_root=REPO_ROOT,
+        )
+    reports = {
+        owner.key: owner_report(owner, _outcomes(_load_exit_codes(owner, REPO_ROOT)))
+        for owner in selected
+    }
+    if args.update_floors:
+        payload = updated_floors_payload(payload, reports)
+        write_baseline(args.floors, payload, label="mutation floors")
+        parse_floors(payload)
+    failed = any(report["status"] == "regression" for report in reports.values())
+    _write_report(
+        args.output,
+        {
+            "kill_rate_definition": KILL_RATE_DEFINITION,
+            "owners": reports,
             "schema_version": SCHEMA_VERSION,
             "status": "regression" if failed else "accepted",
             "tool": {"name": "mutmut", "version": MUTMUT_VERSION},
-        }
-        _write_report(args.output, report)
-    except (BaselineError, PilotError) as error:
-        print(f"[x] Mutation pilot failed: {_ascii(str(error))}", file=sys.stderr)
-        return 1
-
-    total = sum(report["counts"]["total"] for report in owner_reports.values())
-    survivors = sum(report["counts"].get("survived", 0) for report in owner_reports.values())
-    runtime = "metadata only" if args.report_only else f"{elapsed:.1f}s runtime"
-    print(f"[+] Mutation pilot report: {total} mutants, {survivors} survivors, {runtime}")
+        },
+    )
+    _print_summary(reports, elapsed)
     print(f"[i] Report written to {_ascii(str(args.output))}")
-    for owner in OWNERS:
-        counts = owner_reports[owner.key]["counts"]
-        print(
-            f"[i] {owner.key}: total={counts['total']} "
-            f"killed={counts.get('killed', 0)} survived={counts.get('survived', 0)} "
-            f"timeout={counts.get('timeout', 0)} suspicious={counts.get('suspicious', 0)}"
-        )
-        resolved_count = len(comparisons[owner.key]["resolved_survivors"])
-        if resolved_count:
-            print(
-                f"[i] {owner.key}: {resolved_count} accepted survivor(s) are now killed; "
-                "review and rerun with --update-baseline."
-            )
     if failed:
         print(
-            "[x] Unexpected mutation outcomes are not allowlisted. "
-            "Inspect the JSON report, use 'mutmut results' to find each survivor, "
-            "then run 'mutmut show <name>'; "
-            "add a behavioral test before updating the baseline.",
+            "[x] A kill rate dropped below its floor or mutation evidence is incomplete. "
+            "Run 'mutmut show <name>' for each unlisted survivor and add a behavioral "
+            "test; list a survivor as equivalent only with a reviewed reason.",
             file=sys.stderr,
         )
         return 1
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the mutation floors check, a negative control, or the floor ratchet."""
+    args = _parse_args(argv)
+    if args.max_children < 1:
+        print("[x] --max-children must be at least 1", file=sys.stderr)
+        return 2
+    try:
+        if args.check_floor_ratchet:
+            return _run_ratchet(args)
+        payload = load_baseline(args.floors, label="mutation floors")
+        owners = parse_floors(payload)
+        if args.negative_control:
+            return _run_negative_control(owners, args.negative_control)
+        return _run_floors(args, payload, owners)
+    except (BaselineError, PilotError) as error:
+        print(f"[x] Mutation floors failed: {_ascii(str(error))}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

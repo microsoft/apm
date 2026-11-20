@@ -56,6 +56,16 @@ jobs:
         uv run --frozen --extra dev python scripts/check_complexity_ratchet.py \
           --base-ref "$BASE_SHA"
 
+    - name: Mutation floor ratchet (floors never lower)
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      run: |
+        # Sub-second: validates tests/mutation/floors.json and rejects any
+        # per-owner kill-rate floor decrease vs base. Mutation runs nightly.
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+          --check-floor-ratchet --base-ref "$BASE_SHA"
+
     - name: Check YAML encoding safety
       run: |
         # Ensure YAML file I/O goes through yaml_io helpers.

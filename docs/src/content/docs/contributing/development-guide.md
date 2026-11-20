@@ -278,51 +278,46 @@ Gates only move upward. When actual coverage exceeds the gate by at least
 CI's coverage summaries include a "Lowest-coverage files" section, rendered by
 `scripts/coverage-summary.py`, to identify where new tests would help.
 
-### Running the bounded mutation pilot
+### Mutation kill-rate floors
 
-The advisory mutation pilot covers five stable owners: dependency subset
-selection, update-plan construction, cached-policy serialization, canonical
-in-package link projection, and lockfile field normalization (the fail-closed
-`host_type`/`exec_status` normalizers, not the `@dataclass` reconstruction
-methods `to_dict`/`from_dict`/`to_dependency_ref` -- mutmut cannot mutate
-`@dataclass` methods; those are defended by PR #2246's manual mutation-break
-twins instead). It runs nightly or by manual workflow
-dispatch, not as required PR CI, and has a 20-minute hosted job budget.
+Mutation testing covers about 20 high-blast owners. Each owner in
+[`tests/mutation/floors.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/floors.json)
+lists its architecture owner, the exact functions mutated, the test seams that
+may kill them, a kill-rate floor, the last measured counts, and the reviewed
+equivalent mutants. Kill rate is `(killed + timeout) / (total - equivalent)`.
+A scheduled workflow (nightly or manual dispatch, not a PR check) fails when
+any owner drops below its floor or a mutant ends in an incomplete state.
+mutmut cannot mutate methods of `@dataclass` classes, so targets avoid them.
 
-Run the exact-function allowlist locally:
-
-```bash
-uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --output mutation-pilot-report.json
-```
-
-The command fails on new survivors, timeouts, suspicious results, unchecked
-mutants, and incomplete outcomes. It writes a sorted, timestamp-free JSON
-report even when survivor comparison fails. Pass `--reuse-cache` only when
-the allowlisted source, test seams, configuration, runner, and lockfile
-are unchanged.
-
-To inspect existing mutmut metadata without executing mutants:
+Run every owner, or one owner while iterating:
 
 ```bash
-uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --report-only --output mutation-pilot-report.json
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py --owner install-outcome
 ```
 
-The reviewed survivor allowlist lives in
-[`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json).
-Do not update it to make a run green. Review every surviving diff with
-`mutmut show` and add behavioral tests for real contract gaps.
-Mutant numbers can shift when a function changes. Compare the old and new
-diffs before replacing an accepted ID; a renamed survivor is not a newly
-killed behavior. Add missing coverage to the owner's configured test seam,
-not only to tests outside the pilot.
-Use `--update-baseline` only when the baseline change itself has been reviewed:
+For each unlisted survivor, run `mutmut show <name>` and add a behavioral
+test to the owner's test seam. List a survivor under `equivalents` only with a
+reviewed `class` and `reason`:
+
+- `semantic-equivalent`: the mutant cannot change behavior.
+- `defensive-unreachable`: no caller can reach the mutated branch.
+- `unobservable-diagnostic-text`: debug-level or log-only text. The reason
+  starts with `debug:` or `log-only:` and names where the text is emitted.
+  Error, warning and remediation text a user sees is a promise: it is never
+  equivalent and needs a killing test.
+
+After review, record the new rates. Floors only rise:
 
 ```bash
-uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --update-baseline --output mutation-pilot-report.json
+uv run --frozen --extra dev python scripts/run_mutation_pilot.py --update-floors
 ```
+
+The CI Lint job runs `--check-floor-ratchet --base-ref <base sha>`, which
+rejects a lowered floor or a removed owner. Remapping `architecture_owner`
+never lowers a floor. `--negative-control <owner>` re-reads the last run with
+every kill of that owner turned into a survivor and exits 0 only when the
+floor check catches it; the scheduled job runs it after every run.
 
 ## Coding Style
 

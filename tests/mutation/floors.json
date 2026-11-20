@@ -1,0 +1,576 @@
+{
+  "kill_rate_definition": "(killed + timeout) / (total - equivalent)",
+  "owners": {
+    "apm-home-resolution": {
+      "architecture_owner": "apm-home-resolution",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "get_apm_home",
+            "get_manifest_path",
+            "get_lockfile_dir",
+            "manifest_root",
+            "is_user_scope"
+          ],
+          "source": "src/apm_cli/core/scope.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/core/test_scope.py"
+      ]
+    },
+    "cached-policy-shape": {
+      "architecture_owner": "cached-policy-shape",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "_policy_to_dict"
+          ],
+          "source": "src/apm_cli/policy/discovery.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_covers_every_dataclass_leaf",
+        "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
+        "tests/unit/policy/test_cache_merged_effective.py::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip"
+      ]
+    },
+    "credential-origin-scope": {
+      "architecture_owner": "credential-origin-scope",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "strip_cross_origin_credential_headers",
+            "origin_bound_refusal",
+            "_origin_key",
+            "_comparable_paths",
+            "_path_within",
+            "_comparable_host"
+          ],
+          "source": "src/apm_cli/utils/http_credentials.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/utils/test_http_credentials.py"
+      ]
+    },
+    "dependency-identity-materialization": {
+      "architecture_owner": "dependency-identity-materialization",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "normalize_package_repo_url",
+            "build_dependency_unique_key",
+            "build_canonical_dependency_string"
+          ],
+          "source": "src/apm_cli/models/dependency/identity.py"
+        },
+        {
+          "functions": [
+            "build_update_plan"
+          ],
+          "source": "src/apm_cli/install/plan.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/install/test_plan.py",
+        "tests/unit/models/test_dependency_identity.py"
+      ]
+    },
+    "dependency-selection-merge": {
+      "architecture_owner": "dependency-selection-merge",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "skill_subset_filter_tokens",
+            "parse_skill_subset",
+            "parse_target_subset",
+            "_closest_target",
+            "_levenshtein_distance"
+          ],
+          "source": "src/apm_cli/models/dependency/subsets.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/test_skill_subset_persistence.py",
+        "tests/unit/test_dep_targets_persistence.py"
+      ]
+    },
+    "deployment-provenance-state": {
+      "architecture_owner": "deployment-provenance-state",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "DeploymentLedgerCodec.deployed_file_hashes",
+            "DeploymentLedgerCodec.active_file_owners",
+            "DeploymentLedgerCodec.valid_owner_keys",
+            "DeploymentLedgerCodec.owner_reference_violations"
+          ],
+          "source": "src/apm_cli/core/deployment_ledger.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/test_audit_deployment_owners.py",
+        "tests/unit/core/test_bundle_row_scope.py"
+      ]
+    },
+    "deterministic-atomic-text-writes": {
+      "architecture_owner": "deterministic-atomic-text-writes",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "normalize_crlf_to_lf",
+            "write_text_lf",
+            "atomic_write_text",
+            "_validate_temp_name_fragment"
+          ],
+          "source": "src/apm_cli/utils/atomic_io.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/utils/test_atomic_io.py"
+      ]
+    },
+    "effective-install-target-selection": {
+      "architecture_owner": "effective-install-target-selection",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "normalize_target_list",
+            "_declared_target"
+          ],
+          "source": "src/apm_cli/core/target_detection.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/core/test_target_detection.py"
+      ]
+    },
+    "executable-trust-context": {
+      "architecture_owner": "executable-trust-context",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "resolve_exec_decision",
+            "exec_trust_context_for_project",
+            "resolve_project_exec_allow_map",
+            "_org_denies",
+            "_deny_glob_match"
+          ],
+          "source": "src/apm_cli/security/executables.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/security/test_resolve_exec_decision.py",
+        "tests/unit/security/test_executables.py",
+        "tests/unit/security/test_exec_vocab_unification.py"
+      ]
+    },
+    "file-level-deploy-sync-cleanup": {
+      "architecture_owner": "file-level-deploy-sync-cleanup",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "_is_skill_directory_entry",
+            "remove_stale_deployed_files"
+          ],
+          "source": "src/apm_cli/integration/cleanup.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/integration/test_cleanup_helper.py",
+        "tests/unit/integration/test_cleanup_skill_dirs.py"
+      ]
+    },
+    "frontmatter-bom-bounded-yaml": {
+      "architecture_owner": "frontmatter-bom-bounded-yaml",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "loads_frontmatter",
+            "load_frontmatter",
+            "_bounded_load"
+          ],
+          "source": "src/apm_cli/utils/yaml_io.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/test_yaml_io.py",
+        "tests/unit/utils/test_frontmatter_horizontal_rules.py"
+      ]
+    },
+    "host-credential-resolution": {
+      "architecture_owner": "host-credential-resolution",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "classify_auth_outcome",
+            "is_ado_signin_location",
+            "_classify_response",
+            "_transport_kind"
+          ],
+          "source": "src/apm_cli/core/auth_outcome.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/core/test_auth_outcome.py"
+      ]
+    },
+    "install-outcome": {
+      "architecture_owner": "install-outcome",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "diagnostic_error_count",
+            "install_command_outcome",
+            "missing_requested_components",
+            "require_requested_components"
+          ],
+          "source": "src/apm_cli/install/outcome.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/install/test_install_outcome.py"
+      ]
+    },
+    "link-projection": {
+      "architecture_owner": null,
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "UnifiedLinkResolver._resolve_in_package_asset_link"
+          ],
+          "source": "src/apm_cli/compilation/link_resolver.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/compilation/test_link_resolver.py",
+        "tests/unit/compilation/test_link_resolver_phase3.py",
+        "tests/unit/compilation/test_link_resolver_resolution.py"
+      ]
+    },
+    "network-host-loopback-classification": {
+      "architecture_owner": "network-host-loopback-classification",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "parse_host_address",
+            "is_loopback_host"
+          ],
+          "source": "src/apm_cli/utils/net.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/utils/test_net.py"
+      ]
+    },
+    "neutral-hook-contract": {
+      "architecture_owner": "neutral-hook-contract",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "_handler_to_ir",
+            "_entries_to_ir",
+            "_escape_json_pointer"
+          ],
+          "source": "src/apm_cli/hook_contract.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/integration/test_hook_native_metadata.py",
+        "tests/unit/integration/test_cursor_hook_native_contract.py"
+      ]
+    },
+    "read-only-lockfile-path": {
+      "architecture_owner": "read-only-lockfile-path",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "resolve_lockfile_path_for_read",
+            "resolve_reproducible_timestamp",
+            "_normalize_lockfile_host_type",
+            "_normalize_exec_status"
+          ],
+          "source": "src/apm_cli/deps/lockfile.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/deps/test_lockfile_field_properties.py"
+      ]
+    },
+    "target-scoped-deployed-file-contraction": {
+      "architecture_owner": "target-scoped-deployed-file-contraction",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "DeploymentReconciler.current_claimed_paths",
+            "DeploymentReconciler._is_stale",
+            "DeploymentReconciler._is_generic_stale",
+            "DeploymentReconciler._unchanged"
+          ],
+          "source": "src/apm_cli/core/deployment_state.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/core/test_deployment_state.py"
+      ]
+    },
+    "trust-policy-outcome": {
+      "architecture_owner": "trust-policy-outcome",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "route_discovery_outcome",
+            "resolve_trust_policy"
+          ],
+          "source": "src/apm_cli/policy/outcome_routing.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/policy/test_trust_policy_outcome.py",
+        "tests/unit/policy/test_pr_832_findings.py"
+      ]
+    },
+    "url-path-containment-decoding": {
+      "architecture_owner": "url-path-containment-decoding",
+      "equivalents": [],
+      "floor": 0.0,
+      "measured": {
+        "equivalent": 0,
+        "kill_rate": 0.0,
+        "killed": 0,
+        "no_tests": 0,
+        "survived": 0,
+        "timeout": 0,
+        "total": 0
+      },
+      "targets": [
+        {
+          "functions": [
+            "decode_url_path_segments",
+            "has_symlink_component",
+            "ensure_path_within"
+          ],
+          "source": "src/apm_cli/utils/path_security.py"
+        }
+      ],
+      "test_seams": [
+        "tests/unit/test_path_security.py"
+      ]
+    }
+  },
+  "schema_version": 2,
+  "tool": {
+    "name": "mutmut",
+    "version": "3.6.0"
+  }
+}
