@@ -247,10 +247,12 @@ def resolve_ci_audit_materialization(
             _rich_warning(f"{line} Verifying from the locked source.", symbol="warning", err=True)
     if get_workspace_deploy_root(project_root) != project_root.resolve():
         if warm:
+            from apm_cli.core.cache_drift import package_cache_drift
+
             return CiAuditMaterialization(
-                error=(
-                    f"package copies in {project_root / APM_MODULES_DIR} do not match "
-                    f"apm.lock.yaml; {USER_PACKAGE_COPIES_STALE.clause()}"
+                error=package_cache_drift(
+                    f"Package copies in {project_root / APM_MODULES_DIR}",
+                    USER_PACKAGE_COPIES_STALE.clause(),
                 )
             )
         try:

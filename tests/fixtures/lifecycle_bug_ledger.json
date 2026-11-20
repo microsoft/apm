@@ -4282,6 +4282,19 @@
       "regression_tests": [
         "tests/integration/test_native_mcp_collision_lifecycle.py::test_user_disabled_matching_codex_connection_installs_and_replays_frozen"
       ]
+    },
+    {
+      "issue": 4480,
+      "fixed_in": "Unreleased",
+      "summary": "apm audit --ci named a changed package copy with two different messages depending on which owner detected it (the audit materialization check said the copies do not match apm.lock.yaml, native plugin and Codex checks said the cache differs). Every owner now prints one message, 'package cache differs from its locked content', from core/cache_drift.py.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_codex_native_plugin_lifecycle.py::test_installed_cli_registers_complete_codex_bundle_disabled",
+        "tests/integration/test_codex_native_plugin_lifecycle.py::test_git_pinned_install_and_missing_apm_cache_restore",
+        "tests/integration/test_native_plugin_cache_audit.py::test_native_cache_tamper_fails_installed_audit",
+        "tests/unit/test_codex_native_registrar.py::test_source_identity_refusal_precedes_native_access"
+      ]
     }
   ],
   "lifecycle_contracts": [

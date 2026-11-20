@@ -17,6 +17,7 @@ import tomlkit
 import yaml
 
 from apm_cli.codex_plugins.registrar import marketplace_name
+from apm_cli.core.cache_drift import PACKAGE_CACHE_DRIFT
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.content_hash import compute_native_bundle_hash, compute_package_hash
 from apm_cli.utils.path_security import safe_rmtree
@@ -153,8 +154,14 @@ def _source(root: Path, marker: str) -> None:
     asset.chmod(0o644)
 
 
-_NATIVE_DRIFT = "cache differs"
-_REPLAY_DRIFT = "do not match apm.lock.yaml"
+# One drift message whichever owner detects the changed copy (#4480).
+_DRIFT = PACKAGE_CACHE_DRIFT
+_OLD_REPLAY_DRIFT = "do not match apm.lock.yaml"
+
+
+def _assert_one_drift_message(text: str) -> None:
+    flat = " ".join(text.split())
+    assert _DRIFT in flat and _OLD_REPLAY_DRIFT not in flat, flat
 
 
 def _audit_cache(
@@ -162,12 +169,11 @@ def _audit_cache(
     root: Path,
     env: dict[str, str],
     materialized: Path,
-    *,
-    sibling_drift: str = _NATIVE_DRIFT,
 ) -> None:
     """Native source cache drift must fail the canonical audit without native writes.
 
-    *sibling_drift* is the one message audit prints for a changed ``sibling.txt``.
+    Every changed copy (a hashed file, an unhashed cache file or a mode change)
+    names the drift with the same message.
     """
     home = Path(env["HOME"])
 
@@ -194,26 +200,21 @@ def _audit_cache(
 
     clean = audit("codex-native-cache-audit-clean")
     assert clean.returncode == 0, clean.stdout + clean.stderr
-    for relative, drift in (
-        ("sibling.txt", sibling_drift),
-        ("resources/__pycache__/asset.bin", _NATIVE_DRIFT),
-    ):
+    for relative in ("sibling.txt", "resources/__pycache__/asset.bin"):
         cached = materialized / relative
         original = cached.read_bytes()
         try:
             cached.write_bytes(original + b"\nChanged only in the APM cache.\n")
             changed = audit(f"codex-native-cache-audit-tampered-{cached.name}")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            text = " ".join((changed.stdout + changed.stderr).split())
-            other = _REPLAY_DRIFT if drift == _NATIVE_DRIFT else _NATIVE_DRIFT
-            assert drift in text and other not in text, text
+            _assert_one_drift_message(changed.stdout + changed.stderr)
             assert "Traceback" not in changed.stderr
             structured = audit(f"codex-native-cache-json-{cached.name}", json_output=True)
             assert structured.returncode != 0, structured.stdout + structured.stderr
             report = json.loads(structured.stdout)
             assert report["passed"] is False
             assert any(
-                check["name"] == "drift" and check["passed"] is False and drift in check["message"]
+                check["name"] == "drift" and check["passed"] is False and _DRIFT in check["message"]
                 for check in report["checks"]
             )
         finally:
@@ -225,7 +226,7 @@ def _audit_cache(
             cached.chmod(original_mode ^ stat.S_IXUSR)
             changed = audit("codex-native-cache-audit-mode")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            assert _NATIVE_DRIFT in " ".join((changed.stdout + changed.stderr).split())
+            _assert_one_drift_message(changed.stdout + changed.stderr)
             assert "Traceback" not in changed.stderr
         finally:
             cached.chmod(original_mode)
@@ -561,7 +562,7 @@ def test_git_pinned_install_and_missing_apm_cache_restore(
         ]["loose"]["enabled"]
         is False
     )
-    _audit_cache(runner, tmp_path, env, materialized, sibling_drift=_REPLAY_DRIFT)
+    _audit_cache(runner, tmp_path, env, materialized)
     config_path = Path(env["CODEX_HOME"]) / "config.toml"
     config_before = config_path.read_bytes()
     asset = materialized / "resources/__pycache__/asset.bin"
@@ -583,7 +584,7 @@ def test_git_pinned_install_and_missing_apm_cache_restore(
                 f"codex-native-same-pin-{fault}",
             )
             assert refused.returncode != 0, refused.stdout + refused.stderr
-            assert "cache differs" in " ".join((refused.stdout + refused.stderr).split())
+            assert _DRIFT in " ".join((refused.stdout + refused.stderr).split())
             assert "Error installing dependencies:" not in refused.stdout + refused.stderr
             assert ledger.read_bytes() == ownership_before
             assert config_path.read_bytes() == config_before
@@ -707,7 +708,7 @@ def test_git_pinned_install_and_missing_apm_cache_restore(
             "codex-native-repaired-pin-cache-refusal",
         )
         assert refused.returncode != 0, refused.stdout + refused.stderr
-        assert "cache differs" in " ".join((refused.stdout + refused.stderr).split())
+        assert _DRIFT in " ".join((refused.stdout + refused.stderr).split())
         assert ledger.read_bytes() == ownership_before
         assert config_path.read_bytes() == config_before
     finally:
