@@ -204,6 +204,10 @@ def copy_deployed_hook_bundle(
         target_file = project_root / target_rel
         ensure_path_within(target_file, project_root)
         if integrator.try_adopt_identical(target_file, source_file, target_paths):
+            # A managed script already holding the source bytes is APM's: record
+            # the receipt the skipped copy would have (#4184, #3701).
+            if managed_files and target_rel in managed_files:
+                integrator.note_rendered_write(target_file)
             if target_rel in command_target_rels:
                 result.files_adopted += 1
             continue

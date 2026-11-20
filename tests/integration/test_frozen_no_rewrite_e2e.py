@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from apm_cli.install.frozen_withdrawal import kept_lines
 from tests.integration.test_required_lifecycle_state_machine import (
     _INSTALL_ARGS,
     _new_scenario,
@@ -157,11 +158,10 @@ def test_frozen_install_kept_file_remedy_runs_to_a_clean_refusal(
     assert (kept_dir / "SKILL.md").is_file()
 
     flat = _frozen_refusal(scenario, project, scenario.environment, "kept-frozen-refusal")
-    assert (
-        "kept .claude/skills/beta/SKILL.md: already on disk before this install "
-        "(not written by it); delete or move it aside if it is not yours to keep, "
-        "then rerun 'apm install --frozen'"
-    ) in flat
+    # The kept line comes from the one kept-file shape (#4504).
+    (kept_line,) = kept_lines({".claude/skills/beta/SKILL.md": "adopted"})
+    assert " ".join(kept_line.split()).removeprefix("- ") in flat, flat
+    assert "already on disk before this install (not written by it)" in flat, flat
     assert (kept_dir / "SKILL.md").is_file()
     assert lockfile.read_bytes() == locked
 
@@ -172,7 +172,7 @@ def test_frozen_install_kept_file_remedy_runs_to_a_clean_refusal(
 
     flat = _frozen_refusal(scenario, project, scenario.environment, "kept-remedy-rerun")
     assert ".claude/skills/beta is deployed by this install but not recorded" in flat
-    assert " kept " not in flat
+    assert " kept " not in flat and "Kept " not in flat, flat
     assert "the unrecorded files were removed again" in flat
     assert not kept_dir.exists()
     assert lockfile.read_bytes() == locked

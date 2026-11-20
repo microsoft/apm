@@ -3965,8 +3965,8 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="registry-delegation-scope-manifest-path",
         rule_id="registry_delegation.scope_manifest_path",
         path="src/apm_cli/commands/update.py",
-        old="manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)",
-        new="get_deploy_root(scope)",
+        old="        manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER),\n",
+        new="        get_deploy_root(scope),\n",
         intent="User-scope update discovers policy from the deploy root.",
     ),
     MutationCase(
