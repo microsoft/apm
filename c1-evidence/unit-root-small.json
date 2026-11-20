@@ -1,0 +1,9 @@
+{
+ "partition": "unit root and small subpackages",
+ "steps_done": [1],
+ "folds": {},
+ "decisions": [
+  "step1: --report-equal-copies lists 3 in-scope copies (test_base_integrator, test_hook_integrator, test_prune_command); all 3 files are owned by open PRs, left untouched"
+ ],
+ "counts_left": {"same_body_groups": 88, "unclassified_modules": null, "placement_offenders": null, "weak_tests": null}
+}
