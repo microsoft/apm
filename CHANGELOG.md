@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4158)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
+- Internal: PR checks run the full Windows unit suite (3 shards), the same selection main push runs. (closes #4115, #4150)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
+- Faster CLI startup: `apm --help` and every verb load command modules and GitPython only when needed (`apm --help` imports 332 modules instead of 767); help text and exit codes are unchanged. (closes #4118, #4150)
+- Internal: architecture-linter mutation tests share one session cache, so each file is walked and parsed once instead of once per case; findings are unchanged. (closes #4119, #4150)
 - Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
 - Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
 - Internal: lifecycle tests share one hermetic world: nine fixture packages, local git, marketplace, MCP registry and policy services, cloned per test in milliseconds. (#4142)
@@ -28,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
 - Internal: lifecycle tests add security tables and all 25 documented user journeys, each credited only through oracle receipts. (#4156)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
+- Internal: each CI shard collects only its own test files instead of every test root, checked against a full collect on the same commit. (closes #4120, #4150)
 
 ### Fixed
 

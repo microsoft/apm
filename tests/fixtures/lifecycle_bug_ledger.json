@@ -2319,6 +2319,16 @@
       ]
     },
     {
+      "issue": 4115,
+      "fixed_in": "0.37.0",
+      "summary": "PERF-H2: the PR Windows gate ran only windows_compat unit tests while main push ran the full Windows unit suite, so Windows-only unit regressions passed PR checks and turned main red (11 of 21 red main pushes, 2026-11-05..19).",
+      "failure_modes": ["portability", "observation"],
+      "properties": ["portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/quality/test_ci_topology.py::test_pr_windows_gate_runs_every_windows_unit_node"
+      ]
+    },
+    {
       "issue": 4116,
       "fixed_in": "Unreleased",
       "summary": "PERF-H1, PERF-H9: the declared merge_group gate (full integration, binary build, release validation, global coverage floor) gated no merge after 2026-09-09 while merge-gate.yml and the workflow comments still described it as live; regressions outside lifecycle smoke surfaced only in the nightly.",
@@ -2335,6 +2345,49 @@
         "tests/quality/test_ci_topology.py::test_global_coverage_floor_gates_the_merge",
         "tests/quality/test_ci_topology.py::test_merge_queue_freshness_alarm_is_scheduled",
         "tests/unit/scripts/test_merge_queue_freshness.py::test_bypassed_queue_names_last_run_and_commits_since_it"
+      ]
+    },
+    {
+      "issue": 4118,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H5: apm --help imported every command module and GitPython (767 modules, spawning git version); verbs now load lazily under an installed-CLI import budget with help output and exit codes unchanged.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_cli_startup_import_budget.py::test_installed_cli_startup_stays_within_import_budget",
+        "tests/unit/test_cli_lazy_dispatch.py::test_root_help_from_stubs_matches_resolved_commands",
+        "tests/unit/test_cli_lazy_dispatch.py::test_lazy_stub_short_help_matches_resolved_command"
+      ]
+    },
+    {
+      "issue": 4119,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H6: every architecture-linter mutation case re-walked the inventory and re-parsed the repository, so the owner mutation matrix cost about 29 s per case; a session cache now parses each file content once with identical findings.",
+      "failure_modes": [
+        "cache"
+      ],
+      "properties": [
+        "portability.byte_deterministic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_per_group",
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_parses_each_file_content_at_most_once_over_full_matrix",
+        "tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix"
+      ]
+    },
+    {
+      "issue": 4120,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H8: every CI shard collected (imported) its whole test roots and then deselected the other shards' tests, so each shard and each xdist worker paid the full collection; shards now collect only their own explicit test file lists.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/quality/test_ci_topology.py::test_shard_file_lists_match_full_collection",
+        "tests/quality/test_ci_topology.py::test_windows_unit_shard_file_lists_match_full_collection"
       ]
     },
     {
