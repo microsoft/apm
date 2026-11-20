@@ -125,22 +125,28 @@ def _engine(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> subprocess
 
 def _git_config_probe_report(env: dict[str, str]) -> str:
     """Git's own answer to APM's config probe (utils/git_env.py), which APM does not print."""
-    git = shutil.which("git", path=env.get("PATH")) or "git"
+    script = (
+        "from pathlib import Path\n"
+        "from apm_cli.utils import git_env as g\n"
+        "exe = g.get_git_executable()\n"
+        "child = g.git_subprocess_env(None)\n"
+        "cmd = [exe, 'config', '--null', '--show-scope', '--list']\n"
+        "r = g._run_git_config(cmd, capture_output=True, check=False,"
+        " cwd=str(Path(exe).resolve().parent), env=child, timeout=30)\n"
+        "keys = sorted(k for k in child if k.upper().startswith(('GIT_', 'HOME', 'XDG_')))\n"
+        "print('exe', repr(exe), 'exit', r.returncode)\n"
+        "print('stderr', repr(r.stderr.decode(errors='replace')))\n"
+        "print('env', {k: child[k] for k in keys})\n"
+    )
     probe = subprocess.run(
-        (git, "config", "--null", "--show-scope", "--list"),
-        cwd=str(Path(git).resolve().parent),
+        (sys.executable, "-c", script),
         env=env,
         capture_output=True,
+        text=True,
         check=False,
-        timeout=30,
+        timeout=60,
     )
-    keys = sorted(k for k in env if k.upper().startswith(("GIT_", "HOME", "XDG_", "USERPROFILE")))
-    shown = {k: env[k] for k in keys}
-    return (
-        f"\n[world] git config probe: {git} exit {probe.returncode}\n"
-        f"[world] stderr: {probe.stderr.decode(errors='replace')!r}\n"
-        f"[world] env: {shown!r}\n"
-    )
+    return f"\n[world] apm git config probe:\n{probe.stdout}{probe.stderr}"
 
 
 def _scratch_env(env: dict[str, str], scratch: Path) -> dict[str, str]:
