@@ -206,9 +206,7 @@ def _parse_equivalent(key: str, item: object) -> tuple[str, dict[str, str]]:
         raise BaselineError(f"invalid mutation floors: {key} {mutant} class {kind!r}")
     if not isinstance(reason, str) or len(reason.strip()) < 20:
         raise BaselineError(f"invalid mutation floors: {key} {mutant} needs a reason")
-    if kind == "unobservable-diagnostic-text" and not reason.startswith(
-        DIAGNOSTIC_REASON_PREFIXES
-    ):
+    if kind == "unobservable-diagnostic-text" and not reason.startswith(DIAGNOSTIC_REASON_PREFIXES):
         raise BaselineError(
             f"invalid mutation floors: {key} {mutant} diagnostic-text reason must start "
             "with 'debug:' or 'log-only:' and name where it is emitted"
@@ -349,9 +347,7 @@ def owner_report(owner: Owner, outcomes: dict[str, list[str]]) -> dict[str, Any]
     measured = _measure(owner, outcomes)
     undetected = {name for status in UNDETECTED_STATUSES for name in outcomes.get(status, [])}
     present = {name for names in outcomes.values() for name in names}
-    fatal = {
-        status: outcomes[status] for status in sorted(FATAL_STATUSES) if outcomes.get(status)
-    }
+    fatal = {status: outcomes[status] for status in sorted(FATAL_STATUSES) if outcomes.get(status)}
     below_floor = measured["kill_rate"] < owner.floor
     return {
         "architecture_owner": owner.architecture_owner,
@@ -466,9 +462,7 @@ def check_floor_ratchet(current: dict[str, Any], base: dict[str, Any] | None) ->
 def negative_control(owner: Owner, outcomes: dict[str, list[str]]) -> dict[str, Any]:
     """Simulate a test-suite regression by turning every detected mutant into a survivor."""
     simulated = {
-        status: list(names)
-        for status, names in outcomes.items()
-        if status not in DETECTED_STATUSES
+        status: list(names) for status, names in outcomes.items() if status not in DETECTED_STATUSES
     }
     flipped = [name for status in sorted(DETECTED_STATUSES) for name in outcomes.get(status, [])]
     simulated["survived"] = sorted([*simulated.get("survived", []), *flipped])
@@ -529,9 +523,7 @@ def _run_ratchet(args: argparse.Namespace) -> int:
     current = load_baseline(args.floors, label="mutation floors")
     base = None
     if args.base_ref:
-        base = load_baseline_at_ref(
-            REPO_ROOT, args.floors, args.base_ref, label="mutation floors"
-        )
+        base = load_baseline_at_ref(REPO_ROOT, args.floors, args.base_ref, label="mutation floors")
     problems = check_floor_ratchet(current, base)
     for problem in problems:
         print(f"[x] Mutation floor ratchet: {_ascii(problem)}", file=sys.stderr)
@@ -576,7 +568,9 @@ def _print_summary(reports: dict[str, dict[str, Any]], elapsed: float | None) ->
                 print(f"[!] {key}: {len(report[label])} {label.replace('_', ' ')}")
 
 
-def _run_floors(args: argparse.Namespace, payload: dict[str, Any], owners: tuple[Owner, ...]) -> int:
+def _run_floors(
+    args: argparse.Namespace, payload: dict[str, Any], owners: tuple[Owner, ...]
+) -> int:
     selected = _select_owners(owners, args.owner)
     elapsed = None
     if args.report_only:

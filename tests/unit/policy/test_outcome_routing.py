@@ -41,9 +41,7 @@ class _Log:
 
 def _route(result: PolicyFetchResult, *, default: str = "warn", **kwargs):
     log = _Log()
-    policy = route_discovery_outcome(
-        result, logger=log, fetch_failure_default=default, **kwargs
-    )
+    policy = route_discovery_outcome(result, logger=log, fetch_failure_default=default, **kwargs)
     return policy, log.calls
 
 
@@ -302,11 +300,14 @@ def test_resolve_trust_policy_uses_project_default_and_neutral_label(tmp_path: P
         resolve_trust_policy(root, fetch_result=PolicyFetchResult(outcome="absent"))
 
     assert str(caught.value).startswith("Blocked by org policy: no enforceable org policy")
-    assert resolve_trust_policy(
-        root,
-        fetch_result=PolicyFetchResult(outcome="absent"),
-        raise_blocking_errors=False,
-    ) is None
+    assert (
+        resolve_trust_policy(
+            root,
+            fetch_result=PolicyFetchResult(outcome="absent"),
+            raise_blocking_errors=False,
+        )
+        is None
+    )
     assert resolve_trust_policy(root, no_policy=True) is None
 
 

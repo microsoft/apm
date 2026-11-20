@@ -10,8 +10,8 @@ from apm_cli.core.deployment_state import (
     DeploymentIntent,
     DeploymentLedger,
     DeploymentLocator,
-    DeploymentReconcileResult,
     DeploymentReconciler,
+    DeploymentReconcileResult,
     DeploymentRecord,
     LocatorKind,
     MaterializationResult,
@@ -1530,15 +1530,11 @@ def test_generic_row_is_stale_only_without_any_surviving_claim(
 
 def test_dry_run_and_invalid_payloads_return_the_exact_unchanged_result(tmp_path: Path) -> None:
     first, second = _locator(), _locator(".github/agents/other.agent.md")
-    previous = DeploymentLedger(
-        records={first.key: _record(first), second.key: _record(second)}
-    )
+    previous = DeploymentLedger(records={first.key: _record(first), second.key: _record(second)})
     reconciler = _reconciler(tmp_path)
 
     dry_run = reconciler.reconcile(previous, [], replace(_intent(), dry_run=True))
-    invalid = reconciler.reconcile(
-        previous, [_materialization("a", first, valid=False)], _intent()
-    )
+    invalid = reconciler.reconcile(previous, [_materialization("a", first, valid=False)], _intent())
 
     retained = (first, second)
     assert dry_run == DeploymentReconcileResult(

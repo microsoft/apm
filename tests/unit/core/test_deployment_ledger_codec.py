@@ -49,9 +49,7 @@ def _lockfile(*records: DeploymentRecord) -> LockFile:
 def test_hash_and_owner_projections_are_keyed_by_path() -> None:
     lockfile = _lockfile(
         _record(".claude/rules/a.md", owners=("acme/a",), active="acme/a", digest="sha256:a"),
-        _record(
-            ".claude/rules/b.md", owners=("acme/a", "acme/b"), active="acme/b", digest=None
-        ),
+        _record(".claude/rules/b.md", owners=("acme/a", "acme/b"), active="acme/b", digest=None),
     )
 
     assert DeploymentLedgerCodec.deployed_file_hashes(lockfile) == {

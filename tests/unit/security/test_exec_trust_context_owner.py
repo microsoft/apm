@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 import apm_cli.security.executables as ex
-import apm_cli.security.trust as trust
+from apm_cli.security import trust
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,

@@ -355,7 +355,7 @@ class TestAtomicWriteOwnership:
     """Temp naming, text-mode contract and descriptor ownership on failure."""
 
     def _capture_temp_name(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
-        import apm_cli.utils.atomic_io as atomic_io
+        from apm_cli.utils import atomic_io
 
         names: list[str] = []
         real = atomic_io._replace_atomic_file
@@ -394,7 +394,7 @@ class TestAtomicWriteOwnership:
     ) -> None:
         import codecs
 
-        import apm_cli.utils.atomic_io as atomic_io
+        from apm_cli.utils import atomic_io
 
         seen: list[dict] = []
         real_fdopen = atomic_io.os.fdopen
@@ -413,7 +413,7 @@ class TestAtomicWriteOwnership:
     def test_fchmod_failure_is_tolerated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import apm_cli.utils.atomic_io as atomic_io
+        from apm_cli.utils import atomic_io
 
         def _fail(fd: int, mode: int) -> None:
             raise OSError("no chmod")
@@ -428,7 +428,7 @@ class TestAtomicWriteOwnership:
     def test_unwrapped_descriptor_is_closed_once_on_failure(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import apm_cli.utils.atomic_io as atomic_io
+        from apm_cli.utils import atomic_io
 
         closed: list[int] = []
         real_close = atomic_io.os.close
@@ -453,7 +453,7 @@ class TestAtomicWriteOwnership:
     def test_wrapped_descriptor_is_not_closed_twice(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import apm_cli.utils.atomic_io as atomic_io
+        from apm_cli.utils import atomic_io
 
         closed: list[int] = []
         monkeypatch.setattr(atomic_io.os, "close", closed.append)

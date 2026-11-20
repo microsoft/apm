@@ -396,4 +396,6 @@ def test_base_path_keeps_trailing_characters_other_than_slash() -> None:
         origin_bound_refusal("https://h.example/api/v", base_url="https://h.example/apiX")
         == REFUSED_OUTSIDE_BASE_PATH
     )
-    assert origin_bound_refusal("https://h.example/apiX/v", base_url="https://h.example/apiX/") is None
+    assert (
+        origin_bound_refusal("https://h.example/apiX/v", base_url="https://h.example/apiX/") is None
+    )

@@ -255,8 +255,8 @@ def test_signal_outcomes_are_classified_accurately(pilot: ModuleType) -> None:
     assert pilot.STATUS_BY_EXIT_CODE[-9] == "terminated"
     assert pilot.STATUS_BY_EXIT_CODE[-11] == "segfault"
     assert {"segfault", "terminated"} <= pilot.FATAL_STATUSES
-    assert pilot.DETECTED_STATUSES == {"killed", "timeout"}
-    assert pilot.UNDETECTED_STATUSES == {"survived", "no_tests"}
+    assert {"killed", "timeout"} == pilot.DETECTED_STATUSES
+    assert {"survived", "no_tests"} == pilot.UNDETECTED_STATUSES
 
 
 # --- kill rate and floors ------------------------------------------------------
@@ -451,9 +451,7 @@ def test_run_mutmut_respects_cache_mode_and_passes_owner_patterns(
     expected_removals: int,
 ) -> None:
     removals = []
-    monkeypatch.setattr(
-        pilot.shutil, "rmtree", lambda path, ignore_errors: removals.append(path)
-    )
+    monkeypatch.setattr(pilot.shutil, "rmtree", lambda path, ignore_errors: removals.append(path))
     run = Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(pilot.subprocess, "run", run)
     owner = _owner(pilot)
@@ -477,7 +475,7 @@ def test_mutmut_shim_keeps_stats_working_after_a_test_chdirs(
     pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import mutmut
-    import mutmut.mutation.trampoline as trampoline
+    from mutmut.mutation import trampoline
 
     monkeypatch.setattr(mutmut, "_stats", set())
     monkeypatch.setattr(trampoline, "record_trampoline_hit", trampoline.record_trampoline_hit)
