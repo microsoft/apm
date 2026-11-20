@@ -1,12 +1,8 @@
 {
   "files": {
-    "src/apm_cli/install/errors.py": 1,
-    "src/apm_cli/install/integrity.py": 1,
-    "src/apm_cli/install/local_edits.py": 3,
     "src/apm_cli/install/phases/audit.py": 1,
     "src/apm_cli/install/phases/cleanup.py": 2,
     "src/apm_cli/install/phases/codex_plugins.py": 2,
-    "src/apm_cli/install/phases/content_hash_stream.py": 1,
     "src/apm_cli/install/phases/finalize.py": 2,
     "src/apm_cli/install/phases/integrate.py": 2,
     "src/apm_cli/install/phases/local_content.py": 3,
@@ -15,15 +11,12 @@
     "src/apm_cli/install/presentation/dry_run.py": 1,
     "src/apm_cli/install/primitive_classification.py": 2,
     "src/apm_cli/install/resolution_staging.py": 1,
-    "src/apm_cli/install/service.py": 9,
     "src/apm_cli/install/services.py": 1,
     "src/apm_cli/install/skill_path_migration.py": 1,
     "src/apm_cli/install/source_helpers.py": 2,
     "src/apm_cli/install/target_filter.py": 1,
     "src/apm_cli/install/target_hints.py": 1,
-    "src/apm_cli/install/target_warnings.py": 2,
-    "src/apm_cli/policy/ci_checks.py": 7,
-    "src/apm_cli/policy/policy_checks.py": 4
+    "src/apm_cli/install/target_warnings.py": 2
   },
   "version": 1
 }

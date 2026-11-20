@@ -153,10 +153,9 @@ def frozen_install_tip(error: FrozenInstallError) -> str:
         lock_state = "MCP lock state"
     else:
         lock_state = "package lock state"
-    return (
-        f"Tip: rerun 'apm install' without --frozen to create or repair {lock_state}, "
-        "retaining the original options, including --root DIR or --global if specified."
-    )
+    from apm_cli.core.remediation import FROZEN_LOCK_STATE_DRIFT
+
+    return f"Tip: {FROZEN_LOCK_STATE_DRIFT.bind(lock_state=lock_state).sentence()}"
 
 
 class PolicyViolationError(RuntimeError):

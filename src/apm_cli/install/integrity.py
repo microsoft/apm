@@ -85,10 +85,12 @@ def enforce_installed_hash_policy(ctx: InstallContext) -> None:
     lockfile_path = get_lockfile_path(ctx.apm_dir)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
+        from ..core.remediation import LOCKFILE_UNREADABLE
+
         raise PolicyViolationError(
             "security.integrity.require_hashes is enabled but the lockfile at "
-            f"{lockfile_path} could not be read (missing or corrupt); "
-            "failing closed. Re-run 'apm install' to regenerate it."
+            f"{lockfile_path} could not be read (missing or corrupt); failing closed. "
+            f"{LOCKFILE_UNREADABLE.bind(path=lockfile_path).sentence()}"
         )
     try:
         enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)

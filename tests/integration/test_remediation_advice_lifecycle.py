@@ -981,6 +981,77 @@ def test_w3_core_models_remediation_clears_the_reported_state(
 
 # -- W4 executed proofs (install/, policy/) -----------------------------------
 # -- W4 frozen-policy proofs --
+#
+# Advice printed by policy/ and the frozen-install modules under install/. A
+# frozen install reports drift against apm.lock.yaml; the advised plain
+# install records it, and the same frozen install then succeeds.
+
+_FROZEN_INSTALL_ARGS = (*_INSTALL_ARGS, "--frozen")
+
+
+def _w4_declare_mcp_server(world: _World) -> None:
+    manifest = load_yaml(world.consumer.manifest_path)
+    manifest["dependencies"]["mcp"] = [
+        {
+            "name": "w4-frozen-mcp",
+            "registry": False,
+            "transport": "stdio",
+            "command": "printf",
+            "args": ["w4"],
+        }
+    ]
+    dump_yaml(manifest, world.consumer.manifest_path)
+
+
+def _w4_skill_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "skill-kit", skill="alpha")
+    consumer = scenario.consumers.create(
+        "skill-consumer", dependencies=(source.dependency,), targets=("copilot",)
+    )
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="remediation-w4-skill-install",
+    )
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+W4_FROZEN_POLICY_PROOFS: tuple[_BoundProof, ...] = (
+    _BoundProof(
+        "frozen-lock-state-drift",
+        _installed_world,
+        _w4_declare_mcp_server,
+        _FROZEN_INSTALL_ARGS,
+        1,
+        values=(("lock_state", "MCP lock state"),),
+    ),
+    _BoundProof(
+        "frozen-selections-changed",
+        _w4_skill_world,
+        _select_skill,
+        _FROZEN_INSTALL_ARGS,
+        1,
+    ),
+    _BoundProof(
+        "dependency-selection-changed",
+        _w4_skill_world,
+        _select_skill,
+        _FROZEN_INSTALL_ARGS,
+        1,
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W4_FROZEN_POLICY_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w4_frozen_policy_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _BoundProof
+) -> None:
+    test_w2_integration_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
 # -- end W4 frozen-policy proofs --
 # -- W4 drift-trust proofs --
 #
