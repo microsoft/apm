@@ -147,3 +147,13 @@ def test_audit_remediation_clears_the_reported_check(
     cleared = _audit(world, "remediation-audit-cleared")
     assert _check(cleared, proof.check)["passed"] is True
     assert cleared["passed"] is True, cleared
+
+
+# -- W2 executed proofs (integration/, marketplace/, bundle/) -----------------
+# -- W2 integration proofs --
+# -- end W2 integration proofs --
+# -- W2 marketplace proofs --
+# -- end W2 marketplace proofs --
+# -- W2 bundle proofs --
+# -- end W2 bundle proofs --
+# -- end W2 executed proofs ---------------------------------------------------

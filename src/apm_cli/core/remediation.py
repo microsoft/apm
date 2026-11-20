@@ -171,6 +171,15 @@ RESYNC_AFTER_UNMANAGED_CONFLICT = _entry(
     before="resolve the ownership conflicts",
 )
 
+# -- W2 (integration/, marketplace/, bundle/) --------------------------------
+# -- W2 integration --
+# -- end W2 integration --
+# -- W2 marketplace --
+# -- end W2 marketplace --
+# -- W2 bundle --
+# -- end W2 bundle --
+# -- end W2 -------------------------------------------------------------------
+
 # Drift finding kind -> the remediation that clears it. A plain 'apm install'
 # keeps a local edit to a managed file, so an edited ("modified") finding is
 # restored only by deleting it first (#3994); re-sync covers the kinds that a
