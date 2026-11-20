@@ -115,7 +115,7 @@ class TestProtocolFallbackPortWarning:
         assert (docs.scheme, docs.hostname, docs.path, docs.fragment) == (
             "https",
             "microsoft.github.io",
-            "/apm/consumer/manage-dependencies/",
+            "/apm/consumer/install-packages/",
             "transport-selection",
         )
 

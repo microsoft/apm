@@ -395,7 +395,9 @@ the marketplace and fail rather than use stale cached data. Exceptions
 until 0.38 (#2903): registry-routed catalog entries still resolve through the
 catalog (the lockfile has no registry binding), and the lockfile does not
 record catalog-inline MCP/LSP servers, so a package with locked servers and no
-`apm_modules/` copy reads the catalog, also under `--frozen`; one with no
+`apm_modules/` copy reads the catalog for server metadata only, also under
+`--frozen` (the locked commit still pins it; a catalog that now selects
+another commit fails until `apm update <name>@<marketplace>`); one with no
 locked servers (`--only=apm`, root-overridden server) fails its content-hash
 check when cold -- run `apm update` for it.
 
@@ -791,7 +793,7 @@ OpenCode 2 layout), APM writes there instead: `false` becomes
 `disabled: true`, `true` or omission writes no field, and other values warn
 and leave the file unchanged. Set `codemode: false` as an extra field to
 bypass Code Mode. See the
-[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp----listmcpdependency)
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp--listmcpdependency)
 for the dependency contract and
 [OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
 for format selection.

@@ -363,7 +363,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
     ),
     MutationCase(
         rule_id="registry_delegation.lifecycle_docs_aggregate",
-        path="docs/src/content/docs/concepts/lifecycle.md",
+        path="docs/src/content/docs/concepts/how-apm-works.md",
         old="deploys individual primitives but does not run aggregate",
         new="deploys individual primitives and also runs aggregate",
         intent="Lifecycle docs stop stating that install skips aggregate compilation.",

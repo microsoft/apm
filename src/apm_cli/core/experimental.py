@@ -98,7 +98,9 @@ FLAGS: dict[str, ExperimentalFlag] = {
         name="registries",
         description="Enable REST-based APM package registries in apm.yml.",
         default=False,
-        hint=("Use registries: in apm.yml. See https://microsoft.github.io/apm/guides/registries/"),
+        hint=(
+            "Use registries: in apm.yml. See https://microsoft.github.io/apm/reference/registries/"
+        ),
     ),
     "canvas": ExperimentalFlag(
         name="canvas",

@@ -192,6 +192,7 @@ def install_local_bundle(
             approval_key=bundle_approval_key,
             exec_type="mcp",
             logger=logger,
+            user_scope=global_,
         )
         bundle_lsp_deps = _filter_bundle_executables(
             bundle_lsp_deps,
@@ -200,6 +201,7 @@ def install_local_bundle(
             approval_key=bundle_approval_key,
             exec_type="lsp",
             logger=logger,
+            user_scope=global_,
         )
         from ..policy.install_preflight import run_policy_preflight
 
@@ -430,7 +432,7 @@ def install_local_bundle(
                 f"Bundle staged {len(staged_instructions)} instruction(s) "
                 f"for compile (target: {target_names}). Run 'apm compile' "
                 "to merge them into AGENTS.md / GEMINI.md / equivalent. "
-                "Reference: https://microsoft.github.io/apm/guides/compilation/"
+                "Reference: https://microsoft.github.io/apm/consumer/choose-harnesses/#compiled-outputs"
             )
 
         # Issue #1207 D2.c: route bundle ``mcp.json`` / ``.mcp.json`` (Anthropic plugin
@@ -517,12 +519,23 @@ def _parse_legacy_bundle_mcp_servers(
 def effective_bundle_allow_map(
     project_root: Path,
     *,
+    user_scope: bool,
     no_policy: bool,
     logger: Any,
     migrate_user_legacy: bool = True,
 ) -> dict[str, dict[str, bool]] | None:
-    """Resolve local-bundle trust through the canonical project owner."""
-    from ..security.executables import effective_exec_map_for_project
+    """Resolve local-bundle trust through the canonical trust owner.
+
+    Org policy is discovered from *project_root*; the grants are read from
+    the scope's manifest (``$APM_HOME/apm.yml`` under ``-g``), never from
+    the working directory's ``apm.yml`` at user scope.
+    """
+    from ..core.scope import manifest_root
+    from ..security.executables import (
+        exec_trust_context_for_project,
+        materialize_exec_map,
+        project_manifest_path,
+    )
 
     policy = None
     if not no_policy:
@@ -533,11 +546,14 @@ def effective_bundle_allow_map(
             "policy",
             None,
         )
-    return effective_exec_map_for_project(
-        project_root,
-        policy=policy,
-        logger=logger,
-        migrate_user_legacy=migrate_user_legacy,
+    grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
+    return materialize_exec_map(
+        exec_trust_context_for_project(
+            grants_manifest,
+            policy=policy,
+            logger=logger,
+            migrate_user_legacy=migrate_user_legacy,
+        )
     )
 
 
@@ -549,11 +565,12 @@ def _filter_bundle_executables(
     approval_key: str | None,
     exec_type: str,
     logger,
+    user_scope: bool,
 ) -> list[Any]:
     """Apply executable trust to the exact bundle artifact, never its claimed name."""
     if not dependencies or allow_executables is None:
         return dependencies
-    from ..security.executables import is_package_approved
+    from ..security.executables import is_package_approved, local_bundle_approval_hint
 
     if approval_key is None:
         raise ValueError("Local bundle executable approval requires an artifact digest")
@@ -562,12 +579,8 @@ def _filter_bundle_executables(
     noun = "executable" if len(dependencies) == 1 else "executables"
     logger.warning(
         f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from "
-        f"{bundle_info.package_id}. To approve this exact local bundle, add:\n"
-        "executables:\n"
-        "  allow:\n"
-        f'    "{approval_key}":\n'
-        f"      {exec_type}: true\n"
-        "Then rerun the install."
+        f"{bundle_info.package_id}. "
+        + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
     )
     return []
 

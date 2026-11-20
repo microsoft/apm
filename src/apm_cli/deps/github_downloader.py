@@ -79,7 +79,7 @@ _log = logging.getLogger(__name__)
 # `--allow-protocol-fallback` section (Starlight site defined in
 # docs/astro.config.mjs).
 _PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
+    "https://microsoft.github.io/apm/consumer/install-packages/#transport-selection"
 )
 
 

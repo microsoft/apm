@@ -21,7 +21,7 @@ _TEMPLATE = """\
 # Both files must be committed to the repository.
 #
 # For the full schema, see:
-#   https://microsoft.github.io/apm/guides/marketplace-authoring/
+#   https://microsoft.github.io/apm/producer/publish-to-a-marketplace/
 
 name: {name}
 description: A short description of what your marketplace offers
@@ -97,7 +97,7 @@ _MARKETPLACE_BLOCK_TEMPLATE = """\
 # cadence.
 #
 # For the full schema, see:
-#   https://microsoft.github.io/apm/guides/marketplace-authoring/
+#   https://microsoft.github.io/apm/producer/publish-to-a-marketplace/
 marketplace:
   owner:
     name: {owner}

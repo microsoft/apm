@@ -1,0 +1,161 @@
+---
+title: Run in CI
+description: Install from the lockfile and fail the build when apm.yml, apm.lock.yaml and the deployed files disagree, in GitHub Actions, Azure Pipelines, GitLab CI and Agentic Workflows.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Use this page to make every pull request check that the agent setup in the
+repository matches the lockfile. Two commands do it:
+
+```bash frame="terminal"
+apm install --frozen
+apm audit --ci
+```
+
+- `apm install --frozen` installs exactly what `apm.lock.yaml` records. It
+  fails if the lockfile is missing or out of sync with `apm.yml` (source,
+  ref, host, transport or MCP config), and never rewrites it.
+- `apm audit --ci` checks the lockfile, replays the install in a scratch
+  folder and compares it with the checkout, and scans for hidden Unicode. It
+  exits 1 on any failure; the checks are listed in
+  [Baseline CI checks](../../reference/baseline-checks/).
+
+If you commit the deployed files, run `apm audit --ci` before the install: `apm install`
+restores some edited managed files, such as instructions, which would hide the
+edit from the audit.
+
+A green run means the files match the lockfile. It says nothing about whether their
+content is harmless; see [The agent supply chain](../../concepts/agent-supply-chain/).
+
+## Add the job
+
+<Tabs syncKey="ci">
+  <TabItem label="GitHub Actions">
+    ```yaml title=".github/workflows/apm.yml"
+    name: APM
+    on:
+      pull_request:
+      push:
+        branches: [main]
+
+    jobs:
+      apm:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - uses: microsoft/apm-action@v1
+            with:
+              setup-only: 'true'
+              apm-version: '0.36.1'
+          - run: |
+              apm install --frozen
+              apm audit --ci
+            env:
+              GITHUB_APM_PAT: ${{ secrets.APM_PAT }}
+    ```
+
+    `setup-only` puts the APM CLI on `PATH` without running an install, so
+    the two commands run as written. Pin `apm-version` to the release your
+    team uses: each `microsoft/apm-action` release otherwise brings its own
+    default. Pin the action to a commit SHA if your organization requires it.
+    Private packages need `GITHUB_APM_PAT`.
+  </TabItem>
+  <TabItem label="Azure Pipelines">
+    ```yaml title="azure-pipelines.yml"
+    steps:
+      - script: |
+          curl -sSL https://aka.ms/apm-unix | sh -s -- --prefix "$HOME/.local"
+          export PATH="$HOME/.local/bin:$PATH"
+          apm install --frozen
+          apm audit --ci
+        displayName: APM
+        env:
+          ADO_APM_PAT: $(ADO_PAT)
+    ```
+
+    In organizations that disable personal access tokens, run the script in
+    an `AzureCLI@2` task with a workload identity federation service
+    connection and leave `ADO_APM_PAT` unset: APM uses the `az` login
+    session. See [Azure DevOps](../../getting-started/authentication/#azure-devops).
+  </TabItem>
+  <TabItem label="GitLab CI">
+    ```yaml title=".gitlab-ci.yml"
+    apm:
+      image: python:3.12
+      script:
+        - pip install apm-cli==0.36.1
+        - apm install --frozen
+        - apm audit --ci
+    ```
+
+    For private GitLab packages, add `GITLAB_APM_PAT` as a masked CI/CD
+    variable with `read_repository` scope.
+  </TabItem>
+  <TabItem label="GitHub Agentic Workflows">
+    In an [agentic workflow](https://github.github.com/gh-aw/), install the
+    repository's agent setup before the agent starts:
+
+    ```yaml title=".github/workflows/review.md (frontmatter)"
+    on:
+      pull_request:
+        types: [opened]
+    engine: copilot
+    steps:
+      - name: Install agent packages
+        uses: microsoft/apm-action@v1
+    ```
+
+    The action runs `apm install` from `apm.yml` and `apm.lock.yaml`, so the
+    agent loads the locked files. To give one workflow its own packages
+    instead, import gh-aw's shared `apm.md` component with `packages:` and a
+    `target:` that matches `engine:`; it ignores the repository's `apm.yml`.
+    Keep the `apm install --frozen` and `apm audit --ci` job as the
+    pull-request check.
+  </TabItem>
+</Tabs>
+
+## Report findings in code scanning
+
+Write SARIF and upload it, for example with `github/codeql-action/upload-sarif`:
+
+```bash frame="terminal"
+apm audit --ci -f sarif -o apm.sarif
+```
+
+## Verify
+
+Open a pull request. The job prints:
+
+```text frame="none"
+[*] Installed 2 APM dependencies in 0.8s.
+[i] Deployed files verified against apm.lock.yaml.
+...
+[+] No drift detected
+...
+[*] All 10 check(s) passed
+```
+
+To see it fail, commit an edit to a deployed `SKILL.md`. `apm install
+--frozen` stops and names the file:
+
+```text frame="none"
+[x] --frozen: deployed files do not match the hashes recorded in apm.lock.yaml.
+  - .claude/skills/style-checker/SKILL.md: expected sha256:11427002..., observed sha256:6d75ce01...
+```
+
+## When CI fails
+
+- **Lockfile missing or out of sync.** Run `apm install` locally and commit
+  `apm.lock.yaml` with the `apm.yml` change.
+- **Hashes do not match, `hash-drift` or `Drift detected`.** Someone edited a
+  managed file. Revert it, or send the change upstream with
+  `apm export-patch`, then run `apm install` and commit.
+- **Authentication errors.** See [Use private sources](../../getting-started/authentication/).
+- **More errors:** [Troubleshoot](../../troubleshooting/).
+
+:::tip[Other options]
+Make this a required check that also enforces your organization's policy:
+[Gate pull requests](../../enterprise/enforce-in-ci/). Refresh dependencies on
+a schedule: [Update dependencies](../update-and-refresh/).
+:::

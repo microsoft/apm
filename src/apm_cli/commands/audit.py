@@ -770,7 +770,15 @@ def _audit_ci_gate(
             from ..policy.models import CheckResult
             from ..policy.policy_checks import FAIL_CLOSED_POLICY_CHECKS
 
-            policy_result = run_policy_checks(cfg.project_root, policy_obj, fail_fast=fail_fast)
+            policy_result = run_policy_checks(
+                cfg.project_root,
+                policy_obj,
+                fail_fast=fail_fast,
+                modules_root=(
+                    prepared_replay.modules_root if prepared_replay is not None else None
+                ),
+                no_policy=no_policy,
+            )
             if policy_obj.enforcement == "block":
                 ci_result.checks.extend(policy_result.checks)
             else:

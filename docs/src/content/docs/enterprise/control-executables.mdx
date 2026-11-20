@@ -1,0 +1,141 @@
+---
+title: Control executables
+description: Decide which packages may deploy hooks, MCP servers and other code to developer machines, publish an approved set for teams, and govern lifecycle scripts.
+---
+
+import { Steps, Badge } from '@astrojs/starlight/components';
+
+Some agent capabilities run code. A hook runs a command when the harness (the agent
+tool, such as Claude Code or GitHub Copilot) fires an event; an MCP or LSP server starts
+a process; a plugin can ship `bin/` executables. This page shows a platform team how to
+decide, for every repository at once, which packages may deploy them, and how to govern
+the lifecycle scripts APM itself runs during install.
+
+Skills, instructions, agents and prompts are text and are never gated.
+
+## How the gate works
+
+The executables gate covers hooks, MCP servers, LSP servers, `bin/` executables and
+canvas extensions from dependencies. It is **off by default**: everything deploys. It
+turns on when either:
+
+- the repository's `apm.yml` has an `executables:` block, even an empty one (the older
+  spelling `allowExecutables:` still works and migrates on the next `apm approve`), or
+- the org policy carries a non-empty `executables:` block.
+
+Once on, a dependency's executables are **parked**: not deployed until someone approves
+them. In CI or any non-interactive run, `apm install` still succeeds and lists what it
+parked; in a terminal it asks whether to trust each package, and a yes deploys on the
+next install. Every decision follows one
+ladder, and deny wins: org deny, user deny, project deny, project allow, user allow, org
+recommend, else parked.
+
+## Set the org practice
+
+Priya turns the gate on for every Contoso repository and pre-approves the packages her
+team reviewed.
+
+<Steps>
+
+1. **Publish an `executables:` section** in the org policy:
+
+   ```yaml title="contoso/.github/apm-policy.yml"
+   executables:
+     deny: ["untrusted-org/*"]
+     recommend: ["contoso/review-skills"]
+   ```
+
+   Any non-empty block turns the gate on wherever the policy applies. `deny` accepts
+   globs and no repository or user can override it. `recommend` is exact-match and
+   marks packages your team reviewed. `require` makes `apm audit --ci` fail when a
+   listed package's executables are present but not approved. `enforce` is reserved:
+   today it behaves as `recommend` and never forces anything to run. Fields:
+   [policy schema](../../reference/policy-schema/#executables).
+
+2. **Teams accept the recommended set** in each repository and commit `apm.yml`:
+
+   ```bash frame="terminal"
+   apm approve --recommended
+   ```
+
+3. **Teams review everything else.** List what is parked, then approve one package at
+   a time; `apm approve <pkg>` prints every hook and server it would run:
+
+   ```bash frame="terminal"
+   apm approve --pending
+   ```
+
+   The developer workflow is in [Approve hooks and MCP servers](../../consumer/approve-executables/).
+
+4. **Explain any decision** when a team asks why something did not deploy:
+
+   ```bash frame="terminal"
+   apm policy explain contoso/review-skills
+   ```
+
+   It prints, per executable type, whether it is allowed and which layer decided.
+   `apm approve --list` gives the same view for every installed package.
+
+</Steps>
+
+`apm approve` records approvals in the repository's `apm.yml`, so each one is a reviewed
+line in a pull request. Personal grants (`apm approve --user`, or a yes at the install
+prompt) stay in that machine's APM config, and `apm audit` ignores them.
+
+## Approvals pin content <Badge text="New in 0.37" variant="note" />
+
+From APM 0.37, `apm approve` pins each hook file and each MCP server definition to a
+SHA-256 fingerprint, and a native plugin to one fingerprint over its whole folder. If a
+package update changes what runs, install parks it as "definition changed" until
+someone approves again. The lockfile cannot grant permission; grants live in `apm.yml`.
+
+- In 0.36 and earlier, an approval covers a package and type (`hooks: true`) for any
+  content. 0.37 still deploys those grants and warns that they are not pinned; run
+  `apm approve <pkg>` to pin them.
+- Every machine needs APM 0.37 or later to read pinned approvals. Older versions reject
+  them and fail closed.
+- `apm audit --ci` fails an MCP server the lockfile admits but `apm.yml` does not
+  approve.
+
+## Lifecycle scripts
+
+Lifecycle scripts are not harness hooks. APM itself runs them, during `apm install`,
+`update`, `uninstall` and `compile`, from a `lifecycle:` block. Packages you install
+cannot add them. Three tiers exist:
+
+| Tier | Where | Runs |
+|---|---|---|
+| Admin | `/etc/apm/policy.d/*.json` (Windows: `%ProgramData%\APM\policy.d\*.json`) | Always, without consent |
+| User | `lifecycle:` in `~/.apm/apm.yml` | Always |
+| Project | `lifecycle:` in the repository's `apm.yml` | After `apm lifecycle trust` on that machine |
+
+Project scripts are skipped until a developer runs `apm lifecycle` to see them and
+`apm lifecycle trust` to allow them. Trust is per machine and bound to a SHA-256 of the
+`lifecycle:` block, so any edit to the block revokes it. Your controls:
+
+- `executables.deny_all: true` in the org policy suppresses every lifecycle script, and
+  every executable type, in governed repositories.
+- `APM_NO_SCRIPTS=1` disables all lifecycle scripts for one run. Set it in CI.
+- `apm lifecycle --execute` fires only what an install would fire: untrusted project
+  scripts, `APM_NO_SCRIPTS` and `executables.deny_all` withhold scripts exactly as they
+  do for `apm install`.
+- For fleet-wide scripts, such as an install-analytics webhook, ship a JSON file to the
+  admin directory with your device management. See
+  [`apm lifecycle`](../../reference/cli/lifecycle/).
+
+A failing script never aborts the APM command.
+
+## Limits
+
+- Not a sandbox. Approval decides what gets installed; the harness decides what an
+  approved hook or server may do.
+- Pins cover what APM copies. Code a hook downloads at run time (`npx`, `curl`) is not
+  covered.
+- Org policy governs project installs. User-scope installs (`apm install -g`) are not
+  governed, including `deny_all`.
+
+## Related
+
+- [`apm approve`](../../reference/cli/approve/): store format, precedence, output.
+- [Agent supply chain security model](../security/): where this control fits.
+- [Set an org policy](../apm-policy/): publish and test the policy file.

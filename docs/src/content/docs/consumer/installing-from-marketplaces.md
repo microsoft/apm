@@ -1,450 +1,180 @@
 ---
-title: Installing from marketplaces
-description: Six ways consumers install APM-published plugins -- through APM, VS Code, Cursor, Copilot CLI, Claude Code, and Codex -- and the auth and cache layout of each.
-sidebar:
-  order: 2
+title: Install from a marketplace
+description: Register a marketplace, find a plugin by name, install it into the lockfile, and know what replays without the marketplace.
 ---
 
-A marketplace publisher (see
-[Publish to a marketplace](../../producer/publish-to-a-marketplace/))
-ships one `marketplace.json` that every major agent runtime can read.
-This page covers the install side: which command each runtime
-exposes, what authentication it needs, and where files land on disk.
+Use this page when someone tells you "install `review-kit` from the Contoso
+marketplace". A **marketplace** is a published list of plugins and packages:
+a `marketplace.json` file in a git repository or at an HTTPS URL. Each entry
+names a plugin and the repository and version it comes from. Organizations run
+private marketplaces to offer a curated set of approved agent capabilities;
+see [Build your organization's marketplace](../../enterprise/org-marketplace/).
 
-The recommended path is `apm install`. It is the only path that gives
-you a committed `apm.lock.yaml`, content-hash pinning, transitive
-resolution, the pre-install security scan, and `apm audit --ci`
-drift detection. Use a native command when you cannot install APM,
-or when the runtime owns the install surface (VS Code Copilot Chat).
+APM installs marketplace plugins into the same manifest and lockfile as any
+other package, so teammates and CI get the same files.
+
+## Add a marketplace
+
+Register it once per machine, pinned to a tag:
+
+```bash frame="terminal"
+apm marketplace add contoso/agent-marketplace#v2.0.0 --name contoso
+```
+
+Without `#ref` (or `--ref`), APM tracks the default branch and warns that it
+can move. `SOURCE` can also be a GitLab, Azure DevOps or other git URL, an SSH
+URL, a local folder, or a hosted `marketplace.json` URL. APM downloads
+hosted URLs over HTTPS with no credentials, so use a git-backed marketplace
+for private lists ([credentials](../../getting-started/authentication/#generic-marketplace-git-transport)).
+If the file is not in a default location, pass `--path`.
+
+`apm marketplace list` shows what you registered; `apm marketplace remove
+contoso` forgets it.
+
+## Find a plugin
+
+```bash frame="terminal"
+apm marketplace browse contoso
+apm search review@contoso
+```
+
+`browse` lists every entry; `search` takes `QUERY@MARKETPLACE` and matches
+names, descriptions and tags. Each row prints the install name, such as
+`review-kit@contoso`.
 
 ## Install patterns
 
-| Runtime                         | Install command                                                         | Auth                                | Cache layout                                                                 |
-|---------------------------------|-------------------------------------------------------------------------|-------------------------------------|------------------------------------------------------------------------------|
-| APM (recommended)               | `apm marketplace add <owner>/<repo>` then `apm install <pkg>@<marketplace>` | HTTPS: host token or git credential helper. SSH: local key or agent. | `apm_modules/` in the project; fetched refs in the platform cache (`apm cache info`); catalogs in `~/.apm/cache/marketplace/`. |
-| VS Code (GitHub Copilot Chat)   | Plugin marketplace UI; or `code --install-extension` for the marketplace itself. | VS Code GitHub sign-in.             | Per-user extension store managed by VS Code. APM artifacts stream from the marketplace at activation. |
-| Cursor                          | Settings -> Plugins -> add marketplace URL.                             | Cursor account.                     | `~/.cursor/extensions/` per-user.                                            |
-| GitHub Copilot CLI              | `gh copilot marketplace add <owner>/<repo>` then `gh copilot plugin install <pkg>`. | `gh auth login`.                    | `~/.config/gh/copilot/` per-user.                                            |
-| Claude Code                     | `/plugin marketplace add <owner>/<repo>` then `/plugin install <pkg>`.  | Anthropic sign-in.                  | `~/.claude/plugins/` per-user; `.claude/` in-project when wired.             |
-| OpenAI Codex CLI 0.163.0+       | `codex plugin marketplace add ...` then `codex plugin add <pkg>@<marketplace>`. | Native activation and authentication remain with Codex. | User cache managed by Codex; not an APM project registration. |
+Through APM:
 
-Native commands above read whichever artifact the runtime expects.
-Most read `.claude-plugin/marketplace.json` (Anthropic-compatible
-schema); Codex reads `.agents/plugins/marketplace.json`. Producers
-who enable both outputs reach every runtime from one repo.
-
-## Local authoring previews through APM
-
-To preview an author's catalog before it is published, run
-`apm marketplace add ./apm.yml --name alice-dev`, then
-`apm install my-tool@alice-dev`. APM rereads the file on each command;
-registration does not install its inventory or publish anything. See
-[Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
-for offline and locked-replay rules.
-
-## Codex compatibility bundles through APM
-
-APM recognizes a compatibility-only `.codex-plugin/plugin.json` without
-reducing its bundle to loose skills. This route requires **Codex CLI
-0.163.0 or later on `PATH`, user scope only**. Older or unrecognized
-`codex --version` output is refused with the minimum named; unexpected
-app-server responses fail before any native write:
-
-```sh
-apm install -g <package> --target codex
-apm install -g --frozen --target codex
-apm uninstall -g <package>
+```bash frame="terminal"
+apm install review-kit@contoso
 ```
 
-Native qualification was measured on Codex CLI 0.163.0 and 0.164.0 on **macOS arm64 only**. Other platforms
-are not qualified by that evidence; APM checks the version and scope, not the OS.
+APM looks up `review-kit`, installs it from the source and ref the marketplace
+lists, and records the plugin in `apm.lock.yaml`. Append `#v2.0.0` to install
+a specific tag instead of the listed one. To follow a version range, declare
+the entry in `apm.yml`:
 
-Approve the package's executable types in `allowExecutables` first. APM scans
-and transfers the complete bundle, including sibling assets and referenced MCP
-resources, then uses Codex's public app-server configuration and marketplace
-operations. New registrations are **disabled**. Reinstall, update, and repair
-preserve existing activation, explicit disables, MCP policy, and unrelated
-settings. APM never runs plugin/MCP code or grants native trust or authentication.
-
-The initial contract supports MCP server objects and package-relative JSON
-files containing `mcpServers`. At least one native-discoverable `SKILL.md` must
-provide an unambiguous installed path so APM can verify the complete native
-copy. Symlinks, skill subsets, unsupported MCP shapes, other Codex versions,
-and project-scope registration fail explicitly rather than silently dropping
-resources or claiming native loading. This is a content-discovery contract,
-not evidence that an MCP process can start or authenticate.
-
-APM keeps its transport snapshots and ownership journal in
-`$APM_HOME/.codex-native/` (normally `~/.apm/.codex-native/`), outside disposable
-`apm_modules/`. Missing or corrupt native copies are restored through a
-selected native marketplace refresh with a new transport generation. Publisher
-bytes, publisher version, and original dependency pins remain unchanged;
-a healthy reinstall does not create a new generation. Keep the ownership
-journal: APM refuses to adopt a matching native registration without it.
-Native fingerprints include publisher `__pycache__` assets and executable
-bits; existing APM lockfile hashes are unchanged. The validated ownership
-journal also identifies native bundles during a cold-cache frozen restore
-alongside unrelated loose MCP declarations. A missing or `0.0.0` native
-version does not authorize rewriting publisher `apm.yml` metadata.
-Running `apm audit --ci` from the APM user directory checks the cached source
-bundle without starting Codex. Native-copy verification happens during install.
-The journal binds each remote bundle's native fingerprint to its original Git
-commit. Changed cache bytes or executable bits at the same commit are refused,
-not adopted as an update. Remove only that dependency's disposable
-`apm_modules/` directory and rerun `apm install -g --frozen --target codex`.
-Local source edits and newly selected Git commits remain valid updates.
-For a legacy remote record without source-pin provenance, save its pinned
-declaration, run `apm uninstall -g <dependency>`, then
-`apm install -g <saved-pinned-dependency> --target codex`. APM does not infer
-missing provenance from the current cache. `apm audit --ci --format json`
-reports native cache refusal as a failed drift check without changing native state.
-
-Native registration runs after APM persistence. A late failure can leave the
-acquired package, lockfile, or some native changes in place: pending ownership
-supports retry, not atomic rollback across APM and Codex. Keep the journal,
-resolve the reported native error, then rerun `apm install -g --target codex`.
-Migration also refuses native registration if cleanup retains edited or
-undeletable loose files. Preserve or relocate your edits and resolve that
-cleanup conflict before retrying; APM does not register both copies.
-The error names the dependency and retained paths.
-
-Removal fails and retains APM declarations when native ownership has changed,
-another plugin shares the owned marketplace, or the entry contains activation
-or customized MCP settings. Retire that entry explicitly using Codex, then
-retry APM removal. Native removal has no atomic compare-and-swap API; avoid
-concurrent native configuration edits while uninstalling.
-
-Existing eligible `apm.yml`, portable/root `plugin.json`, and
-`.claude-plugin/plugin.json` precedence is unchanged. A co-located Codex
-compatibility overlay does not replace those formats. This route neither
-changes `apm pack` output nor translates Codex data for other targets, and
-does not also generate loose skill or MCP registrations.
-
-Selecting both Claude and Codex does not reinterpret a Codex compatibility
-bundle as a Claude plugin. Each native route retains its own admission,
-ownership and audit checks while sharing APM's source scan and native
-fingerprint utility. This does not extend either route's runtime qualification.
-
-## What you give up with native installs
-
-### APM-managed Claude user plugins
-
-`apm install --global --target claude` installs an eligible Claude plugin
-intact, so its commands and hooks resolve `${CLAUDE_PLUGIN_ROOT}` to their own
-bundled files. It does not need the `claude` CLI and never runs it:
-
-1. APM resolves and locks the plugin, scans it, and checks its executable
-   approval, as for any dependency. `~/.apm/apm_modules` keeps the fetched source.
-2. It copies the approved plugin root to `~/.agents/plugins/<plugin>/` and
-   generates `~/.agents/plugins/.claude-plugin/marketplace.json`.
-3. It declares that marketplace in Claude's `settings.json` (`~/.claude`, or
-   `CLAUDE_CONFIG_DIR`): one `extraKnownMarketplaces` entry, named
-   `apm-u-<hash>` per APM home, plus `enabledPlugins["<plugin>@<marketplace>"]: true`.
-
-Restart Claude, or run `/reload-plugins`, to load new plugins. APM writes
-nothing else into your Claude settings:
-
-- It writes `true` only when the key is absent, so a plugin you set to `false`
-  stays disabled across reinstalls.
-- Uninstall removes only the keys and roots its previous `apm.lock.yaml`
-  recorded. It keeps your own entries, your explicit `false`, and any deployed
-  root you edited.
-- If a marketplace with APM's name already points somewhere else, the install
-  fails and changes nothing.
-- If declaring fails, settings and deployed roots are left as they were and the
-  previous lockfile is restored, so a retry still owns everything it must remove.
-
-A plugin is declared only when its executables are approved. Otherwise, or when
-APM cannot install it intact (see below), the plugin is parked: APM neither
-deploys nor declares it, names the package and the next step, and continues; it
-never falls back to copying loose files. Approve from the user manifest
-directory, from any shell: `cd ~/.apm && apm approve --pending`.
-
-`apm.lock.yaml` records each deployed plugin as `native_plugin`: its name, its
-root, and one fingerprint over every file's path, bytes and executable bit.
-`apm audit --ci`, run from `~/.apm` with `claude` among the manifest's
-`targets`, fails drift when either the source or the deployed copy changes.
-Reinstalling the same revision refuses changed bytes.
-
-The route needs `.claude-plugin/plugin.json` and accepts commands, skills,
-agents, hooks, and MCP and LSP servers (`.mcp.json`, `.lsp.json`, or
-`mcpServers` / `lspServers` in the manifest). Claude loads those servers from
-the plugin; APM does not write them into Claude's MCP or LSP config. They are
-covered by the same whole-plugin approval. `bin/` stays inside the deployed
-plugin root, also under that approval; org `bin_deploy` policy parks the plugin,
-and a non-interactive install needs `--trust-bin`. Org MCP policy (allow, deny,
-transport, self-defined) applies to every MCP server Claude would load (root
-`.mcp.json` plus every `mcpServers` form): under `enforcement: block` a
-violating server, or an entry APM cannot read (a `.mcpb`/`.dxt` bundle, a URL,
-an unreadable file), parks the whole plugin; under `warn` it is reported. A
-transitive plugin that ships MCP servers is parked unless it is pinned
-(`apm approve`) or you pass `--trust-transitive-mcp`, even without an
-`executables` block. With other targets selected too, APM still writes the servers for
-those targets. The route parks plugins with partial skill subsets, symlinks,
-server files outside the plugin, `monitors/` and `workflows/` (Claude runs their
-commands; APM cannot vet them) and other manifest capabilities; resolve the
-restriction or exclude Claude from that dependency's targets. If the package
-already owns loose Claude hooks, run
-`apm uninstall --global <package> && apm install --global <package>` to switch
-it to the native route.
-
-:::note[Runtime qualification]
-A human witness on Claude Code 2.1.322 (macOS arm64) observed `SessionStart`
-and `UserPromptSubmit` hooks and a namespaced plugin command reading bundled
-resources through `CLAUDE_PLUGIN_ROOT`. `SubagentStart` was not observed.
-Project scope comes later (#3921).
-:::
-
-### Direct native installs
-
-Native runtime commands install the plugin and stop there. They do
-not produce a project-scoped lockfile, do not run the APM security
-scan, and do not participate in `apm audit --ci` drift detection. If
-your team or org has adopted APM, prefer `apm install` even when a
-native command exists -- the lockfile is what makes installs
-reproducible across machines and CI.
-
-| Capability                          | `apm install` | Native runtime install |
-|-------------------------------------|---------------|------------------------|
-| Project-scoped `apm.lock.yaml`      | yes           | no                     |
-| Content-hash pinning                | yes           | no                     |
-| Transitive dependency resolution    | yes           | no                     |
-| Pre-install security scan           | yes           | no                     |
-| `apm audit --ci` drift gate         | yes           | no                     |
-| Cross-harness deploy from one ref   | yes           | no (per-runtime install) |
-
-## Picking the install path
-
-After `apm install`, `apm audit --ci` checks marketplace declarations against
-their locked source and version evidence, without refreshing the catalog.
-Missing or ambiguous provenance fails rather than guessing. See
-[baseline checks](../../reference/baseline-checks/#ref-consistency).
-
-- **You are the only user on a workstation and the plugin is simple.**
-  A native install is fine. Treat it as a personal tool, not project
-  infrastructure.
-- **The plugin will be used by a team or in CI.** Use `apm install`.
-  Commit `apm.yml` and `apm.lock.yaml`. Every contributor gets the
-  same bytes.
-- **Your org has an `apm-policy.yml`.** `apm install` is the only
-  path that enforces it. See
-  [Governance on the consumer ramp](../governance-on-the-consumer-ramp/).
-
-## Local and self-hosted marketplaces
-
-`apm marketplace add` can register marketplaces from git repositories,
-local files, or hosted `marketplace.json` catalogs. The same register /
-browse / install / update workflow works against:
-
-- **Local filesystem paths** -- `apm marketplace add /srv/marketplaces/agent-forge`
-  (or a relative path, `~/code/marketplace`, or a direct
-  `marketplace.json` file). Useful for privacy-sensitive packages,
-  offline workflows, and air-gapped environments. Local marketplaces
-  with relative plugin sources install by copying from disk via
-  `LocalDependencySource`.
-- **`file://` URIs** -- `apm marketplace add file:///srv/marketplaces/agent-forge.git`.
-  Behaves the same as a local path.
-- **Git HTTPS URLs with `#ref`** --
-  `apm marketplace add https://gitlab.com/acme/agent-forge.git#v1.0.0`.
-  APM strips the fragment into the stored ref. If you omit `#ref`
-  (or `--ref`), APM warns because the default branch can move.
-- **Hosted `marketplace.json` URLs** --
-  `apm marketplace add https://catalog.example.com/marketplace.json --name catalog`.
-  APM fetches the JSON directly over HTTPS, caches ETag/Last-Modified
-  metadata, and records the source URL plus content digest in the
-  lockfile when packages are installed from it.
-- **Generic git URLs** -- any host APM does not classify as
-  GitHub or GitLab family flows through subprocess `git` and
-  `GitCache`. Includes Azure DevOps (auth via `ADO_APM_PAT`),
-  Gitea, Bitbucket Server, and self-hosted git servers.
-- **SSH URLs** -- `git@gitea.example.com:org/repo.git`, or
-  `ssh://git@gitea.example.com:2222/org/repo.git` when the server uses a
-  non-default port. The fully qualified form retains its username and port
-  when passed to subprocess `git`. SSH uses the local key or agent
-  without forwarding HTTP credentials; passwords, query parameters, and `#ref`
-  fragments are rejected (use `--ref` instead).
-  For in-repository plugins from GitLab and generic git marketplaces, APM
-  keeps this consumer-selected SSH transport when it writes their concrete
-  `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain
-  HTTPS. This includes a `github.com` marketplace registered over SSH: the
-  install pre-flight checks its in-repository plugins with `git ls-remote`
-  over SSH, so a private catalog needs only an SSH key, not a GitHub token.
-
-Remote package entries keep their own source identity independently of the
-marketplace registration. Version lookup uses the package repository's tags,
-not the catalog's; packages inside the catalog repository use its tags.
-APM preserves the package's host, port, explicit transport, SSH user, path,
-and ref. A full 40-character `sha` on a `github`, `url` or `git-subdir`
-source wins over `ref`: APM installs that commit and records it as the `ref`
-in `apm.yml` and as `resolved_commit` in the lockfile.
-A catalog on port `8443` does not change a package's default HTTPS
-port, even when both URLs share the same hostname and repository path.
-An explicit SSH source stays SSH. Lookup and installation use the same package
-identity; bare cross-repository entries retain their normal dependency defaults.
-On an enterprise (`*.ghe.com`) marketplace, a plugin source of any type
-(`github`, `git-subdir`, `gitlab`, `url`) with a bare cross-repository
-`owner/repo` would fall back to public `github.com`, so
-APM refuses that entry as a dependency-confusion risk (#1326) before contacting
-the package repository or writing any file, whether it comes from the command
-line, `apm.yml`, a transitive dependency, or `apm update`. Ask the publisher to
-host-qualify the `repo:` field. If `GITHUB_HOST` is the marketplace host,
-bare entries resolve to that host, install, and lock it. `apm install` replays entries already in
-`apm.lock.yaml` without re-reading the catalog, so run `apm update` to re-check
-entries an older APM locked.
-Invalid URLs, unsafe subdirectory paths, and malformed `sha` values fail
-before manifest, lockfile, or deployment writes.
-
-Catalog paths can point to versioned directories generated by `apm pack`, such
-as `plugins/my-plugin-1.2.3`. APM keeps their repository/path coordinates through
-installation and `--dry-run` instead of treating the version suffix as a file
-extension. Directory content and path checks still apply. Git directory probes
-reject files, symbolic links, and submodules.
-
-Use `apm install pkg@catalog#v1.0.1` for a literal Git tag. For a range, declare
-the marketplace dependency in `apm.yml`:
-
-```yaml
-dependencies:
-  apm:
-    - name: pkg
-      marketplace: catalog
-      version: "^1.0.0"
+```diff title="apm.yml"
+ dependencies:
+   apm:
++    - name: review-kit
++      marketplace: contoso
++      version: "^2.0.0"
 ```
 
-APM selects the highest matching package tag using the publisher's
-`source.tag_pattern`. No match is an error; it does not fall back to catalog
-tags or treat the range as a raw ref.
+APM picks the highest release tag that matches, using the tag pattern the
+publisher declared, and fails if none matches.
 
-**Locked entries replay the lockfile.** Once `apm.lock.yaml` records a
-marketplace entry, `apm install` and `apm install --frozen` reinstall its locked
-commit without reading the catalog or needing the marketplace registration, so
-catalog edits do not change what installs. Only new entries, entries whose
-`name`, `marketplace` or `version` changed, and `apm update` resolve through
-the catalog. `--frozen` fails for an entry the lockfile does not record.
-Entries the catalog routes through a package registry are the exception: the
-lockfile does not record that registry binding, so they still resolve through
-the catalog.
+The same marketplace often works in each harness's own commands too (a
+harness is the agent tool that reads the files, such as Claude Code). Those
+install the plugin for one user, with no project lockfile, policy check or
+`apm audit`:
 
-Marketplace entries can also provide inline LSP or MCP servers when their
-downloaded source has no package manifest. APM validates these
-[catalog-only marketplace packages](../../reference/package-types/#catalog-only-marketplace-package)
-before deployment. The lockfile does not record those inline definitions, so
-when a package with locked servers has no copy in `apm_modules/` (a fresh
-checkout or cold CI runner), install, including `--frozen`, reads the catalog
-for it. If the lockfile records none of its servers (for example after
-`apm install --only=apm`, or when a root `mcp:` entry overrides the server),
-a cold copy cannot be rebuilt and fails its content-hash check; run
-`apm update` for that package. Lockfile-only replay for these packages is
-planned for 0.38 (#2903).
+| Tool | Install command |
+|---|---|
+| APM (project lockfile) | `apm marketplace add OWNER/REPO` then `apm install NAME@MARKETPLACE` |
+| GitHub Copilot CLI | `copilot plugin marketplace add OWNER/REPO` then `copilot plugin install NAME@MARKETPLACE` |
+| Claude Code | `/plugin marketplace add OWNER/REPO` then `/plugin install NAME@MARKETPLACE` |
+| Codex CLI 0.163.0+ | `codex plugin marketplace add ...` then `codex plugin add NAME@MARKETPLACE` |
 
-Marketplace publishers can route an entry through a configured APM package
-registry with the entry's `registry` and semver `version` fields. Enable the
-feature first with `apm experimental enable registries`; see
-[Registries](../../guides/registries/). APM honors that route through the
-package-registry resolver. Missing or malformed registry intent fails closed
-instead of silently falling back to the plugin's Git source.
+Use the native command for a personal tool. Use `apm install` when the plugin
+belongs to the project.
 
-:::note[Hosted JSON is public HTTPS]
-Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
-send custom auth headers. Use git-backed marketplaces for private
-catalogs.
-:::
 
-For generic HTTPS marketplaces, `marketplace.json` is fetched via Git.
-Authentication may use the host's matching `*_APM_PAT` variable (such as
-`ADO_APM_PAT`) or a local git credential helper. SSH marketplaces instead use
-the local SSH key or agent in non-interactive mode; APM does not forward HTTP
-tokens, authorization headers, askpass programs, or registry credentials to
-that subprocess. See
-[Authentication](../../getting-started/authentication/).
+A Claude Code plugin installed with `apm install -g --target claude <plugin>@<marketplace>`
+is deployed whole and registered in Claude Code's settings; see
+[Claude Code plugins at user scope](../install-plugins/#claude-code-plugins-at-user-scope).
 
-**Several catalogs in one repository.** To register a catalog stored outside
-the default locations, pass its repository-relative path:
+## How marketplace installs lock
 
-```bash
-apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
-apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json --name acme-backend
+The lockfile records the plugin's commit and file hashes like any package,
+plus where it was found:
+
+```yaml title="apm.lock.yaml"
+- repo_url: contoso/review-kit
+  resolved_commit: 8c1f0b2...
+  discovered_via: contoso
+  marketplace_plugin_name: review-kit
+  source_url: https://github.com/contoso/agent-marketplace
+  source_digest: sha256:...
 ```
 
-APM saves the path with the registration, so `browse`, `update`, and
-`apm install pkg@acme-frontend` keep reading that catalog. See
-[`marketplace add --path`](../../reference/cli/marketplace/) for the default
-discovery order and path rules. Separate catalogs are not access control:
-repository read access covers all of them.
+- `apm install` and `apm install --frozen` replay the locked commit without
+  contacting the marketplace, so an edit to `marketplace.json` changes nothing
+  until you update. A package whose locked MCP or LSP servers have no copy in
+  `apm_modules/` still reads the marketplace for those definitions only; the
+  locked commit still pins the download. If the marketplace now selects another
+  source or commit, install fails; run `apm update <plugin>@<marketplace>` to
+  move to it.
+- `apm update` and `apm install --refresh` revalidate the marketplace and fail
+  rather than use stale data. `apm marketplace update` refreshes the cached
+  list and nothing else.
+- The name `contoso` is local to your machine. If it later points at a
+  different marketplace, `apm update`, `apm install <plugin>@contoso` (with or
+  without `-g`), `apm outdated` and any other re-resolution fail and name both
+  origins instead of switching.
 
-**Lockfile note.** Relative package sources from a local marketplace record a
-local-path source in `apm.lock.yaml`; lockfiles produced this way are
-machine-specific -- do not commit them into a shared repo. Remote
-package entries in the same local marketplace remain remote, host-qualified
-dependencies. Installs from a remote catalog (hosted `marketplace.json` or
-Git) record the catalog's origin as `source_url` plus a `source_digest`; local
-catalogs record neither. See
-[lockfile reference](../../reference/lockfile-spec/).
-
-**Aliases are machine-local.** A name like `company` only means something on
-the machine that registered it. If `company` later points at a different
-catalog, `apm install` keeps replaying the locked marketplace. `apm update`,
-`apm install <plugin>@company` (with or without `-g`), `apm outdated` and any
-other re-resolution of a locked `company` entry fail instead of switching,
-naming the locked and current origins.
-Alias names match case-insensitively. Re-register the locked origin with
-`apm marketplace add <locked-origin> --name company` to keep it. To switch on
-purpose, remove the entry from `apm.yml`, run `apm install`, add it back and
-run `apm install` again. The check compares origins only, so moving the catalog
-to another `--path` in the same repository is not detected. Registering a
-second name for an already registered catalog (same origin and `--path`)
-succeeds with a `[!]` warning.
+`source_url` records the origin; the digest records provenance and is not a
+trust anchor.
 
 ## Declare marketplaces in your user manifest
 
-Instead of running `apm marketplace add` on every machine, list your
-marketplaces once in the user manifest (`$APM_HOME/apm.yml`, default
-`~/.apm/apm.yml`; see the [`APM_HOME` path contract](../../reference/environment-variables/#apm_home-path-contract))
-and run `apm install -g`:
+To register the same marketplaces on every machine, list them in your user
+manifest (`~/.apm/apm.yml`, or `$APM_HOME/apm.yml`) and run `apm install -g`:
 
-```yaml
-# $APM_HOME/apm.yml (default ~/.apm/apm.yml)
-name: me
-version: 1.0.0
+```yaml title="~/.apm/apm.yml"
 marketplaces:
-  - name: acme
-    source: https://github.com/acme-org/agent-marketplace#v1.2.0
-  - name: internal
-    source: git@gitea.example.com:platform/marketplace.git
-    ref: v3.0.0
+  - name: contoso
+    source: https://github.com/contoso/agent-marketplace
+    ref: v2.0.0
 ```
 
-Each entry takes a `name` and a `source` in any SOURCE form
-`apm marketplace add` accepts, plus an optional `ref` that works like
-`--ref`. There is no `--host` equivalent: use a full URL for hosts other
-than the default. Local paths must be absolute or start with `~/`. `apm install -g`
-then:
+APM adds missing entries, updates changed ones, and removes ones it added that
+you deleted. It leaves registrations you made with `apm marketplace add`
+alone. A project `apm.yml` cannot declare `marketplaces:`. Registering grants
+no trust and installs nothing.
 
-- registers declared marketplaces that are missing, and re-registers
-  entries whose `source` or `ref` changed;
-- removes marketplaces it registered earlier that you deleted from the
-  list;
-- keeps marketplaces you added with `apm marketplace add`. If a declared
-  `name` matches one of them, APM reports the conflict and leaves your
-  manual registration alone. Run `apm marketplace remove NAME` and re-run
-  `apm install -g` to hand it over to the manifest.
+## Codex compatibility bundles through APM
 
-The output lists each marketplace registered, updated, removed or kept.
-If an entry cannot be fetched, or the user manifest or an entry is
-invalid, `apm install -g` exits with an error and removes nothing.
-`apm install -g --dry-run` previews the changes without fetching or
-writing. Registering a marketplace only makes it searchable with
-`apm search QUERY@NAME` and installable with `apm install PKG@NAME`. It
-installs nothing and grants no trust.
+A plugin that ships `.codex-plugin/plugin.json` can be registered with Codex
+as a whole bundle:
 
-Only the user manifest may declare marketplaces. A project or package
-`apm.yml` that contains `marketplaces:` fails with an error pointing to the
-user manifest.
+```bash frame="terminal"
+apm install -g contoso/review-kit --target codex
+```
 
-## Where next
+This needs Codex CLI 0.163.0 or later on `PATH` and works at user scope
+(`-g`); project scope fails. Approve the package's executables before you
+install ([Approve hooks and MCP servers](../approve-executables/)). APM scans and
+copies the complete bundle, registers it through Codex's configuration
+interface disabled, and never runs plugin code or grants Codex trust. Enable
+it in Codex. APM keeps its ownership journal in `$APM_HOME/.codex-native/`;
+keep that folder. It was qualified on macOS arm64. See
+[Install plugins](../install-plugins/) for current limits.
 
-- [Install packages](../install-packages/) -- the full `apm install`
-  surface for declared dependencies.
-- [Authentication](../authentication/) -- tokens for private hosts.
-- [Publish to a marketplace](../../producer/publish-to-a-marketplace/) --
-  the producer side of the artifacts described above.
+## Verify
+
+```bash frame="terminal"
+apm deps list
+```
+
+The plugin appears with its primitive counts. Commit `apm.yml` and
+`apm.lock.yaml`.
+
+## When things go wrong
+
+- **`marketplace.json` changed but my install did not.** Expected: run
+  `apm outdated` to see it, then `apm update`.
+- **Refused bare cross-repo source on `*.ghe.com`.** The entry would fall back
+  to public `github.com`, so APM refuses it as a dependency-confusion risk.
+  Ask the publisher to host-qualify the entry. A bare `owner/repo` is accepted
+  when your `GITHUB_HOST` is the marketplace host, because it then resolves
+  to that host.
+- **The plugin installs but is incomplete in Claude Code.** See
+  [Install plugins](../install-plugins/#known-gaps).
+
+:::tip[Other options]
+Publish your own: [Publish to a marketplace](../../producer/publish-to-a-marketplace/).
+Every flag: [`apm marketplace`](../../reference/cli/marketplace/).
+:::

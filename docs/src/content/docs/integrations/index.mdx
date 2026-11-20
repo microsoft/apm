@@ -1,0 +1,39 @@
+---
+title: Integrations A-Z
+description: Every harness, CI system, git host and service APM works with, and the page that shows you how.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+Looking for a specific tool? Find it below. Each entry points to the task page that covers it.
+A harness is the agent tool that reads the files APM writes, such as Claude Code or GitHub Copilot.
+
+| Integration | What it is | Where to go |
+|---|---|---|
+| Azure DevOps | Git host and CI | [Use private sources](../getting-started/authentication/#azure-devops), [Run in CI](../consumer/run-in-ci/) |
+| Canvas extensions <Badge text="Experimental" variant="caution" /> | Copilot CLI canvas bundles | [Canvas extensions](./canvas/) |
+| Claude Code | Harness | [Choose your harnesses](../consumer/choose-harnesses/), [Install plugins](../consumer/install-plugins/) |
+| Codex | Harness | [Choose your harnesses](../consumer/choose-harnesses/), [Install plugins](../consumer/install-plugins/) |
+| Copilot app workflows <Badge text="Experimental" variant="caution" /> | GitHub Copilot app | [GitHub Copilot App workflows](./copilot-app/) |
+| Cursor | Harness | [Choose your harnesses](../consumer/choose-harnesses/) |
+| Dependabot | Automated update pull requests | [Update dependencies](../consumer/update-and-refresh/#dependabot) |
+| External scanners <Badge text="Experimental" variant="caution" /> | SARIF scanners at audit and install time | [External scanners](./external-scanners/) |
+| Gemini CLI | Harness | [Choose your harnesses](../consumer/choose-harnesses/) |
+| GitHub Actions | CI | [Run in CI](../consumer/run-in-ci/), [Gate pull requests](../enterprise/enforce-in-ci/) |
+| GitHub Agentic Workflows | Agents that run in GitHub Actions | [Run in CI](../consumer/run-in-ci/) |
+| GitHub Copilot | Harness (VS Code, JetBrains, Copilot CLI, cloud agent) | [Choose your harnesses](../consumer/choose-harnesses/) |
+| GitHub Enterprise | Git host (GHES and GHE.com) | [Use private sources](../getting-started/authentication/) |
+| GitHub rulesets | Required checks on pull requests | [Gate pull requests](../enterprise/enforce-in-ci/) |
+| Grok Build | Harness | [Choose your harnesses](../consumer/choose-harnesses/) |
+| GitLab | Git host and CI | [Use private sources](../getting-started/authentication/), [Run in CI](../consumer/run-in-ci/) |
+| Hermes Agent | Harness | [Hermes Agent](./hermes/) |
+| JFrog Artifactory | Agent Packages repositories | [Build your organization's marketplace](../enterprise/org-marketplace/) |
+| Kiro | Harness | [Choose your harnesses](../consumer/choose-harnesses/) |
+| Microsoft 365 Copilot Cowork <Badge text="Experimental" variant="caution" /> | Cowork skills | [Microsoft 365 Copilot Cowork](./copilot-cowork/) |
+| OpenClaw <Badge text="Experimental" variant="caution" /> | Agent runtime | [OpenClaw Agent](./openclaw/) |
+| OpenCode | Harness | [Choose your harnesses](../consumer/choose-harnesses/) |
+| Renovate | Automated update pull requests | [Update dependencies](../consumer/update-and-refresh/#renovate) |
+| Windsurf | Harness | [Choose your harnesses](../consumer/choose-harnesses/) |
+
+The full list of harnesses, and which agent capabilities each one receives, is in the
+[Targets matrix](../reference/targets-matrix/).
