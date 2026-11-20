@@ -18,6 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..core.remediation import (
+    MARKETPLACE_REGISTER_MANUAL,
+    MARKETPLACES_OUTSIDE_USER_MANIFEST,
+    either_sentence,
+)
+
 MARKETPLACES_KEY = "marketplaces"
 _ENTRY_KEYS = ("name", "source", "ref")
 
@@ -56,8 +62,10 @@ def outside_user_manifest_error(manifest_path: Path) -> str:
     return (
         f"'{MARKETPLACES_KEY}' is not allowed in {_ascii(manifest_path.as_posix())}. "
         "Project and package manifests cannot declare marketplaces. "
-        f"Move the entries to the user manifest ({_ascii(user_manifest_path().as_posix())}) "
-        "and run 'apm install -g', or register one with 'apm marketplace add SOURCE --name NAME'."
+        + either_sentence(
+            MARKETPLACES_OUTSIDE_USER_MANIFEST.bind(path=_ascii(user_manifest_path().as_posix())),
+            MARKETPLACE_REGISTER_MANUAL,
+        )
     )
 
 
