@@ -231,7 +231,7 @@ def test_catalog_defined_servers_replay_warm_and_reresolve_cold(
     # Only the catalog holds the server definitions a cold copy needs.
     world.remove_materialized()
     failed = world.run(*_INSTALL, "--frozen", expected=1)
-    assert "Failed to fetch marketplace 'acme'" in " ".join(failed.stdout.split())
+    assert "Failed to fetch marketplace 'acme'" in " ".join((failed.stdout + failed.stderr).split())
     blocked.rename(world.catalog.origin)
     world.run(*_INSTALL, "--frozen")
     assert world.lock_bytes == lock_bytes

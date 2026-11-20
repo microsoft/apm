@@ -345,7 +345,7 @@ class TestGitCacheCheckoutEviction:
         checkout_dir = tmp_path / "fake-checkout"
         checkout_dir.mkdir()
 
-        with patch("apm_cli.cache.git_cache.logging.getLogger") as mock_logger:
+        with patch("logging.getLogger") as mock_logger:
             mock_log_instance = MagicMock()
             mock_logger.return_value = mock_log_instance
             cache._evict_checkout(checkout_dir)

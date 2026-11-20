@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import LOCAL_EDITS_EXPORT, RESTORE_EDITED_SKILL
 from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
     output,
@@ -132,7 +133,12 @@ def test_export_patch_claude_plugin_package_exports_upstream_files(
 def test_export_patch_two_packages_and_install_hint_then_overwrite(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """Edits in 2 packages -> 2 patches; audit and install point at export-patch."""
+    """Edits in 2 packages -> 2 patches; audit and install point at export-patch.
+
+    Per primitive kind (RA-009): an edited agent is overwritten by a plain
+    install, so audit and install point at ``apm export-patch`` first; edited
+    skills are kept by the install, so audit names delete-then-install instead.
+    """
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
         "consumer-two",
@@ -144,12 +150,20 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     )
     world.apm(project, "install", "--no-policy")
     lock_before = (project / "apm.lock.yaml").read_bytes()
-    for rel in (".claude/skills/tool-skill/SKILL.md", ".claude/skills/rx/SKILL.md"):
+    skills = (".claude/skills/tool-skill/SKILL.md", ".claude/skills/rx/SKILL.md")
+    agent = project / ".claude" / "agents" / "ra.md"
+    agent_before = agent.read_bytes()
+    for rel in skills:
         target = project / rel
         target.write_text(target.read_text() + "two-package edit\n")
+    agent.write_text(agent.read_text() + "agent edit\n")
 
     audit = world.apm(project, "audit", "--ci", "--no-policy", expect=1)
-    assert "apm export-patch" in output(audit)
+    audit_text = " ".join(output(audit).split())
+    assert "1 local edit(s) to managed files that the next 'apm install' overwrites" in audit_text
+    assert LOCAL_EDITS_EXPORT.clause() in audit_text
+    assert "apm export-patch" in audit_text
+    assert RESTORE_EDITED_SKILL.bind(subject="the edited skill files").sentence() in audit_text
 
     world.apm(project, "export-patch", "-o", str(tmp_path / "out"))
     patches = sorted((tmp_path / "out").glob("*.patch"))
@@ -157,8 +171,13 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
 
     install = world.apm(project, "install", "--no-policy")
-    assert "apm export-patch" in output(install)
+    install_text = " ".join(output(install).split())
+    assert "overwrites 1 locally edited managed file(s): .claude/agents/ra.md" in install_text
+    assert "apm export-patch" in install_text
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
+    assert agent.read_bytes() == agent_before
+    for rel in skills:
+        assert (project / rel).read_text().endswith("two-package edit\n")
 
 
 def test_export_patch_keeps_ambiguity_for_authored_apm_plugin_sources(

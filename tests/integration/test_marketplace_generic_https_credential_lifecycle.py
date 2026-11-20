@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import MARKETPLACE_ADD_FAILED
 from apm_cli.core.tls_trust import configure_process_tls_trust
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -349,6 +350,6 @@ def test_generic_https_marketplace_add_rejects_http_rewrite(
     assert "insecure HTTP" in output
     # The marketplace was never registered, so the retry is the add command.
     assert "It was not registered" in normalized_output
-    assert "rerun this 'apm marketplace add' command" in normalized_output
+    assert MARKETPLACE_ADD_FAILED.sentence() in normalized_output
     assert "apm marketplace update" not in normalized_output
     assert "github-apm-sentinel" not in output

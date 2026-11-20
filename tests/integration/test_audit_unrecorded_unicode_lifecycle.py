@@ -270,7 +270,9 @@ def test_native_hook_discovery_across_reinstall_update_and_user_scope(
     refused = _run(
         lifecycle, ("audit", "--strip"), expected=1, scenario_id="native-hooks-mixed-strip-refusal"
     )
-    assert "does not rewrite native configuration" in " ".join(refused.stdout.split())
+    assert "does not rewrite native configuration" in " ".join(
+        (refused.stdout + refused.stderr).split()
+    )
     assert dirty_skill.read_bytes() == _BIDI_BYTES
     _assert_same_state(
         mixed_before,

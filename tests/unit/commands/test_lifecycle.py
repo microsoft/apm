@@ -63,7 +63,7 @@ class TestLifecycleTest:
             tmp_path / "apm.yml",
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo test-ok"}]}},
         )
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             result = cli_runner.invoke(lifecycle, ["test", "post-install"])
         assert result.exit_code == 0
         assert "Dry-run" in result.output
@@ -87,7 +87,7 @@ class TestLifecycleTest:
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo test-ok"}]}},
         )
         assert cli_runner.invoke(lifecycle, ["trust"]).exit_code == 0
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="test-ok", stderr="", returncode=0)
             result = cli_runner.invoke(lifecycle, ["test", "post-install", "--execute"])
         assert result.exit_code == 0
@@ -246,7 +246,7 @@ class TestLifecycleTestTrustDisplay:
             {"lifecycle": {"post-install": [{"type": "command", "run": "echo ok"}]}},
         )
         # Deliberately do NOT run 'apm lifecycle trust' before --execute.
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="ok", stderr="", returncode=0)
             result = cli_runner.invoke(lifecycle, ["test", "post-install", "--execute"])
         assert result.exit_code == 0

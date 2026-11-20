@@ -949,7 +949,7 @@ def _agentrc_on_path(path):
     def _which(cmd, *args, **kwargs):
         return path if cmd == "agentrc" else real_which(cmd, *args, **kwargs)
 
-    return patch("apm_cli.commands.init.shutil.which", side_effect=_which)
+    return patch("shutil.which", side_effect=_which)
 
 
 def test_agentrc_probe_never_poisons_the_git_executable_cache(tmp_path, monkeypatch):

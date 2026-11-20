@@ -22,7 +22,7 @@ from scripts.architecture_linter.models import Rule, Violation
 RULE_MODULE_OWNERSHIP = "registry_delegation.module_ownership"
 GUARD_MODULE_OWNERSHIP = "registry-delegation-module-ownership"
 UNOWNED_MODULES_PATH = ".apm/architecture/unowned-modules.json"
-UNOWNED_MODULE_CEILING = 309
+UNOWNED_MODULE_CEILING = 307
 
 _SRC = "src/apm_cli/"
 

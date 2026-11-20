@@ -452,7 +452,7 @@ class TestMcpEnvVarHeadersCursor:
         result = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
         # An unowned differing same-name entry is preserved and reported (#3681).
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "conflicts with the existing" in " ".join(result.stdout.split())
+        assert "conflicts with the existing" in " ".join((result.stdout + result.stderr).split())
         assert cursor_config.read_bytes() == before
         document["mcpServers"]["repair-probe"]["headers"]["x-probe"] = "${env:CURSOR_TOKEN}"
         document["mcpServers"]["repair-probe"]["headers"]["Authorization"] = (
