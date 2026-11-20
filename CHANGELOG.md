@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` and cold lockfile replays print the package header as `<name> #<ref> @<sha>`, without repeating the locked commit (#4217)
 - `apm install --frozen` with MCP servers prints its MCP targeting line once instead of twice, at project and user scope (#4217)
 - Installing a dependency whose repository the host answers 404 for now reports `Repository <owner/repo> not found on <host>` once, with `Run 'apm uninstall <owner/repo>'`, instead of a network error. (#4217)
+- `apm install --frozen` replays a lockfile written through `PROXY_REGISTRY_URL` for tag and branch refs, verifying the proxy route, ref and locked content hash (#4217)
+- With registries disabled, `apm install` names the `$APM_HOME` file that configures registries instead of blaming apm.yml, and prints `Run 'apm experimental enable registries'` (#4217)
+- `apm install <pkg>` also locks declared local-path dependencies missing from `apm.lock.yaml`, and reports byte-identical pre-existing skills as adopted (#4217)
+- `apm update` lists a moved SHA pin once (under Revision pin updates) and its Total line counts only changed dependencies. (#4217)
 
 ## [0.37.0] - 2026-11-20
 
