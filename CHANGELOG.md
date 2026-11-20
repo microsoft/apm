@@ -90,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm targets` lists the targets `apm.yml` declares as active, as install resolves them. (closes #3792, #3988)
 - Messages name `targets:`, `executables.allow` and "marketplace", and generated `apm.yml` headers and target errors no longer list the deprecated `vscode`. (#3988)
 - `apm install` reports pinned hooks denied by org policy or `apm deny --user` as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4044, #4055)
+- `apm install` reports denied bin/ executables and canvas extensions as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4052, #4064)
 
 ### Security
 
