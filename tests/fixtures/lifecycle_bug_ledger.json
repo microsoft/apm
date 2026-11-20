@@ -591,6 +591,16 @@
       ]
     },
     {
+      "issue": 4171,
+      "fixed_in": "Unreleased",
+      "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",
+      "failure_modes": ["auth", "outcome"],
+      "properties": ["auth.credentials_isolated", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_config_credential_rendering_lifecycle.py::test_credential_values_never_reach_command_output_or_artifacts"
+      ]
+    },
+    {
       "issue": 4187,
       "fixed_in": "Unreleased",
       "summary": "audit --ci and install --frozen reach one verdict on locked package content hashes.",
