@@ -342,3 +342,58 @@ def test_update_names_a_bundle_whose_executables_are_parked(
     _allow(consumer, key)
     world.apm(consumer, "install", str(bundle))
     assert "awaiting approval" not in output(world.apm(consumer, "update", "--yes"))
+
+
+def _skill_bundle(world: MarketplacePackWorld, tmp_path: Path) -> Path:
+    producer = world.isolated.work_root / "skillpkg"
+    write(
+        producer / "apm.yml",
+        "name: skillpkg\nversion: 1.0.0\ndescription: s\nlicense: MIT\n"
+        "targets: [copilot]\ndependencies:\n  apm: []\n",
+    )
+    write(producer / ".apm" / "skills" / "ss" / "SKILL.md", skill_md("ss"))
+    world.apm(producer, "install", "--no-policy")
+    world.apm(producer, "pack", "-o", str(tmp_path / "skill-out"))
+    return tmp_path / "skill-out" / "skillpkg-1.0.0"
+
+
+@pytest.mark.parametrize("edited", [False, True], ids=["unedited", "edited"])
+def test_bundle_skill_migration_removes_receipted_legacy_copies(
+    tmp_path: Path, apm_binary_path: Path, edited: bool
+) -> None:
+    """#4223: a bundle install records receipts, so skill path migration proves its files.
+
+    A bundle cannot be rendered from a locked source; its receipts are the only
+    deletion evidence (req-lk-024). An unedited legacy copy is removed when the
+    converged layout is installed. An edited one is kept, named and refused
+    with the #4360 exit and wording, and the converged copy still deploys;
+    moving it aside, as the remedy says, lets the next install converge.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle = _skill_bundle(world, tmp_path)
+    consumer = world.consumer("migrate", targets=("copilot",))
+    install = ("install", str(bundle), "--target", "copilot", "--no-policy")
+    world.apm(consumer, *install, "--legacy-skill-paths")
+    legacy = consumer / ".github" / "skills" / "ss" / "SKILL.md"
+    assert legacy.is_file()
+    receipts = world.isolated.home / ".apm" / "deployment-receipts"
+    assert receipts.is_dir() and any(receipts.iterdir()), "bundle install records receipts"
+    if edited:
+        legacy.write_text("# mine\n", encoding="ascii")
+
+    result = world.apm(consumer, *install, expect=1 if edited else 0)
+
+    assert (consumer / ".agents" / "skills" / "ss" / "SKILL.md").is_file()
+    if edited:
+        assert legacy.read_bytes() == b"# mine\n"
+        output = " ".join((result.stdout + result.stderr).split())
+        assert "Kept .github/skills/ss/SKILL.md:" in output, output
+        assert "Move it aside, then run 'apm install'" in output, output
+        # The remedy: move the edited copy aside, then the install converges.
+        aside = tmp_path / "SKILL.md.mine"
+        legacy.rename(aside)
+        world.apm(consumer, *install)
+        assert aside.read_bytes() == b"# mine\n"
+    assert not legacy.exists()
+    local = world.lock(consumer).get("local_deployed_files") or []
+    assert not any(path.startswith(".github/skills/") for path in local), local

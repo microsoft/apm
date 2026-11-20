@@ -16,7 +16,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 from urllib.parse import urlparse
 
 from apm_cli.deps.lockfile import LockedDependency
@@ -108,7 +107,7 @@ class TestEnforceRequireHashes(unittest.TestCase):
 
 
 def _gate_ctx(apm_dir: Path, require_hashes: bool):
-    """Minimal install-context stub for ``_enforce_require_hashes``."""
+    """Minimal install-context stub for ``check_before_lockfile``."""
     integrity = SimpleNamespace(require_hashes=require_hashes)
     security = SimpleNamespace(integrity=integrity)
     policy = SimpleNamespace(security=security)
@@ -122,27 +121,25 @@ def _gate_ctx(apm_dir: Path, require_hashes: bool):
 
 
 class TestPipelineEnforceRequireHashes(unittest.TestCase):
-    """The pipeline gate must fail closed on an unreadable lockfile."""
+    """The commit gate must fail closed on a missing lockfile."""
 
-    def test_unreadable_lockfile_fails_closed_when_enabled(self):
+    def test_missing_lockfile_fails_closed_when_enabled(self):
+        from apm_cli.install.commit_gate import check_before_lockfile
         from apm_cli.install.phases.policy_gate import PolicyViolationError
-        from apm_cli.install.pipeline import _enforce_require_hashes
 
         with tempfile.TemporaryDirectory() as d:
             ctx = _gate_ctx(Path(d), require_hashes=True)
-            with patch("apm_cli.deps.lockfile.LockFile.read", return_value=None):
-                with self.assertRaises(PolicyViolationError) as exc:
-                    _enforce_require_hashes(ctx)
+            with self.assertRaises(PolicyViolationError) as exc:
+                check_before_lockfile(ctx, None)
         self.assertIn("require_hashes", str(exc.exception))
 
-    def test_unreadable_lockfile_noop_when_disabled(self):
-        from apm_cli.install.pipeline import _enforce_require_hashes
+    def test_missing_lockfile_noop_when_disabled(self):
+        from apm_cli.install.commit_gate import check_before_lockfile
 
         with tempfile.TemporaryDirectory() as d:
             ctx = _gate_ctx(Path(d), require_hashes=False)
-            with patch("apm_cli.deps.lockfile.LockFile.read", return_value=None):
-                # Default-off must not raise even if the lockfile is unreadable.
-                _enforce_require_hashes(ctx)
+            # Default-off must not raise even without a lockfile.
+            check_before_lockfile(ctx, None)
 
 
 if __name__ == "__main__":

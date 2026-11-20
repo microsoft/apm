@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -61,6 +62,76 @@ _LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
 # after a reboot or remount. Windows root identity is intentionally unchanged.
 _ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
+# Receipts examined per command; collection is incremental across commands.
+_RECEIPT_COLLECTION_LIMIT = 256
+
+
+def _receipt_key(root: str, scope: str) -> str:
+    """The receipt file stem for a project *root* (as recorded) and *scope*."""
+    return hashlib.sha256(f"{Path(root)}|{scope}".encode()).hexdigest()
+
+
+def _next_receipt_batch(directory: Path, limit: int) -> list[Path]:
+    """The next *limit* receipts after the cursor, wrapping, then advance it.
+
+    Each command resumes where the previous one stopped, so retained receipts
+    never hide one behind them. The cursor exists only while there are more
+    receipts than one batch examines.
+    """
+    receipts = sorted(directory.glob("*.json"))
+    cursor = directory / ".collection-cursor"
+    last = ""
+    with contextlib.suppress(OSError, UnicodeDecodeError):
+        if not cursor.is_symlink():
+            last = cursor.read_text(encoding="ascii").strip()
+    start = next((i for i, path in enumerate(receipts) if path.name > last), 0)
+    batch = (receipts[start:] + receipts[:start])[:limit]
+    if len(receipts) > limit and not cursor.is_symlink():
+        with contextlib.suppress(OSError):
+            cursor.write_text(batch[-1].name + "\n", encoding="ascii")
+    return batch
+
+
+def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) -> int:
+    """Best effort: delete receipts whose recorded project root is gone (#4176).
+
+    Receipts are not packages: this never selects package removals, which
+    stay with install/orphans.py.
+
+    A receipt goes only when its file name is the key of the root and scope it
+    records, that root is absolute and no longer exists, and the root's parent
+    directory does (so an unmounted volume never looks deleted). Any doubt
+    keeps the receipt; no error reaches the command. Returns the count removed.
+    """
+    from apm_cli.core.scope import get_apm_home
+
+    removed = 0
+    try:
+        directory = get_apm_home() / "deployment-receipts"
+        if directory.is_symlink() or not directory.is_dir():
+            return 0
+        for path in _next_receipt_batch(directory, limit):
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                data = json.loads(path.read_text(encoding="utf-8"))
+                root, scope = data["root"], data["scope"]
+                if not isinstance(root, str) or not isinstance(scope, str):
+                    continue
+                recorded = Path(root)
+                if (
+                    path.stem == _receipt_key(root, scope)
+                    and recorded.is_absolute()
+                    and not os.path.lexists(recorded)
+                    and recorded.parent.is_dir()
+                ):
+                    path.unlink()
+                    removed += 1
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    except OSError:
+        return removed
+    return removed
 
 
 @dataclass(frozen=True)
@@ -82,6 +153,16 @@ class DeploymentCleanupSnapshot:
     hashes: dict[str, str]
 
 
+def materialization_evidence_paths(project_root: Path, scope: InstallScope) -> tuple[Path, Path]:
+    """Return ``(OS-user receipt file, checkout identity file)`` for *project_root*."""
+    from apm_cli.core.scope import get_apm_home
+
+    root = project_root.resolve()
+    key = _receipt_key(root.as_posix(), scope.value)
+    state_path = get_apm_home() / "deployment-receipts" / f"{key}.json"
+    return state_path, root / LOCAL_STATE_DIR / "installation"
+
+
 class DeploymentMaterializationSession:
     """Installation-local rendered-write evidence, subordinate to current ownership.
 
@@ -94,15 +175,10 @@ class DeploymentMaterializationSession:
     def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
         self.scope = scope
-        from apm_cli.core.scope import get_apm_home
-
-        key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
-        apm_home = get_apm_home()
+        self.state_path, self.identity_path = materialization_evidence_paths(self.root, scope)
         # Containment is anchored one level above APM_HOME (``$HOME`` by
         # default); for a shallow custom root the symlink check is the guard.
-        self._receipts_base = apm_home.parent
-        self.state_path = apm_home / "deployment-receipts" / f"{key}.json"
-        self.identity_path = self.root / LOCAL_STATE_DIR / "installation"
+        self._receipts_base = self.state_path.parent.parent.parent
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
@@ -655,6 +731,39 @@ def record_rendered_writes(
         targets,
         DeploymentMaterializationSession.receipt_owner(package_info),
     )
+
+
+def record_bundle_receipts(
+    project_root: Path,
+    *,
+    scope: InstallScope,
+    targets: Sequence[TargetProfile],
+    written: Sequence[str],
+    lockfile: LockFile,
+) -> None:
+    """Record local deployment receipts for files a local bundle install wrote (#4223).
+
+    Bundle files cannot be rendered from a locked source, so the receipt is
+    their only deletion evidence (req-lk-024). *written* lists only files this
+    install actually wrote, never adopted identical ones; *lockfile* already
+    holds their claims, so each receipt binds to the committed local-bundle
+    claim. A file no target root contains is not receipted.
+    """
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    if not written:
+        return
+    session = DeploymentMaterializationSession(project_root, scope, lockfile)
+    for claim in written:
+        path = Path(claim)
+        physical = path if path.is_absolute() else project_root / path
+        if physical.is_symlink() or not physical.is_file():
+            continue
+        try:
+            session.record({physical: compute_file_hash(physical)}, targets, _LOCAL_BUNDLE_OWNER)
+        except ValueError:
+            continue
+    session.flush()
 
 
 def _is_canonical_bundle_hash(content_hash: str | None) -> bool:
@@ -1649,33 +1758,36 @@ class DeploymentLedgerCodec:
 
         In memory a row keeps its compatibility value and inferred scope;
         persisted, every row records scope ``user`` and a path under its
-        target's external user root is target-relative. A form read from the
-        lock is reused while it still maps back to the same row.
+        target's user root outside HOME is target-relative. A form read from
+        the lock is reused while it still maps back to the same row. Plain
+        user-scoped keys are reserved first, so a target-relative form never
+        displaces another row; it stays project-relative instead.
         """
         absolute = DeploymentLedgerCodec._absolute_values(lockfile)
         read_forms: dict[str, DeploymentLocator] = getattr(lockfile, "_user_row_forms", {})
+        ordered = sorted(
+            lockfile.deployment_ledger.records.values(),
+            key=lambda record: (record.locator.scope != "user", record.locator.key),
+        )
+        reserved = {replace(record.locator, scope="user").key for record in ordered}
         records: dict[str, DeploymentRecord] = {}
-        for record in lockfile.deployment_ledger.records.values():
-            locator = replace(record.locator, scope="user")
-            read_form = read_forms.get(record.locator.key)
-            if locator.kind == LocatorKind.PROJECT_RELATIVE and locator.value in absolute:
-                root = DeploymentLedgerCodec._user_root(locator.target)
+        for record in ordered:
+            plain = replace(record.locator, scope="user")
+            options = [plain, record.locator]
+            if plain.kind == LocatorKind.PROJECT_RELATIVE and plain.value in absolute:
+                root = DeploymentLedgerCodec._user_root(plain.target)
+                read_form = read_forms.get(record.locator.key)
                 if (
                     read_form is not None
                     and read_form.kind == LocatorKind.TARGET_RELATIVE
-                    and locator.value.endswith(f"/{read_form.value}")
+                    and plain.value.endswith(f"/{read_form.value}")
                 ):
-                    root = locator.value[: -len(read_form.value) - 1]
-                relative = locator.value.removeprefix(f"{root}/") if root else ""
-                suffix = f"/{relative}"
-                if (
-                    relative
-                    and relative != locator.value
-                    and sum(value.endswith(suffix) for value in absolute) == 1
-                ):
-                    locator = replace(locator, kind=LocatorKind.TARGET_RELATIVE, value=relative)
-            if locator.key in records:
-                locator = record.locator
+                    root = plain.value[: -len(read_form.value) - 1]
+                relative = plain.value.removeprefix(f"{root}/") if root else plain.value
+                converted = replace(plain, kind=LocatorKind.TARGET_RELATIVE, value=relative)
+                if relative != plain.value and converted.key not in reserved:
+                    options.insert(0, converted)
+            locator = next(option for option in options if option.key not in records)
             records[locator.key] = replace(record, locator=locator)
         return DeploymentLedgerCodec.rows(DeploymentLedger(records=records))
 
@@ -1703,23 +1815,18 @@ class DeploymentLedgerCodec:
         reads unchanged.
         """
         absolute = DeploymentLedgerCodec._absolute_values(lockfile)
+        resolved = DeploymentLedgerCodec._resolve_target_relative(
+            lockfile.deployment_ledger, absolute
+        )
         forms: dict[str, DeploymentLocator] = {}
         records: dict[str, DeploymentRecord] = {}
-        for record in lockfile.deployment_ledger.records.values():
+        for key, record in lockfile.deployment_ledger.records.items():
             locator = record.locator
             if locator.scope == "user":
-                if locator.kind == LocatorKind.TARGET_RELATIVE:
-                    matches = [v for v in absolute if v.endswith(f"/{locator.value}")]
-                    root = DeploymentLedgerCodec._user_root(locator.target)
-                    value = (
-                        matches[0]
-                        if len(matches) == 1
-                        else f"{root}/{locator.value}"
-                        if root
-                        else None
+                if key in resolved:
+                    locator = replace(
+                        locator, kind=LocatorKind.PROJECT_RELATIVE, value=resolved[key]
                     )
-                    if value is not None:
-                        locator = replace(locator, kind=LocatorKind.PROJECT_RELATIVE, value=value)
                 bundle = record.active_owner == _LOCAL_BUNDLE_OWNER
                 scope = "user" if bundle else DeploymentLedgerCodec.legacy_scope(locator.value)
                 locator = replace(locator, scope=scope)
@@ -1727,6 +1834,35 @@ class DeploymentLedgerCodec:
             records[locator.key] = replace(record, locator=locator)
         lockfile.deployment_ledger = DeploymentLedger(records=records)
         lockfile._user_row_forms = forms
+
+    @staticmethod
+    def _resolve_target_relative(ledger: DeploymentLedger, absolute: set[str]) -> dict[str, str]:
+        """Map each user target-relative row key to its absolute compatibility value.
+
+        Per target: the path under the target's resolved user root wins, then
+        the one candidate not already taken by another row, then the root path.
+        """
+        pending = {
+            key: record.locator
+            for key, record in ledger.records.items()
+            if record.locator.scope == "user" and record.locator.kind == LocatorKind.TARGET_RELATIVE
+        }
+        roots = {key: DeploymentLedgerCodec._user_root(loc.target) for key, loc in pending.items()}
+        resolved = {
+            key: f"{roots[key]}/{loc.value}"
+            for key, loc in pending.items()
+            if roots[key] and f"{roots[key]}/{loc.value}" in absolute
+        }
+        for key, loc in sorted(pending.items()):
+            if key in resolved:
+                continue
+            taken = set(resolved.values())
+            matches = [v for v in absolute if v.endswith(f"/{loc.value}") and v not in taken]
+            if len(matches) == 1:
+                resolved[key] = matches[0]
+            elif roots[key]:
+                resolved[key] = f"{roots[key]}/{loc.value}"
+        return resolved
 
     @staticmethod
     def persisted_rows(lockfile: LockFile, *, user_scope: bool) -> list[dict[str, Any]]:

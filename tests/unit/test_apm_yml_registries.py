@@ -235,7 +235,14 @@ class TestRegistryUrlScheme:
     @_CONTRACTS
     @pytest.mark.parametrize(
         "url",
-        ["http://registry.example.com/apm", "HTTP://registry.example.com", "http://8.8.8.8/apm"],
+        [
+            "http://registry.example.com/apm",
+            "HTTP://registry.example.com",
+            "http://8.8.8.8/apm",
+            # Just outside the RFC 1918 172.16.0.0/12 range on both sides.
+            "http://172.32.0.1/apm",
+            "http://172.15.255.255/apm",
+        ],
     )
     def test_http_to_public_host_is_a_parse_error(self, write_yml, schema_line, url):
         p = write_yml(_registry_manifest(schema_line, f"url: {url}"))

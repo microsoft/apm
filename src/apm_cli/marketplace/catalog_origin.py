@@ -154,7 +154,8 @@ def _declared_row_keeps_provenance(lockfile: LockFile, declared: Iterable[object
             continue
         require_locked_catalog_origin(alias, plugin, lockfile)
         try:
-            resolution = resolve_marketplace_plugin(plugin, alias)
+            # Origin only: ref pins stay with install and update resolution.
+            resolution = resolve_marketplace_plugin(plugin, alias, enforce_ref_pins=False)
             admit_marketplace_resolution(resolution)
         except MarketplaceError as exc:
             raise MarketplaceProvenanceError(
@@ -169,6 +170,17 @@ def _declared_row_keeps_provenance(lockfile: LockFile, declared: Iterable[object
                 f"apm.yml declares {plugin}@{alias}, but apm.lock.yaml records {key} "
                 f"without its marketplace provenance. {_NEXT_STEP}"
             )
+
+
+def _registered_local_catalog(alias: str) -> bool:
+    """Whether the user registered *alias* as a local catalog, which has no origin.
+
+    Decided by the user's marketplace registration only, never by the lock row.
+    """
+    try:
+        return get_marketplace_by_name(alias).kind == "local"
+    except MarketplaceError:
+        return False
 
 
 def _declared_dependencies(manifest: Path | None) -> list[object]:
@@ -220,14 +232,15 @@ def reverify_locked_provenance(
             )
         if legacy:
             continue
-        if not dep.source_url:
+        if not dep.source_url and not _registered_local_catalog(alias):
             raise MarketplaceProvenanceError(
                 f"apm.lock.yaml records no marketplace origin for {key} ({plugin}@{alias}). "
                 + _NEXT_STEP
             )
         require_locked_row_origin(dep)
         try:
-            resolution = resolve_marketplace_plugin(plugin, alias)
+            # Origin only: ref pins stay with install and update resolution.
+            resolution = resolve_marketplace_plugin(plugin, alias, enforce_ref_pins=False)
             admit_marketplace_resolution(resolution)
         except MarketplaceError as exc:
             raise MarketplaceProvenanceError(

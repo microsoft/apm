@@ -69,6 +69,7 @@ from ..core.command_logger import InstallLogger
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
@@ -364,10 +365,7 @@ def _run_mcp_lsp_integration(
             pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
-        logger.refusal(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()
         sys.exit(1)
 
@@ -389,6 +387,22 @@ def _run_mcp_lsp_integration(
         force=force,
         prepared=prepared_lsp,
     )
+
+
+def _resolve_only_packages(packages: tuple[str, ...], declared: list) -> list[str] | None:
+    """Resolve named packages to declared keys, or refuse with exit 1."""
+    try:
+        return resolve_requested_packages(packages, declared)
+    except UnknownPackageError as e:
+        _rich_error(f"Package '{e.token}' not found in apm.yml")
+        if e.available:
+            _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
+        else:
+            _rich_info(
+                f"No APM dependencies are declared. Run 'apm install {e.token}' to add it.",
+                symbol="info",
+            )
+        sys.exit(1)
 
 
 def _handle_service_only_update(
@@ -503,7 +517,10 @@ def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
     for row in restored:
         logger.info(f"Restored marketplace provenance for {row} from its catalog.")
     if restored and not dry_run:
-        lockfile.write(lock_path)
+        from apm_cli.deps.lockfile_write_authority import provisional_lockfile_writes
+
+        with provisional_lockfile_writes():
+            lockfile.write(lock_path)
     return lockfile
 
 
@@ -701,6 +718,7 @@ def update(
     )
 
 
+@lockfile_writer(LockfileWriter.UPDATE)
 def _run_dep_update(
     *,
     assume_yes: bool,
@@ -801,6 +819,13 @@ def _run_dep_update_locked(
     logger = InstallLogger(
         verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
     )
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    # Map any positional [PACKAGES] to canonical dependency keys for the
+    # engine's only_packages filter; None means "refresh everything". A named
+    # package must be declared even when apm.yml declares no APM dependencies
+    # (#4263), so this runs before any reconcile or service-only path.
+    only_packages = _resolve_only_packages(packages, project_manifest_dependencies(apm_package))
     from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
 
     reconcile_scope_bundle_hooks(scope, apm_package, logger=logger, dry_run=dry_run)
@@ -820,21 +845,7 @@ def _run_dep_update_locked(
     # pipeline must resolve against the new SHAs, but declined/dry-run paths
     # should not mutate the APMPackage instance parsed from the on-disk manifest.
     staged_apm_package = copy.deepcopy(apm_package)
-    from ..models.dependency.replacement import project_manifest_dependencies
-
     all_declared_deps = project_manifest_dependencies(staged_apm_package)
-
-    # Map any positional [PACKAGES] to canonical dependency keys for the
-    # engine's only_packages filter; None means "refresh everything".
-    try:
-        only_packages = resolve_requested_packages(
-            packages,
-            all_declared_deps,
-        )
-    except UnknownPackageError as e:
-        _rich_error(f"Package '{e.token}' not found in apm.yml")
-        _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
-        sys.exit(1)
 
     revision_pin_resolution = _resolve_and_stage_revision_pin_updates(
         all_declared_deps=all_declared_deps,
@@ -986,6 +997,7 @@ def _run_dep_update_locked(
             target=target,
             legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
+            trust_transitive_mcp=trust_transitive_mcp,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -1003,7 +1015,7 @@ def _run_dep_update_locked(
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except PolicyViolationError as e:
-        _rich_error(str(e), err=True)
+        _rich_error(str(e), symbol="error", err=True)
         sys.exit(1)
     except (DirectDependencyError, RequiredIntegrationError) as e:
         logger.error(str(e))

@@ -16,12 +16,10 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_UPDATE_REDEFINED = "S-pending (neutral issue to follow): update and install agreement on gated surfaces after a definition change"
-_UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
-_UNINSTALL_SIBLING = (
-    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
-)
-_DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
+_UPDATE_REDEFINED = "#4444 update and install agreement on gated surfaces after a definition change"
+_UPDATE_DEP_DENY = "#4445 update and install agreement on a policy-denied dependency"
+_UNINSTALL_SIBLING = "#4446 uninstall rebuild agreement on gated surfaces"
+_DRY_RUN = "#4454 dry-run preview of gate removal"
 _XFAIL = {
     "G|update|definition-changed|hook": _UPDATE_REDEFINED,
     "G|update|policy-dep-deny|hook": _UPDATE_DEP_DENY,
@@ -36,9 +34,7 @@ _SMOKE = {"G|install|revoke-approval|hook", "G|frozen|local-deny|hook"}
 
 # G path -> (changes with a row, surface files)
 _MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
-_DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
-_XFAIL["G|marketplace-install|local-deny|hook"] = _DENY_BY_SPEC
-_USER_ORG = "S-pending (neutral issue to follow): org policy for user-scope installs"
+_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL.update(
     {
         f"G|marketplace-install|{change}|hook": _USER_ORG

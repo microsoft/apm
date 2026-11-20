@@ -1432,17 +1432,16 @@ def test_known_output_cell_output_shape_narrows_where_it_is_strict() -> None:
         )
 
 
-def test_frozen_parked_mcp_cell_owns_the_transitive_variant() -> None:
+def test_frozen_parked_mcp_transitive_repeat_is_an_i9_failure() -> None:
     park = (
         "[!] Parked MCP server 'srv' from transitive package acme/plugin "
         "(self-defined, not approved)\n"
     )
     stdout = f"{park}[i] Targets: copilot\n{park}+- MCP Servers (1)\n"
     args = ("install", "--frozen")
-    check_cli_output(args, _cli(args, stdout))  # the repeat is owned by the #4299 cell
     check_cli_output(args, _cli(args, f"{park}+- MCP Servers (1)\n"))  # once is correct
     with pytest.raises(OutputOracleError, match=r"I9: stdout repeats a diagnostic"):
-        check_cli_output(args, _cli(args, stdout), known_cells=())
+        check_cli_output(args, _cli(args, stdout))
 
 
 def test_known_output_cells_are_well_formed() -> None:

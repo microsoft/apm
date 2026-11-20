@@ -750,18 +750,15 @@ class TestCommandIntegratorAdopt:
 
         return pkg_dir, target, _make_package_info(pkg_dir)
 
-    def test_adopt_fires_before_format_dispatch_when_bytes_identical(self, tmp_path: Path) -> None:
-        """Adopt check fires before format dispatch when the on-disk file is
-        byte-identical to the rendered command APM would write (#4360).
-        """
+    def test_adopt_fires_when_the_target_holds_the_rendered_command(self, tmp_path: Path) -> None:
+        """An unrecorded command file holding the rendered command is adopted."""
         body = b"---\ndescription: cmd\n---\n# Cmd\n"
-        pkg_dir, target, pkg_info = self._build(tmp_path, body)
-        # Pre-place the target with the bytes the command render produces.
-        rendered = CommandIntegrator()._render_command(
-            pkg_dir / ".apm" / "prompts" / "cmd.prompt.md", target, "claude_command"
+        _pkg_dir, target, pkg_info = self._build(tmp_path, body)
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"], pkg_info, tmp_path, force=False, managed_files=None
         )
-        assert rendered is not None
-        target.write_text(rendered, encoding="utf-8", newline="\n")
+        rendered = target.read_bytes()
+        assert rendered != body
 
         result = CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS["claude"],
@@ -771,12 +768,28 @@ class TestCommandIntegratorAdopt:
             managed_files=None,
         )
 
-        assert target in result.target_paths, (
-            "Adopt must fire when target bytes match source bytes -- "
-            "the adopt check runs before format dispatch."
-        )
+        assert target in result.target_paths
         assert result.files_adopted == 1
         assert result.files_integrated == 0
+        assert target.read_bytes() == rendered
+
+    def test_raw_prompt_bytes_are_not_adopted_as_a_command(self, tmp_path: Path) -> None:
+        """A file holding the raw prompt is not the rendered command, so it is skipped."""
+        body = b"---\ndescription: cmd\n---\n# Cmd\n"
+        _pkg_dir, target, pkg_info = self._build(tmp_path, body)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        assert result.files_adopted == 0
+        assert target.read_bytes() == body
 
     def test_divergent_content_skipped_not_adopted(self, tmp_path: Path) -> None:
         """When on-disk bytes differ from source, adopt does not fire."""
@@ -809,7 +822,7 @@ def test_gemini_command_adopts_its_rendered_toml(tmp_path: Path) -> None:
     target = tmp_path / ".gemini" / "commands" / "cmd.toml"
     target.parent.mkdir(parents=True)
     target.write_text(
-        CommandIntegrator._render_gemini_command(source), encoding="utf-8", newline="\n"
+        CommandIntegrator._gemini_command_text(source), encoding="utf-8", newline="\n"
     )
 
     result = CommandIntegrator().integrate_commands_for_target(
@@ -822,4 +835,58 @@ def test_gemini_command_adopts_its_rendered_toml(tmp_path: Path) -> None:
 
     assert result.files_adopted == 1
     assert result.files_integrated == 0
-    assert target.read_text(encoding="utf-8") == CommandIntegrator._render_gemini_command(source)
+    assert target.read_text(encoding="utf-8") == CommandIntegrator._gemini_command_text(source)
+
+
+class TestCommandFilesDeployLfOnEveryPlatform:
+    """Command files deploy LF everywhere, so a reinstall adopts them (#4468).
+
+    ``_crlf_text_open`` gives text-mode writes Windows newline translation on any
+    OS; only a writer that leaves newlines to the platform is affected by it.
+    """
+
+    @staticmethod
+    def _crlf_text_open(file, mode="r", *args, **kwargs):
+        if "w" in mode and "b" not in mode and kwargs.get("newline") is None:
+            kwargs["newline"] = "\r\n"
+        return open(file, mode, *args, **kwargs)
+
+    @staticmethod
+    def _deploy(root: Path, target_name: str) -> tuple[Path, PackageInfo]:
+        pkg_dir = root / "pkg"
+        prompts_src = pkg_dir / ".apm" / "prompts"
+        prompts_src.mkdir(parents=True)
+        (prompts_src / "cmd.prompt.md").write_bytes(
+            b"---\ndescription: cmd\n---\n# Cmd\n\nRun it.\n"
+        )
+        pkg_info = _make_package_info(pkg_dir)
+        (root / KNOWN_TARGETS[target_name].root_dir).mkdir(parents=True)
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS[target_name], pkg_info, root, force=False, managed_files=None
+        )
+        assert result.files_integrated == 1
+        (target,) = result.target_paths
+        return target, pkg_info
+
+    @pytest.mark.parametrize("target_name", ["claude", "cursor"])
+    def test_deployed_command_is_lf_and_a_reinstall_adopts_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str
+    ) -> None:
+        reference, _ = self._deploy(tmp_path / "reference", target_name)
+        lf_render = reference.read_bytes().replace(b"\r\n", b"\n")
+
+        from apm_cli.integration import command_integrator
+
+        monkeypatch.setattr(command_integrator, "open", self._crlf_text_open, raising=False)
+        root = tmp_path / "project"
+        target, pkg_info = self._deploy(root, target_name)
+        deployed = target.read_bytes()
+        assert b"\r\n" not in deployed
+        assert deployed == lf_render
+
+        again = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS[target_name], pkg_info, root, force=False, managed_files=None
+        )
+        assert again.files_adopted == 1
+        assert again.files_integrated == 0
+        assert target.read_bytes() == deployed

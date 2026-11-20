@@ -62,25 +62,10 @@ class _AuditConfig:
 
 
 def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None) -> str:
-    """Render a per-outcome `cause` line for audit --ci policy-discovery messages.
+    """Render the per-outcome cause line for audit --ci policy-discovery messages."""
+    from ..policy.outcome_routing import outcome_cause
 
-    Used by both the ``warn`` (`[!]`) and ``block`` (`[x]`) branches so the
-    wording is identical; only the prefix and suffix change. Closes #1159
-    by replacing the prior silent-skip with explicit, actionable causes
-    for ``no_git_remote`` / ``absent`` / ``empty`` outcomes (and matching
-    the existing wording for fetch failures).
-    """
-    src = source or "unknown"
-    if outcome == "no_git_remote":
-        return "Could not determine org from git remote"
-    if outcome == "absent":
-        return f"No org policy found at {src}"
-    if outcome == "empty":
-        return f"Org policy at {src} is present but empty"
-    # malformed / cache_miss_fetch_fail / garbage_response (and any
-    # `error` set on the result): preserve the legacy wording so existing
-    # consumers parsing the line keep working.
-    return f"Policy fetch failed: {err_text or outcome}"
+    return outcome_cause(outcome, source, err_text)
 
 
 def _is_explicit_policy_source(policy_source: str | None) -> bool:
@@ -720,6 +705,7 @@ def _audit_ci_gate(
     logger = cfg.logger
 
     from ..install.audit_replay import resolve_ci_audit_materialization
+    from ..install.exec_gate import exec_policy_from_discovery
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
@@ -758,6 +744,11 @@ def _audit_ci_gate(
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
         no_policy=no_policy,
+        policy_provider=(
+            None
+            if no_policy and not policy_source
+            else lambda: exec_policy_from_discovery(fetch_policy)
+        ),
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror

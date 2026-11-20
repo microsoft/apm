@@ -90,7 +90,7 @@ _EXEC_DECISION_CALLERS = {
         }
     ),
     "recorded_exec_status_is_stale": frozenset(
-        {(_EXEC_GATE, "lock_exec_decisions_stale"), (_EXEC_GATE, "for_dependency")}
+        {(_EXEC_GATE, "stale_exec_decisions"), (_EXEC_GATE, "for_dependency")}
     ),
 }
 _MANIFEST_DERIVATION_TOKENS = ('"apm.yml"', "APM_YML_FILENAME")

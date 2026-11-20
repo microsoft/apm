@@ -273,17 +273,6 @@ class CommandIntegrator(BaseIntegrator):
 
         return (command_name, new_post, warnings, dropped_keys)
 
-    def _render_command(self, source: Path, target: Path, format_id: str) -> str | None:
-        """Return the exact text deployment writes, for the adopt check (#4360)."""
-        try:
-            if format_id == "gemini_command":
-                return self._render_gemini_command(source)
-            _name, post, _warnings, _dropped = self._transform_prompt_to_command(source)
-            post.content, _links = self.resolve_links(post.content, source, target)
-            return frontmatter.dumps(post)
-        except yaml.YAMLError:
-            return None
-
     def integrate_command(
         self,
         source: Path,
@@ -457,9 +446,8 @@ class CommandIntegrator(BaseIntegrator):
         # Ensure target directory exists
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write the command file
-        with open(target, "w", encoding="utf-8") as f:
-            f.write(compiled)
+        # LF on every platform, as _LF_NORMALIZED_DEPLOY declares and adopt compares.
+        write_text_lf(target, compiled)
 
         return (links_resolved, True, bool(dropped_keys))
 
@@ -598,8 +586,7 @@ class CommandIntegrator(BaseIntegrator):
                 force,
                 diagnostics,
                 target_paths,
-                # Commands are transformed: adopt against the rendered text.
-                expected_content=self._render_command(prompt_file, target_path, mapping.format_id),
+                expected_content=self._rendered_command(prompt_file, target_path, mapping),
             )
             if skip:
                 if adopted:
@@ -732,6 +719,24 @@ class CommandIntegrator(BaseIntegrator):
     # Gemini CLI Commands (.toml format)
     # ------------------------------------------------------------------
 
+    def _rendered_command(self, source: Path, target: Path, mapping: Any) -> str | None:
+        """Return the text this integrator deploys for *source*, for the adopt check.
+
+        Commands are format-transformed, so an existing file is compared with
+        the rendered command, never the raw prompt. ``None`` when nothing is
+        on disk yet or the source cannot be rendered (the write path reports it).
+        """
+        if not target.is_file():
+            return None
+        try:
+            if mapping.format_id == "gemini_command":
+                return self._gemini_command_text(source)
+            _name, post, _warnings, _dropped = self._transform_prompt_to_command(source)
+            post.content, _links = self.resolve_links(post.content, source, target)
+            return frontmatter.dumps(post)
+        except Exception:
+            return None
+
     @staticmethod
     def _write_gemini_command(source: Path, target: Path) -> None:
         """Transform a ``.prompt.md`` file to Gemini CLI ``.toml`` format.
@@ -742,12 +747,13 @@ class CommandIntegrator(BaseIntegrator):
 
         Ref: https://geminicli.com/docs/cli/gemini-md/
         """
+        text = CommandIntegrator._gemini_command_text(source)
         target.parent.mkdir(parents=True, exist_ok=True)
-        write_text_lf(target, CommandIntegrator._render_gemini_command(source))
+        write_text_lf(target, text)
 
     @staticmethod
-    def _render_gemini_command(source: Path) -> str:
-        """Return the Gemini CLI ``.toml`` text for one ``.prompt.md`` file."""
+    def _gemini_command_text(source: Path) -> str:
+        """Render a ``.prompt.md`` file as Gemini CLI ``.toml`` command text."""
         import toml as _toml
 
         post = load_frontmatter(source)
@@ -762,6 +768,7 @@ class CommandIntegrator(BaseIntegrator):
         doc = {"prompt": prompt_text}
         if description:
             doc = {"description": description, "prompt": prompt_text}
+
         return _toml.dumps(doc)
 
     # ------------------------------------------------------------------

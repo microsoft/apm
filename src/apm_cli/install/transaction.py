@@ -20,6 +20,7 @@ from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
+    from apm_cli.install.deploy_snapshot import DeployTargetSnapshot
 
 
 def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
@@ -85,8 +86,13 @@ def _maybe_rollback_manifest(
 class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
-    The resolution journal is intentionally limited to paths prepared below
-    ``apm_modules``. Native target integrations are outside this transaction.
+    The resolution journal is limited to paths prepared below ``apm_modules``.
+    Native target integrations are inside this transaction only while the
+    install-time audit can block: :meth:`snapshot_deploy_targets` then
+    captures their paths before integration, rollback restores them, and
+    :meth:`release_deploy_targets` discards the copy once the audit passed.
+    On every rollback, target roots the attempt created
+    (:meth:`track_created_target_roots`) are removed when left empty.
     """
 
     def __init__(
@@ -120,6 +126,8 @@ class InstallTransaction:
             self._release_workspace_lock()
             raise
         self._lock = threading.RLock()
+        self._deploy_snapshot: DeployTargetSnapshot | None = None
+        self._created_target_roots: list[Path] = []
         self.committed = False
         self._completed = False
         self._rolled_back = False
@@ -150,6 +158,7 @@ class InstallTransaction:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
             try:
                 if not self.committed:
+                    self.release_deploy_targets()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
                     self._ref_pins.commit()
@@ -188,8 +197,10 @@ class InstallTransaction:
         if result.disposition is InstallDisposition.DRY_RUN:
             with self._lock:
                 if self._rolled_back:
-                    raise RuntimeError("Cannot complete an install transaction after rollback")
+                    # A preview whose staging already rolled back changed nothing.
+                    return result
                 try:
+                    self.release_deploy_targets()
                     self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)
@@ -206,18 +217,70 @@ class InstallTransaction:
             return result
         return self.commit(result)
 
+    def snapshot_deploy_targets(self, ctx: Any) -> None:
+        """Capture the paths integration can write when the install-time audit can block."""
+        from apm_cli.install.deploy_snapshot import capture_audit_gated_snapshot
+
+        with self._lock:
+            if self._deploy_snapshot is None and not (self.committed or self._rolled_back):
+                self._deploy_snapshot = capture_audit_gated_snapshot(ctx)
+
+    def track_created_target_roots(self, roots: list[Path]) -> None:
+        """Follow the target roots this attempt creates; rollback removes empty ones."""
+        self._created_target_roots = roots
+
+    def _remove_created_target_roots(self) -> None:
+        """Remove target roots this attempt created that a failure left empty (#4159)."""
+        from apm_cli.install.deploy_snapshot import remove_empty_directories
+
+        remove_empty_directories(self._created_target_roots)
+
+    @property
+    def restores_deploy_targets(self) -> bool:
+        """Whether rollback will restore the snapshotted deploy paths."""
+        return self._deploy_snapshot is not None
+
+    def release_deploy_targets(self) -> None:
+        """Discard the deploy snapshot: every gate that scans deployed bytes passed."""
+        with self._lock:
+            snapshot, self._deploy_snapshot = self._deploy_snapshot, None
+        if snapshot is not None:
+            snapshot.discard()
+
+    def _restore_deploy_targets(self) -> None:
+        """Put every snapshotted deploy path back to its pre-install bytes."""
+        snapshot, self._deploy_snapshot = self._deploy_snapshot, None
+        if snapshot is None:
+            return
+        issues = snapshot.restore()
+        if self._logger is None:
+            return
+        if not issues:
+            self._logger.progress("Deployed files restored to their previous state.")
+            return
+        self._logger.warning(
+            "Some deployed files could not be restored. Close programs using them, "
+            "then copy them back from the retained pre-install copies before retrying."
+        )
+        for path, reason in issues:
+            self._logger.warning(f"Deploy restore path {path}: {reason}")
+
     def rollback(self) -> None:
-        """Restore the manifest and only resolution paths prepared here."""
+        """Restore the manifest, snapshotted deploy paths and resolution paths."""
         with self._lock:
             if self.committed or self._rolled_back:
                 return
             try:
                 self._ref_pins.discard()
                 try:
-                    cleanup_issues = self._resolution.rollback() or []
-                    self._report_resolution_cleanup_issues(cleanup_issues)
+                    self._restore_deploy_targets()
+                    self._remove_created_target_roots()
                 finally:
-                    self._restore_manifest()
+                    try:
+                        cleanup_issues = self._resolution.rollback() or []
+                        self._report_resolution_cleanup_issues(cleanup_issues)
+                    finally:
+                        self._restore_manifest()
                 self._rolled_back = True
                 self._completed = True
             finally:

@@ -238,6 +238,8 @@ _REFUSE_ONLY = {
     ("origin", "clear"),
     # An older generator stamp on a lock whose rows carry origin evidence (rule 1).
     ("apm_version", "downgrade"),
+    # A row that claims a local catalog while the alias is registered remote.
+    ("source_url", "claim-local"),
 }
 
 
@@ -269,6 +271,8 @@ def test_update_restores_or_refuses_altered_marketplace_provenance(
     elif field == "origin":
         del lock["dependencies"][0]["source_url"]
         del lock["dependencies"][0]["source_digest"]
+    elif edit == "claim-local":
+        lock["dependencies"][0]["source_url"] = "./agent-catalog"
     elif edit == "tamper":
         lock["dependencies"][0][field] = _TAMPERED[field]
     else:

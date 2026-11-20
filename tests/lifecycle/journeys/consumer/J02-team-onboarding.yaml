@@ -48,7 +48,7 @@ steps:
     exit: 0
     converged: true
     files: []
-    forbidden_lines: [integrated]
+    forbidden_lines: [integrated, adopted]
 known_cells:
   - id: j02-frozen-transitive-unpinned-notice
     law: FORBID
@@ -65,3 +65,8 @@ known_cells:
     tracking: "#4184"
     step: 5
     match: "forbidden 'integrated' printed"
+  - id: j02-converged-install-reports-adopted
+    law: FORBID
+    tracking: "#4184"
+    step: 5
+    match: "forbidden 'adopted' printed"

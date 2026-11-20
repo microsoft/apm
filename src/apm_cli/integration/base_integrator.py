@@ -32,6 +32,20 @@ def discover_primitives(*args: Any, **kwargs: Any) -> Any:
     return _discover_primitives(*args, **kwargs)
 
 
+def _target_root_dirs(base: Path) -> frozenset[Path]:
+    """Every project-layout target root directory under *base*.
+
+    A project's target roots signal which harnesses it uses (opt-in targets
+    deploy only where their root exists), so project cleanup never removes
+    them. Cleanup bounded by the home directory is user scope, where roots
+    APM created itself (such as ``~/.claude``) go when their last file is
+    retired.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return frozenset((base / profile.root_dir).resolve() for profile in KNOWN_TARGETS.values())
+
+
 def _managed_absolute_target_root(
     candidate: Path,
     targets: Any,
@@ -1028,6 +1042,13 @@ class BaseIntegrator:
         if not deleted_paths:
             return
         stop_resolved = stop_at.resolve()
+        # A project's target roots stay (#4132); at user scope the same names
+        # are roots APM created, which go with their last file.
+        target_roots = (
+            frozenset()
+            if stop_resolved == Path.home().resolve()
+            else _target_root_dirs(stop_resolved)
+        )
         # Collect unique parents (skip stop_at itself)
         candidates: set = set()
         for p in deleted_paths:
@@ -1040,7 +1061,11 @@ class BaseIntegrator:
             except (ValueError, OSError):
                 cleanup_boundary = p.parent.resolve()
             parent = p.parent
-            while parent not in (parent.parent, stop_at) and parent.resolve() != cleanup_boundary:
+            while (
+                parent not in (parent.parent, stop_at)
+                and parent.resolve() != cleanup_boundary
+                and parent.resolve() not in target_roots
+            ):
                 candidates.add(parent)
                 parent = parent.parent
         # Sort deepest-first for safe bottom-up removal

@@ -16,12 +16,20 @@ set -e
 #     https://raw.githubusercontent.com/microsoft/apm/main/install.sh | \
 #     GITHUB_APM_PAT=$GITHUB_APM_PAT sh
 
-# Colors for output
-RED=$(printf '\033[0;31m')
-GREEN=$(printf '\033[0;32m')
-BLUE=$(printf '\033[0;34m')
-YELLOW=$(printf '\033[1;33m')
-NC=$(printf '\033[0m') # No Color
+# Colors for output: only on a terminal, and never when NO_COLOR is set.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    RED=$(printf '\033[0;31m')
+    GREEN=$(printf '\033[0;32m')
+    BLUE=$(printf '\033[0;34m')
+    YELLOW=$(printf '\033[1;33m')
+    NC=$(printf '\033[0m') # No Color
+else
+    RED=''
+    GREEN=''
+    BLUE=''
+    YELLOW=''
+    NC=''
+fi
 
 apm_echo() {
     printf '%s\n' "$*"

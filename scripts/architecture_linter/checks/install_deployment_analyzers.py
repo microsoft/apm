@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_agent_render_adopt import (
     GUARD_AGENT_RENDER_ADOPT,
+    GUARD_COMMAND_RENDER_ADOPT,
     check_agent_render_then_adopt,
+    check_command_render_then_adopt,
 )
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
@@ -39,6 +41,10 @@ from scripts.architecture_linter.checks.install_checkout_skill_trust import (
     check_cleanup_retains_kept_members,
     check_skill_adoption_trusted_receipt,
 )
+from scripts.architecture_linter.checks.install_cleanup_target_roots import (
+    GUARD_CLEANUP_TARGET_ROOTS,
+    check_cleanup_target_roots,
+)
 from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
     check_codex_agent_link_resolution,
@@ -51,6 +57,12 @@ from scripts.architecture_linter.checks.install_dry_run_plan import (
 from scripts.architecture_linter.checks.install_effective_selection import (
     GUARD_EFFECTIVE_SELECTION,
     check_effective_selection,
+)
+from scripts.architecture_linter.checks.install_entry_and_commit import (
+    GUARD_COMMIT_ORDER,
+    GUARD_ENTRY_ROUTING,
+    check_install_commit_order,
+    check_install_entry_routing,
 )
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
@@ -88,6 +100,14 @@ from scripts.architecture_linter.checks.install_locked_source_cache import (
 from scripts.architecture_linter.checks.install_locked_source_cache import (
     check_locked_source_cache,
 )
+from scripts.architecture_linter.checks.install_lockfile_preflight import (
+    GUARD_INSTALL_LOCKFILE_PREFLIGHT,
+    check_install_lockfile_preflight,
+)
+from scripts.architecture_linter.checks.install_lockfile_required import (
+    GUARD_LOCKFILE_REQUIRED,
+    check_lockfile_required,
+)
 from scripts.architecture_linter.checks.install_lsp_capability_gate import (
     GUARD_LSP_CAPABILITY_GATE,
     check_lsp_capability_gate,
@@ -124,6 +144,10 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
     _GUARD_PACKAGE_TARGET,
     check_package_target_authorization,
 )
+from scripts.architecture_linter.checks.install_policy_cache_pin import (
+    GUARD_POLICY_CACHE_PIN,
+    check_policy_cache_pin,
+)
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_policy_outcome_routing import (
     GUARD_POLICY_FIELD_TYPES,
@@ -133,6 +157,10 @@ from scripts.architecture_linter.checks.install_policy_outcome_routing import (
 )
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
+)
+from scripts.architecture_linter.checks.install_receipt_collection import (
+    GUARD_RECEIPT_COLLECTION,
+    check_receipt_collection,
 )
 from scripts.architecture_linter.checks.install_registry_url_scheme import (
     GUARD_REGISTRY_URL_SCHEME,
@@ -204,9 +232,38 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
     check_resolution_replacement,
     check_uninstall_selection,
 )
+from scripts.architecture_linter.checks.install_uninstall_preflight import (
+    GUARD_UNINSTALL_PREFLIGHT,
+    check_uninstall_preflight,
+)
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_UNINSTALL_PREFLIGHT,
+        "Uninstall validates recorded paths and survivor trust before its first write.",
+        check_uninstall_preflight,
+    ),
+    _rule(
+        GUARD_INSTALL_LOCKFILE_PREFLIGHT,
+        "Every mutating install refuses an unwritable lockfile before it deploys.",
+        check_install_lockfile_preflight,
+    ),
+    _rule(
+        GUARD_LOCKFILE_REQUIRED,
+        "Frozen install and audit share one answer to whether a lockfile is required.",
+        check_lockfile_required,
+    ),
+    _rule(
+        GUARD_CLEANUP_TARGET_ROOTS,
+        "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
+        check_cleanup_target_roots,
+    ),
+    _rule(
+        GUARD_RECEIPT_COLLECTION,
+        "Orphaned deployment receipts are collected only by the receipt owner.",
+        check_receipt_collection,
+    ),
     _rule(
         _GUARD_BUNDLE_STAGING,
         "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
@@ -246,6 +303,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_REGISTRY_URL_SCHEME,
         "Registry URL scheme acceptance stays owned by deps/registry/url_scheme.py.",
         check_registry_url_scheme,
+    ),
+    _rule(
+        GUARD_POLICY_CACHE_PIN,
+        "A cached org policy is verified against its record before use, in one reader.",
+        check_policy_cache_pin,
     ),
     _rule(
         GUARD_TRUST_POLICY_OUTCOME,
@@ -358,6 +420,16 @@ RULES: tuple[Rule, ...] = (
         check_prospective_dry_run_plan,
     ),
     _rule(
+        GUARD_ENTRY_ROUTING,
+        "Every package install and its dry-run preview enter one install pipeline.",
+        check_install_entry_routing,
+    ),
+    _rule(
+        GUARD_COMMIT_ORDER,
+        "Every install check completes before the lockfile and deployed files commit.",
+        check_install_commit_order,
+    ),
+    _rule(
         _GUARD_SOURCE_PLAN,
         "Authorized deployable source paths come from install/deployable_source_plan.py.",
         check_source_plan,
@@ -426,6 +498,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_AGENT_RENDER_ADOPT,
         "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
         check_agent_render_then_adopt,
+    ),
+    _rule(
+        GUARD_COMMAND_RENDER_ADOPT,
+        "Command adoption compares the rendered command via _check_adopt_or_skip.",
+        check_command_render_then_adopt,
     ),
     _rule(
         GUARD_OVERWRITE_EVIDENCE,

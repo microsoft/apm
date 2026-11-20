@@ -7,6 +7,7 @@ import queue
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,17 +43,43 @@ def is_qualified_codex_version(output: str) -> bool:
     return core > minimum or (core == minimum and match.group(4) is None)
 
 
+def _offline_launch_dir() -> Path:
+    """A private working directory whose project layer keeps app-server startup offline.
+
+    At startup the app-server syncs its curated plugin marketplace over the network
+    unless plugins are off in the startup configuration. Plugins are turned off
+    only for this trusted directory, so the startup tasks stay offline while
+    requests that load the configuration of a marketplace path still see plugins.
+    """
+    launch_dir = Path(tempfile.mkdtemp(prefix="apm-codex-")).resolve()
+    (launch_dir / ".codex").mkdir()
+    (launch_dir / ".codex" / "config.toml").write_text(
+        "[features]\nplugins = false\n", encoding="utf-8"
+    )
+    return launch_dir
+
+
+def _offline_launch_args(launch_dir: Path) -> list[str]:
+    """Trust only the private launch directory, for this process and nothing else."""
+    return ["-c", f'projects={{{json.dumps(str(launch_dir))}={{trust_level="trusted"}}}}']
+
+
 class CodexRpc:
     """One bounded stdio connection to the public app-server protocol."""
 
-    def __init__(self, executable: Path, cwd: Path) -> None:
-        self._process = subprocess.Popen(
-            [str(executable), "app-server", "--stdio"],
-            cwd=cwd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
+    def __init__(self, executable: Path) -> None:
+        self._launch_dir = _offline_launch_dir()
+        try:
+            self._process = subprocess.Popen(
+                [str(executable), "app-server", "--stdio", *_offline_launch_args(self._launch_dir)],
+                cwd=self._launch_dir,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            shutil.rmtree(self._launch_dir, ignore_errors=True)
+            raise
         self._responses: queue.Queue[dict[str, Any] | Exception] = queue.Queue(maxsize=32)
         self._reader_error: Exception | None = None
         self._request_id = 0
@@ -155,6 +182,7 @@ class CodexRpc:
         self._reader.join(timeout=1)
         if self._process.stdout is not None:
             self._process.stdout.close()
+        shutil.rmtree(self._launch_dir, ignore_errors=True)
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
@@ -219,7 +247,7 @@ class CodexNativeClient:
 
     def connect(self) -> CodexRpc:
         """Create a short-lived connection without starting an agent thread."""
-        return CodexRpc(self.executable, self.cwd)
+        return CodexRpc(self.executable)
 
     @staticmethod
     def read_config(rpc: CodexRpc) -> NativeUserConfig:

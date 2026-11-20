@@ -266,6 +266,7 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
+# Strict known cells this machine discharges; #4214 is fixed (LSP-only packages survive uninstall).
 KNOWN_CELLS: tuple = ()
 
 
@@ -617,7 +618,7 @@ def replay_spine(machine: SourceMachine) -> None:
         machine.declare(choice, False)
         for op in ("install", "update", "prune", "compile", "lock"):
             machine.reconcile(op, True)
-    # p-lsp still survives: the strict known cell #4214 fails this uninstall.
+    # p-lsp still survives this uninstall (#4214).
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
         machine.uninstall(slot, True)

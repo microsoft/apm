@@ -25,8 +25,10 @@ def test_rpc_reader_failure_stays_bounded_when_response_queue_is_full():
     assert rpc._responses.qsize() == 1
 
 
-def test_rpc_close_reaps_helper_after_broken_pipe():
+def test_rpc_close_reaps_helper_after_broken_pipe(tmp_path):
     rpc = CodexRpc.__new__(CodexRpc)
+    rpc._launch_dir = tmp_path / "launch"
+    rpc._launch_dir.mkdir()
     rpc._process = Mock()
     rpc._process.stdin.close.side_effect = BrokenPipeError("closed native stream")
     rpc._reader = Mock()
@@ -35,3 +37,4 @@ def test_rpc_close_reaps_helper_after_broken_pipe():
     rpc._process.wait.assert_called_once_with(timeout=5)
     rpc._reader.join.assert_called_once_with(timeout=1)
     rpc._process.stdout.close.assert_called_once()
+    assert not rpc._launch_dir.exists()

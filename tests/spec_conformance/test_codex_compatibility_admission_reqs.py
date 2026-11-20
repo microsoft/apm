@@ -53,7 +53,9 @@ def codex_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         install_path=source,
         dependency_ref=DependencyReference.parse("owner/example"),
     )
-    ctx = SimpleNamespace(dry_run=False, codex_native_plugins={}, blocked_executables=[])
+    ctx = SimpleNamespace(
+        dry_run=False, frozen=False, codex_native_plugins={}, blocked_executables=[]
+    )
 
     def forbidden(*args: object, **kwargs: object) -> None:
         raise AssertionError("admission must not launch a native client")

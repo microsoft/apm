@@ -42,6 +42,18 @@ _ROUTES = (
         "read locked sources through the shared git cache",
     ),
     (
+        "src/apm_cli/integration/mcp_config_view.py",
+        "_collect_locked_dependencies",
+        "_copy_contradicts_lock",
+        "judge frozen lock sync only from copies that match the lock",
+    ),
+    (
+        "src/apm_cli/integration/mcp_config_view.py",
+        "_copy_contradicts_lock",
+        "locked_content_mismatch",
+        "ask the locked content verdict about an apm_modules copy",
+    ),
+    (
         "src/apm_cli/install/phases/download.py",
         "run",
         "stage_existing_copy",

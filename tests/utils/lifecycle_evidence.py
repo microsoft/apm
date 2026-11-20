@@ -390,23 +390,6 @@ _FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runti
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
     KnownOutputCell(
-        "audit-json-replay-error-has-no-json",
-        "I6",
-        "#4287",
-        _scenario_runs("audit", "root-source-replacement"),
-        r"JSON mode printed invalid JSON",
-        output=r"\A\Z",
-    ),
-    KnownOutputCell(
-        "approve-org-policy-warning-twice",
-        "I9",
-        "#4178",
-        _runs("approve"),
-        r"\[!\] (Org policy not applied|Using stale cached org policy)",
-        # Only runs that print the same warning line twice (a single warning is correct).
-        output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
-    ),
-    KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
         "#4196",
@@ -414,83 +397,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _FROZEN_MCP_TARGETING,
         # Auto-detected targets print no targeting line, so there is nothing to repeat.
         output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
-    ),
-    KnownOutputCell(
-        "install-frozen-parked-mcp-notice-per-phase",
-        "I9",
-        "#4299",
-        _runs("install", "--frozen"),
-        r"Parked MCP server .*(: denied|from transitive package)",
-        # Each MCP view build (once per phase) re-emits a denied or unapproved
-        # transitive park: the same top-level notice line appears twice.
-        output=(
-            r"^(\[!\] Parked MCP server [^\n]*?(?:: denied|from transitive package)[^\n]*)$"
-            r".*^\1$"
-        ),
-    ),
-    KnownOutputCell(
-        "install-registry-lookup-per-registry",
-        "I9",
-        "#4244",
-        _runs_any("install", "update"),
-        r"Looking up 1 MCP server in registry",
-        output=r"^\[i\] Using MCP registry: .*^\[i\] Using MCP registry: ",
-    ),
-    KnownOutputCell(
-        "install-mcp-passthrough-warning-per-parse",
-        "I9",
-        "#4242",
-        _runs("install", "hermes"),
-        r"'hermes-stdio': unknown key\(s\) preserved in extra",
-        output=(
-            r"^\+- MCP Servers.*'hermes-stdio': unknown key"
-            r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
-        ),
-    ),
-    KnownOutputCell(
-        "self-update-installer-color-codes",
-        "I6",
-        "#4308",
-        _runs("self-update"),
-        r"stdout has characters outside printable ASCII \['0x1b'\]",
-        # self-update passes the installer's output through; install.sh always colors it.
-        output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
-    ),
-    KnownOutputCell(
-        "command-echoes-non-ascii-path",
-        "I6",
-        "#4330",
-        # Any command that echoes a user path (install, deps list, export-patch, ...).
-        lambda _args, _scenario: True,
-        r"stdout has characters outside printable ASCII",
-        # A path (after a separator) with a non-ASCII character the test's own
-        # working directory does not explain; the cwd echo itself passes I6.
-        output=r"[/\\][^\n]*?[^\x00-\x7f]",
-    ),
-    KnownOutputCell(
-        "uninstall-duplicate-declaration-lines",
-        "I9",
-        "#4331",
-        _runs("uninstall"),
-        r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
-        output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-verbose-diagnostics-repeat",
-        "I9",
-        "#4334",
-        _runs("install", "--verbose"),
-        r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
-        output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-frozen-trust-notice-repeats",
-        "I9",
-        "#4256",
-        _runs("install", "--frozen"),
-        r"Trusting direct dependency MCP",
-        # Only runs that print the same trust notice twice (one notice is correct).
-        output=r"^(\[i\] Trusting direct dependency MCP[^\n]*)$.*^\1$",
     ),
 )
 

@@ -29,6 +29,12 @@ class ResolutionStagingSession:
         """Create an empty staging session rooted below ``apm_modules``."""
         self._modules_dir = apm_modules_dir
         self._modules_existed = apm_modules_dir.exists()
+        # Missing parents (``~/.apm`` at user scope) go with an empty rollback.
+        self._missing_parents: list[Path] = []
+        parent = apm_modules_dir.parent
+        while not parent.exists() and parent != parent.parent:
+            self._missing_parents.append(parent)
+            parent = parent.parent
         # 12 hex chars (48 bits) is ample entropy for one install session and
         # keeps staged paths well clear of Windows MAX_PATH (issue #2896).
         self._staging_root = apm_modules_dir / STAGING_DIR_NAME / uuid.uuid4().hex[:12]
@@ -286,6 +292,9 @@ class ResolutionStagingSession:
                     and not any(self._modules_dir.iterdir())
                 ):
                     self._modules_dir.rmdir()
+                for created in self._missing_parents:
+                    if created.is_dir() and not any(created.iterdir()):
+                        created.rmdir()
             except OSError as exc:
                 cleanup_issues.append(
                     (self._modules_dir, f"could not remove empty directory: {exc}")

@@ -190,6 +190,11 @@ class DeploymentEvidence:
         value = value.replace("\\", "/").rstrip("/")
         return value in self._kept or value in self._kept_parents
 
+    @property
+    def receipt_hashes(self) -> dict[str, str]:
+        """Map each receipted resolved physical path to the hash APM wrote there."""
+        return dict(self._receipts)
+
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.
 
@@ -412,7 +417,10 @@ def _render_locked(
     )
     try:
         snapshot.parent.mkdir()
-        (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
+        from apm_cli.deps.lockfile_write_authority import lockfile_scratch_writes
+
+        with lockfile_scratch_writes():
+            (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
         with contextlib.redirect_stdout(io.StringIO()):
             with contextlib.redirect_stderr(io.StringIO()):
                 return run_replay(config, CheckLogger(verbose=False))
@@ -485,7 +493,9 @@ class CleanupResult:
         prefix = "~/" if self.user_scope else ""
         announced: list[str] = []
         for path in sorted(dict.fromkeys(path.rstrip("/") for path in self.deleted)):
-            if any(path.startswith(f"{directory}/") for directory in directories):
+            # Check each ancestor against the set: cost scales with path depth.
+            parts = path.split("/")
+            if any("/".join(parts[:depth]) in directories for depth in range(1, len(parts))):
                 continue
             shown = f"{path}/" if path in directories else path
             announced.append(shown if "://" in shown else prefix + shown)

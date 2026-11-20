@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, LockfileRefusal, get_lockfile_path
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.integration._shared import (
     deduplicate_deps,
     resolve_locked_apm_yml_sources,
@@ -992,7 +993,7 @@ class LSPIntegrator:
         try:
             lockfile = lockfile_state
             if lockfile is None and lock_path is not None:
-                lockfile = LockFile.read(lock_path) if lock_path.exists() else LockFile()
+                lockfile = LockFile.read(lock_path) if lockfile_exists(lock_path) else LockFile()
             if lockfile is None:
                 lockfile = LockFile()
             lockfile.lsp_servers = sorted(lsp_server_names)

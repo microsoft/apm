@@ -19,6 +19,7 @@ The deny-wins precedence is resolved by
 from __future__ import annotations
 
 import sys
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -172,19 +173,33 @@ def _store_label(user_scope: bool) -> str:
     return "apm.yml"
 
 
+_ORG_POLICY_PER_COMMAND: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Return the merged org policy, routed as every other policy reader routes it.
+
+    One command resolves its policy once (#4178): the result is memoized per
+    command logger, so a miss is reported once however many trust readers ask.
 
     A blocking outcome raises :class:`PolicyViolationError`; an outcome that
     leaves no usable policy is reported and yields an empty policy.
     """
+    root = Path(project_root).resolve()
+    if logger is not None:
+        cached = _ORG_POLICY_PER_COMMAND.get(logger)
+        if cached is not None and cached[0] == root:
+            return cached[1]
     policy = resolve_trust_policy(project_root, logger=logger)
-    return policy if policy is not None else ApmPolicy()
+    policy = policy if policy is not None else ApmPolicy()
+    if logger is not None:
+        _ORG_POLICY_PER_COMMAND[logger] = (root, policy)
+    return policy
 
 
 def _report_policy_block(exc: PolicyViolationError) -> None:
     """Announce a blocking policy outcome; nothing was written."""
-    _rich_error(str(exc))
+    _rich_error(str(exc), symbol="error")
     _rich_info(
         "Nothing was written. Run 'apm policy status --no-cache' to diagnose "
         "the org policy source, fix it, then re-run the command.",
@@ -255,6 +270,11 @@ def approve_cmd(
 
         apm approve -g owner/repo
     """
+    if not (packages or pending or approve_all or recommended or list_decisions):
+        # A missing package is a usage error (exit 2), like `apm deny` (#4262).
+        raise click.UsageError(
+            "Specify at least one package, or use --pending / --all / --recommended."
+        )
     logger = CommandLogger("approve")
     try:
         manifest = _find_manifest(user_scope, global_scope)
@@ -276,12 +296,6 @@ def approve_cmd(
         if approve_all:
             _approve_all_pending(manifest, user_scope, allow, deny, logger=logger)
             return
-
-        if not packages:
-            logger.refusal(
-                "Specify at least one package, or use --pending / --all / --recommended."
-            )
-            sys.exit(1)
 
         packages = _canonical_specs(manifest, packages)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)

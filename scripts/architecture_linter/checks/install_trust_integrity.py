@@ -74,6 +74,9 @@ _DISCOVERY_CALLERS = frozenset(
         ("src/apm_cli/commands/policy.py", "status"),
         ("src/apm_cli/commands/audit.py", "_audit_ci_gate"),
         ("src/apm_cli/commands/audit.py", "_resolve_fail_on_drift"),
+        # apm update, install --frozen and audit --ci staleness fail toward the
+        # gate: an unusable policy is indeterminate, never "no policy" (#4053).
+        (_EXEC_GATE, "discovered_exec_policy"),
         ("src/apm_cli/core/lifecycle_scripts.py", "build_runner_from_context"),
     }
 )
@@ -551,7 +554,7 @@ _PROVENANCE_REQUIRED = {
     _CATALOG_ORIGIN: (
         "def reverify_locked_provenance(",
         "require_locked_row_origin(dep)",
-        "resolution = resolve_marketplace_plugin(plugin, alias)",
+        "resolution = resolve_marketplace_plugin(plugin, alias, enforce_ref_pins=False)",
     ),
 }
 # Lock catalog provenance is written by the lockfile phase and the origin owner only.

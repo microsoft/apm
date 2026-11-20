@@ -255,3 +255,70 @@ def test_home_allowlist_admits_only_exact_ancestors(tmp_path: Path) -> None:
     )
     with pytest.raises(AssertionError, match=r"\['\.local/bin', '\.local/bin/evil'\]"):
         check_cross_cutting(before, after, None, _Model(), op)
+
+
+def _native_after(
+    tmp_path: Path, managed: set[str], *, user_scope: bool = True, recorded_name: str = "tool"
+) -> Observation:
+    """A user deploy root with one native plugin root recorded by its lock (#4225)."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.native_plugins.record import NativePluginRecord
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    root = tmp_path / ".agents/plugins/tool"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text('{"name":"tool"}', encoding="ascii")
+    (root / "bin").mkdir()
+    (root / "bin/tool").write_text("#!/bin/sh\n", encoding="ascii")
+    dependency = LockedDependency(repo_url="fixture/tool")
+    dependency.native_plugin = NativePluginRecord(
+        recorded_name,
+        compute_native_plugin_hash(root),
+        "apm-fixture",
+        str(tmp_path / ".agents/plugins"),
+    )
+    lock = LockFile(dependencies={"fixture/tool": dependency})
+    state = LifecycleStateSnapshot.capture(tmp_path)
+    artifacts = ArtifactSnapshotSet.capture({"home": tmp_path})
+    return Observation(
+        state, artifacts, frozenset(), tmp_path, lock, frozenset(managed), user_scope=user_scope
+    )
+
+
+def _expect_i1(after: Observation, messages: list[str]) -> None:
+    from tests.lifecycle.oracles import _i1_lock_deployed
+
+    found = [v.message for v in _i1_lock_deployed(after, after, None, None, None) or []]
+    assert found == messages
+
+
+def test_i1_counts_paths_under_a_verified_native_plugin_root_as_recorded(tmp_path: Path) -> None:
+    after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"})
+    _expect_i1(after, [])
+    project = _native_after(tmp_path / "p", {".agents/plugins/tool/bin/tool"}, user_scope=False)
+    _expect_i1(project, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
+
+
+def test_i1_fails_a_native_plugin_root_that_differs_from_its_record(tmp_path: Path) -> None:
+    after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"})
+    (tmp_path / ".agents/plugins/tool/bin/tool").write_text("changed\n", encoding="ascii")
+    _expect_i1(
+        after,
+        [
+            "native plugin root does not match the lock: .agents/plugins/tool",
+            "deployed file is not in the lock: .agents/plugins/tool/bin/tool",
+        ],
+    )
+
+
+def test_i1_fails_a_path_outside_every_native_plugin_root(tmp_path: Path) -> None:
+    after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool", ".agents/plugins/other/x"})
+    (tmp_path / ".agents/plugins/other").mkdir()
+    (tmp_path / ".agents/plugins/other/x").write_text("x\n", encoding="ascii")
+    _expect_i1(after, ["deployed file is not in the lock: .agents/plugins/other/x"])
+
+
+def test_i1_fails_a_verified_tree_the_lock_has_no_native_plugin_record_for(tmp_path: Path) -> None:
+    # Same bytes and fingerprint, but the lock's only record names another root.
+    after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"}, recorded_name="other")
+    _expect_i1(after, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])

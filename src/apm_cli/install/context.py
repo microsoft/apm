@@ -74,6 +74,16 @@ class InstallContext:
     allow_insecure_hosts: tuple[str, ...] = ()
     trust_bin: bool | None = None
     trust_transitive_mcp: bool = False
+    # MCP servers the command integrates after this pipeline: the commit gate
+    # enforces their policy before any deploy (install/commit_gate.py).
+    install_mcp: bool = True
+    mcp_runtime: str | None = None
+    mcp_policy_enforced: bool = False
+    # --dry-run: what this pipeline could not resolve, and the merged MCP set
+    # the commit gate collected (install/dry_run_plan.py renders both).
+    preview_errors: list[str] = field(default_factory=list)
+    preview_declaration_errors: list[str] = field(default_factory=list)
+    preview_mcp_dependencies: tuple[Any, ...] | None = None
     transaction: Any = None  # InstallTransaction
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
     # Dependency keys routed to native Claude this run, admitted or parked.
@@ -128,6 +138,7 @@ class InstallContext:
     # Targets phase outputs
     # ------------------------------------------------------------------
     targets: list[Any] = field(default_factory=list)  # targets
+    created_target_roots: list[Path] = field(default_factory=list)  # targets
     integrators: dict[str, Any] = field(default_factory=dict)  # targets
 
     # ------------------------------------------------------------------

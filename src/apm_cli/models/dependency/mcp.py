@@ -13,6 +13,19 @@ from apm_cli.utils.path_security import PathTraversalError, validate_path_segmen
 
 from .subsets import parse_target_subset
 
+# Passthrough warnings already shown in this process (#4242): one command
+# parses the same manifest several times, but the user needs one warning per
+# server.
+_PASSTHROUGH_WARNED: set[str] = set()
+
+
+def _warn_passthrough_once(message: str) -> None:
+    if message in _PASSTHROUGH_WARNED:
+        return
+    _PASSTHROUGH_WARNED.add(message)
+    _rich_warning(message, symbol="warning")
+
+
 # Keys recognised by from_dict (including legacy alias 'type' -> 'transport').
 _KNOWN_DICT_KEYS = frozenset(
     {
@@ -218,16 +231,14 @@ class MCPDependency:
         reserved = sorted(set(reserved_unknown) | set(reserved_explicit))
         if reserved:
             safe_reserved = ", ".join(ascii(k)[1:-1] for k in reserved)
-            _rich_warning(
+            _warn_passthrough_once(
                 f"MCP dependency '{safe_name}': reserved passthrough key(s) ignored "
-                f"(cannot override a modeled MCP field): {safe_reserved}",
-                symbol="warning",
+                f"(cannot override a modeled MCP field): {safe_reserved}"
             )
         if passthrough_unknown:
             safe_keys = ", ".join(ascii(k)[1:-1] for k in passthrough_unknown)
-            _rich_warning(
-                f"MCP dependency '{safe_name}': unknown key(s) preserved in extra: {safe_keys}",
-                symbol="warning",
+            _warn_passthrough_once(
+                f"MCP dependency '{safe_name}': unknown key(s) preserved in extra: {safe_keys}"
             )
 
         transport = d.get("transport") or d.get("type")  # legacy 'type' -> 'transport'
