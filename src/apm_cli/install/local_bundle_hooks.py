@@ -114,6 +114,9 @@ def integrate_local_bundle_hooks(
     managed_files = _prior_bundle_claims(project_root, user_scope=user_scope)
     with tempfile.TemporaryDirectory(prefix="apm-bundle-hooks-") as tmp:
         package_info = _bundle_hook_package(bundle_info, verified_files, Path(tmp) / slug, slug)
+        package_info.local_bundle_approval = approval_key
+        # Entries recorded under an earlier key are replaced, never kept beside.
+        _retire_bundle_hooks(project_root, targets, slug)
         integrator = HookIntegrator()
         for target in hook_targets:
             outcome = integrator.integrate_hooks_for_target(

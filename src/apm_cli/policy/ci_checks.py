@@ -1150,6 +1150,44 @@ def _check_drift(
 # -- Aggregate runner ----------------------------------------------
 
 
+def _check_local_bundle_hooks(
+    deployment_root: Path,
+    manifest: APMPackage,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+    no_policy: bool,
+) -> CheckResult:
+    """Fail when a deployed local-bundle hook's approval no longer holds."""
+    from ..install.errors import PolicyViolationError
+    from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
+    from ..security.executables import resolve_project_exec_allow_map
+
+    def allow_provider():
+        return resolve_project_exec_allow_map(
+            deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
+        )
+
+    try:
+        unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider)
+    except PolicyViolationError as exc:
+        return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
+    if not unadmitted:
+        return CheckResult(
+            name="local-bundle-hooks", passed=True, message="Local bundle hooks are approved"
+        )
+    return CheckResult(
+        name="local-bundle-hooks",
+        passed=False,
+        message=(
+            f"{len(unadmitted)} local bundle(s) have hooks the current executables "
+            "trust does not admit; run 'apm install' to retire them, or approve the "
+            "bundle and rerun 'apm install <bundle>'"
+        ),
+        details=[f"{item.slug}: {item.reason}" for item in unadmitted],
+    )
+
+
 def run_baseline_checks(
     project_root: Path,
     *,
@@ -1292,9 +1330,13 @@ def run_baseline_checks(
     ):
         return result
 
-    # Check 8: Content integrity
+    # Check 8: Content integrity; 8b: local-bundle hooks still admitted (#4027)
     if _run(
         _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+    ) or _run(
+        _check_local_bundle_hooks(
+            deployment_root, manifest, resolved_targets, user_scope=user_scope, no_policy=no_policy
+        )
     ):
         return result
 

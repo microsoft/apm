@@ -742,7 +742,7 @@ def test_hook_sidecar_comparison_must_use_canonical_owner(path: str, old: str, n
         ),
         (
             "src/apm_cli/integration/hook_integrator.py",
-            "return local_bundle_hook_source_marker(bundle_id)",
+            "return local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
             'return f"local-bundle::{bundle_id}"',
         ),
         (
@@ -891,6 +891,24 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "    from ...policy.discovery import discover_policy_with_chain\n\n"
             "    discover_policy_with_chain(project_root)\n"
             "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/commands/install.py",
+            "    reconcile_scope_bundle_hooks(\n",
+            "    (lambda *a, **k: None)(\n",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "        elif not all(is_package_approved(allow_map, key, EXEC_TYPE_HOOKS) for key in keys):\n",
+            "        elif False:\n",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hooks.py",
+            "def _retire_bundle_hooks(",
+            'def _marker(slug):\n    return "local-bundle::" + slug\n\n\ndef _retire_bundle_hooks(',
         ),
         (
             "install-deployment-bundle-user-scope-root",
@@ -1696,6 +1714,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="@serialized_lifecycle\ndef set(",
         new="def set(",
         intent="Config mutation stops routing through the canonical lifecycle lock.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-local-bundle-hook-trust",
+        rule_id="install-deployment-local-bundle-hook-trust",
+        path="src/apm_cli/install/local_bundle_hook_trust.py",
+        old="        if None in keys:\n",
+        new="        if not keys:\n",
+        intent="A local-bundle hook with no recorded approval key is admitted instead of retired.",
     ),
     MutationCase(
         guard_id="install-deployment-lock-parent-placement",

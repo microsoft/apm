@@ -131,6 +131,11 @@ def prune(ctx, dry_run):
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
+        from ..install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+        reconcile_scope_bundle_hooks(
+            InstallScope.PROJECT, apm_package, logger=logger, dry_run=dry_run
+        )
         installed_packages = (
             _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
         )

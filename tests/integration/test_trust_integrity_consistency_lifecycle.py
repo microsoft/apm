@@ -409,3 +409,121 @@ def test_global_bundle_reads_user_scope_from_apm_home_outside_home(
     assert _user_hooks_deployed(home, target), output(result)
     lock = load_yaml(apm_home / "apm.lock.yaml")
     assert any(path.endswith("/x.sh") for path in lock.get("local_deployed_files") or []), lock
+
+
+def _bundle_hook_world(tmp_path: Path, apm_binary_path: Path, *, alias: str | None = None):
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    runner = _runner(apm_binary_path)
+    env = world.isolated.subprocess_env()
+    bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
+    project = world.consumer(targets=("claude",))
+    (project / ".claude").mkdir()
+    _allow(project, _bundle_key(bundle))
+    args = ("install", str(bundle), "--no-policy", *(("--as", alias) if alias else ()))
+    result = run_step(runner, args, cwd=project, env=env, step="bundle-granted")
+    assert _hooks_deployed(project), output(result)
+    return world, runner, env, bundle, project
+
+
+def _revoke(project: Path) -> None:
+    manifest = load_yaml(project / "apm.yml")
+    manifest["executables"] = {"allow": {}}
+    dump_yaml(manifest, project / "apm.yml")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("install", "--no-policy"),
+        ("install", "--no-policy", "--frozen"),
+        ("update", "--yes"),
+        ("prune",),
+    ],
+    ids=["install", "frozen", "update", "prune"],
+)
+def test_revoked_bundle_grant_retires_its_hooks(
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
+) -> None:
+    _world, runner, env, _bundle, project = _bundle_hook_world(tmp_path, apm_binary_path)
+    _revoke(project)
+
+    result = run_step(runner, command, cwd=project, env=env, step="after-revoke")
+
+    assert not _hooks_deployed(project), output(result)
+    assert "approval no longer granted" in output(result), output(result)
+
+
+def test_audit_flags_a_revoked_bundle_hook_before_install_retires_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    _world, runner, env, _bundle, project = _bundle_hook_world(tmp_path, apm_binary_path)
+    run_step(runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit-ok")
+    _revoke(project)
+
+    result = run_step(
+        runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit", expected=1
+    )
+
+    assert "local-bundle-hooks" in output(result), output(result)
+    assert "hookpkg: approval no longer granted" in output(result), output(result)
+    assert _hooks_deployed(project)
+    run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="retire")
+    assert not _hooks_deployed(project)
+    run_step(runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit-clean")
+
+
+def test_approved_bundle_hooks_survive_install_and_alias_follows_its_key(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    _world, runner, env, _bundle, project = _bundle_hook_world(
+        tmp_path, apm_binary_path, alias="team-hooks"
+    )
+    for command in (("install", "--no-policy"), ("install", "--no-policy", "--frozen")):
+        result = run_step(runner, command, cwd=project, env=env, step="approved")
+        assert _hooks_deployed(project), output(result)
+
+    _revoke(project)
+    result = run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="revoked")
+
+    assert not _hooks_deployed(project), output(result)
+    assert "local bundle 'team-hooks'" in " ".join(output(result).split()), output(result)
+
+
+def test_bundle_hook_without_a_recorded_key_fails_closed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    _world, runner, env, _bundle, project = _bundle_hook_world(tmp_path, apm_binary_path)
+    sidecar = project / ".claude" / "apm-hooks.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    for entries in data.values():
+        for entry in entries:
+            entry["_apm_source"] = "local-bundle::hookpkg"
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+
+    result = run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="no-key")
+
+    assert not _hooks_deployed(project), output(result)
+    text = " ".join(output(result).split())
+    assert "no approval record" in text, text
+    assert "apm install <bundle>" in text, text
+
+
+def test_org_deny_all_retires_deployed_bundle_hooks(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_policy(_POLICY)
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
+        project = world.consumer(targets=("claude",))
+        (project / ".claude").mkdir()
+        _allow(project, _bundle_key(bundle))
+        result = run_step(runner, ("install", str(bundle)), cwd=project, env=env, step="granted")
+        assert _hooks_deployed(project), output(result)
+
+        world.publish_policy({**_POLICY, "executables": {"deny_all": True}})
+        world.clear_policy_cache()
+        result = run_step(runner, ("install",), cwd=project, env=env, step="deny-all")
+
+    assert not _hooks_deployed(project), output(result)

@@ -318,7 +318,7 @@ class TestCiWithoutPolicy:
         # not corrupt JSON parsing.
         data = json.loads(result.stdout)
         # Only the nine baseline checks, including deployment ownership.
-        assert data["summary"]["total"] == 9
+        assert data["summary"]["total"] == 10
 
 
 # -- #3195: explicit --policy fails closed when it cannot be loaded -------

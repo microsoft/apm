@@ -356,6 +356,13 @@
       "owner": "bundle/unpacker.py (_refuse_executable_content before any preview or write)",
       "selectors": ["src/apm_cli/bundle/unpacker.py"],
       "guards": ["install-deployment-unpack-executable-refusal"]
+    },
+    {
+      "id": "local-bundle-hook-trust",
+      "decision": "Whether a deployed local bundle's hooks are still admitted by the approval key that admitted them, under the current project, user and org trust (#4027)",
+      "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement goes through HookIntegrator.retire_local_bundle_hooks; consumers: commands/install.py, commands/update.py, commands/prune.py, policy/ci_checks.py",
+      "selectors": ["src/apm_cli/install/local_bundle_hook_trust.py"],
+      "guards": ["install-deployment-local-bundle-hook-trust"]
     }
   ]
 }

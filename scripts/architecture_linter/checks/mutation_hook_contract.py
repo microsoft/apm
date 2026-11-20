@@ -1012,7 +1012,10 @@ def _nhc_local_bundle_markers(
     )
     findings.extend(
         _require(
-            _has_fixed(consumer, "return local_bundle_hook_source_marker(bundle_id)"),
+            _has_fixed(
+                consumer,
+                "return local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
+            ),
             rule_id,
             _HOOK_INTEGRATOR,
             "HookIntegrator must mark local-bundle hooks through hook_ownership.py",
