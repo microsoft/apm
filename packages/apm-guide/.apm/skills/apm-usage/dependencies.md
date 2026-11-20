@@ -379,7 +379,8 @@ Unknown keys in a marketplace entry are rejected.
 A committed install records each plugin version's catalog ref under
 `APM_HOME` (`cache/marketplace/version-pins.json`, keyed by the resolved
 version). If the catalog later points that version at another ref, install
-refuses (exit 1) and names both refs until the named entry is removed. A raw
+refuses (exit 1) and names both refs; `apm update`
+accepts the new ref. A raw
 ref override (`version: main`) never checks or records a pin, and a failed or
 `--dry-run` install records nothing.
 On a `*.ghe.com` marketplace, a plugin source of any type (`github`,
