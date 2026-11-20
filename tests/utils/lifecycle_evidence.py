@@ -585,14 +585,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
-        "install-verbose-diagnostics-repeat",
-        "I9",
-        "#4334",
-        _runs("install", "--verbose"),
-        r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
-        output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
         "I9",
         "#4291",

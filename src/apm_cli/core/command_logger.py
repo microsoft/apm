@@ -613,7 +613,7 @@ class InstallLogger(CommandLogger):
             color="dim",
         )
 
-    def materialize_result(self, sparse_applied: bool, consumer_size_bytes: int):
+    def materialize_result(self, dep_name: str, sparse_applied: bool, consumer_size_bytes: int):
         """Log materialization outcome and consumer dir size (verbose only).
 
         ``sparse_applied`` tells the reader whether sparse-cone fired
@@ -627,7 +627,7 @@ class InstallLogger(CommandLogger):
         size_mb = consumer_size_bytes / (1024 * 1024)
         applied = "yes" if sparse_applied else "no"
         _rich_echo(
-            f"    [i] perf: materialize sparse={applied} size={size_mb:.2f} MB",
+            f"    [i] perf: materialize {dep_name} sparse={applied} size={size_mb:.2f} MB",
             color="dim",
         )
 

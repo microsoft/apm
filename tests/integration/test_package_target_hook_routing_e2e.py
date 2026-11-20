@@ -499,7 +499,8 @@ def test_package_target_transition_repairs_cursor_and_uninstall_preserves_user_h
         scenario_id="target-transition-restrict-update",
     )
     assert (
-        "Package target restriction: [claude]; effective targets: [claude]" in update_result.stdout
+        "Package target restriction for " in update_result.stdout
+        and "[claude]; effective targets: [claude]" in update_result.stdout
     )
     lock = load_yaml(consumer.root / "apm.lock.yaml")
     dependencies = lock["dependencies"]
