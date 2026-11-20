@@ -106,6 +106,7 @@ class DeploymentMaterializationSession:
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
         self._written: dict[str, str] = {}
+        self._kept: set[str] = set()
         self._dirty = False
         self._claims: dict[str, list[DeploymentRecord]] = {}
         if lockfile is not None:
@@ -290,12 +291,25 @@ class DeploymentMaterializationSession:
             if (content_hash := self._records[key].content_hash) is not None
         }
 
-    def has_receipt(self, path: Path) -> bool:
-        """Return whether any receipt, trusted or not, exists for this physical path."""
-        return path.resolve().as_posix() in self._physical_keys
+    def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
+        """Record a declared member this run deliberately left on disk unwritten."""
+        from apm_cli.install.deployed_paths import deployed_path_entry
+
+        self._kept.add(deployed_path_entry(path, self.root, targets))
+
+    def kept_values(self) -> frozenset[str]:
+        """Return lock values of declared members this run kept; cleanup retains them."""
+        return frozenset(self._kept)
 
     def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
-        """Return a prior rendered hash only for a currently authorized physical member."""
+        """Return a prior rendered hash only for a currently authorized physical member.
+
+        A receipt is trusted only when it is bound to the current lock claim:
+        same owner, same claim signature, and the hash the lock records for the
+        path (when it records one). A receipt written under another checkout's
+        lock therefore never vouches for, or refuses, the bytes now on disk.
+        The lock can only withdraw trust here; it never grants it.
+        """
         from apm_cli.install.deployed_paths import deployed_path_entry
 
         locator = self._locator(path, targets)
@@ -326,9 +340,15 @@ class DeploymentMaterializationSession:
             not self._claims.get(value)
             or record.active_owner not in self._valid_owners
             or self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]
+            or not self._claim_hash_matches(value, record.content_hash)
         ):
             return None
         return record.content_hash
+
+    def _claim_hash_matches(self, value: str, content_hash: str | None) -> bool:
+        """Return whether the current lock claim records this receipt's hash, if any."""
+        claimed = {record.content_hash for record in self._claims.get(value, ())} - {None}
+        return not claimed or content_hash in claimed
 
     def _claim_signature(self, value: str) -> str:
         """Bind to canonical ownership metadata, independently of the actual adapter writer."""

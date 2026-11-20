@@ -56,6 +56,7 @@ def deployment_evidence(ctx: InstallContext) -> DeploymentEvidence:
             lockfile=ctx.existing_lockfile,
             lockfile_root=ctx.apm_dir,
             diagnostics=ctx.diagnostics,
+            kept=getattr(ctx, "kept_deployed_values", frozenset()),
         )
         ctx.deployment_evidence = evidence
     return evidence

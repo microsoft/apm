@@ -439,8 +439,11 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
-    def _skill_member_skipped(self, _path: Path) -> None:
+    def _skill_member_skipped(self, path: Path) -> None:
         self._skill_can_complete = False
+        # A declared member left on disk is kept, never cleaned as stale.
+        if self._materialization_session is not None and self._skill_targets:
+            self._materialization_session.keep(path, self._skill_targets)
 
     def _skill_materialization_complete(self, project_root: Path) -> bool:
         """Require positive discovery and every admitted source at every physical target."""

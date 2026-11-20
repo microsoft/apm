@@ -147,6 +147,8 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     finally:
         if locked is not None:
             locked.close()
+        if session is not None:
+            ctx.kept_deployed_values = session.kept_values()
     return session
 
 

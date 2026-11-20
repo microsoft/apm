@@ -1,17 +1,17 @@
 """Cold-restore adoption of unchanged deployed skill trees (#3391, #3625, #3883).
 
-Without any local deployment receipt for it, an existing skill directory is
-adopted only when its whole file tree equals what this install would write:
-every admitted source member after final link rendering, with no extra or
-missing files. When the commit being installed differs from the locked one
-(``apm update``, or ``apm install`` after an ``apm.yml`` ref change), the tree
-may instead equal what the currently locked version renders, materialized
-from its locked commit, so unchanged committed output can be replaced by the
-new version. The verified
-on-disk hash then stands in for the missing baseline, so the guarded write
-path rewrites the files and records receipts. Lockfile hashes are never
-consulted. Any difference returns no adoption, so the caller keeps its
-fail-closed refusal.
+Without a local deployment receipt trusted for the current lock claim (none
+in a new worktree, or one written under another checkout's lock), an existing
+skill directory is adopted only when its whole file tree equals what this
+install would write: every admitted source member after final link
+rendering, with no extra or missing files. When the commit being installed
+differs from the locked one (``apm update``, or ``apm install`` after an
+``apm.yml`` ref change), the tree may instead equal what the currently locked
+version renders, materialized from its locked commit, so unchanged committed
+output can be replaced by the new version. The verified on-disk hash then
+stands in for the missing baseline, so the guarded write path rewrites the
+files and records receipts. Lockfile hashes never grant a baseline. Any
+difference returns no adoption, so the caller keeps its fail-closed refusal.
 """
 
 from __future__ import annotations
@@ -87,11 +87,14 @@ def adoptable_skill_members(
     walk_source: WalkSource,
     ignore: Callable[[str, list[str]], list[str]],
     resolve_links: ResolveLinks,
+    trusted: Callable[[Path], str | None] | None = None,
 ) -> frozenset[Path]:
     """Return destination members when the tree equals this install's output, else empty.
 
-    Call before copying so earlier writes in the same pass cannot complete a
-    tree that was not identical on disk.
+    A member with a *trusted* receipt hash matches only when its bytes still
+    equal that receipt; every other member must equal the render. Call before
+    copying so earlier writes in the same pass cannot complete a tree that
+    was not identical on disk.
     """
     if destination.is_symlink() or not destination.is_dir():
         return frozenset()
@@ -114,6 +117,11 @@ def adoptable_skill_members(
         for target, member in expected.items():
             if member.is_symlink() or not member.is_file() or not target.is_file():
                 return frozenset()
+            receipted = trusted(target) if trusted is not None else None
+            if receipted is not None:
+                if compute_file_hash(target) != receipted:
+                    return frozenset()
+                continue
             if target.read_bytes() != _expected_bytes(resolve_links, member, target, source):
                 return frozenset()
     except (OSError, UnicodeError):
@@ -144,17 +152,34 @@ def adoption_baselines(
     ignore: Callable[[str, list[str]], list[str]],
     resolve_links: ResolveLinks,
     owned: Callable[[Path], bool],
+    trusted: Callable[[Path], str | None] | None = None,
 ) -> dict[Path, str]:
     """Map adoptable members to verified on-disk hashes when every member is claimed.
 
     Identical files without an ownership claim never gain local authority.
     """
     members = adoptable_skill_members(
-        source, destination, walk_source=walk_source, ignore=ignore, resolve_links=resolve_links
+        source,
+        destination,
+        walk_source=walk_source,
+        ignore=ignore,
+        resolve_links=resolve_links,
+        trusted=trusted,
     )
     if not all(owned(path) for path in members):
         return {}
     return {path: compute_file_hash(path) for path in members}
+
+
+def all_files_trusted(destination: Path, trusted: Callable[[Path], str | None]) -> bool:
+    """Return whether every file under *destination* has a trusted receipt."""
+    if destination.is_symlink() or not destination.is_dir():
+        return True
+    return all(
+        trusted(Path(directory) / name) is not None
+        for directory, _directories, filenames in os.walk(destination)
+        for name in filenames
+    )
 
 
 def installing_commit(package_info: Any) -> str | None:
@@ -290,22 +315,34 @@ def skill_tree_baselines(
     targets: Sequence[Any] | None = None,
     commit: str | None = None,
 ) -> dict[Path, str]:
-    """Return adoption baselines for a skill tree without any local receipt.
+    """Return adoption baselines for members of a skill tree without a trusted receipt.
 
     The single decision shared by skill preflight and materialization: compare
     with the source being installed first, then, when *commit* (the one being
     installed) differs from the lock, with the currently locked source
     rendered under the same copy filter. *plan*, *owner*, *targets* and
-    *commit* default to the integrator's current package.
+    *commit* default to the integrator's current package. Only receipts the
+    session trusts for the current lock claim count: a tree whose files all
+    carry one needs no adoption, and a receipted member matches only its own
+    receipt. A missing or untrusted receipt (another worktree or checkout)
+    falls through to the renders.
     """
     session = integrator._materialization_session
-    if session is None or force or session.has_receipt(destination / "SKILL.md"):
+    if session is None or force:
         return {}
     plan = plan or integrator._skill_source_plan
     if owner is None:
         owner, commit = integrator._skill_current_owner, integrator._skill_current_commit
     targets = targets if targets is not None else integrator._skill_targets or ()
-    compare = partial(adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned)
+
+    def trusted(path: Path) -> str | None:
+        return session.baseline(path, targets)
+
+    if all_files_trusted(destination, trusted):
+        return {}
+    compare = partial(
+        adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned, trusted=trusted
+    )
     adopted = compare(source, destination, ignore=ignore, resolve_links=integrator.resolve_links)
     locked_sources: LockedSkillSources | None = session.locked_sources
     rebased = getattr(ignore, "rebased", None)
