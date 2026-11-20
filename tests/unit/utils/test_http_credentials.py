@@ -292,6 +292,25 @@ def test_credentialed_request_ignores_ambient_netrc(tmp_path, monkeypatch) -> No
         assert origin.seen[1]["authorization"].startswith("Basic ")
 
 
+def test_session_without_ambient_credentials_never_sends_netrc(tmp_path, monkeypatch) -> None:
+    """Neither the request nor a redirect hop picks up .netrc credentials (#4088)."""
+    with _server() as target:
+        target_url = f"http://localhost:{target.server_address[1]}/landing"
+        with _server(target_url) as origin:
+            netrc = tmp_path / "netrc"
+            netrc.write_text(
+                "machine 127.0.0.1 login ambient password ambient-secret\n"
+                "machine localhost login ambient password ambient-secret\n"
+            )
+            netrc.chmod(0o600)
+            monkeypatch.setenv("NETRC", str(netrc))
+            origin_url = f"http://127.0.0.1:{origin.server_address[1]}/start"
+            with CredentialScopedSession(ambient_credentials=False) as session:
+                session.get(origin_url, timeout=10)
+    assert "authorization" not in origin.seen[0]
+    assert "authorization" not in target.seen[0]
+
+
 def test_anonymous_request_can_exclude_ambient_netrc(tmp_path, monkeypatch) -> None:
     with _server() as origin:
         port = origin.server_address[1]

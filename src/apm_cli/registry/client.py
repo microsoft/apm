@@ -371,7 +371,8 @@ class SimpleRegistryClient:
         # is unreachable: a network blip against a private registry must not
         # look like a successful install.
         self._is_custom_url = source != "default"
-        self.session = CredentialScopedSession()
+        # Registry calls send only the credentials APM was given, never ~/.netrc.
+        self.session = CredentialScopedSession(ambient_credentials=False)
         self._timeout = _resolve_timeout()
         self._http_cache = self._init_http_cache()
 

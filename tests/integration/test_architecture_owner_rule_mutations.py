@@ -2998,7 +2998,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-http-session-construction",
         rule_id="transport-platform-http-session-construction",
         path="src/apm_cli/registry/client.py",
-        old="self.session = CredentialScopedSession()",
+        old="self.session = CredentialScopedSession(ambient_credentials=False)",
         new="self.session = requests.Session()",
         intent="The MCP registry client builds an ad hoc session outside the credential-origin owner.",
     ),
@@ -3292,6 +3292,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="    if not policy_discovery_uses_git_remote(project_root):\n",
         new="    if False:\n",
         intent="Git-remote policy discovery bypasses the one user-scope decision.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-http-session-construction",
+        rule_id="transport-platform-http-session-construction",
+        path="src/apm_cli/registry/client.py",
+        old="CredentialScopedSession(ambient_credentials=False)",
+        new="CredentialScopedSession()",
+        intent="The MCP registry client lets requests attach ambient netrc credentials.",
     ),
 )
 

@@ -295,9 +295,27 @@ def _session_sites(index: TreeIndex) -> Iterator[ast.AST]:
             yield from (base for base in node.bases if is_session(base))
 
 
+_NO_AMBIENT_SESSIONS: dict[str, str] = {
+    # The MCP registry client sends only the credentials APM was given.
+    "src/apm_cli/registry/client.py": "CredentialScopedSession(ambient_credentials=False)",
+}
+
+
 def _check_session_construction(provider: FactsProvider) -> tuple[Violation, ...]:
     """requests.Session is built only by the credential-origin-scope owner."""
     findings: list[Violation] = []
+    for path, needle in _NO_AMBIENT_SESSIONS.items():
+        facts, failures = checked_facts(provider, path, _SESSION_RULE, require_python=True)
+        if failures:
+            findings.extend(failures)
+        elif needle not in source_text(facts):
+            findings.append(
+                violation(
+                    _SESSION_RULE,
+                    path,
+                    f"{path} must build its session as {needle} so .netrc never applies",
+                )
+            )
     seen: Counter[tuple[str, str]] = Counter()
     for path in _src_python(provider):
         if path == _SESSION_OWNER:

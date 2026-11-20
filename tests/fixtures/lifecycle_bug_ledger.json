@@ -579,7 +579,8 @@
         "tests/integration/test_egress_route_policy_contract.py::test_update_preflight_sends_no_source_host_probe",
         "tests/integration/test_egress_route_policy_contract.py::test_policy_fetch_goes_direct_in_registry_only_mode",
         "tests/integration/test_egress_route_policy_contract.py::test_automatic_version_check_is_not_sent_in_registry_only_mode",
-        "tests/integration/test_egress_route_policy_contract.py::test_explicit_self_update_check_goes_direct_in_registry_only_mode"
+        "tests/integration/test_egress_route_policy_contract.py::test_explicit_self_update_check_goes_direct_in_registry_only_mode",
+        "tests/integration/test_mcp_registry_ambient_credentials_lifecycle.py::test_registry_requests_carry_no_netrc_credentials"
       ]
     }
   ],
