@@ -895,7 +895,8 @@ def _check_content_integrity(
         )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
-        remedies.append("'apm install' to restore drifted files")
+        # Plain 'apm install' can keep a local edit, so it is not the restore (#3994).
+        remedies.append("'apm install --force' to restore drifted files (overwrites local edits)")
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
         remedies.append("'apm install <bundle> --force' to restage drifted files")
