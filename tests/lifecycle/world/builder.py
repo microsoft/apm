@@ -7,7 +7,9 @@ Layout under ``base`` (an ``IsolatedApmEnvironment`` root, cloned per test)::
     packages/        every world package (local-path sources)
     work/project/    the consumer project (apm.yml, executables gate on)
     work/elsewhere/  the cwd of user-scope commands (no apm.yml)
-    bundles/         ``apm pack`` output of p-exec
+    bundles/         ``apm pack`` output of p-exec (default plugin format)
+    bundles-apm/     ``apm pack --format apm`` of a consumer of approved p-exec
+                     (what ``apm unpack`` reads: the deployed hook and MCP entry)
     executables/     trap ``claude`` / ``codex`` binaries that must never run
 
 APM_HOME/config.json enables the experimental ``canvas`` primitive.
@@ -125,17 +127,74 @@ def _engine(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> subprocess
     )
 
 
+def _scratch_env(env: dict[str, str], scratch: Path) -> dict[str, str]:
+    """Packing must not leave receipts, approvals or cache in the template's HOME."""
+    (scratch / ".apm").mkdir(parents=True)
+    return {
+        **env,
+        "HOME": str(scratch),
+        "USERPROFILE": str(scratch),
+        "APM_HOME": str(scratch / ".apm"),
+        "APM_CACHE_DIR": str(scratch / "cache"),
+    }
+
+
+def _checked(result: subprocess.CompletedProcess, what: str) -> None:
+    if result.returncode != 0:
+        raise RuntimeError(f"{what} failed ({result.returncode}): {result.stdout}{result.stderr}")
+
+
 def _pack_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
-    """Pack *source* with the engine CLI; return the bundle it wrote."""
+    """Pack package *source* itself (default plugin format); return the bundle."""
     output.mkdir()
-    work = output.parent / "pack-src"
+    work = output.parent / f"pack-src-{output.name}"
+    scratch = output.parent / f"pack-home-{output.name}"
     shutil.copytree(source, work)
-    result = _engine(("pack", "--archive", "-o", str(output)), work, env)
-    shutil.rmtree(work)
-    bundles = sorted(output.iterdir())
-    if result.returncode != 0 or len(bundles) != 1:
-        raise RuntimeError(f"apm pack failed ({result.returncode}): {result.stdout}{result.stderr}")
-    return bundles[0]
+    try:
+        _checked(
+            _engine(("pack", "--archive", "-o", str(output)), work, _scratch_env(env, scratch)),
+            "apm pack",
+        )
+    finally:
+        shutil.rmtree(work)
+        shutil.rmtree(scratch)
+    (bundle,) = sorted(output.iterdir())
+    return bundle
+
+
+def _pack_apm_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
+    """Pack the deployed files of an approved *source* as a ``--format apm`` bundle.
+
+    The APM layout ships a consumer's deployed dependency files, so a scratch
+    consumer named after the package installs its git-served copy, approves it
+    and packs. Needs the world services running.
+    """
+    output.mkdir()
+    work = output.parent / f"pack-consumer-{output.name}" / source.name
+    scratch = output.parent / f"pack-home-{output.name}"
+    work.mkdir(parents=True)
+    # pack refuses local-path dependencies, so depend on the git-served copy.
+    remote = f"{ORG}/{source.name}"
+    manifest = {
+        **_manifest(source.name),
+        "license": "MIT",
+        "dependencies": {"apm": [f"{remote}#{TAG}"]},
+    }
+    (work / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    env = _scratch_env(env, scratch)
+    try:
+        _checked(_engine(("install",), work, env), "apm install")
+        _checked(_engine(("approve", remote), work, env), "apm approve")
+        _checked(_engine(("install",), work, env), "apm install")
+        _checked(
+            _engine(("pack", "--format", "apm", "--archive", "-o", str(output)), work, env),
+            "apm pack --format apm",
+        )
+    finally:
+        shutil.rmtree(work.parent)
+        shutil.rmtree(scratch)
+    (bundle,) = sorted(output.iterdir())
+    return bundle
 
 
 def build_template(base: Path) -> World:
@@ -170,6 +229,8 @@ def build_template(base: Path) -> World:
         if enabled.returncode != 0:
             raise RuntimeError(f"enabling canvas failed: {enabled.stdout}{enabled.stderr}")
         bundle = _pack_bundle(authored["p-exec"].root, base / "bundles", env)
+        # ``apm unpack`` reads only the legacy APM bundle layout.
+        apm_bundle = _pack_apm_bundle(authored["p-exec"].root, base / "bundles-apm", env)
     except Exception:
         services.close()
         raise
@@ -191,6 +252,9 @@ def build_template(base: Path) -> World:
         )
     packages["p-exec:bundle"] = PackageRef(
         "p-exec", str(bundle), authored["p-exec"].kinds, "local-bundle"
+    )
+    packages["p-exec:apm-bundle"] = PackageRef(
+        "p-exec", str(apm_bundle), authored["p-exec"].kinds, "local-bundle"
     )
     return World(
         base,
