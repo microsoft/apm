@@ -98,8 +98,12 @@ def _check_journey(journey: dict, oracles: set[str], docs_root: Path) -> list[st
         argv = step.get("argv")
         if argv is not None and not (
             step.get("kind") == "apm"
+            and isinstance(argv, list)
             and argv
-            and all(isinstance(a, list) and a and a[0] == "apm" for a in argv)
+            and all(
+                isinstance(a, list) and a and a[0] == "apm" and all(isinstance(t, str) for t in a)
+                for a in argv
+            )
         ):
             problems.append(f"{where}: argv must be a list of apm argv lists on an apm step")
         unknown = set(step.get("oracles") or ()) - set(oracles)
@@ -127,6 +131,8 @@ def test_index_matches_the_pinned_schema() -> None:
         (lambda idx: idx.update(schema_version=2), "schema_version"),
         (lambda idx: idx["journeys"][0]["docs"].append("nope/missing.md"), "not found"),
         (lambda idx: idx["journeys"][0]["steps"][0].update(kind="robot"), "kind"),
+        (lambda idx: idx["journeys"][0]["steps"][0].update(argv=[["apm", 42]]), "argv"),
+        (lambda idx: idx["journeys"][0]["steps"][0].update(argv="apm --version"), "argv"),
     ],
 )
 def test_a_mutated_index_fails(mutation, expected: str) -> None:
@@ -153,18 +159,28 @@ def test_golden_mutation_fails() -> None:
     assert any("golden journeys" in problem for problem in check_index(index))
 
 
-def _persona_journeys() -> dict[str, int]:
-    found: dict[str, int] = {}
+def _persona_journeys() -> dict[str, dict[str, int]]:
+    found: dict[str, dict[str, int]] = {}
     for persona in PERSONA_DIRS:
         for path in sorted((INDEX.parent / persona).glob("*.yaml")):
             data = yaml.safe_load(path.read_text(encoding="ascii"))
-            found[data["id"]] = len(data.get("steps") or [])
+            found.setdefault(persona, {})[data["id"]] = len(data.get("steps") or [])
     return found
 
 
 def test_persona_journey_files_agree_with_the_index() -> None:
+    """Each persona with journey files carries exactly the index's ids and step counts.
+
+    Personas roll out one directory at a time (#4110), so a persona with no files yet is
+    not required; once a persona has any file, all of its journeys must be present.
+    """
     found = _persona_journeys()
     if not found:
         pytest.skip("no tests/lifecycle/journeys/{consumer,producer,enterprise}/*.yaml yet (#4110)")
-    expected = {journey["id"]: len(journey["steps"]) for journey in _load()["journeys"]}
-    assert found == expected
+    for persona, journeys in found.items():
+        expected = {
+            journey["id"]: len(journey["steps"])
+            for journey in _load()["journeys"]
+            if journey["persona"] == persona
+        }
+        assert journeys == expected, persona

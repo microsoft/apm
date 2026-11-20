@@ -189,7 +189,7 @@ journeys:
     - O9
     - O10
   - n: 5
-    cmd: git add apm.yml apm.lock.yaml .github .claude .agents && git commit -m 'Add agent dependencies' && git status --porcelain
+    cmd: git add apm.yml apm.lock.yaml .gitignore .github .claude .agents && git commit -m 'Add agent dependencies' && git status --porcelain
     kind: shell
     exit: 0
     key_lines: []
@@ -2335,7 +2335,26 @@ journeys:
   fixtures: null
   steps:
   - n: 1
-    cmd: apm audit -f sarif -o audit.sarif; -f json -o report.json; -f markdown -o report.md
+    cmd: apm audit -f sarif -o audit.sarif; apm audit -f json -o report.json; apm audit -f markdown -o report.md
+    argv:
+    - - apm
+      - audit
+      - -f
+      - sarif
+      - -o
+      - audit.sarif
+    - - apm
+      - audit
+      - -f
+      - json
+      - -o
+      - report.json
+    - - apm
+      - audit
+      - -f
+      - markdown
+      - -o
+      - report.md
     kind: apm
     exit: 0
     key_lines: []
