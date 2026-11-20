@@ -64,6 +64,8 @@ def test_normalize_package_repo_url_lowercases_only_case_insensitive_identities(
         ),
         ({"source": "local", "local_path": None}, "Owner/Repo"),
         ({"host": "github.com", "is_marketplace": True}, "Owner/Repo"),
+        ({"host": "github.com", "virtual_path": "skills/A"}, "owner/repo"),
+        ({"host": "gitlab.example.com", "source": "registry"}, "gitlab.example.com/owner/repo"),
     ],
 )
 def test_build_dependency_unique_key_table(kwargs: dict, expected: str) -> None:

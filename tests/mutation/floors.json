@@ -161,6 +161,26 @@
           "class": "semantic-equivalent",
           "mutant": "apm_cli.install.plan.build_update_plan__mutmut_53",
           "reason": "old is a LockedDependency, which always defines resolved_tag, so dropping the getattr default cannot raise or change the truth test."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.models.dependency.identity.build_dependency_unique_key__mutmut_12",
+          "reason": "source is also passed to normalize_package_repo_url, whose classifier already treats source == 'local' as case-sensitive, so the redundant is_local flag (None, dropped, or never true) cannot change the key."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.models.dependency.identity.build_dependency_unique_key__mutmut_18",
+          "reason": "source is also passed to normalize_package_repo_url, whose classifier already treats source == 'local' as case-sensitive, so the redundant is_local flag (None, dropped, or never true) cannot change the key."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.models.dependency.identity.build_dependency_unique_key__mutmut_21",
+          "reason": "source is also passed to normalize_package_repo_url, whose classifier already treats source == 'local' as case-sensitive, so the redundant is_local flag (None, dropped, or never true) cannot change the key."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.models.dependency.identity.build_dependency_unique_key__mutmut_22",
+          "reason": "source is also passed to normalize_package_repo_url, whose classifier already treats source == 'local' as case-sensitive, so the redundant is_local flag (None, dropped, or never true) cannot change the key."
         }
       ],
       "floor": 0.97,

@@ -125,3 +125,15 @@ def test_normalize_host_type_lowercases_and_lists_supported_values() -> None:
         "Unsupported lockfile host_type: Nope. Supported values: "
         + ", ".join(sorted(_ALLOWED_HOST_TYPES))
     )
+
+
+def test_unsupported_host_type_lists_every_supported_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apm_cli.deps import lockfile
+
+    monkeypatch.setattr(lockfile, "_ALLOWED_HOST_TYPES", {"gitlab", "bitbucket"})
+
+    with pytest.raises(ValueError) as caught:
+        _normalize_lockfile_host_type("nope")
+    assert str(caught.value) == (
+        "Unsupported lockfile host_type: nope. Supported values: bitbucket, gitlab"
+    )
