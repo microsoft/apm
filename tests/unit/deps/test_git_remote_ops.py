@@ -202,9 +202,12 @@ class TestValidateLsRemoteTagOutput:
             f" {'a' * 40}\trefs/tags/v1.0.0",
         ],
     )
-    def test_invalid_or_ambiguous_records_are_rejected(self, output: str) -> None:
+    @pytest.mark.parametrize(
+        "prefix", ["", f"{'b' * 40}\trefs/tags/v0.1.0\n"], ids=["alone", "after_valid"]
+    )
+    def test_invalid_or_ambiguous_records_are_rejected(self, prefix: str, output: str) -> None:
         with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
-            validate_ls_remote_tag_output(output)
+            validate_ls_remote_tag_output(prefix + output)
 
     @pytest.mark.parametrize("conflicting_sha", ["a", "b"])
     def test_duplicate_records_are_rejected(self, conflicting_sha: str) -> None:

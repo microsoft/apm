@@ -1,7 +1,8 @@
 {
   "partition": "train2 residual dedupe and placement",
   "steps_done": [
-    1
+    1,
+    2
   ],
   "folds": {
     "tests/test_codex_empty_string_and_defaults.py::TestCodexEmptyStringAndDefaults::test_codex_empty_strings_trigger_defaults": "tests/test_empty_string_and_defaults.py::TestEmptyStringAndDefaults::test_codex_empty_strings_trigger_defaults",
@@ -11,10 +12,11 @@
   "decisions": [
     "step 1: --report-equal-copies lists 166 deletable copies, none in a file inside this scope (all in open-PR or protected files); nothing to delete",
     "token_manager: 4 copies in tests/test_token_manager.py deleted; identical twins kept in forbidden tests/unit/core/test_token_manager_lifecycle.py (pure static checks, no class context)",
-    "codex empty-string: 3 tests in tests/test_codex_empty_string_and_defaults.py had identical bodies to tests/test_empty_string_and_defaults.py but a fixture without registry 'required' flags; folded that context into the surviving tests via indirect parametrize of github_mcp_server_data (declared_required / implicit_required) and deleted the copies"
+    "codex empty-string: 3 tests in tests/test_codex_empty_string_and_defaults.py had identical bodies to tests/test_empty_string_and_defaults.py but a fixture without registry 'required' flags; folded that context into the surviving tests via indirect parametrize of github_mcp_server_data (declared_required / implicit_required) and deleted the copies",
+    "git_remote_ops: unit test shared a body with forbidden tests/spec_conformance/test_resolution_reqs.py but used different inputs; differentiated only the unit copy by parametrizing a valid-record prefix (alone / after_valid), so a malformed record is also proven rejected after a valid one"
   ],
   "counts_left": {
-    "same_body_groups": 1,
+    "same_body_groups": 0,
     "unclassified_modules": 0,
     "placement_offenders": 7,
     "weak_tests": 0
