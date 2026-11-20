@@ -29,7 +29,7 @@ steps:
     key_lines:
       - "[+]  fetch -> Claude Code (configured)"
       - "[+] Added MCP server 'fetch'"
-      - "apm.yml: <APM_HOME>/apm.yml"
+      - "manifest: ~/.apm/apm.yml"
     forbidden_lines: ["[!]", "[x]"]
   - n: 3
     run: [apm deps list -g]

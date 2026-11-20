@@ -58,18 +58,3 @@ steps:
     exit: 0
     key_lines: ["[+] No drift detected"]
 known_cells:
-  - id: J15-identical-skill-reported-as-integrated-not-adopted
-    law: KEY
-    tracking: "#4198"
-    step: 5
-    match: "key line not printed: 'adopted'"
-  - id: J15-install-pkg-drops-declared-local-dep-from-lock
-    law: I1
-    tracking: "#4198"
-    step: 5
-    match: "deployed file is not in the lock: \\.claude/skills/review/SKILL\\.md"
-  - id: J15-audit-after-install-lock-misses-local-dep
-    law: I1
-    tracking: "#4198"
-    step: 6
-    match: "deployed file is not in the lock: \\.claude/skills/review/SKILL\\.md"

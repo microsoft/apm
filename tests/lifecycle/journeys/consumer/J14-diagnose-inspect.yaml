@@ -61,18 +61,3 @@ steps:
     remediate:
       - {advice: apm uninstall lifecycle/p-missing}
 known_cells:
-  - id: J14-missing-repo-reported-as-network-error
-    law: FORBID
-    tracking: "#4199"
-    step: 5
-    match: "Could not connect to github.com \\(network error"
-  - id: J14-missing-repo-prints-no-runnable-next-action
-    law: O8
-    tracking: "#4199"
-    step: 5
-    match: "advice 'apm uninstall lifecycle/p-missing' is not printed"
-  - id: J14-verbose-install-failure-printed-twice
-    law: O4
-    tracking: "#4199"
-    step: 5
-    match: "repeats \"fatal: repository 'https://github.com/lifecycle/p-missing.git/' not found\""

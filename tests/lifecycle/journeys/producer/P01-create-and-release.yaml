@@ -110,4 +110,4 @@ steps:
       commands: [apm view you/my-skills versions]
     key_lines: ["| v1.0.0 | tag    |"]
     forbidden_lines: ["[x]"]
-known_cells: []
+known_cells:
