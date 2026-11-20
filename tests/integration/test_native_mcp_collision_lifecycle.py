@@ -694,3 +694,37 @@ def test_registry_receipt_never_adopts_or_deletes_unverified_native_state(
     result = scenario.install(targets=target)
     assert result.returncode == (1 if evidence == "edited" else 0)
     assert scenario.path(target).read_bytes() == before
+
+
+def test_user_disabled_matching_codex_connection_installs_and_replays_frozen(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """A user's own entry equal to the declaration, only switched off, is no conflict."""
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    declared = {"name": "notes", "registry": False, "transport": "stdio", "command": "INERT"}
+    scenario.declare([declared])
+    manifest = load_yaml(scenario.root / "apm.yml")
+    manifest["executables"] = {"allow": {"notes": {"mcp": True}}}
+    dump_yaml(manifest, scenario.root / "apm.yml")
+    path = scenario.path("codex")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '# user comment\n[mcp_servers.notes]\ncommand = "INERT"\nenabled = false\n',
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    _success(scenario.install(targets="codex"))
+    assert path.read_bytes() == before
+    assert scenario.lock().mcp_target_servers == {}
+    _success(scenario.install("--frozen", targets="codex"))
+    assert path.read_bytes() == before
+
+    # A different command stays a conflict, on install and on replay.
+    scenario.edit("codex", "notes", {"command": "OTHER", "enabled": False})
+    edited = path.read_bytes()
+    for flags in ((), ("--frozen",)):
+        refused = scenario.install(*flags, targets="codex")
+        assert refused.returncode == 1, refused.stdout + refused.stderr
+        assert path.read_bytes() == edited

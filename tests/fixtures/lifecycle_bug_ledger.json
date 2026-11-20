@@ -2923,6 +2923,17 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4449,
+      "fixed_in": "Unreleased",
+      "summary": "A user's own Codex MCP entry equal to a self-defined declaration, including one the user switched off with enabled = false, is no conflict: install and --frozen replay leave it unowned and byte-stable; a different command still fails closed.",
+      "failure_modes": ["ownership", "outcome"],
+      "properties": ["ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_native_mcp_collision_lifecycle.py::test_user_disabled_matching_codex_connection_installs_and_replays_frozen",
+        "tests/integration/test_codex_native_plugin_lifecycle.py::test_git_pinned_install_and_missing_apm_cache_restore"
+      ]
     }
   ],
   "lifecycle_contracts": [

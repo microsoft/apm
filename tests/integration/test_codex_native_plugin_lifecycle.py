@@ -153,6 +153,16 @@ def _source(root: Path, marker: str) -> None:
     asset.chmod(0o644)
 
 
+# Audit names cache drift through the Codex native owner or, for a source the
+# lock pins by content hash, through the integrity replay; both fail closed.
+_CACHE_DRIFT = ("cache differs", "do not match apm.lock.yaml")
+
+
+def _names_cache_drift(output: str) -> bool:
+    text = " ".join(output.split())
+    return any(marker in text for marker in _CACHE_DRIFT)
+
+
 def _audit_cache(
     runner: ApmLifecycleRunner,
     root: Path,
@@ -192,7 +202,7 @@ def _audit_cache(
             cached.write_bytes(original + b"\nChanged only in the APM cache.\n")
             changed = audit(f"codex-native-cache-audit-tampered-{cached.name}")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            assert "cache differs" in " ".join((changed.stdout + changed.stderr).split())
+            assert _names_cache_drift(changed.stdout + changed.stderr)
             assert "Traceback" not in changed.stderr
             structured = audit(f"codex-native-cache-json-{cached.name}", json_output=True)
             assert structured.returncode != 0, structured.stdout + structured.stderr
@@ -201,7 +211,7 @@ def _audit_cache(
             assert any(
                 check["name"] == "drift"
                 and check["passed"] is False
-                and "cache differs" in check["message"]
+                and _names_cache_drift(check["message"])
                 for check in report["checks"]
             )
         finally:
@@ -213,7 +223,7 @@ def _audit_cache(
             cached.chmod(original_mode ^ stat.S_IXUSR)
             changed = audit("codex-native-cache-audit-mode")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            assert "cache differs" in " ".join((changed.stdout + changed.stderr).split())
+            assert _names_cache_drift(changed.stdout + changed.stderr)
             assert "Traceback" not in changed.stderr
         finally:
             cached.chmod(original_mode)
