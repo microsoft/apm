@@ -65,7 +65,8 @@ Accepted forms:
 
 - `OWNER/REPO` -- GitHub shorthand (`acme/marketplace`).
 - `HOST/OWNER/.../REPO` -- non-GitHub host shorthand
-  (`gitlab.com/team/marketplace`).
+  (`gitlab.com/team/marketplace`). Both shorthand forms accept `#ref`, for
+  example `acme/marketplace#v1.0.0`.
 - HTTPS git URL -- Azure DevOps Services, a configured Azure DevOps Server,
   GitLab, Gitea, Bitbucket Server, or another self-hosted git server. Add
   `#ref` to pin the marketplace, for example

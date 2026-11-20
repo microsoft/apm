@@ -1,0 +1,26 @@
+{
+  "changelog": "`apm marketplace add OWNER/REPO#ref` and `HOST/OWNER/REPO#ref` register the named ref instead of tracking `main` (#4217)",
+  "ledger_row": {
+    "issue": 4200,
+    "fixed_in": "Unreleased",
+    "summary": "apm marketplace add OWNER/REPO#ref kept the #ref inside the stored repository URL, tracked main, failed the fetch, and printed an unpinned warning suggesting OWNER/REPO#ref#v1.0.0.",
+    "failure_modes": [
+      "reference",
+      "outcome"
+    ],
+    "properties": [
+      "source.ref_cache_coherent",
+      "outcome.status_matches_state"
+    ],
+    "regression_tests": [
+      "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref[owner-repo]",
+      "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref[host-owner-repo]",
+      "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_honors_shorthand_fragment_ref",
+      "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_keeps_hash_in_local_paths"
+    ]
+  },
+  "red": "APM_E2E_TESTS=1 APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref -n 0 -p no:cacheprovider -q -> FAILED [owner-repo] and [host-owner-repo]: `assert result.returncode == 0` (exit 1; '[!] Pin this git marketplace with a #ref (for example, team/platform/agent-catalog#release/pilot#v1.0.0)' then '[x] Failed to fetch marketplace')",
+  "green": "APM_E2E_TESTS=1 APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref -n 0 -p no:cacheprovider -q -> 2 passed (module: 4 passed)",
+  "owner": "src/apm_cli/marketplace/registration.py (split_source_fragment_ref, used by parse_registration_source for both apm marketplace add and the user-manifest marketplaces: reconcile); helper is_shorthand_marketplace_source in src/apm_cli/marketplace/source_identity.py",
+  "notes": "Chose HONOR over refuse: the CLI's own unpinned-source warning already prints '<OWNER/REPO>#v1.0.0' as the fix, so the hint must be runnable; the test executes that printed hint and asserts the registry ref is v1.0.0. A '#' stays part of local paths and SCP/SSH forms keep their existing fragment refusal. Docs: reference/cli/marketplace.md accepted forms and apm-guide commands.md updated. The user-manifest marketplaces: source field inherits the same grammar through parse_registration_source."
+}

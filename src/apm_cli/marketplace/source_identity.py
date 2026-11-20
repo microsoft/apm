@@ -347,6 +347,13 @@ def _reject_conflicting_host(host_flag: str | None, embedded_host: str | None, s
         )
 
 
+def is_shorthand_marketplace_source(raw: str) -> bool:
+    """Return whether *raw* is ``OWNER/REPO`` or ``HOST/OWNER/REPO`` shorthand."""
+    return not (
+        "://" in raw or _looks_like_local_marketplace_source(raw) or _SCP_PREFIX_RE.match(raw)
+    )
+
+
 def _looks_like_local_marketplace_source(raw: str) -> bool:
     """Return whether *raw* is a local filesystem source."""
     if raw.lower().startswith("file://"):
