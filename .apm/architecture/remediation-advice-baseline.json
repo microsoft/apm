@@ -1,0 +1,10 @@
+{
+  "files": {
+    "src/apm_cli/commands/approve.py": 1,
+    "src/apm_cli/install/outcome.py": 1,
+    "src/apm_cli/integration/cleanup.py": 2,
+    "src/apm_cli/marketplace/catalog_origin.py": 1,
+    "src/apm_cli/marketplace/version_pins.py": 1
+  },
+  "version": 1
+}

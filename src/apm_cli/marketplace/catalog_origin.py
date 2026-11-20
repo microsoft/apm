@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..core.remediation import MARKETPLACE_DUPLICATE_ALIAS
 from .errors import MarketplaceError, MarketplaceOriginConflictError, MarketplaceProvenanceError
 from .registry import get_marketplace_by_name
 from .source_identity import (
@@ -95,7 +96,8 @@ def duplicate_origin_warning(source: MarketplaceSource, existing: MarketplaceSou
     return (
         f"Marketplace '{source.name}' points at the same catalog as '{existing.name}' "
         f"({marketplace_origin(source)}). Both names resolve the same plugins; "
-        f"if this was unintended, run: apm marketplace remove {shlex.quote(source.name)}"
+        "if this was unintended, "
+        f"{MARKETPLACE_DUPLICATE_ALIAS.bind(name=shlex.quote(source.name)).clause()}."
     )
 
 

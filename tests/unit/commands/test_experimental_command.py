@@ -581,24 +581,23 @@ class TestBuildTableImportErrorFallback:
 
 
 class TestPrintListFooterStaleKeys:
-    """Line 64: stale config keys trigger a note in list footer."""
+    """Unknown or retired config keys are ignored with one verbose note (#4089)."""
 
-    def test_stale_keys_note_shown_in_list(self, runner: CliRunner, tmp_path) -> None:
-        """Line 64: get_stale_config_keys() returns non-empty → note shown."""
+    def test_stale_keys_note_is_verbose_only(self, runner: CliRunner, tmp_path) -> None:
         from apm_cli.commands.experimental import experimental
 
         with patch(
             "apm_cli.commands.experimental.get_stale_config_keys",
-            return_value=["old_key"],
+            return_value=["marketplace_authoring"],
         ):
-            result = runner.invoke(experimental, ["list"])
+            quiet = runner.invoke(experimental, ["list"])
+            verbose = runner.invoke(experimental, ["list", "--verbose"])
 
-        assert result.exit_code == 0
-        assert (
-            "unknown flag" in result.output.lower()
-            or "stale" in result.output.lower()
-            or "1" in result.output
-        )
+        assert quiet.exit_code == 0
+        assert "marketplace-authoring" not in quiet.output
+        assert verbose.exit_code == 0
+        assert verbose.output.count("Ignoring 1 unknown or retired flag(s)") == 1
+        assert "marketplace-authoring" in verbose.output
 
 
 class TestDisableFlagUnknown:

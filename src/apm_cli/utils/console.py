@@ -135,6 +135,26 @@ def new_console(**kwargs: Any) -> Any:
     return _ascii_console(rich_console.Console, **kwargs)
 
 
+_UNSET: Any = object()
+
+
+def new_table(*args: Any, box: Any = _UNSET, **kwargs: Any) -> Any:
+    """Return a new Rich table drawn with the ASCII box (#4089).
+
+    The one constructor for Rich tables in APM; ``args``/``kwargs`` pass
+    through to ``rich.table.Table``. ``box`` may only be ``None`` (no box) or
+    an ASCII box, so a table stays ASCII on any console that renders it.
+    """
+    from rich import box as rich_box
+    from rich.table import Table as RichTable
+
+    if box is _UNSET:
+        box = rich_box.ASCII
+    elif box is not None and not box.ascii:
+        raise ValueError("new_table() draws ASCII boxes only; pass box=None or an ASCII box")
+    return RichTable(*args, box=box, **kwargs)
+
+
 # Thread-safe console singleton ------------------------------------------------
 _console_instance: Any | None = None
 _console_lock = threading.Lock()
@@ -214,6 +234,7 @@ def _rich_echo(
     """Echo message with Rich formatting or colorama fallback.
 
     ``err=True`` writes to stderr regardless of the configured output stream.
+    Error lines (red, or the ``error`` symbol) always go to stderr.
     """
     # Handle backward compatibility - if style is provided, use it as color
     if style is not None:
@@ -223,10 +244,14 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
+    err = err or color == "red" or symbol == "error"
     # A hard-wrapped URL is split into lines that no longer open (#3994).
     soft_wrap = soft_wrap or "://" in message
     console = _get_stderr_console() if err else _get_console()
     if console:
+        # Piped or captured output is never hard-wrapped: a wrapped command or
+        # path no longer copies, greps or parses as one line.
+        soft_wrap = soft_wrap or not console.is_terminal
         try:
             style_str = color
             if bold:
@@ -269,8 +294,8 @@ def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
     _rich_echo(message, color="green", symbol=symbol, bold=True)
 
 
-def _rich_error(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013
-    """Display error message with red color (``err=True`` writes to stderr)."""
+def _rich_error(message: str, symbol: str = None, *, err: bool = True):  # noqa: RUF013
+    """Display an error message in red on stderr."""
     _rich_echo(message, color="red", symbol=symbol, err=err)
 
 
@@ -321,7 +346,7 @@ def _create_files_table(files_data: list, title: str = "Files") -> Any | None:
         return None
 
     try:
-        table = Table(title=title, show_header=True, header_style="bold cyan")
+        table = new_table(title=title, show_header=True, header_style="bold cyan")
         table.add_column("File", style="bold white")
         table.add_column("Description", style="white")
 

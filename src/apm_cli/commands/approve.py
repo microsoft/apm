@@ -24,6 +24,13 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.remediation import (
+    EXECUTABLES_APPROVED,
+    EXECUTABLES_DENIED,
+    EXECUTABLES_UNAPPROVED,
+    INSTALLED_FILES_DIFFER,
+    LOCKFILE_RECORDS_INCONSISTENT,
+)
 from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import serialized_lifecycle
 
@@ -375,7 +382,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
         # Deployed hooks keep firing until install retires them (#3924).
         _rich_info(
-            f"Run '{_install_command(manifest)}' to remove executables already deployed.",
+            EXECUTABLES_DENIED.with_command(_install_command(manifest)).sentence(),
             symbol="info",
         )
 
@@ -653,10 +660,7 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
             _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
             _echo_pins(decl, pins, _item_states(ctx, decl, pins))
         _rich_echo("")
-        _rich_info(
-            "Review each definition, then run 'apm approve <package>' to pin it.",
-            symbol="info",
-        )
+        _rich_info(EXECUTABLES_UNAPPROVED.sentence(), symbol="info")
     if bundles:
         _show_pending_bundles(manifest, bundles)
 
@@ -859,7 +863,7 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> str | None:
     if not decl.content_verified:
         _rich_error(
             f"{identity}: installed files differ from apm.lock.yaml; not approved. "
-            "Run 'apm install' to restore them, then retry."
+            f"{INSTALLED_FILES_DIFFER.sentence()}"
         )
         return None
     pins = _pins_for(decl)
@@ -1043,10 +1047,10 @@ def _record_and_save(
             _rich_success(line, symbol="check")
     if successes:
         install = _install_command(manifest)
-        share = "" if user_scope or install.endswith("-g") else "; commit apm.yml to share"
+        share = "" if user_scope or install.endswith("-g") else " Commit apm.yml to share."
         _rich_info(
             f"Updated {_store_label(user_scope)} ({len(successes)} approved). "
-            f"Run '{_install_command(manifest)}' to deploy{share}.",
+            f"{EXECUTABLES_APPROVED.with_command(install).sentence()}{share}",
             symbol="info",
         )
         if share and not had_pins and has_any_pins(allow):
@@ -1220,8 +1224,8 @@ def scan_installed_executable_packages(manifest: Path) -> list:
         except LocalResolutionError as exc:
             raise click.ClickException(
                 "Cannot inspect installed packages because apm.lock.yaml has "
-                f"invalid local dependency ancestry: {exc}. Run 'apm install' "
-                "to regenerate the lockfile, then retry."
+                f"invalid local dependency ancestry: {exc}. "
+                f"{LOCKFILE_RECORDS_INCONSISTENT.sentence()}"
             ) from exc
         for locked in lockfile.get_package_dependencies():
             try:

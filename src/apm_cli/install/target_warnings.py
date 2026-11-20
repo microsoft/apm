@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import HOOKS_SKIPPED_UNAPPROVED
 from apm_cli.integration.targets import (
     target_supports_primitive,
     target_warns_unsupported_primitives,
@@ -36,9 +37,12 @@ def log_hooks_skip(
     if logger:
         from apm_cli.security.trust import approve_command
 
+        approve = HOOKS_SKIPPED_UNAPPROVED.bind(package=_pkg_label).with_command(
+            approve_command(_pkg_label)
+        )
         logger.warning(
             f"{_pkg_label}: hooks skipped (not approved in executables.allow). "
-            f"Run '{approve_command(_pkg_label)}' to approve.",
+            f"{approve.sentence()}",
             symbol="warning",
         )
 

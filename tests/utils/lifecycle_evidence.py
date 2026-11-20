@@ -384,8 +384,6 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
     return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
 
 
-_FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runtimes?)|Skipped targets without MCP support)"
-
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
@@ -405,15 +403,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         r"\[!\] (Org policy not applied|Using stale cached org policy)",
         # Only runs that print the same warning line twice (a single warning is correct).
         output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
-    ),
-    KnownOutputCell(
-        "install-frozen-mcp-targeting-twice",
-        "I9",
-        "#4196",
-        _runs("install", "--frozen"),
-        _FROZEN_MCP_TARGETING,
-        # Auto-detected targets print no targeting line, so there is nothing to repeat.
-        output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
     ),
     KnownOutputCell(
         "install-frozen-parked-mcp-notice-per-phase",
@@ -571,23 +560,26 @@ def _logical_lines(text: str) -> list[str]:
     fills the width). Joining it back keeps two different wrapped paths from
     comparing equal on their shared first half ("[>] Resolving"); a short
     line is never joined, so plain lines such as "Phase: ..." stay apart. A
-    plain line joins only where it broke at a space, so long unwrapped log
-    lines (which fill the width but end in no space) stay apart.
+    plain line joins only where it broke at a space, and a line longer than
+    the width is unwrapped output (RA-010), never a wrap.
     """
     lines: list[str] = []
     previous_raw = ""
     for raw in text.splitlines():
         broke_at_space = previous_raw.endswith(" ")
+        # A console wrap never exceeds the 80-column width; a longer line is
+        # unwrapped output (RA-010).
+        filled = _WRAP_WIDTH <= len(previous_raw) <= _WRAP_WIDTH + 1
         line = raw.rstrip()
-        wrapped = previous_raw.endswith(" ") or len(previous_raw) >= _WRAP_WIDTH
-        if _WRAP_WIDTH <= len(previous_raw) <= _WRAP_WIDTH + 1 and re.match(r" \S", line):
+        if filled and re.match(r" \S", line):
+            # The continuation of a line that filled the width keeps the space it broke at.
             line = line[1:]
         previous_raw = raw
         if not line.strip():
             continue
         if (
             lines
-            and wrapped
+            and (broke_at_space or filled)
             and not line[:1].isspace()
             and not line.startswith(_LINE_OPENERS)
             and (broke_at_space or lines[-1].strip().startswith(_LINE_OPENERS))

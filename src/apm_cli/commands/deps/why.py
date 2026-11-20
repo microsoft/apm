@@ -27,6 +27,10 @@ import sys
 
 import click
 
+from apm_cli.core.remediation import (
+    LOCKFILE_MISSING,
+)
+
 from ...core.command_logger import CommandLogger
 from ...core.scope import InstallScope, get_apm_dir
 from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
@@ -158,7 +162,7 @@ def _load_lockfile(apm_dir, logger: CommandLogger) -> LockFile | None:
     lockfile_path = get_lockfile_path(apm_dir)
     if not lockfile_path.exists():
         logger.error("no apm.lock.yaml found in this project.")
-        logger.info("Hint: run 'apm install' first.")
+        logger.info(f"Hint: {LOCKFILE_MISSING.clause()}.")
         return None
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
