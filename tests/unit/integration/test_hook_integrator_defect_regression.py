@@ -20,6 +20,7 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.gate import SecurityGate
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _package_info(package_path: Path, name: str = "superpowers") -> PackageInfo:
@@ -550,6 +551,7 @@ def test_hook_bundle_stale_sibling_removed_from_target_paths(tmp_path: Path) -> 
         project,
         managed_files=managed_files,
         managed_file_hashes=compute_deployed_hashes(managed_files, project),
+        evidence=receipted_evidence(project),
     )
 
     assert sync_result["files_removed"] >= 4

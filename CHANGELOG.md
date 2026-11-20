@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PROXY_REGISTRY_ONLY=1` also refuses unsanctioned MCP registries and marketplace catalogs the proxy cannot serve; set `MCP_REGISTRY_URL` to a proxied registry. (closes #3994, #4004)
 - Hash framing hardening: `apm install` moves `apm.lock.yaml` to `lockfile_version: "4"`, which older APM refuses; update CI to APM 0.37 before committing it. (closes #4000, #4026)
 - **Coming in 0.38:** CLI contract changes to exit codes, to which output goes to stderr, and to how an install handles a locally-authored file at a dependency's path. Details and any transition window will be in the 0.38 notes. (#3983)
+- Cleanup deletes only files a local receipt or the locked render proves APM wrote; others, like old hook `package.json` sidecars, stay named: delete them. (closes #3701, #4049)
 
 ### Added
 

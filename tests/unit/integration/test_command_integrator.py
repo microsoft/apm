@@ -22,6 +22,7 @@ from apm_cli.integration.command_integrator import (
     _extract_input_names,
 )
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _to_bundle(d: dict) -> IntegratorBundle:
@@ -1449,6 +1450,7 @@ class TestCursorCommandIntegration:
             None,
             temp_project,
             managed_files=managed,
+            evidence=receipted_evidence(temp_project),
         )
 
         assert result["files_removed"] == 1
