@@ -1758,33 +1758,36 @@ class DeploymentLedgerCodec:
 
         In memory a row keeps its compatibility value and inferred scope;
         persisted, every row records scope ``user`` and a path under its
-        target's external user root is target-relative. A form read from the
-        lock is reused while it still maps back to the same row.
+        target's user root outside HOME is target-relative. A form read from
+        the lock is reused while it still maps back to the same row. Plain
+        user-scoped keys are reserved first, so a target-relative form never
+        displaces another row; it stays project-relative instead.
         """
         absolute = DeploymentLedgerCodec._absolute_values(lockfile)
         read_forms: dict[str, DeploymentLocator] = getattr(lockfile, "_user_row_forms", {})
+        ordered = sorted(
+            lockfile.deployment_ledger.records.values(),
+            key=lambda record: (record.locator.scope != "user", record.locator.key),
+        )
+        reserved = {replace(record.locator, scope="user").key for record in ordered}
         records: dict[str, DeploymentRecord] = {}
-        for record in lockfile.deployment_ledger.records.values():
-            locator = replace(record.locator, scope="user")
-            read_form = read_forms.get(record.locator.key)
-            if locator.kind == LocatorKind.PROJECT_RELATIVE and locator.value in absolute:
-                root = DeploymentLedgerCodec._user_root(locator.target)
+        for record in ordered:
+            plain = replace(record.locator, scope="user")
+            options = [plain, record.locator]
+            if plain.kind == LocatorKind.PROJECT_RELATIVE and plain.value in absolute:
+                root = DeploymentLedgerCodec._user_root(plain.target)
+                read_form = read_forms.get(record.locator.key)
                 if (
                     read_form is not None
                     and read_form.kind == LocatorKind.TARGET_RELATIVE
-                    and locator.value.endswith(f"/{read_form.value}")
+                    and plain.value.endswith(f"/{read_form.value}")
                 ):
-                    root = locator.value[: -len(read_form.value) - 1]
-                relative = locator.value.removeprefix(f"{root}/") if root else ""
-                suffix = f"/{relative}"
-                if (
-                    relative
-                    and relative != locator.value
-                    and sum(value.endswith(suffix) for value in absolute) == 1
-                ):
-                    locator = replace(locator, kind=LocatorKind.TARGET_RELATIVE, value=relative)
-            if locator.key in records:
-                locator = record.locator
+                    root = plain.value[: -len(read_form.value) - 1]
+                relative = plain.value.removeprefix(f"{root}/") if root else plain.value
+                converted = replace(plain, kind=LocatorKind.TARGET_RELATIVE, value=relative)
+                if relative != plain.value and converted.key not in reserved:
+                    options.insert(0, converted)
+            locator = next(option for option in options if option.key not in records)
             records[locator.key] = replace(record, locator=locator)
         return DeploymentLedgerCodec.rows(DeploymentLedger(records=records))
 
@@ -1812,23 +1815,18 @@ class DeploymentLedgerCodec:
         reads unchanged.
         """
         absolute = DeploymentLedgerCodec._absolute_values(lockfile)
+        resolved = DeploymentLedgerCodec._resolve_target_relative(
+            lockfile.deployment_ledger, absolute
+        )
         forms: dict[str, DeploymentLocator] = {}
         records: dict[str, DeploymentRecord] = {}
-        for record in lockfile.deployment_ledger.records.values():
+        for key, record in lockfile.deployment_ledger.records.items():
             locator = record.locator
             if locator.scope == "user":
-                if locator.kind == LocatorKind.TARGET_RELATIVE:
-                    matches = [v for v in absolute if v.endswith(f"/{locator.value}")]
-                    root = DeploymentLedgerCodec._user_root(locator.target)
-                    value = (
-                        matches[0]
-                        if len(matches) == 1
-                        else f"{root}/{locator.value}"
-                        if root
-                        else None
+                if key in resolved:
+                    locator = replace(
+                        locator, kind=LocatorKind.PROJECT_RELATIVE, value=resolved[key]
                     )
-                    if value is not None:
-                        locator = replace(locator, kind=LocatorKind.PROJECT_RELATIVE, value=value)
                 bundle = record.active_owner == _LOCAL_BUNDLE_OWNER
                 scope = "user" if bundle else DeploymentLedgerCodec.legacy_scope(locator.value)
                 locator = replace(locator, scope=scope)
@@ -1836,6 +1834,35 @@ class DeploymentLedgerCodec:
             records[locator.key] = replace(record, locator=locator)
         lockfile.deployment_ledger = DeploymentLedger(records=records)
         lockfile._user_row_forms = forms
+
+    @staticmethod
+    def _resolve_target_relative(ledger: DeploymentLedger, absolute: set[str]) -> dict[str, str]:
+        """Map each user target-relative row key to its absolute compatibility value.
+
+        Per target: the path under the target's resolved user root wins, then
+        the one candidate not already taken by another row, then the root path.
+        """
+        pending = {
+            key: record.locator
+            for key, record in ledger.records.items()
+            if record.locator.scope == "user" and record.locator.kind == LocatorKind.TARGET_RELATIVE
+        }
+        roots = {key: DeploymentLedgerCodec._user_root(loc.target) for key, loc in pending.items()}
+        resolved = {
+            key: f"{roots[key]}/{loc.value}"
+            for key, loc in pending.items()
+            if roots[key] and f"{roots[key]}/{loc.value}" in absolute
+        }
+        for key, loc in sorted(pending.items()):
+            if key in resolved:
+                continue
+            taken = set(resolved.values())
+            matches = [v for v in absolute if v.endswith(f"/{loc.value}") and v not in taken]
+            if len(matches) == 1:
+                resolved[key] = matches[0]
+            elif roots[key]:
+                resolved[key] = f"{roots[key]}/{loc.value}"
+        return resolved
 
     @staticmethod
     def persisted_rows(lockfile: LockFile, *, user_scope: bool) -> list[dict[str, Any]]:
