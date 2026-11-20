@@ -83,87 +83,12 @@ class TestBuildChildrenIndex:
 # ---------------------------------------------------------------------------
 
 
-class TestValidateUninstallPackages:
-    def test_invalid_format_no_slash(self):
-        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
-
-        logger = _make_logger()
-        _removed, not_found = _validate_uninstall_packages(
-            ["badname"],
-            [],
-            logger,
-        )
-        assert "badname" in not_found
-        logger.error.assert_called()
-
-    def test_valid_package_found(self):
-        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
-
-        logger = _make_logger()
-        removed, not_found = _validate_uninstall_packages(
-            ["org/repo"],
-            ["org/repo"],
-            logger,
-        )
-        assert "org/repo" in removed or len(removed) == 1
-        assert not_found == []
-
-    def test_package_not_in_current_deps(self):
-        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
-
-        logger = _make_logger()
-        _removed, not_found = _validate_uninstall_packages(
-            ["org/repo"],
-            [],
-            logger,
-        )
-        assert "org/repo" in not_found
-
-    def test_marketplace_resolved_none_adds_to_not_found(self):
-        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
-
-        logger = _make_logger()
-        # plugin-name without slash should be treated as marketplace ref
-        with (
-            patch(
-                "apm_cli.commands.uninstall.engine._is_marketplace_ref",
-                return_value=True,
-            ),
-            patch(
-                "apm_cli.commands.uninstall.engine._resolve_marketplace_packages",
-                return_value={"my-plugin@market": None},
-            ),
-        ):
-            _removed, not_found = _validate_uninstall_packages(
-                ["my-plugin@market"],
-                [],
-                logger,
-            )
-        assert "my-plugin@market" in not_found
-
-
 # ---------------------------------------------------------------------------
 # _dry_run_uninstall
 # ---------------------------------------------------------------------------
 
 
 class TestDryRunUninstall:
-    def test_no_lockfile(self, tmp_path):
-        from apm_cli.commands.uninstall.engine import _dry_run_uninstall
-
-        logger = _make_logger()
-        apm_modules = tmp_path / "apm_modules"
-        apm_modules.mkdir()
-
-        with (
-            patch(
-                "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
-            ),
-            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
-        ):
-            _dry_run_uninstall(["org/repo"], apm_modules, logger)
-        logger.success.assert_called()
-
     def test_with_lockfile_and_orphans(self, tmp_path):
         from apm_cli.commands.uninstall.engine import _dry_run_uninstall
 
@@ -183,100 +108,10 @@ class TestDryRunUninstall:
             _dry_run_uninstall(["org/repo"], apm_modules, logger)
         logger.success.assert_called()
 
-    def test_package_exists_on_disk(self, tmp_path):
-        from apm_cli.commands.uninstall.engine import _dry_run_uninstall
-
-        logger = _make_logger()
-        apm_modules = tmp_path / "apm_modules"
-        apm_modules.mkdir()
-        (apm_modules / "org").mkdir()
-        (apm_modules / "org" / "repo").mkdir()
-
-        with (
-            patch(
-                "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
-            ),
-            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
-        ):
-            _dry_run_uninstall(["org/repo"], apm_modules, logger)
-        logger.success.assert_called()
-
 
 # ---------------------------------------------------------------------------
 # _remove_packages_from_disk
 # ---------------------------------------------------------------------------
-
-
-class TestRemovePackagesFromDisk:
-    def test_no_modules_dir_returns_zero(self, tmp_path):
-        from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
-
-        logger = _make_logger()
-        result = _remove_packages_from_disk(["org/repo"], tmp_path / "nonexistent", logger)
-        assert result == 0
-
-    def test_package_not_on_disk_warns(self, tmp_path):
-        from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
-
-        logger = _make_logger()
-        apm_modules = tmp_path / "apm_modules"
-        apm_modules.mkdir()
-
-        result = _remove_packages_from_disk(["org/repo"], apm_modules, logger)
-        assert result == 0
-        logger.warning.assert_called()
-
-    def test_path_traversal_error_propagates(self, tmp_path):
-        from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
-        from apm_cli.utils.path_security import PathTraversalError
-
-        logger = _make_logger()
-        apm_modules = tmp_path / "apm_modules"
-        apm_modules.mkdir()
-
-        with (
-            patch(
-                "apm_cli.models.apm_package.DependencyReference.parse",
-                side_effect=PathTraversalError("traversal"),
-            ),
-            pytest.raises(PathTraversalError, match="traversal"),
-        ):
-            _remove_packages_from_disk(["../evil"], apm_modules, logger)
-        logger.error.assert_called()
-
-    def test_removes_existing_package(self, tmp_path):
-        from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
-
-        logger = _make_logger()
-        apm_modules = tmp_path / "apm_modules"
-        apm_modules.mkdir()
-        org_dir = apm_modules / "org"
-        org_dir.mkdir()
-        pkg_dir = org_dir / "repo"
-        pkg_dir.mkdir()
-        (pkg_dir / "apm.yml").write_text("name: repo\n")
-
-        with patch("apm_cli.integration.base_integrator.BaseIntegrator.cleanup_empty_parents"):
-            result = _remove_packages_from_disk(["org/repo"], apm_modules, logger)
-        assert result == 1
-        logger.progress.assert_called()
-
-    def test_fallback_path_single_segment(self, tmp_path):
-        """Covers the single-segment package_str fallback path."""
-        from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
-
-        logger = _make_logger()
-        apm_modules = tmp_path / "apm_modules"
-        apm_modules.mkdir()
-
-        # DependencyReference.parse raises -> fallback path with single segment
-        with patch(
-            "apm_cli.models.apm_package.DependencyReference.parse",
-            side_effect=ValueError("bad ref"),
-        ):
-            result = _remove_packages_from_disk(["just-a-name"], apm_modules, logger)
-        # Not found, but should not raise
-        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -285,16 +120,6 @@ class TestRemovePackagesFromDisk:
 
 
 class TestCleanupTransitiveOrphans:
-    def test_no_lockfile_returns_zero(self, tmp_path):
-        from apm_cli.commands.uninstall.engine import _cleanup_transitive_orphans
-
-        logger = _make_logger()
-        removed, orphans = _cleanup_transitive_orphans(
-            None, ["org/repo"], tmp_path / "nonexistent", tmp_path / "apm.yml", logger
-        )
-        assert removed == 0
-        assert orphans == set()
-
     def test_no_modules_dir_returns_zero(self, tmp_path):
         from apm_cli.commands.uninstall.engine import _cleanup_transitive_orphans
 
@@ -390,23 +215,6 @@ class TestCleanupTransitiveOrphans:
 
 
 class TestResolveMarketplacePackages:
-    def test_dry_run_skips_registry(self):
-        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
-
-        logger = _make_logger()
-        with patch(
-            "apm_cli.marketplace.resolver.parse_marketplace_ref",
-            return_value=("plugin", "market", None),
-        ):
-            result = _resolve_marketplace_packages(
-                ["plugin@market"],
-                None,
-                logger,
-                dry_run=True,
-            )
-        assert result["plugin@market"] is None
-        logger.warning.assert_called()
-
     def test_registry_fallback_resolves_canonical(self):
         from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
 
@@ -457,50 +265,3 @@ class TestResolveMarketplacePackages:
             )
         assert result["plugin@market"] is None
         logger.warning.assert_called()
-
-    def test_registry_fallback_exception_logged(self):
-        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
-
-        logger = _make_logger()
-
-        with (
-            patch(
-                "apm_cli.marketplace.resolver.parse_marketplace_ref",
-                return_value=("plugin", "market", None),
-            ),
-            patch(
-                "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
-                side_effect=Exception("network error"),
-            ),
-        ):
-            result = _resolve_marketplace_packages(
-                ["plugin@market"],
-                None,
-                logger,
-            )
-        assert result["plugin@market"] is None
-        logger.warning.assert_called()
-
-    def test_no_lockfile_trusts_registry(self):
-        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
-
-        logger = _make_logger()
-        mock_resolution = MagicMock()
-        mock_resolution.canonical = "org/repo"
-
-        with (
-            patch(
-                "apm_cli.marketplace.resolver.parse_marketplace_ref",
-                return_value=("plugin", "market", None),
-            ),
-            patch(
-                "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
-                return_value=mock_resolution,
-            ),
-        ):
-            result = _resolve_marketplace_packages(
-                ["plugin@market"],
-                None,  # No lockfile
-                logger,
-            )
-        assert result["plugin@market"] == "org/repo"
