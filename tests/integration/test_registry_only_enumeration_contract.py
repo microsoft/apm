@@ -291,7 +291,7 @@ def test_install_exact_pin_lists_source_tags_when_mode_is_off(
     assert any("ls-remote" in call for call in scenario.git_network_calls), scenario.output
 
 
-def test_outdated_names_remedy_without_contacting_source_host(
+def test_outdated_states_the_policy_without_contacting_source_host(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     scenario = _run(
@@ -305,7 +305,12 @@ def test_outdated_names_remedy_without_contacting_source_host(
 
     assert scenario.result.returncode == 0, scenario.output
     assert "unknown" in scenario.output
-    assert "PROXY_REGISTRY_ONLY is set" in scenario.output
+    # RA-014: state the enterprise policy only; never advise lifting it.
+    assert (
+        "[i] Source-host checks are disabled because PROXY_REGISTRY_ONLY is set "
+        "(enterprise proxy policy)."
+    ) in scenario.result.stdout.splitlines(), scenario.output
+    assert "unset" not in scenario.output.lower(), scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
 

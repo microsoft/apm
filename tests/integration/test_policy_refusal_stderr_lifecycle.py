@@ -38,11 +38,17 @@ def _assert_refusal_on_stderr(result: CommandResult, *needles: str) -> None:
         assert needle not in stdout, f"{needle!r} leaked to stdout\n--- stdout ---\n{stdout}"
 
 
+def _assert_no_bypass(result: CommandResult) -> None:
+    for token in ("--no-policy", "APM_POLICY_DISABLE", "bypass"):
+        assert token not in result.stdout + result.stderr, (token, result.stdout, result.stderr)
+
+
 def test_policy_refusals_and_approve_usage_error_write_stderr(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
     package = world.publish_package("pkg-a")
+    added = world.publish_package("pkg-b")
     world.publish_policy(_ALLOW_ALL)
     project = world.consumer(dependencies=[package.slug])
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
@@ -57,19 +63,37 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
         # Upstream moves on, so `apm update` has a change to apply (#4166).
         (package.repository.worktree / "NEXT.md").write_text("next\n", encoding="utf-8")
         world.repositories.commit(package.repository, message="pkg-a next")
-        # Each refusal names a bypass that command accepts: install has
-        # --no-policy, update only the one-shot env prefix (#3994).
-        install_bypass = "--no-policy` for one-off bypass"
-        update_bypass = "`APM_POLICY_DISABLE=1 apm update` (never export it in CI)"
-        for step, args, bypass in (
-            ("2-install-blocked", ("install",), install_bypass),
-            ("3-frozen-blocked", ("install", "--frozen"), install_bypass),
-            ("4-update-blocked", ("update", "--yes"), update_bypass),
+        # G7 (RA-015): no refusal advertises a bypass, on either stream.
+        for step, args in (
+            ("2-install-blocked", ("install",)),
+            ("3-frozen-blocked", ("install", "--frozen")),
+            ("4-update-blocked", ("update", "--yes")),
         ):
             result = run_step(runner, args, cwd=project, env=env, step=step, expected=1)
-            _assert_refusal_on_stderr(result, violation, "blocked by org policy", bypass)
-            if args[0] == "update":
-                assert "--no-policy" not in result.stdout + result.stderr, step
+            _assert_refusal_on_stderr(
+                result,
+                violation,
+                "blocked by org policy",
+                "contact your policy admin to allow it.",
+                "Run `apm policy status` to see the active policy.",
+            )
+            _assert_no_bypass(result)
+
+        # RA-015b: a refused add was never kept, so the hint names no apm.yml edit.
+        world.publish_policy({**_ALLOW_ALL, "dependencies": {"deny": [added.slug]}})
+        world.clear_policy_cache()
+        manifest = (project / "apm.yml").read_bytes()
+        refused_add = run_step(
+            runner, ("install", added.slug), cwd=project, env=env, step="4b-add", expected=1
+        )
+        _assert_refusal_on_stderr(
+            refused_add,
+            f"Policy violation: github.com/{added.slug}",
+            "Nothing was changed. Contact your policy admin to allow it.",
+        )
+        assert "from apm.yml" not in refused_add.stdout + refused_add.stderr
+        _assert_no_bypass(refused_add)
+        assert (project / "apm.yml").read_bytes() == manifest
 
         usage = run_step(runner, ("approve",), cwd=project, env=env, step="5-approve", expected=2)
         _assert_refusal_on_stderr(

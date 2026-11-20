@@ -126,7 +126,6 @@ def test_lock_move_aside_allowlist_is_live() -> None:
 _FORCE_PENDING_RULING = frozenset(
     {
         "drift-restore-edited-force",
-        "install-audit-force",
         "local-file-unmanaged",
         "local-files-collide",
         "lockfile-state-unreconciled",
@@ -148,3 +147,17 @@ def test_no_remediation_offers_force() -> None:
         if "--force" in _remedy_text(entry)
     }
     assert forced == _FORCE_PENDING_RULING
+
+
+# RA-015 (G7): no remedy advertises a policy bypass. The one entry below awaits
+# a steward ruling; the set may only shrink.
+_POLICY_BYPASS_PENDING_RULING = frozenset({"required-package-unlocked"})
+
+
+def test_no_remediation_advertises_a_policy_bypass() -> None:
+    bypassing = {
+        remediation_id
+        for remediation_id, entry in catalog().items()
+        if any(token in _remedy_text(entry) for token in ("--no-policy", "APM_POLICY_DISABLE"))
+    }
+    assert bypassing == _POLICY_BYPASS_PENDING_RULING

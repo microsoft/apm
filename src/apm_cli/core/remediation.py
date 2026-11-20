@@ -1355,10 +1355,10 @@ LOCAL_BUNDLE_EXECUTABLES_PARKED = _entry(
 # -- W4 phases-targets --
 # Advice printed by install/phases, install/presentation and the install
 # target, staging and source helpers.
-INSTALL_AUDIT_FORCE = _entry(
-    "install-audit-force",
-    "apm install --force",
-    "install despite the critical findings (downgrades the audit block to a warning)",
+SECURITY_FINDINGS_REVIEW = _entry(
+    "security-findings-review",
+    "apm audit",
+    "review the critical findings, then drop or replace the dependency or contact its author",
 )
 CODEX_ADMISSION_STALE = _entry(
     "codex-admission-stale",
