@@ -20,6 +20,7 @@ from apm_cli.integration.dispatch import get_dispatch_table
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import PackageInfo, PackageType, validate_apm_package
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX mode hardening only")
@@ -198,6 +199,7 @@ def test_user_scope_claude_plugin_bin_routes_natively_under_policy_and_scan(
             trust_bin=True,
             ctx=ctx,
             policy=policy,
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
         return ctx, diagnostics
 
@@ -300,4 +302,4 @@ def test_resolve_bin_skip(
     expected: tuple[bool, str | None],
 ) -> None:
     """allowExecutables approval should override trust posture when bin/ is blocked."""
-    assert _resolve_bin_skip(bin_approved, trust_bin) == expected
+    assert _resolve_bin_skip(bin_approved, trust_bin, non_interactive=False) == expected

@@ -38,7 +38,7 @@ APM uses a tiered approach to integration testing:
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
 - **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: four shards each retain a hard 10-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
+- **Duration**: four shards each retain a hard 15-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
 - **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks every shard result independently and fails if any is missing, skipped, cancelled, or failed.
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
 - **Sharding**: `scripts.ci_sharding` balances the shards by the measured durations in `.github/ci-durations/linux-x86_64.json` while keeping each module and composite `xdist_group` intact. The shards are disjoint and their union is the unchanged required selection.
@@ -561,7 +561,7 @@ skill. The local fixture covers both an independent skill and a separately
 installed skill from the plugin; the network-backed case uses the same assertions.
 Cleanup wording is not the lifecycle contract.
 
-Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker. The ten-minute whole-job limit includes setup and cleanup; `--durations=20` reports slow cases without changing selection or assertions.
+Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker. The 15-minute whole-job limit includes setup and cleanup; `--durations=20` reports slow cases without changing selection or assertions.
 Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.

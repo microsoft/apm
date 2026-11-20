@@ -606,10 +606,13 @@ def test_consumer_resolves_credentials_per_host_class():
 @pytest.mark.req("req-sc-004")
 def test_archive_container_size_and_entry_count_capped():
     assert_spec_contains(
-        "`application/gzip` over a tar payload",
-        "MUST reject `application/zip`",
+        "`application/gzip` over a tar payload (`tar.gz`) or\n`application/zip` (`zip`)",
+        "MUST reject any other\narchive container in v0.1",
         "100 MB",
         "10,000",
+        "counted as\nentries are read",
+        "any symbolic or hard\nlink, and any duplicate entry path",
+        "The same limit set, (b) through (d),\napplies identically to `tar.gz` and `zip`.",
     )
 
 
