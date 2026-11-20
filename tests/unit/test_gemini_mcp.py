@@ -52,6 +52,16 @@ class TestGeminiClientAdapter(unittest.TestCase):
         config = self.adapter.get_current_config()
         self.assertEqual(config, {})
 
+    def test_unreadable_config_warns_once_per_path(self):
+        """Two reads of one unreadable config log one warning (#4332)."""
+        self.settings_json.write_text("{\n  // comment\n}")
+        with self.assertLogs("apm_cli.adapters.client.gemini", level="DEBUG") as logs:
+            self.adapter.get_current_config()
+            self.adapter.get_current_config()
+        warnings = [r for r in logs.records if r.levelname == "WARNING"]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Could not read", warnings[0].getMessage())
+
     def test_get_current_config_returns_empty_dict_when_no_dir(self):
         """get_current_config returns {} when the .gemini directory does not exist."""
         adapter = GeminiClientAdapter(project_root=Path(tempfile.mkdtemp()))

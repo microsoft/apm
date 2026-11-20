@@ -4318,12 +4318,21 @@ not create a distinct host class.
 classifies two distinct hostnames as the same host class for the
 purposes of credential reuse MUST do so on the basis of (a)
 identical eTLD+1 per the Public Suffix List
-([https://publicsuffix.org](https://publicsuffix.org)), or (b) an
+([https://publicsuffix.org](https://publicsuffix.org)), (b) an
 explicit `aliases:` entry in the project's `apm.yml`
 `registries:` block (see [Section 4.2.3](#423-registries) and
-[req-sc-006](#req-sc-006)). Implementations MUST NOT collapse two
-hostnames onto the same host class on any other basis (such as
-DNS CNAME chains, TLS SAN entries, or shared HTTP redirects).
+[req-sc-006](#req-sc-006)), or (c) membership of both hostnames in
+the built-in **GitHub-operated host class**: `github.com` and every
+`*.ghe.com` host, plus a GitHub Enterprise Server host only when the
+operator names it through the `GITHUB_HOST` setting, never through a
+manifest. An implementation that uses (c) MUST document the class in
+its [conformance statement](#112-how-to-claim-conformance) and apply
+it under the determinism and precedence rules of
+[req-sc-013](#req-sc-013). Basis (c) covers only those hosts; it does
+not widen (a) or (b) for any other host.
+Implementations MUST NOT collapse two hostnames onto the same host
+class on any other basis (such as DNS CNAME chains, TLS SAN entries,
+or shared HTTP redirects).
 A host-class assignment produced by a configuration signal exercised
 under [req-sc-013](#req-sc-013) is not subject to this prohibition.
 
@@ -5522,6 +5531,7 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.69  | 2026-11-20 | Amendment for issue #3701 (deletion requires deployment evidence). Added [req-lk-024](#req-lk-024) (Section 5.2, consumer MUST): a lockfile-driven deletion of a deployed file needs a matching local deployment record or byte equality, over the [req-lk-012](#req-lk-012) canonical domain, with the locked version's render; a lockfile hash alone never authorizes it; without evidence, or on a mismatch, the file is kept with a diagnostic naming it and the manual resolution; the render is established before the dependency's source is removed; managed final symbolic links are out of scope. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: a consumer that deletes a file on the strength of a lockfile hash alone no longer conforms. Sections 1.3, 5.7, 10.7, 10.11, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes and `lockfile_version` are unchanged. Proposed 2026-11-20; adopted 2026-11-20 in this Working Draft by editor decision relayed in PR #4049 (https://github.com/microsoft/apm/pull/4049#issuecomment-7035970110), without the Section 9.3 reviewer-panel approval and public comment period. Adds one MUST. Statement count: 148 -> 149 (144 MUST, 5 SHOULD). |
 | 0.1.70  | 2026-11-20 | Amendment for issue #4234 (zip registry archives). Revised [req-sc-004](#req-sc-004) (Section 10.5, consumer MUST) in place: clause (a) admits `application/zip` alongside `tar.gz` and rejects every other container; (c) counts entries as they are read; a new clause (d) refuses path traversal, absolute paths, symbolic and hard links and duplicate entry paths; and the limit set (b) through (d) applies identically to both containers. A violation fails closed and leaves no entry of the archive extracted. Under Section 9.2 this changes evaluations defined by a normative statement, so it is an amendment, not errata. The reserved Appendix B archive-container item is aligned. Proposed and adopted 2026-11-20 in this Working Draft by editor decision recorded in issue #4234, without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.71  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-lk-015](#req-lk-015) (Section 5.6.4, consumer MUST) in place, re-anchoring git-source integrity: every git-sourced lock entry records `content_hash`, a `sha256` envelope over the package tree whose byte stream follows [req-lk-016](#req-lk-016); a frozen install and `apm audit` recompute it at `resolved_commit` and fail closed with a diagnostic naming the entry, the expected envelope and the observed envelope. The canonical git tree hash `tree_sha256` and its Section 5.6.4 byte representation are reserved for v0.2; the Section 5.2 field table, the Section 5.6.4 editorial note, the Section 7.5 lockfile-replay prose and the informative lockfile examples are aligned. Under Section 9.2 this changes the field a normative statement names, so it is an amendment, not errata; the integrity obligation itself is unchanged. Schema bytes and `lockfile_version` are unchanged. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
+| 0.1.72  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-sc-005](#req-sc-005) (Section 10.3, consumer MUST) in place: beside identical eTLD+1 (a) and an explicit `aliases:` entry (b), a third basis (c) admits the built-in GitHub-operated host class, which is `github.com` and every `*.ghe.com` host, plus a GitHub Enterprise Server host only when the operator names it through the `GITHUB_HOST` setting, never through a manifest. An implementation that uses (c) documents the class in its conformance statement and applies it under the [req-sc-013](#req-sc-013) determinism and precedence rules. Basis (c) covers only those hosts and does not widen (a) or (b) for any other host. Under Section 9.2 this changes an evaluation defined by a normative statement, so it is an amendment, not errata. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
@@ -5530,7 +5540,7 @@ working draft
 contains 149 statements (144 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
 
-Amendments 0.1.70 and 0.1.71 were adopted on 2026-11-20 by editor decision (issues #4234 and #4092); their Date is the adoption date. They revise [req-sc-004](#req-sc-004) and [req-lk-015](#req-lk-015) in place and add no statement.
+Amendments 0.1.70, 0.1.71 and 0.1.72 were adopted on 2026-11-20 by editor decision (issues #4234 and #4092); their Date is the adoption date. They revise [req-sc-004](#req-sc-004), [req-lk-015](#req-lk-015) and [req-sc-005](#req-sc-005) in place and add no statement.
 
 Errata:
 

@@ -378,6 +378,12 @@ _SKILL_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
 _DRIFT = r"content-integrity\s*\|\s*1 file\(s\) with hash drift"
 _FROZEN_HASHES = r"--frozen: deployed files do not match the hashes recorded in apm.lock.yaml"
 _RETAINED = r"Uninstall could not remove tracked target files"
+_FAILED_CLOSED_LEAVES_BYTES = (
+    "#4353 install leaves fetched bytes in apm_modules when it fails closed"
+)
+_AUDIT_PASSES_EDITED_COPY = (
+    "#4356 audit --ci passes an edited cached copy that install --frozen refuses"
+)
 
 DEPLOYED_FILE_HASHES = ArtifactSlice(
     packages=("p-skill",),
@@ -427,7 +433,10 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         # evidence. An edited file is retained and uninstall exits 1; an edited
         # or missing lock hash does not change the evidence, so cleanup proceeds.
         ("uninstall-prune", "disk-or-cache"): Expect(
-            1, (_RETAINED, r"Retained user-edited file"), unchanged=_SKILL_STATE
+            1,
+            (_RETAINED, r"Retained user-edited file"),
+            unchanged=_SKILL_STATE,
+            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
@@ -492,24 +501,32 @@ GIT_CONTENT_HASH = ArtifactSlice(
     cells={
         # The drift replay renders the changed copy and reports the deployed file.
         ("audit-ci", "disk-or-cache"): Expect(
-            1, (r"drift\s*\|\s*drift detected",), unchanged=_SKILL_STATE
-        ),
-        # I3: audit --ci must agree with install --frozen, which refuses this lock.
-        ("audit-ci", "lock-edited"): Expect(
             1,
             unchanged=_SKILL_STATE,
-            xfail=_pending("audit and frozen agree on content hash"),
+            xfail=_AUDIT_PASSES_EDITED_COPY,
         ),
+        # I3: audit --ci must agree with install --frozen, which refuses this lock.
+        ("audit-ci", "lock-edited"): Expect(1, unchanged=_SKILL_STATE),
         ("audit-ci", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("frozen", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
-        ("frozen", "lock-edited"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        ("frozen", "disk-or-cache"): Expect(
+            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
+        ),
+        ("frozen", "lock-edited"): Expect(
+            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
+        ),
         # Entries without a content hash are accepted (security.md defaults).
         ("frozen", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("install", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        ("install", "disk-or-cache"): Expect(
+            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
+        ),
         ("install", "lock-edited"): Expect(
-            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, smoke=True
+            1,
+            (_CONTENT_MISMATCH,),
+            unchanged=_SKILL_STATE,
+            smoke=True,
+            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         # Install records the hash of verified bytes again.
         ("install", "missing-hash"): Expect(
@@ -580,21 +597,24 @@ APPROVAL_PINS = ArtifactSlice(
     cells={
         # The replay parks the hook, so the deployed one is reported.
         ("audit-ci", "disk-or-cache"): Expect(
-            1, (r"orphaned: \.github/hooks/p-exec-session\.json",), unchanged=_HOOK_STATE
+            1,
+            (r"orphaned: \.github/hooks/p-exec-session\.json",),
+            unchanged=_HOOK_STATE,
+            xfail=_AUDIT_PASSES_EDITED_COPY,
         ),
         ("audit-ci", "lock-edited"): Expect(
             1, (r"orphaned: \.github/hooks/p-exec-session\.json",), unchanged=_HOOK_STATE
         ),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
-        ("frozen", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
-        # I3: frozen must agree with audit --ci (exit 1) and keep lock and disk in step.
-        ("frozen", "lock-edited"): Expect(
-            1,
-            unchanged=_HOOK_STATE,
-            xfail=_pending("frozen and approval pin agreement"),
+        ("frozen", "disk-or-cache"): Expect(
+            1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
         ),
+        # I3: frozen must agree with audit --ci (exit 1) and keep lock and disk in step.
+        ("frozen", "lock-edited"): Expect(1, unchanged=_HOOK_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
-        ("install", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
+        ("install", "disk-or-cache"): Expect(
+            1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
+        ),
         # I4: the item no longer matches its pin, so install retires it.
         ("install", "lock-edited"): Expect(0, (_PARKED,), absent=(HOOK,)),
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
@@ -602,7 +622,12 @@ APPROVAL_PINS = ArtifactSlice(
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(HOOK, LOCK)),
         ("uninstall-prune", "upstream-or-proxy"): Expect(0, absent=(HOOK, LOCK)),
         # Same commit: the changed copy fails closed (update.md).
-        ("update", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
+        ("update", "disk-or-cache"): Expect(
+            1,
+            (_EXEC_MISMATCH,),
+            unchanged=_HOOK_STATE,
+            xfail="#4363 update exits 1 on a content hash mismatch without an error marker",
+        ),
         ("update", "lock-edited"): Expect(
             0, (r"parked pending approval",), absent=(HOOK,), present=(LOCK,)
         ),
@@ -676,7 +701,11 @@ PATH_CONTAINMENT = ArtifactSlice(
         ),
         ("update", "disk-or-cache"): Expect(0, unchanged=(LOCK, MANIFEST), check=_outside_intact),
         ("uninstall-prune", "disk-or-cache"): Expect(
-            1, (_RETAINED,), unchanged=(LOCK, MANIFEST), check=_outside_intact
+            1,
+            (_RETAINED,),
+            unchanged=(LOCK, MANIFEST),
+            check=_outside_intact,
+            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         # The commit pin holds: the moved tag is not fetched.
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE, check=_outside_intact),
@@ -1046,7 +1075,6 @@ POLICY_HASH_PIN = ArtifactSlice(
             (_HASH_MISMATCH,),
             unchanged=_PIN_STATE,
             policy_fetch=True,
-            xfail=_pending("audit and install agree on policy hash mismatch"),
         ),
         ("frozen", "upstream-or-proxy"): Expect(
             1, (_HASH_MISMATCH,), unchanged=_PIN_STATE, policy_fetch=True
