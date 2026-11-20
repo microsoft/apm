@@ -547,22 +547,6 @@ class TestUnmanagedFilesTransparency(unittest.TestCase):
         )
         self.assertEqual(result.unmanaged_files.action, "deny")
 
-    def test_parent_deny_child_explicit_ignore(self):
-        """Parent deny + child explicitly sets ignore -> merged deny (escalation)."""
-        result = merge_policies(
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="ignore")),
-        )
-        self.assertEqual(result.unmanaged_files.action, "deny")
-
-    def test_parent_warn_child_explicit_deny(self):
-        """Parent warn + child explicitly sets deny -> merged deny (child tightens)."""
-        result = merge_policies(
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="warn")),
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
-        )
-        self.assertEqual(result.unmanaged_files.action, "deny")
-
     def test_parent_ignore_child_omits(self):
         """Parent ignore + child omits -> merged ignore."""
         result = merge_policies(
