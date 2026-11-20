@@ -4108,7 +4108,7 @@
       "failure_modes": ["portability"],
       "properties": ["portability.byte_deterministic"],
       "regression_tests": [
-        "tests/unit/utils/test_git_config_probe_path_limit.py::test_clone_config_probe_runs_for_a_git_dir_beyond_the_explicit_limit"
+        "tests/integration/test_git_config_probe_path_limit.py::test_clone_config_probe_runs_for_a_git_dir_beyond_the_explicit_limit"
       ]
     },
     {
