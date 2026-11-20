@@ -25,6 +25,11 @@ import posixpath
 import sys
 from pathlib import Path
 
+from apm_cli.core.remediation import (
+    MCP_CLIENT_CONFIG_MALFORMED,
+    MCP_CLIENT_CONFIG_UNREADABLE,
+    MCP_CLIENT_CONFIG_UNWRITABLE,
+)
 from apm_cli.utils.atomic_io import atomic_write_text
 
 from ...utils.path_security import PathTraversalError, ensure_path_within
@@ -223,25 +228,25 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         except (OSError, UnicodeError) as exc:
             raise IntelliJConfigError(
                 f"Cannot read JetBrains Copilot MCP config at '{path}'. "
-                "Check its permissions and UTF-8 encoding, then rerun apm install."
+                + MCP_CLIENT_CONFIG_UNREADABLE.sentence()
             ) from exc
         try:
             config = json.loads(_strip_jsonc_trailing_commas(_strip_jsonc_comments(raw)))
         except json.JSONDecodeError as exc:
             raise IntelliJConfigError(
                 f"JetBrains Copilot MCP config at '{path}' is malformed JSON ({exc}). "
-                "Fix the file, then rerun apm install."
+                + MCP_CLIENT_CONFIG_MALFORMED.sentence()
             ) from exc
         if not isinstance(config, dict):
             raise IntelliJConfigError(
                 f"JetBrains Copilot MCP config at '{path}' must contain a JSON object. "
-                "Fix the file, then rerun apm install."
+                + MCP_CLIENT_CONFIG_MALFORMED.sentence()
             )
         servers = config.get(self.mcp_servers_key)
         if self.mcp_servers_key in config and not isinstance(servers, dict):
             raise IntelliJConfigError(
                 f"JetBrains Copilot MCP config at '{path}' has a non-object "
-                "'servers' value. Fix the file, then rerun apm install."
+                "'servers' value. " + MCP_CLIENT_CONFIG_MALFORMED.sentence()
             )
         return config
 
@@ -266,7 +271,7 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         except OSError as exc:
             raise IntelliJConfigError(
                 f"Cannot write JetBrains Copilot MCP config at '{path}'. "
-                "Check permissions and free space, then rerun apm install."
+                + MCP_CLIENT_CONFIG_UNWRITABLE.sentence()
             ) from exc
 
     def get_current_config(self) -> dict:

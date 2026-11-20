@@ -426,7 +426,10 @@ def test_malformed_installed_destination_fails_without_rewrite(
     assert result.returncode == 1
     assert "MCP configuration failed for selected runtime(s)" in result.stderr + result.stdout
     assert "is malformed JSON" in result.stderr + result.stdout
-    assert "Fix the file, then rerun apm install" in result.stderr + result.stdout
+    assert (
+        "Fix the file, then run 'apm install' to write the MCP server configuration"
+        in result.stderr + result.stdout
+    )
     assert "MCP server written to apm.yml" not in result.stderr + result.stdout
     assert "Run with --verbose" not in result.stderr + result.stdout
     assert canonical.read_bytes() == original
@@ -501,7 +504,7 @@ def test_uninstall_with_malformed_intellij_config_is_nonzero(
     assert "Uninstall incomplete" in uninstall.stderr + uninstall.stdout
     assert "Uninstall complete" not in uninstall.stderr + uninstall.stdout
     normalized_output = " ".join((uninstall.stderr + uninstall.stdout).split())
-    assert normalized_output.count("rerun apm install") == 1
+    assert normalized_output.count("run 'apm install' to write the MCP server") == 1
     assert canonical.read_bytes() == original
 
 
