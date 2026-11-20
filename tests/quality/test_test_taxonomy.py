@@ -15,6 +15,8 @@ import pytest
 from scripts.test_static_facts import module_markers
 from tests.quality.taxonomy import (
     candidate_promises,
+    directory_conflict_message,
+    directory_marker,
     load_promises,
     missing_promise_message,
     spawning_unit_message,
@@ -449,6 +451,10 @@ def _taxonomy_ratchet_findings(
     misplaced: set[str] = set()
     for module, markers in sorted(inventory.modules.items()):
         behavioral = _behavioral(markers)
+        implied = directory_marker(module)
+        if implied and behavioral and behavioral != (implied,):
+            failures.append(directory_conflict_message(module, behavioral, implied))
+        behavioral = behavioral or ((implied,) if implied else ())
         if not behavioral:
             unclassified.add(module)
             if module not in baseline["unclassified_modules"]:
@@ -902,3 +908,63 @@ def test_tm017_changed_reports_only_changed_modules_with_the_gate_message(
     )
     assert taxonomy_main(["--changed", "--base-ref", "main", "--root", str(root)]) == 0
     assert "[+] tm006: 1 changed test module(s)" in capsys.readouterr().out
+
+
+def test_tm018_lifecycle_family_directory_supplies_the_marker() -> None:
+    module = "tests/lifecycle/machines/test_m_new.py"
+    inventory = TaxonomyInventory(modules={module: ()}, nodes={}, promises={module: ("P-INV-I6",)})
+    empty = {key: frozenset() for key in BASELINE_LISTS}
+    assert _taxonomy_ratchet_findings(inventory, empty, frozenset({"P-INV-I6"}))[0] == []
+    contradicting = TaxonomyInventory(
+        modules={module: ("unit",)}, nodes={}, promises={module: ("P-INV-I6",)}
+    )
+    assert _taxonomy_ratchet_findings(contradicting, empty, frozenset({"P-INV-I6"}))[0] == [
+        f"{module}: declares ['unit'] but its directory determines 'e2e'. Fix: drop the "
+        "behavioral marker (the directory applies 'e2e'), or move the module out of the "
+        "directory."
+    ]
+    assert directory_marker("tests/lifecycle/generator/test_generator_rules.py") is None
+    line, _ids = suggested_pytestmark(module, "", _SUGGESTION_CATALOG)
+    assert line == 'pytestmark = [pytest.mark.promise("<catalog id>")]'
+
+
+def test_tm018_changed_accepts_a_promise_only_module_in_a_family_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _changed_repo(tmp_path)
+    machines = root / "tests" / "lifecycle" / "machines"
+    machines.mkdir(parents=True)
+    (machines / "test_m_new.py").write_text(
+        'import pytest\n\npytestmark = [pytest.mark.promise("P-INV-I6")]\n'
+    )
+    assert taxonomy_main(["--changed", "--base-ref", "main", "--root", str(root)]) == 0
+    assert "[+] tm006: 1 changed test module(s)" in capsys.readouterr().out
+
+
+class _FakeItem:
+    def __init__(self, relative: str, markers: tuple[str, ...] = ()) -> None:
+        self.fspath = REPO_ROOT / relative
+        self.markers = list(markers)
+
+    def get_closest_marker(self, name: str) -> object | None:
+        return name if name in self.markers else None
+
+    def iter_markers(self, name: str):  # a generator, as in pytest
+        return (marker for marker in self.markers if marker == name)
+
+    def add_marker(self, name: str) -> None:
+        self.markers.append(name)
+
+
+def test_tm018_collection_applies_the_directory_marker_only_when_missing() -> None:
+    from tests.lifecycle.conftest import pytest_collection_modifyitems
+
+    bare = _FakeItem("tests/lifecycle/scenarios/test_new.py", ("promise",))
+    declared = _FakeItem("tests/lifecycle/scenarios/test_old.py", ("e2e",))
+    elsewhere = _FakeItem("tests/lifecycle/generator/test_new.py", ("promise",))
+    pytest_collection_modifyitems([bare, declared, elsewhere])
+    assert (bare.markers, declared.markers, elsewhere.markers) == (
+        ["promise", "e2e"],
+        ["e2e"],
+        ["promise"],
+    )
