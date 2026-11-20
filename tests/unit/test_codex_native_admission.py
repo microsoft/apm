@@ -255,3 +255,6 @@ def test_parked_bundle_already_reported_gets_no_second_notice(tmp_path):
     plain = _admit(tmp_path, approvals={})
     finalize_codex_native({}, plain, None, None, ctx, None)
     assert len(warned) == 1 and "apm approve -g owner/example" in warned[0]
+    # Replay still refuses the same bundle outright, reported or not.
+    with pytest.raises(CodexNativeError, match=r"executables\.allow"):
+        _admit(tmp_path, approvals={}, read_only=True, parked_reported=True)
