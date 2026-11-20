@@ -56,6 +56,7 @@ def test_duplicate_keys_on_one_flow_line_are_refused(tmp_path: Path) -> None:
 
 def test_deeply_nested_text_is_left_to_the_bounded_loader(tmp_path: Path) -> None:
     reject_duplicate_manifest_keys(tmp_path / "apm.yml", "a: " + "[" * 5000 + "]" * 5000)
+    assert not (tmp_path / "apm.yml").exists()
 
 
 @pytest.mark.parametrize(
@@ -73,6 +74,7 @@ def test_deeply_nested_text_is_left_to_the_bounded_loader(tmp_path: Path) -> Non
 )
 def test_non_duplicated_or_malformed_text_is_left_to_the_loader(tmp_path: Path, text: str) -> None:
     reject_duplicate_manifest_keys(tmp_path / "apm.yml", text)
+    assert not (tmp_path / "apm.yml").exists()
 
 
 def test_package_load_rejects_duplicate_keys(tmp_path: Path) -> None:
@@ -98,6 +100,7 @@ def test_bom_manifest_still_loads(tmp_path: Path) -> None:
 
     assert APMPackage.from_apm_yml(manifest).name == "demo"
     assert load_manifest_roundtrip(manifest)["name"] == "demo"
+    assert manifest.read_bytes() == b"\xef\xbb\xbfname: demo\nversion: 1.0.0\n"
 
 
 @pytest.mark.parametrize(
@@ -148,6 +151,7 @@ def test_anchor_or_alias_is_refused_with_file_and_line(tmp_path: Path, text: str
 )
 def test_ampersand_and_asterisk_inside_scalars_are_not_anchors(tmp_path: Path, text: str):
     reject_manifest_anchors(tmp_path / "apm.yml", text)
+    assert not (tmp_path / "apm.yml").exists()
 
 
 def test_every_manifest_read_refuses_anchors_without_writing(tmp_path: Path) -> None:

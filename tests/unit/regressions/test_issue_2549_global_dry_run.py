@@ -97,6 +97,7 @@ def test_existing_user_manifest_is_read_in_place(tmp_path: Path) -> None:
 
     assert preview_manifest == user_manifest
     assert temp_dir is None
+    assert user_manifest.read_text(encoding="utf-8") == "name: test\n"
 
 
 def test_registry_default_read_does_not_create_missing_user_config(
