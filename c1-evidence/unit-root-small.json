@@ -3,7 +3,8 @@
  "steps_done": [
   1,
   2,
-  3
+  3,
+  4
  ],
  "folds": {
   "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_legacy_optional_hint_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_skipped[codex]",
@@ -185,12 +186,24 @@
   "kept same-body groups (14): 9 have every member in files owned by open PRs; 4 pair tests/unit/core/test_token_manager_lifecycle.py (lifecycle file, must not edit) with tests/test_token_manager.py; 1 pairs core/test_auth_validation TestDetectTokenType::test_token_prefixes with tests/integration/test_commands_auth_flow.py (same assert body, different rows; tests/integration has no owning partition, deleting either loses rows)",
   "step3: 372 in-scope modules got one module-level behavioral marker (276 component, 96 unit); component = tmp_path/tempfile/CliRunner/real file reads or writes/process spawn/PATH lookup, unit = everything else; existing pytestmark values were turned into lists keeping their marks; stale '# noqa: F401' on now-used pytest imports dropped",
   "step3 left unclassified (41): 35 modules owned by open PRs and 6 *_lifecycle* modules (rule forbids editing them)",
-  "env: 5 tests (git transport matrix x2, anonymous-first scoped retry, auth credential report, drift git-head proof) fail identically with and without this branch in this sandbox (forced commit signing, GIT_SSH_COMMAND=/bin/false); not caused by these changes"
+  "env: 5 tests (git transport matrix x2, anonymous-first scoped retry, auth credential report, drift git-head proof) fail identically with and without this branch in this sandbox (forced commit signing, GIT_SSH_COMMAND=/bin/false); not caused by these changes",
+  "step4: 30 process-spawning tests/unit modules moved with git mv to tests/integration/<same name> (already marked component; subprocess 'python -m apm_cli.cli' from source counts as component, not e2e: no installed binary)",
+  "step4: tests/unit/test_runtime_setup_codex_script.py collided with tests/integration/test_runtime_setup_codex_script.py; its 11 tests were appended to the integration module (pytestmark gained component) and the unit file removed",
+  "step4: tests/unit/policy/test_cache_merged_effective.py is wired into mutation-pilot (pyproject, workflow, script); only its single git-spawning test moved to tests/integration/test_cache_merged_effective.py (promise P-OWN-policy-remote-origin-reader, P-OWN-cached-policy-shape); the rest stays in unit",
+  "step4: path mentions updated in development-guide.md, .apm and .github tests.instructions.md (apm.lock.yaml hash for the deployed instructions file refreshed) and test_tls_custom_ca docstring; docstrings in tests/unit/install (other partition) and tests/perf evidence (protected) still mention old paths",
+  "step4 left (3): tests/unit/policy/test_ci_checks.py and tests/unit/test_init_command.py (open PRs), tests/unit/test_lifecycle_executor_paths.py (lifecycle file)",
+  "env: test_public_release_metadata unix cases fail identically in tests/unit and tests/integration when run as root (installer refuses admin install); shepherd gate fixtures fail on forced commit signing",
+  "step4: 30 process-spawning tests/unit modules moved with git mv to tests/integration/<same name> (already marked component; subprocess 'python -m apm_cli.cli' from source counts as component, not e2e: no installed binary)",
+  "step4: tests/unit/test_runtime_setup_codex_script.py collided with tests/integration/test_runtime_setup_codex_script.py; its 11 tests were appended to the integration module (pytestmark gained component) and the unit file removed",
+  "step4: tests/unit/policy/test_cache_merged_effective.py is wired into mutation-pilot (pyproject, workflow, script); only its single git-spawning test moved to tests/integration/test_cache_merged_effective.py (promise P-OWN-policy-remote-origin-reader, P-OWN-cached-policy-shape); the rest stays in unit",
+  "step4: path mentions updated in development-guide.md, .apm and .github tests.instructions.md (apm.lock.yaml hash for the deployed instructions file refreshed) and test_tls_custom_ca docstring; docstrings in tests/unit/install (other partition) and tests/perf evidence (protected) still mention old paths",
+  "step4 left (3): tests/unit/policy/test_ci_checks.py and tests/unit/test_init_command.py (open PRs), tests/unit/test_lifecycle_executor_paths.py (lifecycle file)",
+  "env: test_public_release_metadata unix cases fail identically in tests/unit and tests/integration when run as root (installer refuses admin install); shepherd gate fixtures fail on forced commit signing"
  ],
  "counts_left": {
   "same_body_groups": 14,
   "unclassified_modules": 41,
-  "placement_offenders": null,
+  "placement_offenders": 3,
   "weak_tests": null
  }
 }
