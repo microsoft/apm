@@ -189,7 +189,7 @@ journeys:
     - O9
     - O10
   - n: 5
-    cmd: git add apm.yml apm.lock.yaml .github .claude .agents && git commit -m 'Add agent dependencies' && git status --porcelain
+    cmd: git add apm.yml apm.lock.yaml .gitignore .github .claude .agents && git commit -m 'Add agent dependencies' && git status --porcelain
     kind: shell
     exit: 0
     key_lines: []
@@ -686,10 +686,6 @@ journeys:
   tier: nightly
   docs:
   - consumer/install-mcp-servers.md
-  docs_missing: true
-  docs_unresolved:
-  - consumer/choosing-an-mcp-registry.md
-  - consumer/install-lsp-servers.md
   fixtures:
   - local MCP registry
   - targets claude,copilot declared
@@ -797,9 +793,7 @@ journeys:
   docs:
   - consumer/update-and-refresh.mdx
   - enterprise/drift-detection.md
-  docs_missing: true
-  docs_unresolved:
-  - guides/operating-installed-context.md
+  - reference/cli/outdated.md
   fixtures:
   - 'package with tags v1.0.0, v1.1.0; mutable #main dep; marketplace dep'
   steps:
@@ -980,12 +974,10 @@ journeys:
   golden: false
   tier: nightly
   docs:
+  - troubleshooting/common-errors.md
   - reference/cli/compile.md
   - reference/cli/targets.md
   - reference/targets-matrix.md
-  docs_missing: true
-  docs_unresolved:
-  - troubleshooting/compile-zero-output-warning.md
   fixtures: null
   steps:
   - n: 1
@@ -1249,12 +1241,10 @@ journeys:
   golden: false
   tier: nightly
   docs:
+  - reference/cli/audit.md
   - enterprise/drift-detection.md
   - reference/cli/export-patch.md
   - enterprise/security.md
-  docs_missing: true
-  docs_unresolved:
-  - consumer/drift-and-secure-by-default.md
   fixtures: null
   steps:
   - n: 1
@@ -1324,9 +1314,6 @@ journeys:
   docs:
   - reference/cli/run.md
   - reference/cli/preview.md
-  docs_missing: true
-  docs_unresolved:
-  - consumer/run-scripts.md
   fixtures: null
   steps:
   - n: 1
@@ -1396,10 +1383,8 @@ journeys:
   docs:
   - troubleshooting/index.md
   - troubleshooting/install-failures.md
+  - reference/cli/deps.md
   - consumer/install-packages.md
-  docs_missing: true
-  docs_unresolved:
-  - guides/operating-installed-context.md
   fixtures: null
   steps:
   - n: 1
@@ -1499,9 +1484,6 @@ journeys:
   docs:
   - getting-started/coming-from.md
   - reference/cli/init.md
-  docs_missing: true
-  docs_unresolved:
-  - troubleshooting/migration.md
   fixtures: null
   steps:
   - n: 1
@@ -1700,10 +1682,10 @@ journeys:
   title: Pack a bundle and release from CI
   golden: false
   tier: nightly
-  docs: []
+  docs:
+  - reference/cli/pack.md
   docs_missing: true
   docs_unresolved:
-  - producer/pack-a-bundle.md
   - producer/releasing-from-any-ci.md
   fixtures: null
   steps:
@@ -1760,12 +1742,10 @@ journeys:
   tier: nightly
   docs:
   - producer/publish-to-a-marketplace.mdx
+  - reference/package-types.md
   - reference/cli/plugin.md
   - reference/cli/marketplace.md
   - reference/cli/publish.md
-  docs_missing: true
-  docs_unresolved:
-  - producer/repo-shapes.md
   fixtures: null
   steps:
   - n: 1
@@ -1897,9 +1877,7 @@ journeys:
   tier: nightly
   docs:
   - producer/write-primitives.md
-  docs_missing: true
-  docs_unresolved:
-  - enterprise/lifecycle-scripts.md
+  - reference/cli/lifecycle.md
   fixtures: null
   steps:
   - n: 1
@@ -1988,11 +1966,8 @@ journeys:
   docs:
   - enterprise/apm-policy.mdx
   - reference/policy-schema.md
-  docs_missing: true
-  docs_unresolved:
-  - enterprise/policy-pilot.md
-  - consumer/governance-on-the-consumer-ramp.md
-  - troubleshooting/policy-debugging.md
+  - reference/cli/policy.md
+  - troubleshooting/common-errors.md
   fixtures:
   - loopback GitHub HTTPS fixture serving contoso/.github apm-policy.yml (as _policy_scope_kit.py)
   - consumer origin https://github.com/contoso/consumer.git
@@ -2292,9 +2267,7 @@ journeys:
   tier: nightly
   docs:
   - getting-started/authentication.md
-  docs_missing: true
-  docs_unresolved:
-  - consumer/private-and-org-packages.md
+  - consumer/install-packages.md
   fixtures: null
   steps:
   - n: 1
@@ -2364,7 +2337,26 @@ journeys:
   fixtures: null
   steps:
   - n: 1
-    cmd: apm audit -f sarif -o audit.sarif; -f json -o report.json; -f markdown -o report.md
+    cmd: apm audit -f sarif -o audit.sarif; apm audit -f json -o report.json; apm audit -f markdown -o report.md
+    argv:
+    - - apm
+      - audit
+      - -f
+      - sarif
+      - -o
+      - audit.sarif
+    - - apm
+      - audit
+      - -f
+      - json
+      - -o
+      - report.json
+    - - apm
+      - audit
+      - -f
+      - markdown
+      - -o
+      - report.md
     kind: apm
     exit: 0
     key_lines: []

@@ -341,7 +341,7 @@ class TestDetectLocalBundle:
         )
         extraction = tmp_path / "controlled-extraction"
         monkeypatch.setattr(
-            "apm_cli.bundle.local_bundle.tempfile.mkdtemp",
+            "tempfile.mkdtemp",
             lambda **_kwargs: str(extraction),
         )
 
