@@ -51,6 +51,7 @@ from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
+from ..deps.lockfile_write_authority import commit_point_seam_for_tests
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -931,6 +932,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             from .phases import audit as _audit_phase
 
             _run_phase("audit", _audit_phase, ctx)
+        commit_point_seam_for_tests()
         transaction.release_deploy_targets()
 
         # ------------------------------------------------------------------

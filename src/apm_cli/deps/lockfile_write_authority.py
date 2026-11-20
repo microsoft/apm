@@ -160,26 +160,32 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
         raise
     else:
         if active.scope is not None:
-            _commit_seam_for_tests()
+            commit_point_seam_for_tests()
             _commit(active.scope)
     finally:
         _active_writer.reset(token)
 
 
-def _commit_seam_for_tests() -> None:
-    """Installed-binary fault seam at the success commit point.
+_seam_held = False
 
-    ``APM_TEST_LOCK_COMMIT=hold:<marker>`` writes *marker* and waits so a test
-    can signal the command after it changed state and before it commits;
-    ``APM_TEST_LOCK_COMMIT=kill`` ends the process here, as a killed process
-    would, with nothing committed.
+
+def commit_point_seam_for_tests() -> None:
+    """Installed-binary fault seam at a command's commit point.
+
+    ``APM_TEST_LOCK_COMMIT=hold:<marker>`` writes *marker* and waits (once per
+    process) so a test can signal the command after it changed state and
+    staged its lockfile, before it commits; ``APM_TEST_LOCK_COMMIT=kill`` ends
+    the process there, as a killed process would, with nothing committed.
+    Install reaches it before the transaction releases its deploy snapshot.
     """
+    global _seam_held
     seam = os.environ.get("APM_TEST_LOCK_COMMIT", "")
     if seam == "kill":
         os._exit(137)
-    if seam.startswith("hold:"):
+    if seam.startswith("hold:") and not _seam_held:
         import time
 
+        _seam_held = True
         Path(seam[len("hold:") :]).write_text("staged\n", encoding="ascii")
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:

@@ -2,7 +2,8 @@
 
 A command that is interrupted (SIGINT or SIGTERM) after it deployed files and
 before it commits unwinds as a failure: the install transaction restores
-``apm.yml`` and its staging, and the staged lockfile is discarded. A process
+``apm.yml``, its staging and the audit-gated deploy snapshot, and the staged
+lockfile is discarded. A process
 killed at the same point leaves deployed files the lockfile does not record:
 ``apm audit --ci`` reports that state, and the next install adopts the
 matching bytes and converges. An install whose MCP write collides on one
@@ -24,6 +25,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from tests.integration._fault_injection_kit import FaultWorld, build_world, evidence
+from tests.utils.artifact_snapshot import assert_unchanged
 
 pytestmark = [
     pytest.mark.integration,
@@ -32,6 +34,7 @@ pytestmark = [
 ]
 
 _DELTA_SKILL = ".claude/skills/delta-skill-0/SKILL.md"
+_TARGET_ROOTS = (".github", ".claude", ".cursor", ".agents")
 
 
 def _held_at_commit(
@@ -56,16 +59,22 @@ def _held_at_commit(
 
 
 @pytest.mark.parametrize("interrupt", ["SIGINT", "SIGTERM"])
-def test_interrupt_at_the_commit_point_restores_the_manifest_and_discards_the_lock(
+def test_interrupt_at_the_commit_point_restores_deploys_and_discards_the_lock(
     tmp_path: Path, apm_binary_path: Path, interrupt: str
 ) -> None:
     world = build_world(tmp_path, apm_binary_path)
+    enabled = world.apm("experimental", "enable", "external_scanners")
+    assert enabled.returncode == 0, evidence(enabled)
     delta = world.write_package("delta")
     manifest = (world.project / "apm.yml").read_bytes()
     lock = world.lockfile_bytes()
+    before = [world.snapshot(root) for root in _TARGET_ROOTS]
 
     process = _held_at_commit(
-        world, apm_binary_path, tmp_path / "held", "install", "--no-policy", delta
+        world,
+        apm_binary_path,
+        tmp_path / "held",
+        *("install", "--no-policy", "--audit", "block", delta),
     )
     assert (world.project / _DELTA_SKILL).is_file(), "the install deployed before its commit"
     os.killpg(process.pid, getattr(signal, interrupt))
@@ -73,8 +82,11 @@ def test_interrupt_at_the_commit_point_restores_the_manifest_and_discards_the_lo
 
     assert process.returncode != 0, output
     assert "interrupted" in output.lower(), output
+    assert "Deployed files restored to their previous state." in output, output
     assert (world.project / "apm.yml").read_bytes() == manifest, output
     assert world.lockfile_bytes() == lock, output
+    for snapshot, root in zip(before, _TARGET_ROOTS, strict=True):
+        assert_unchanged(snapshot, world.snapshot(root))
     assert not (world.project / "apm_modules/.apm-resolution-staging").exists()
     world.assert_user_file_intact()
 
@@ -84,11 +96,17 @@ def test_interrupt_at_the_commit_point_restores_the_manifest_and_discards_the_lo
     world.assert_converges()
 
 
+@pytest.mark.parametrize("audited", [False, True], ids=["plain", "audited"])
 @pytest.mark.parametrize("change", ["new-package", "changed-package"])
 def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install(
-    tmp_path: Path, apm_binary_path: Path, change: str
+    tmp_path: Path, apm_binary_path: Path, change: str, audited: bool
 ) -> None:
     world = build_world(tmp_path, apm_binary_path)
+    audit_args: tuple[str, ...] = ()
+    if audited:
+        enabled = world.apm("experimental", "enable", "external_scanners")
+        assert enabled.returncode == 0, evidence(enabled)
+        audit_args = ("--audit", "block")
     lock = world.lockfile_bytes()
     if change == "new-package":
         args: tuple[str, ...] = (world.write_package("delta"),)
@@ -100,7 +118,7 @@ def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install
         deployed = world.project / ".github/agents/alpha.agent.md"
 
     killed = world.runner.run(
-        ("install", "--no-policy", *args),
+        ("install", "--no-policy", *audit_args, *args),
         cwd=world.project,
         env=dict(world.env, APM_TEST_LOCK_COMMIT="kill"),
     )
