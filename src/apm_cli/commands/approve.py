@@ -662,6 +662,10 @@ def _find_matching_key(grant_map: dict[str, dict[str, bool]], pkg: str) -> str |
     return None
 
 
+# An item no trust layer admits while no layer enables the gate: it deploys today.
+UNGATED_STATE = "deployed: no executables policy"
+
+
 def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
     """List installed packages whose executables no trust layer admits.
 
@@ -672,7 +676,8 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
     from dataclasses import replace
 
     pending = _pending_declarations(manifest, logger=logger)
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    effective = _effective_trust_context(manifest, logger=logger)
+    ctx = replace(effective, gate_enabled=True)
     bundles = _pending_bundles(manifest, ctx)
     if not pending and not bundles:
         _rich_success("All packages with executables are approved.")
@@ -683,7 +688,14 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
         for decl in pending:
             pins = _pins_for(decl)
             _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
-            _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+            states = _item_states(ctx, decl, pins)
+            if not effective.gate_enabled:
+                # No layer opts in, so these deploy today; the review is ahead of the opt-in.
+                states = {
+                    key: UNGATED_STATE if state == "not approved" else state
+                    for key, state in states.items()
+                }
+            _echo_pins(decl, pins, states)
         _rich_echo("")
         _rich_info(EXECUTABLES_UNAPPROVED.sentence(), symbol="info")
     if bundles:
