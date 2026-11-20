@@ -10,6 +10,7 @@ repositories stay with the template.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -48,10 +49,14 @@ def clone(template: World, dest: Path) -> World:
     if dest.exists():
         raise FileExistsError(dest)
     copy_tree(template.root, dest)
-    old, new = str(template.root), str(dest)
+    # Only whole path components move: "<root>-shared" keeps pointing at the template.
+    pattern = re.compile(re.escape(str(template.root)) + r"(?=$|[/\\:;])")
+
+    def rewrite(value: str) -> str:
+        return pattern.sub(lambda _match: str(dest), value)
 
     def moved(path: Path) -> Path:
-        return Path(str(path).replace(old, new, 1))
+        return Path(rewrite(str(path)))
 
     return replace(
         template,
@@ -59,9 +64,9 @@ def clone(template: World, dest: Path) -> World:
         project=moved(template.project),
         home=moved(template.home),
         apm_home=moved(template.apm_home),
-        env={key: value.replace(old, new) for key, value in template.env.items()},
+        env={key: rewrite(value) for key, value in template.env.items()},
         packages={
-            key: PackageRef(ref.name, ref.spec.replace(old, new, 1), ref.kinds, ref.source)
+            key: PackageRef(ref.name, rewrite(ref.spec), ref.kinds, ref.source)
             for key, ref in template.packages.items()
         },
         cache_root=moved(template.cache_root) if template.cache_root else None,

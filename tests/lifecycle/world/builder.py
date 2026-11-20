@@ -10,7 +10,9 @@ Layout under ``base`` (an ``IsolatedApmEnvironment`` root, cloned per test)::
     bundles/         ``apm pack`` output of p-exec
     executables/     trap ``claude`` / ``codex`` binaries that must never run
 
-Shared per worker, never cloned (``<base>-shared``)::
+APM_HOME/config.json enables the experimental ``canvas`` primitive.
+
+Shared per worker, never cloned (``shared-<base name>`` beside ``base``)::
 
     repositories/    bare git repositories served by the local HTTPS server
     services/        CA material of the recording proxy
@@ -111,20 +113,24 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
     return served
 
 
-def _pack_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
-    """Pack *source* with the engine CLI; return the bundle it wrote."""
-    output.mkdir()
-    work = output.parent / "pack-src"
-    shutil.copytree(source, work)
-    result = subprocess.run(
-        (sys.executable, "-m", "apm_cli.cli", "pack", "--archive", "-o", str(output)),
-        cwd=work,
+def _engine(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        (sys.executable, "-m", "apm_cli.cli", *args),
+        cwd=cwd,
         env=env,
         capture_output=True,
         text=True,
         timeout=120,
         check=False,
     )
+
+
+def _pack_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
+    """Pack *source* with the engine CLI; return the bundle it wrote."""
+    output.mkdir()
+    work = output.parent / "pack-src"
+    shutil.copytree(source, work)
+    result = _engine(("pack", "--archive", "-o", str(output)), work, env)
     shutil.rmtree(work)
     bundles = sorted(output.iterdir())
     if result.returncode != 0 or len(bundles) != 1:
@@ -135,7 +141,7 @@ def _pack_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
 def build_template(base: Path) -> World:
     """Author the template world under *base* (which must not exist yet) and start services."""
     base = base.parent.resolve() / base.name
-    shared = base.parent / f"{base.name}-shared"
+    shared = base.parent / f"shared-{base.name}"
     shared.mkdir()
     isolated = IsolatedApmEnvironment.create(base, base_env=dict(os.environ))
     authored = author_packages(isolated.package_root)
@@ -159,6 +165,10 @@ def build_template(base: Path) -> World:
     user_cwd = isolated.work_root / "elsewhere"
     user_cwd.mkdir()
     try:
+        # Canvas is an experimental primitive; the world's user has turned it on.
+        enabled = _engine(("experimental", "enable", "canvas"), user_cwd, env)
+        if enabled.returncode != 0:
+            raise RuntimeError(f"enabling canvas failed: {enabled.stdout}{enabled.stderr}")
         bundle = _pack_bundle(authored["p-exec"].root, base / "bundles", env)
     except Exception:
         services.close()

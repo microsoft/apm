@@ -97,8 +97,16 @@ def policy_documents() -> dict[str, dict[str, object]]:
         "mcp-deny": {"name": "mcp-deny", **base, "mcp": {"deny": ["*"]}},
         # The project pins a different hash (``use_policy``); the served bytes are benign.
         "hash-mismatch": {"name": "hash-mismatch", **base},
-        "chain-cycle": {"name": "chain-cycle", **base, "extends": policy_org(_CHAIN_PEER)},
-        _CHAIN_PEER: {"name": "chain-cycle-peer", **base, "extends": policy_org("chain-cycle")},
+        "chain-cycle": {
+            "name": "chain-cycle",
+            **base,
+            "extends": f"{policy_org(_CHAIN_PEER)}/{POLICY_REPO}",
+        },
+        _CHAIN_PEER: {
+            "name": "chain-cycle-peer",
+            **base,
+            "extends": f"{policy_org('chain-cycle')}/{POLICY_REPO}",
+        },
     }
 
 
@@ -227,7 +235,15 @@ class WorldServices:
     def _rev_parse(self, repository: Path, ref: str) -> str | None:
         git = shutil.which("git") or "git"
         result = subprocess.run(
-            (git, "--git-dir", str(repository), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"),
+            (
+                git,
+                "--git-dir",
+                str(repository),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"{ref}^{{commit}}",
+            ),
             capture_output=True,
             text=True,
             check=False,
