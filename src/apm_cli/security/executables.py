@@ -1013,7 +1013,10 @@ FIRST_PARTY_PACKAGE = "_local"
 # Explicit blanket authorizations. A missing or omitted map is never one.
 AUTHORIZED_GATE_DISABLED = LAYER_GATE_DISABLED
 AUTHORIZED_REPLAY = "replay-already-authorized"
-_BLANKET_AUTHORIZATIONS = frozenset({AUTHORIZED_GATE_DISABLED, AUTHORIZED_REPLAY})
+AUTHORIZED_FIRST_PARTY = "first-party"
+_BLANKET_AUTHORIZATIONS = frozenset(
+    {AUTHORIZED_GATE_DISABLED, AUTHORIZED_REPLAY, AUTHORIZED_FIRST_PARTY}
+)
 
 
 def authorized_exec_map(reason: str) -> EffectiveExecMap:
@@ -1022,6 +1025,7 @@ def authorized_exec_map(reason: str) -> EffectiveExecMap:
     ``AUTHORIZED_GATE_DISABLED``: no layer opted into the gate (no policy
     signals), so every executable deploys. ``AUTHORIZED_REPLAY``: audit replay
     re-derives content the install gate already authorized.
+    ``AUTHORIZED_FIRST_PARTY``: the project's own content (``_local``).
     """
     if reason not in _BLANKET_AUTHORIZATIONS:
         raise ValueError(f"Unknown executable authorization: {reason!r}")
@@ -1046,16 +1050,6 @@ def closed_exec_map(allow_map: object) -> object:
     becomes a gate-on map with no grants, so it admits nothing.
     """
     return EffectiveExecMap() if allow_map is None else allow_map
-
-
-def declared_project_exec_map(raw_allow: object) -> dict[str, dict[str, bool]]:
-    """Return the map a project's own declared grants imply, without other layers.
-
-    A declared block is its literal grants; no block leaves the gate disabled.
-    """
-    if isinstance(raw_allow, dict):
-        return raw_allow
-    return authorized_exec_map(AUTHORIZED_GATE_DISABLED)
 
 
 def package_type_approved(allow_map: object, package_keys: Any, exec_type: str) -> bool:

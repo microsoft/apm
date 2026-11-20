@@ -749,6 +749,7 @@ def integrate_local_content(  # noqa: PLR0913
     same shape as ``integrate_package_primitives()``.
     """
     from ..integration.canvas_integrator import CanvasIntegrator
+    from ..security.executables import AUTHORIZED_FIRST_PARTY, authorized_exec_map
     from .package_resolution import effective_dependency_selection
 
     if source_root is None:
@@ -780,6 +781,7 @@ def integrate_local_content(  # noqa: PLR0913
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,
+        allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),
     )
 
 
