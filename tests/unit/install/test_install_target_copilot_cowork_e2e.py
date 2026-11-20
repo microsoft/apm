@@ -41,6 +41,9 @@ from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.utils.diagnostics import DiagnosticCollector
 from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

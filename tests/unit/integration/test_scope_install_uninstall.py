@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Set  # noqa: F401, UP035
 
+import pytest
+
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -24,6 +26,8 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
 from tests.utils.deployment_evidence import receipted_evidence
+
+pytestmark = pytest.mark.component
 
 
 def _set_home(monkeypatch, home: Path) -> None:

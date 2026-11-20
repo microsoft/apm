@@ -17,6 +17,9 @@ from apm_cli.primitives.discovery import discover_primitives  # noqa: F401
 from apm_cli.utils.diagnostics import DiagnosticCollector
 from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # IntegrationResult
 # ---------------------------------------------------------------------------

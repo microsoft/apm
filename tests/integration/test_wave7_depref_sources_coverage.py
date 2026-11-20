@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 class TestDependencyReferenceParseFromDictEdgeCases:
     """Cover parse_from_dict branches that are currently uncovered."""

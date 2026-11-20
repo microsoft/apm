@@ -25,6 +25,8 @@ from apm_cli.models.apm_package import (
 from apm_cli.utils.diagnostics import CATEGORY_ERROR, CATEGORY_WARNING, DiagnosticCollector
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.component
+
 
 def _make_package_info(
     package_dir: Path,

@@ -15,10 +15,14 @@ of silently corrupting an end-user workspace.
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.utils.deployment_evidence import receipted_evidence
+
+pytestmark = pytest.mark.component
 
 
 class TestWindsurfTargetProfileShape:

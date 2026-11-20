@@ -36,6 +36,8 @@ from apm_cli.models.apm_package import (
 from apm_cli.utils.diagnostics import CATEGORY_COLLISION, DiagnosticCollector
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.component
+
 
 def _sync(integrator, target: str, root: Path, managed: set[str] | None) -> dict:
     """Sync *integrator* for *target* as on the machine that deployed every file.

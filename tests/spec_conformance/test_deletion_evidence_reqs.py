@@ -18,6 +18,9 @@ from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
 from tests.spec_conformance._helpers import assert_spec_contains
 
+pytestmark = pytest.mark.component
+
+
 _PATH = ".github/instructions/notes.instructions.md"
 
 

@@ -13,10 +13,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.context import InstallContext
 from apm_cli.install.phases import lockfile as lockfile_phase
 from apm_cli.install.phases.lockfile import LockfileBuilder
+
+pytestmark = pytest.mark.component
 
 
 def _existing_with(*repo_urls: str) -> LockFile:

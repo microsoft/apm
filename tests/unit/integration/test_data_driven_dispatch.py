@@ -13,6 +13,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.commands.install import _integrate_package_primitives
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.services import IntegratorBundle
@@ -22,6 +24,9 @@ from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetP
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from tests.utils.deployment_evidence import receipted_evidence
+
+pytestmark = pytest.mark.component
+
 
 # ------------------------------------------------------------------
 # Helpers

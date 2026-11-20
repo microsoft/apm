@@ -37,6 +37,8 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _reset_config_cache() -> Any:

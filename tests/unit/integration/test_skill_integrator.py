@@ -29,6 +29,8 @@ from apm_cli.models.apm_package import (
 )
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.component
+
 
 def _setup_agents_orphan_cleanup(project_root: Path, skill_names: list[str]) -> None:
     """Set up state required for ``.agents/skills/`` orphan cleanup to run.

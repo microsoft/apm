@@ -22,6 +22,8 @@ from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.gate import SecurityGate
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.component
+
 
 def _package_info(package_path: Path, name: str = "superpowers") -> PackageInfo:
     return PackageInfo(

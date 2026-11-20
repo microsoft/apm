@@ -17,6 +17,9 @@ import apm_cli.security.executables as ex
 from apm_cli.install.exec_gate import check_executable_approval, resolve_bin_skip
 from apm_cli.security.executables import build_exec_trust_context, materialize_exec_map
 
+pytestmark = pytest.mark.component
+
+
 PKG = "acme/tools"
 
 

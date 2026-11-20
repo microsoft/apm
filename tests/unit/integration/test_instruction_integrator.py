@@ -18,6 +18,8 @@ from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo
 from apm_cli.utils.yaml_io import loads_frontmatter
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.component
+
 
 def _make_package_info(package_dir, name="test-pkg"):
     """Helper shared across test classes."""

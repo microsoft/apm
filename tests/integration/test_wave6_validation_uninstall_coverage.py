@@ -14,6 +14,9 @@ import requests
 
 from apm_cli.deps.lockfile import LockedDependency
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # install/validation.py -- TLS helpers
 # ---------------------------------------------------------------------------

@@ -28,6 +28,8 @@ from apm_cli.marketplace.yml_schema import (
     load_marketplace_from_legacy_yml,
 )
 
+pytestmark = pytest.mark.component
+
 
 class DuplicateKeyDict(dict):
     def items(self):

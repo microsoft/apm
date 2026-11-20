@@ -15,6 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # DiagnosticCollector
 # ---------------------------------------------------------------------------

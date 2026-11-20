@@ -7,6 +7,8 @@ precedence ladder shared by the install gate and the policy audit. The
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
@@ -30,6 +32,9 @@ from apm_cli.security.executables import (
     materialize_exec_map,
     resolve_exec_decision,
 )
+
+pytestmark = pytest.mark.unit
+
 
 PKG = "owner/repo#v1.0"
 NAME = "owner/repo"

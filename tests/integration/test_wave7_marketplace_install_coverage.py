@@ -23,6 +23,9 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.marketplace.models import MarketplaceManifest, MarketplacePlugin, MarketplaceSource
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Shared fixture helpers
 # ---------------------------------------------------------------------------
