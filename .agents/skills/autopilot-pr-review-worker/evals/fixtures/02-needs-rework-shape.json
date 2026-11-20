@@ -162,6 +162,26 @@
               "devx"
             ]
           }
+        },
+        {
+          "severity": "recommended",
+          "summary": "Install pipeline change has no lifecycle-state-machine evidence that a rerun leaves deployed files and the lockfile unchanged",
+          "rationale": "The resolver/downloader split changes what install writes to disk. Idempotent rerun (I2) and lock == deployed (I1) are durable-state promises; only a real-CLI run with before/after snapshots proves them. Probe: grep'd tests/integration/test_required_lifecycle_state_machine.py for the new resolver path, no match.",
+          "file": "tests/integration/test_required_lifecycle_state_machine.py",
+          "line": 0,
+          "suggestion": "Extend an existing lifecycle test with a parametrize case: install, snapshot, install again, assert snapshot equality (see the apm-lifecycle-tests skill).",
+          "evidence": {
+            "test_file": "tests/integration/test_required_lifecycle_state_machine.py",
+            "test_name": "test_install_rerun_is_idempotent_after_resolver_split",
+            "outcome": "missing",
+            "tier": "lifecycle-state-machine",
+            "assertion_excerpt": "before = LifecycleStateSnapshot.capture(env); runner.install(); assert LifecycleStateSnapshot.capture(env) == before",
+            "proves": "Running apm install twice leaves deployed files and the lockfile byte-identical.",
+            "principles": [
+              "portability-by-manifest",
+              "devx"
+            ]
+          }
         }
       ]
     }
