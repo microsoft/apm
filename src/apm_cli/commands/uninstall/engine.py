@@ -1748,7 +1748,9 @@ def _restage_changed_local_survivors(
         )
         dep.content_hash = current
         restaged.add(key)
-        logger.progress(f"Refreshed {_dependency_public_label(dep_ref)} from its local source")
+        logger.progress(
+            f"Refreshed local package {_dependency_public_label(dep_ref)} from its source"
+        )
     return restaged
 
 

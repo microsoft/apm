@@ -37,6 +37,15 @@ _XFAIL.update(
     }
 )
 
+# Uninstall refreshes the changed local survivor from its source and says so,
+# then retires the redefined hook (#4446).
+_ANNOUNCE = {
+    "G|uninstall-prune-rebuild|definition-changed|hook": (
+        r"(?s)(?=.*Refreshed local package \S+ from its source)"
+        r"(?=.*hooks are no longer allowed)(?=.*definition changed since approval)"
+    ),
+}
+
 _PATHS = {
     "install": (_ALL, _PROJECT),
     "frozen": (_ALL, _PROJECT),
@@ -63,6 +72,7 @@ SLICE = GateSlice(
             surface=surface,
             smoke=f"G|{path}|{change}|hook" in _SMOKE,
             xfail=_XFAIL.get(f"G|{path}|{change}|hook", ""),
+            announce=_ANNOUNCE.get(f"G|{path}|{change}|hook"),
         )
         for path, (changes, surface) in _PATHS.items()
         for change in changes
