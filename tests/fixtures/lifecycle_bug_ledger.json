@@ -2504,6 +2504,26 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4330,
+      "fixed_in": "Unreleased",
+      "summary": "apm output escapes a non-ASCII package or project path to printable ASCII instead of echoing it raw.",
+      "failure_modes": ["portability"],
+      "properties": ["portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_non_ascii_path_output_lifecycle.py::test_non_ascii_package_path_is_echoed_escaped"
+      ]
+    },
+    {
+      "issue": 4331,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall of a package declared more than once prints each removal line once.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_duplicate_declaration_lifecycle.py::test_uninstall_removes_every_declaration_of_one_package"
+      ]
     }
   ],
   "lifecycle_contracts": [

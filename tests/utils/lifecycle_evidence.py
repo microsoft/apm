@@ -558,25 +558,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
     KnownOutputCell(
-        "command-echoes-non-ascii-path",
-        "I6",
-        "#4330",
-        # Any command that echoes a user path (install, deps list, export-patch, ...).
-        lambda _args, _scenario: True,
-        r"stdout has characters outside printable ASCII",
-        # A path (after a separator) with a non-ASCII character the test's own
-        # working directory does not explain; the cwd echo itself passes I6.
-        output=r"[/\\][^\n]*?[^\x00-\x7f]",
-    ),
-    KnownOutputCell(
-        "uninstall-duplicate-declaration-lines",
-        "I9",
-        "#4331",
-        _runs("uninstall"),
-        r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
-        output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
-    ),
-    KnownOutputCell(
         "update-deny-all-lifecycle-notice-repeats",
         "I9",
         "#4333",
