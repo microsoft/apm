@@ -484,16 +484,33 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen"
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[1]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[TRUE]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[true]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_without_lockfile_resolves_and_writes_it",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[empty]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[explicit-no-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[false]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[unset]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[zero]"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-018",
       "keyword": "SHOULD",
+      "partial": "default frozen in CI when a lockfile exists; without a lockfile, resolve normally",
       "section": "5.5",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "partial",
+      "test_count": 10,
       "tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[1]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[TRUE]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[true]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_without_lockfile_resolves_and_writes_it",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[empty]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[explicit-no-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[false]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[unset]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[zero]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
       ],
       "waivers": [
@@ -3237,13 +3254,15 @@
   "summary_by_class": {
     "consumer": {
       "active": 107,
+      "partial": 1,
       "skipped": 3,
       "text-only": 3,
       "unbound": 0,
-      "xfail": 2
+      "xfail": 1
     },
     "governance": {
       "active": 21,
+      "partial": 0,
       "skipped": 0,
       "text-only": 0,
       "unbound": 0,
@@ -3251,6 +3270,7 @@
     },
     "producer": {
       "active": 9,
+      "partial": 0,
       "skipped": 0,
       "text-only": 3,
       "unbound": 0,
@@ -3258,6 +3278,7 @@
     },
     "registry": {
       "active": 0,
+      "partial": 0,
       "skipped": 0,
       "text-only": 1,
       "unbound": 0,
