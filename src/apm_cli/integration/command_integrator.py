@@ -446,9 +446,8 @@ class CommandIntegrator(BaseIntegrator):
         # Ensure target directory exists
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write the command file
-        with open(target, "w", encoding="utf-8") as f:
-            f.write(compiled)
+        # LF on every platform, as _LF_NORMALIZED_DEPLOY declares and adopt compares.
+        write_text_lf(target, compiled)
 
         return (links_resolved, True, bool(dropped_keys))
 
