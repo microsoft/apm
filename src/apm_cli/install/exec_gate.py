@@ -66,10 +66,11 @@ def check_executable_approval(
             package_name, package_info, allow_executables, tuple(candidate_keys), pkg_key, ctx
         )
 
-    # Pinned hook items admit per file at the source plan (hook_file_admission).
+    # Pinned hook items admit per file at the source plan (hook_file_admission);
+    # a package none of whose hook files matches its pin deploys no hooks.
     hooks_ok = any(
         is_package_approved(allow_executables, k, EXEC_TYPE_HOOKS) for k in candidate_keys
-    ) or hooks_package_admissible(allow_executables, tuple(candidate_keys))
+    ) or hooks_package_admissible(allow_executables, tuple(candidate_keys), package_info)
     bin_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_BIN) for k in candidate_keys)
     mcp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_MCP) for k in candidate_keys)
     canvas_ok = any(
@@ -669,3 +670,45 @@ class ReplayExecAllowMap:
                 return None
         self._resolve()
         return self._map
+
+
+def locked_hook_pin_mismatches(
+    lockfile: Any, modules_dir: Path, trust_ctx: Any
+) -> builtins.list[Any]:
+    """Locked hook files whose pinned approval no longer admits them (#4188).
+
+    ``apm install --frozen`` and ``apm audit --ci`` both route here, and each
+    lock row is judged by the trust owner
+    (:func:`~apm_cli.security.trust.recorded_hook_pin_mismatches`), so the two
+    commands reach one verdict. A package not materialized under
+    *modules_dir* is left to the checks that report it.
+    """
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import TRUST_ABSENT, _strip_version
+    from apm_cli.security.trust import recorded_hook_pin_mismatches
+
+    if trust_ctx is None or lockfile is None:
+        return []
+    found: builtins.list[Any] = []
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.exec_status == TRUST_ABSENT:
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        try:
+            package_info = _build_package_info(dep, install_path)
+        except (OSError, ValueError):
+            continue
+        pkg_key = resolve_package_key(package_info, dep.get_unique_key())
+        found.extend(
+            recorded_hook_pin_mismatches(
+                trust_ctx,
+                tuple(_candidate_keys(pkg_key)),
+                install_path,
+                package=_strip_version(pkg_key),
+                recorded_status=dep.exec_status,
+                recorded_allowed=tuple(dep.exec_allowed_types or ()),
+            )
+        )
+    return found

@@ -54,7 +54,7 @@ _ITEM_ROUTES: dict[str, tuple[str, ...]] = {
         "project_allow, project_items = split_item_grants(project_raw_allow)",
     ),
     "src/apm_cli/install/exec_gate.py": (
-        "hooks_package_admissible(allow_executables, tuple(candidate_keys))",
+        "hooks_package_admissible(allow_executables, tuple(candidate_keys), package_info)",
         "return hook_file_filter(allow_executables, keys, Path(package_info.install_path))",
         "verdict = admit_native_plugin(",
         "if native_install(package_info):",

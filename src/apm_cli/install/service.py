@@ -352,6 +352,27 @@ class InstallService:
             )
 
     @staticmethod
+    def enforce_frozen_hook_pins(lockfile: LockFile, modules_dir: Path, trust_ctx: Any) -> None:
+        """Refuse a frozen install whose locked hooks their approval no longer admits.
+
+        Runs before any deployment, through the same owner ``apm audit --ci``
+        uses, so both reach one verdict (#4188).
+        """
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.exec_gate import locked_hook_pin_mismatches
+
+        mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)
+        if mismatches:
+            raise FrozenInstallError(
+                "--frozen: apm.lock.yaml records hooks their approval no longer admits.",
+                reasons=[f"  - {mismatch.describe()}" for mismatch in mismatches],
+                tip=(
+                    "Tip: re-approve the package, or run 'apm install' without --frozen "
+                    "to retire the hooks, then commit apm.yml and apm.lock.yaml."
+                ),
+            )
+
+    @staticmethod
     def reject_frozen_mutation(frozen: bool, operation: str) -> None:
         """Reject an add-style install operation before it can mutate state."""
         if not frozen:
