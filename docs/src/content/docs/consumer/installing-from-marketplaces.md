@@ -98,7 +98,10 @@ plus where it was found:
 - `apm install` and `apm install --frozen` replay the locked commit without
   contacting the marketplace, so an edit to `marketplace.json` changes nothing
   until you update. A package whose locked MCP or LSP servers have no copy in
-  `apm_modules/` still reads the marketplace, which holds those definitions.
+  `apm_modules/` still reads the marketplace for those definitions only; the
+  locked commit still pins the download. If the marketplace now selects another
+  source or commit, install fails; run `apm update <plugin>@<marketplace>` to
+  move to it.
 - `apm update` and `apm install --refresh` revalidate the marketplace and fail
   rather than use stale data. `apm marketplace update` refreshes the cached
   list and nothing else.

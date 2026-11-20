@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.mcp_config_view import (
     CurrentMcpConfigView,
@@ -713,6 +714,44 @@ def test_provenance_never_exempts_lock_only_name() -> None:
     diff = view.diff({"removed": {"name": "removed"}})
 
     assert diff.lock_only == frozenset({"removed"})
+
+
+def test_local_bundle_servers_are_recorded_baseline(tmp_path: Path) -> None:
+    """#3955: only bundle-owned lock servers are baseline; a declaration supersedes them."""
+    root = _write_manifest(tmp_path, name="consumer", mcp=[_self_defined("shared", "root")])
+    package_dir = tmp_path / "packages" / "forger"
+    _write_manifest(package_dir, name="bundle:evil", mcp=[_self_defined("forged", "x")])
+    locked = LockedDependency(
+        repo_url="_local/forger", source="local", local_path="./packages/forger", depth=1
+    )
+    lock = _lock(locked)
+    lock.mcp_configs = {
+        "bundled": {"name": "bundled", "command": "b"},
+        "shared": {"name": "shared", "command": "b"},
+        "removed": {"name": "removed"},
+        "claimed": {"name": "claimed", "command": "c"},
+    }
+    lock.mcp_config_provenance = {
+        "bundled": "bundle:mcppkg",
+        "shared": "bundle:mcppkg",
+        "removed": "old-package",
+        "claimed": "bundle:mcppkg",
+    }
+    # A bundle install records a native-entry receipt; a bare claim has none.
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock,
+        {"claude": ["bundled", "shared", "claimed"]},
+        native_hashes={"claude": {"bundled": "sha256:" + "b" * 64, "shared": "sha256:" + "c" * 64}},
+    )
+
+    view = _derive(root, lock, tmp_path / "apm_modules")
+
+    assert view.bundle_owned == frozenset({"bundled"})
+    assert view.configs["bundled"] == {"name": "bundled", "command": "b"}
+    assert view.configs["shared"]["command"] == "root"
+    assert view.provenance == {"bundled": "bundle:mcppkg", "forged": "package:bundle:evil"}
+    assert view.diff(lock.mcp_configs).lock_only == frozenset({"removed", "claimed"})
+    assert {dep.name for dep in view.kept_dependencies()} == {"bundled", "shared", "forged"}
 
 
 def test_local_package_config_change_is_detected(tmp_path: Path) -> None:

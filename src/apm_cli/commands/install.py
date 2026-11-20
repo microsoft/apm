@@ -1244,6 +1244,7 @@ def install(  # noqa: PLR0913
                 _bundle_project_root = _source_root
                 _allow_execs_for_bundle = _effective_bundle_allow_map(
                     _bundle_project_root,
+                    user_scope=global_,
                     no_policy=no_policy,
                     logger=logger,
                     migrate_user_legacy=not dry_run,

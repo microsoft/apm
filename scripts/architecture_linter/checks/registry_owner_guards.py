@@ -569,6 +569,36 @@ def _target_deprecation_wiring(
     return findings
 
 
+# Raw apm.yml readers pass the manifest path so the deprecated-key warnings fire
+# (#3965). Only callers parsing a config an APMPackage reader already loaded
+# (and so already warned for) may omit it.
+_PATHLESS_RESTRICTION_READERS = frozenset(
+    {
+        "src/apm_cli/integration/mcp_integrator_install.py",
+        "src/apm_cli/integration/mcp_integrator.py",
+    }
+)
+
+
+def _pathless_restriction_reads(rule_id: str, path: str, index) -> list[Violation]:
+    if path in _PATHLESS_RESTRICTION_READERS:
+        return []
+    return [
+        violation(
+            rule_id,
+            path,
+            "manifest_target_restriction needs the manifest path so deprecated "
+            "target keys warn (#3965)",
+            line=node.lineno,
+        )
+        for node in index.nodes
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None))
+        == "manifest_target_restriction"
+        and len(node.args) + len(node.keywords) < 2
+    ]
+
+
 def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
     """Package manifest targets are read only through the declaration owner.
 
@@ -596,6 +626,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
         index = provider.tree_index(path)
         if index is None:
             continue
+        findings.extend(_pathless_restriction_reads(rule_id, path, index))
         for node in index.nodes:
             reason = _raw_target_read(node, path)
             if reason is None:

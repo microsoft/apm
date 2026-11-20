@@ -395,7 +395,9 @@ the marketplace and fail rather than use stale cached data. Exceptions
 until 0.38 (#2903): registry-routed catalog entries still resolve through the
 catalog (the lockfile has no registry binding), and the lockfile does not
 record catalog-inline MCP/LSP servers, so a package with locked servers and no
-`apm_modules/` copy reads the catalog, also under `--frozen`; one with no
+`apm_modules/` copy reads the catalog for server metadata only, also under
+`--frozen` (the locked commit still pins it; a catalog that now selects
+another commit fails until `apm update <name>@<marketplace>`); one with no
 locked servers (`--only=apm`, root-overridden server) fails its content-hash
 check when cold -- run `apm update` for it.
 
@@ -722,6 +724,16 @@ dependencies:
       args: ["--port", "3000"]
       env:
         API_KEY: ${{ secrets.KEY }}
+
+    # Per-server targets: install targets INTERSECT this list (omitted = all;
+    # no overlap = skipped with a warning). Never written into native config.
+    # Dropping a target here or from manifest targets: prunes it on reinstall.
+    # Project-scope claude and copilot share .mcp.json: either name reaches both.
+    - name: claude-only-tools
+      registry: false
+      transport: stdio
+      command: ./bin/claude-tools
+      targets: [claude]
 
     # Self-defined HTTP server
     - name: internal-kb

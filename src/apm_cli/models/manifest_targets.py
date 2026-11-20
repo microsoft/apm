@@ -604,6 +604,17 @@ def read_manifest_target_declaration(
     return ManifestTargetDeclaration.from_manifest(data, manifest_path)
 
 
-def manifest_target_restriction(data: Mapping[str, Any] | None) -> list[str]:
-    """Return the restricting target names of a manifest mapping (empty if none)."""
-    return ManifestTargetDeclaration.from_mapping(data).restriction() or []
+def manifest_target_restriction(
+    data: Mapping[str, Any] | None, manifest_path: Path | None = None
+) -> list[str]:
+    """Return the restricting target names of a manifest mapping (empty if none).
+
+    With *manifest_path*, the read also emits the deprecated-key warnings of
+    :meth:`ManifestTargetDeclaration.from_manifest` (once per run), so raw-YAML
+    readers such as ``apm pack`` warn like every ``APMPackage`` reader.
+    """
+    if manifest_path is not None and isinstance(data, Mapping):
+        declaration = ManifestTargetDeclaration.from_manifest(data, manifest_path)
+    else:
+        declaration = ManifestTargetDeclaration.from_mapping(data)
+    return declaration.restriction() or []

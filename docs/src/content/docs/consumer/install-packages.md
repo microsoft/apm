@@ -88,7 +88,12 @@ apm install ./dist/review-skills-1.1.0.zip --target copilot
 APM checks the files against the hashes `apm pack` recorded in the bundle,
 deploys them and records them in `apm.lock.yaml`. It does not edit `apm.yml`. A reinstall
 removes bundle MCP and LSP servers that are no longer shipped, are denied or are not
-approved. To build one, see
+approved. Bundle MCP servers are recorded in the lockfile, so they pass `apm audit --ci`
+and `apm install --frozen` and survive other installs and uninstalls; `apm install -g
+<bundle>` records them in `$APM_HOME/apm.lock.yaml`. A `bundle:` entry counts only
+when the lockfile also records its deployment, and org MCP policy still applies to
+it. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
+current directory's `apm.yml`. To build one, see
 [Build a plugin](../../producer/build-a-plugin/).
 
 ## Transport selection
@@ -177,6 +182,9 @@ apm audit
 - **Policy violation.** Your organization's policy blocked the dependency
   before any file was written. Run `apm policy status`; see
   [Set an org policy](../../enterprise/apm-policy/).
+- **One package in a multi-package install fails.** If a download fails, or a local
+  path is not a package, APM integrates nothing from that run. Fix the failing entry
+  and rerun.
 - **A local file is in the way.** APM does not overwrite files it did not
   write. Move it and rerun.
 - **`--frozen` fails with `Content hash mismatch`.** See

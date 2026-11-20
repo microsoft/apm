@@ -1554,6 +1554,8 @@ def run_policy_checks(
     policy: ApmPolicy,
     *,
     fail_fast: bool = True,
+    modules_root: Path | None = None,
+    no_policy: bool = False,
 ) -> CIAuditResult:
     """Run the full set of policy checks against a project on disk.
 
@@ -1562,6 +1564,9 @@ def run_policy_checks(
     :func:`run_dependency_policy_checks`.  Then appends the disk-level
     checks (compilation, manifest, unmanaged files) that require the raw
     ``apm.yml``.
+
+    *modules_root* and *no_policy* select the same MCP view the baseline
+    config-consistency check reads (the CI scratch replay, when prepared).
 
     These checks are ADDED to baseline checks -- caller runs both.
     When *fail_fast* is ``True`` (default), stops after the first
@@ -1591,8 +1596,20 @@ def run_policy_checks(
 
     # Get dependencies from manifest (disk view)
     apm_deps = manifest.get_apm_dependencies()
-    # Production and dev MCP servers, as the install gate judges them.
-    mcp_deps = manifest.get_all_mcp_dependencies()
+    # Every MCP server the lock keeps as baseline deploys (root, transitive and
+    # recorded local-bundle servers), so policy judges the audit view's set,
+    # as the install preflight judges the merged set.
+    mcp_brought_in_by = None
+    if lock is None:
+        mcp_deps = manifest.get_all_mcp_dependencies()
+    else:
+        from .ci_checks import audit_mcp_view
+
+        view, _admission = audit_mcp_view(
+            manifest, lock, modules_root=modules_root, no_policy=no_policy
+        )
+        mcp_deps = list(view.kept_dependencies())
+        mcp_brought_in_by = view.brought_in_by
 
     try:
         source_deps = _audit_source_dependencies(manifest, lock)
@@ -1614,6 +1631,7 @@ def run_policy_checks(
         lockfile=lock,
         policy=policy,
         mcp_deps=mcp_deps,
+        mcp_brought_in_by=mcp_brought_in_by,
         # effective_target=None: the manifest target check runs below.
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,

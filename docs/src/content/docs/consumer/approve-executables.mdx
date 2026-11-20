@@ -110,7 +110,9 @@ executables:
 
 - **Hook files** are pinned with the scripts they reference; **MCP servers**
   with their command, arguments, environment, URL and headers. A plugin that
-  the harness loads whole gets one fingerprint over its entire folder.
+  the harness loads whole gets one fingerprint over its entire folder: file paths
+  and bytes, not file modes, so the same pin works on every operating system. The
+  installed copy is still checked, modes included.
 - **Changed content is parked** until you approve it again:
 
   ```text frame="none"
@@ -148,7 +150,8 @@ machine too.
 `apm audit --ci` ignores personal approvals when it checks MCP servers.
 
 If your organization publishes a recommended set, accept it with
-`apm approve --recommended`.
+`apm approve --recommended`. `--recommended` and `--all` skip any package that a
+project, user or organization layer denies, and write no approval for it.
 
 ## Verify
 

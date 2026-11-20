@@ -362,7 +362,7 @@ class PluginManifestProducer:
                 pass
 
         try:
-            targets = manifest_target_restriction(data)
+            targets = manifest_target_restriction(data, options.apm_yml_path)
         except (
             ConflictingTargetsError,
             EmptyTargetsListError,
@@ -484,7 +484,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
         from .plugin_manifest import PLUGIN_MANIFEST_ECOSYSTEMS
 
         try:
-            targets = manifest_target_restriction(data)
+            targets = manifest_target_restriction(data, apm_yml_path)
         except (
             ConflictingTargetsError,
             EmptyTargetsListError,
