@@ -53,15 +53,19 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
         world.publish_policy({**_ALLOW_ALL, "dependencies": {"deny": [package.slug]}})
         world.clear_policy_cache()
         violation = f"Policy violation: github.com/{package.slug}"
-        for step, args in (
-            ("2-install-blocked", ("install",)),
-            ("3-frozen-blocked", ("install", "--frozen")),
-            ("4-update-blocked", ("update", "--yes")),
+        # Each refusal names a bypass that command accepts: install has
+        # --no-policy, update only the one-shot env prefix (#3994).
+        install_bypass = "--no-policy` for one-off bypass"
+        update_bypass = "`APM_POLICY_DISABLE=1 apm update` (never export it in CI)"
+        for step, args, bypass in (
+            ("2-install-blocked", ("install",), install_bypass),
+            ("3-frozen-blocked", ("install", "--frozen"), install_bypass),
+            ("4-update-blocked", ("update", "--yes"), update_bypass),
         ):
             result = run_step(runner, args, cwd=project, env=env, step=step, expected=1)
-            _assert_refusal_on_stderr(
-                result, violation, "blocked by org policy", "--no-policy` for one-off bypass"
-            )
+            _assert_refusal_on_stderr(result, violation, "blocked by org policy", bypass)
+            if args[0] == "update":
+                assert "--no-policy" not in result.stdout + result.stderr, step
 
         usage = run_step(runner, ("approve",), cwd=project, env=env, step="5-approve", expected=1)
         _assert_refusal_on_stderr(usage, "Specify at least one package")

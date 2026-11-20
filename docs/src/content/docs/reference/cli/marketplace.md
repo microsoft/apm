@@ -229,7 +229,9 @@ apm marketplace list --verbose
 
 ### `apm marketplace browse NAME`
 
-Show the packages exposed by a registered marketplace.
+Show the packages exposed by a registered marketplace. Each plugin prints
+its full install name (`plugin@marketplace`) and version, with the
+description wrapped underneath.
 
 ```bash
 apm marketplace browse awesome-agents

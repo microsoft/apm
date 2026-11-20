@@ -744,7 +744,9 @@ def _run_dep_update_locked(
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)
 
-    logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
+    logger = InstallLogger(
+        verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
+    )
     if _handle_service_only_update(
         apm_package=apm_package,
         scope=scope,

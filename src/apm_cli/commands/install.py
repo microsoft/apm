@@ -861,9 +861,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     help=(
         "Refuse to install when apm.lock.yaml is missing or out of sync with "
         "apm.yml, including Git source, ref, host provider, transport, and MCP "
-        "config state (CI-safe; mutually exclusive with "
-        "--update, --mcp, and positional packages). Use 'apm audit' for on-disk "
-        "integrity."
+        "config state, or when deployed files do not match the hashes it records "
+        "(CI-safe; mutually exclusive with --update, --mcp, and positional packages)."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
@@ -1419,7 +1418,6 @@ def install(  # noqa: PLR0913
             get_apm_dir,
             get_manifest_path,
             get_modules_dir,
-            warn_unsupported_user_scope,
         )
 
         if scope is InstallScope.USER:
@@ -1427,7 +1425,6 @@ def install(  # noqa: PLR0913
                 dry_run=dry_run,
                 logger=logger,
                 ensure_user_dirs=ensure_user_dirs,
-                warn_unsupported_user_scope=warn_unsupported_user_scope,
             )
 
         # Scope-aware paths

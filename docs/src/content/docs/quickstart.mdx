@@ -34,15 +34,15 @@ Copilot or Claude Code.
    [i] Targets: claude, copilot  (source: apm.yml)
      [+] vercel-labs/agent-skills #main @1a2c79d4
      |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
-     [!] 1 dependency unpinned: vercel-labs/agent-skills -- add #tag or #sha to
-   prevent drift
+     [!] 1 dependency unpinned: vercel-labs/agent-skills -- apm.lock.yaml pins the
+   resolved commit; to track releases on update, add a semver range in apm.yml
+   such as #^1.0.0 (a tag like #v1.0.0 stays put)
    [*] Installed 1 APM dependency in 6.5s.
    ```
 
-   The warning is APM being careful. This skill follows the repository's `main` branch, but the
-   lockfile records the exact commit you got, `1a2c79d4`, so teammates get that commit until
-   you choose to update. Add `#<tag>` or `#<commit>` to the install to make the manifest exact
-   too.
+   This skill follows the repository's `main` branch, so APM points out that the lockfile
+   records the exact commit you got, `1a2c79d4`. Teammates get that commit until you run
+   `apm update`. Add a semver range such as `#^1.0.0` to follow tagged releases; a fixed tag like `#v1.0.0` stays on that release.
 
 3. **Install a plugin from a marketplace.** A marketplace is a published list of plugins;
    this is Anthropic's.
@@ -72,7 +72,7 @@ Copilot or Claude Code.
 
    ```text frame="none"
    [i] Targeting declared targets from apm.yml: claude, copilot
-   |  [+]  io.github.github/github-mcp-server -> Claude, Copilot (configured)
+   |  [+]  io.github.github/github-mcp-server -> Claude Code, Copilot CLI (configured)
    [*] Configured 1 server
    ```
 
@@ -126,7 +126,7 @@ Copilot or Claude Code.
    ```
 
    ```text frame="none"
-   |  [+]  io.github.github/github-mcp-server -> Claude, Copilot (configured)
+   |  [+]  io.github.github/github-mcp-server -> Claude Code, Copilot CLI (configured)
    ...
    [*] Installed 2 APM dependencies and 1 MCP server in 1.5s.
    [i] Deployed files verified against apm.lock.yaml.

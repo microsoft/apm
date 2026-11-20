@@ -404,7 +404,7 @@ def test_marketplace_update_reports_partial_failure(world: _World) -> None:
     batch = world.run("marketplace", "update", scenario="all-partial")
     assert batch.returncode == 1, _evidence(batch)
     output = _output(batch)
-    assert "acme (1 plugins)" in output
+    assert "acme (1 plugin)" in output
     assert "failed: beta" in output
     assert "Marketplace cache refreshed" not in output
 

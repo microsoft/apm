@@ -353,7 +353,9 @@ class ScriptRunner:
         if not match:
             return None
 
-        args_before = match.group(1).strip()
+        # 'llm < x.prompt.md' redirects stdin in a shell; APM passes the compiled
+        # prompt itself, so a literal '<' must not reach the runtime (#3994).
+        args_before = re.sub(r"(?:^|\s)<$", "", match.group(1).strip()).strip()
         args_after = match.group(3).strip()
 
         # In the env-var path, non-codex runtimes strip -p flags (matches
@@ -389,6 +391,8 @@ class ScriptRunner:
         """
         prefix = f"{env_prefix} " if env_prefix else ""
         result = f"{prefix}codex exec"
+        # The documented 'codex exec <flags> x.prompt.md' already names exec (#3994).
+        args_before = re.sub(r"^exec(?:\s+|$)", "", args_before)
         if args_before:
             result += f" {args_before}"
         if args_after:

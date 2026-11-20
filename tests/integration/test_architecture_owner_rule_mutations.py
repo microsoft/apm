@@ -4374,6 +4374,18 @@ def test_consumer_manifest_guard_rejects_anchor_bypasses(path: str, old: str, ne
             "f\"one: {detail.strip().replace('[x] ', '')}\"",
             id="caller-replaces-status-symbol",
         ),
+        pytest.param(
+            "src/apm_cli/commands/outdated.py",
+            "console=new_console(),",
+            "console=Console(),",
+            id="command-builds-unicode-rich-console",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/outdated.py",
+            "from apm_cli.utils.console import new_console\n",
+            "from rich.console import Console as new_console\n",
+            id="command-imports-rich-console",
+        ),
     ],
 )
 def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str, new: str) -> None:

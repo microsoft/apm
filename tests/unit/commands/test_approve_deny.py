@@ -890,6 +890,19 @@ class TestExplainCmd:
             assert "default-deny" in result.output
             assert "apm approve" in result.output
 
+    def test_explain_with_gate_disabled_does_not_promise_deployment(self) -> None:
+        """A disabled executables gate is not an org-policy verdict (#3994)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+            with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
+                result = runner.invoke(policy_group, ["explain", "hook-pkg"])
+            assert result.exit_code == 0
+            output = " ".join(result.output.split())
+            assert "all executables deploy" not in output
+            assert "Org policy can still block the package" in output
+
     def test_explain_allowed_via_project(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():

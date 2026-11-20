@@ -20,7 +20,7 @@ apm pack [OPTIONS]
 - `targets:` (or deprecated singular `target:`) field containing `claude`, `copilot`, or `codex` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
 
-The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time. In the default Claude plugin format, a project with no `apm.lock.yaml` (for example `dependencies: {}` with only local primitives) still gets an embedded lockfile with an empty dependency list and the full `bundle_files` manifest. `--format agent-plugin` and `--format apm` require the project lockfile.
+The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time. In the default Claude plugin format, a project with no `apm.lock.yaml` (for example `dependencies: {}` with only local primitives) still gets an embedded lockfile with an empty dependency list and the full `bundle_files` manifest. `--format agent-plugin` needs the lockfile only when `apm.yml` declares dependencies, so a fresh `apm plugin init` scaffold packs as is; `--format apm` requires the project lockfile.
 
 Bundles are target-agnostic. The consumer's project decides where files land at install time -- the bundle carries no harness binding. Flags whose scope does not match the detected outputs are silent no-ops, not errors, so the same `apm pack` invocation works in CI across projects that produce only a bundle, only a marketplace, or both.
 
@@ -40,7 +40,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
 | `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
 | `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
-| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Includes `metadata_enrichment.certifiable` and per-package outcomes. |
+| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Includes `metadata_enrichment.certifiable`, per-package outcomes, and `bundle` (`path` and `files` of the built bundle; `null` when no bundle was built). |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
 | `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output in memory and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. Exits `4` for drift or uncertifiable remote Claude metadata. It automatically suppresses normal pack writes. |
@@ -312,7 +312,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 - **Newer lockfiles fail closed.** If `apm.lock.yaml` was written by a newer APM, `apm pack` refuses before writing, names both versions, and tells you how to upgrade.
 - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
 - **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
-- **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.
+- **Share line.** On success, `apm pack` prints the command a consumer runs: `Share with: apm install ./build/<bundle>` for the default Claude plugin bundle, `apm unpack ./build/<bundle>` (deprecated) for `--format apm`, and, for `--format agent-plugin`, adding the bundle path under `dependencies.apm` in the consumer's `apm.yml` and running `apm install --target copilot`.
 - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
 - **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses with a deprecation warning. Use `--marketplace=` to filter which formats are built in a given invocation.
 - **JSON mode.** `--json` makes `apm pack` machine-friendly: stdout is a single JSON object, all human-readable logs move to stderr. Combine with `--marketplace=` for selective CI matrix builds.

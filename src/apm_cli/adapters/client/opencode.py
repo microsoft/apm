@@ -299,11 +299,8 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
                 {config_key: server_config},
                 enabled=opencode_enabled_value(server_info, enabled),
             )
-            if written is False:
-                return False
-
-            print(f"Successfully configured MCP server '{config_key}' for OpenCode")
-            return True
+            # The integrator's install tree reports success once (#3994).
+            return written is not False
 
         except Exception as e:
             print(f"Error configuring MCP server: {e}")

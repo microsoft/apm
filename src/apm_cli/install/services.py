@@ -594,12 +594,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         # still appears and the count is truthful.
         _files = _info["files"]
         _adopted = _info["adopted"]
+        _noun = _info["label"].removesuffix("s") if (_files or _adopted) == 1 else _info["label"]
         if _files > 0:
-            _verb_phrase = f"{_files} {_info['label']} integrated"
+            _verb_phrase = f"{_files} {_noun} integrated"
             if _adopted > 0:
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
-            _verb_phrase = f"{_adopted} {_info['label']} adopted"
+            _verb_phrase = f"{_adopted} {_noun} adopted"
         if _expansion:
             _log_integration(f"  |-- {_verb_phrase}:")
             for line in _expansion:

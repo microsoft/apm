@@ -1,5 +1,6 @@
 """Console utility functions for formatting and output."""
 
+import re
 import threading
 from contextlib import contextmanager
 from typing import Any
@@ -61,6 +62,58 @@ STATUS_SYMBOLS = {
 }
 
 
+# ASCII-only Rich consoles ------------------------------------------------------
+_ascii_console_classes: dict[type, type] = {}
+_ELLIPSIS_RUN = re.compile(r"([^\s|]{0,2})\u2026")
+
+
+def _ascii_ellipsis(segment: Any) -> Any:
+    """Return *segment* with U+2026 runs rewritten to dots of the same width."""
+    text = segment.text
+    if "\u2026" not in text:
+        return segment
+    dotted = _ELLIPSIS_RUN.sub(lambda m: "." * (len(m.group(1)) + 1), text)
+    return segment._replace(text=dotted)
+
+
+def _ascii_console(base: Any, **kwargs: Any) -> Any:
+    """Build *base* so boxes, rules, and trees render in printable ASCII.
+
+    Rich picks ASCII box characters when the console encoding is not UTF.
+    Reporting ``ascii`` keeps tables and panels within the encoding rule on
+    every terminal. A non-class *base* (a test double) is called as is.
+    """
+    if not isinstance(base, type):
+        return base(**kwargs)
+    cls = _ascii_console_classes.get(base)
+    if cls is None:
+
+        class _AsciiConsole(base):  # type: ignore[misc, valid-type]
+            @property
+            def encoding(self) -> str:
+                return "ascii"
+
+            def _render_buffer(self, buffer: Any) -> str:
+                # Rich truncates with U+2026 whatever the encoding (#3994); swap
+                # it and up to two preceding cells for dots so columns stay aligned.
+                # Rewrite segment text, before styles become ANSI escapes.
+                return super()._render_buffer(_ascii_ellipsis(segment) for segment in buffer)
+
+        cls = _ascii_console_classes.setdefault(base, _AsciiConsole)
+    return cls(**kwargs)
+
+
+def new_console(**kwargs: Any) -> Any:
+    """Return a new Rich console that renders boxes and rules in ASCII.
+
+    The one constructor for Rich consoles in APM; ``kwargs`` pass through to
+    ``rich.console.Console``.
+    """
+    from rich import console as rich_console
+
+    return _ascii_console(rich_console.Console, **kwargs)
+
+
 # Thread-safe console singleton ------------------------------------------------
 _console_instance: Any | None = None
 _console_lock = threading.Lock()
@@ -82,7 +135,7 @@ def _get_stderr_console() -> Any | None:
     with _console_lock:
         if _stderr_console_instance is None:
             try:  # noqa: SIM105
-                _stderr_console_instance = Console(stderr=True)
+                _stderr_console_instance = _ascii_console(Console, stderr=True)
             except Exception:
                 pass
     return _stderr_console_instance
@@ -99,7 +152,7 @@ def _get_console() -> Any | None:
         if _console_instance is not None:
             return _console_instance
         try:  # noqa: SIM105
-            _console_instance = Console(stderr=_console_stderr)
+            _console_instance = _ascii_console(Console, stderr=_console_stderr)
         except Exception:
             pass
     return _console_instance
@@ -149,6 +202,8 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
+    # A hard-wrapped URL is split into lines that no longer open (#3994).
+    soft_wrap = soft_wrap or "://" in message
     console = _get_stderr_console() if err else _get_console()
     if console:
         try:
@@ -199,8 +254,15 @@ def _rich_error(message: str, symbol: str = None, *, err: bool = False):  # noqa
 
 
 def _rich_warning(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013
-    """Display warning message with yellow color (``err=True`` writes to stderr)."""
-    _rich_echo(message, color="yellow", symbol=symbol, err=err)
+    """Display warning message with yellow color (``err=True`` writes to stderr).
+
+    Continuation lines carry remediation commands; they are never hard-wrapped,
+    so a command and its argument stay on one copy-pasteable line.
+    """
+    head, sep, rest = message.partition("\n")
+    _rich_echo(head, color="yellow", symbol=symbol, err=err)
+    if sep:
+        _rich_echo(rest, color="yellow", soft_wrap=True, err=err)
 
 
 def _rich_info(

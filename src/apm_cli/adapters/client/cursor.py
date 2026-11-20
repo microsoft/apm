@@ -286,11 +286,8 @@ class CursorClientAdapter(CopilotClientAdapter):
             config_key = self.determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            if self.update_config({config_key: server_config}) is False:
-                return False
-
-            print(f"Successfully configured MCP server '{config_key}' for Cursor")
-            return True
+            # The integrator's install tree reports success once (#3994).
+            return self.update_config({config_key: server_config}) is not False
 
         except Exception as e:
             print(f"Error configuring MCP server: {e}")

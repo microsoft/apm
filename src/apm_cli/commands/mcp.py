@@ -516,10 +516,9 @@ def show(ctx, server_name, verbose):
                 pkg_name = pkg.get("name", "unknown")
                 runtime_hint = pkg.get("runtime_hint", " --")
 
-                # Describe features of local packages
+                # Describe features of local packages. Registry names such as
+                # io.github.<owner>/... say nothing about GitHub toolsets (#3994).
                 features = "Full configuration control"
-                if "github" in name.lower():
-                    features = "Supports GITHUB_TOOLSETS"
 
                 # Truncate long package names intelligently
                 if len(pkg_name) > 25:
@@ -548,9 +547,9 @@ def show(ctx, server_name, verbose):
         )
         install_table.add_row("2", "Install dependencies", "[bold cyan]apm install[/bold cyan]")
         install_table.add_row(
-            "3",
-            "Direct install (coming soon)",
-            f"[bold cyan]apm install {install_name}[/bold cyan]",
+            "",
+            "Or add and install in one step",
+            f"[bold cyan]apm install --mcp {install_name}[/bold cyan]",
         )
 
         console.print(install_table)

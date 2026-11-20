@@ -20,6 +20,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -778,12 +779,23 @@ def _is_interactive() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
+def trust_remedy(package: str, recommend: Collection[str] = ()) -> str:
+    """One remediation line for parked executables.
+
+    Offers ``apm approve --recommended`` only when the org policy declares an
+    ``executables.recommend`` set; otherwise that command finds nothing.
+    """
+    bulk = "Trust the org-vetted set: apm approve --recommended  |  " if recommend else ""
+    return f"{bulk}Trust one: apm approve {package}  |  Inspect: apm policy explain {package}"
+
+
 def prompt_executable_approval(
     declarations: list[ExecutableDeclaration],
     *,
     allow_executables: dict[str, dict[str, bool]] | None = None,
     trust_all: bool = False,
     no_executables: bool = False,
+    recommend: Collection[str] = (),
 ) -> dict[str, dict[str, bool]]:
     """Run the interactive approval flow for packages with executables.
 
@@ -835,12 +847,7 @@ def prompt_executable_approval(
             provenance = "(transitive)" if decl.is_transitive else "(direct)"
             _rich_echo(f"  {decl.package_key} {provenance}: {decl.summary_line()}")
         _rich_echo("")
-        _rich_info(
-            "Trust the org-vetted set: apm approve --recommended  |  "
-            "Trust one: apm approve <package>  |  "
-            "Inspect: apm policy explain <package>",
-            symbol="info",
-        )
+        _rich_info(trust_remedy("<package>", recommend), symbol="info")
         sys.exit(1)
 
     # Interactive: prompt per-package

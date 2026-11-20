@@ -748,7 +748,13 @@ def verify_deployed_file_hashes(
             file_path = resolved
         if not file_path.exists():
             continue  # _check_deployed_files_present owns this signal
-        if locator.kind == LocatorKind.PROJECT_RELATIVE and _has_symlink_component(file_path):
+        # A locked file replaced by a symlink is never followed: it fails the
+        # check (#3994). Only a symlinked parent directory (a shared root) skips.
+        if (
+            locator.kind == LocatorKind.PROJECT_RELATIVE
+            and not file_path.is_symlink()
+            and _has_symlink_component(file_path)
+        ):
             continue
         if file_path.is_symlink() or not file_path.is_file():
             unresolved_hash_paths.append(locator.value)
@@ -895,7 +901,11 @@ def _check_content_integrity(
         )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
-        remedies.append("'apm install' to restore drifted files")
+        from ..deps.file_provenance import LOCAL_BUNDLE_OWNER
+        from ..install.local_edits import restore_drifted_files_remedy
+
+        owners = {drift.owner == LOCAL_BUNDLE_OWNER for drift in hash_mismatches}
+        remedies.extend(restore_drifted_files_remedy(bundle=bundle) for bundle in sorted(owners))
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
         remedies.append("'apm install <bundle> --force' to restage drifted files")

@@ -154,7 +154,9 @@ Check names and severities: [Baseline CI checks](../../reference/baseline-checks
 recorded. It never re-resolves, re-hashes or touches the network. Licenses are the
 `license:` each package declares in its `apm.yml`, validated against SPDX identifiers;
 APM never reads `LICENSE` files, and an undeclared license is `NOASSERTION` in SPDX and
-omitted in CycloneDX. See
+omitted in CycloneDX. Each component carries a package URL, such as
+`pkg:github/<owner>/<repo>@<commit>`, and the lockfile's SHA-256 content hash; SPDX output
+sets `filesAnalyzed: false` because it lists packages, not files. See
 [Inventory and drift](../drift-detection/).
 
 ## Source and license

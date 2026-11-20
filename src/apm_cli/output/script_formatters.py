@@ -3,9 +3,10 @@
 from pathlib import Path
 
 try:
-    from rich.console import Console
     from rich.panel import Panel
     from rich.text import Text
+
+    from apm_cli.utils.console import new_console
 
     RICH_AVAILABLE = True
 except ImportError:
@@ -29,7 +30,7 @@ class ScriptExecutionFormatter:
             use_color: Whether to use colors and rich formatting.
         """
         self.use_color = use_color and RICH_AVAILABLE
-        self.console = Console() if self.use_color else None
+        self.console = new_console() if self.use_color else None
 
     def format_script_header(self, script_name: str, params: dict[str, str]) -> list[str]:
         """Format the script execution header with parameters.

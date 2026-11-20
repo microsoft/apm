@@ -240,7 +240,7 @@ def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: P
                 "name": "remote-tool",
                 "source": {
                     "source": "url",
-                    "url": "acme/remote-tool",
+                    "url": "https://github.com/acme/remote-tool",
                     "ref": "v1.0.0",
                     "sha": "a" * 40,
                     "tag_pattern": "release/{name}/{version}",
@@ -252,7 +252,7 @@ def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: P
                 "name": "remote-subdir-tool",
                 "source": {
                     "source": "git-subdir",
-                    "url": "acme/monorepo",
+                    "url": "https://github.com/acme/monorepo",
                     "path": "plugins/remote-subdir-tool",
                     "ref": "v2.0.0",
                     "sha": "b" * 40,

@@ -46,9 +46,10 @@ governs dependency installs.
 
 ## Examples
 
-Unpack an archive into the current directory:
+Unpack a legacy archive into the current directory:
 
 ```bash
+apm pack --format apm --archive
 apm unpack ./build/my-pkg-1.0.0.zip
 ```
 
@@ -78,7 +79,7 @@ apm unpack bundle.zip --force
 
 ## Behavior
 
-- **Bundle formats.** `apm install` deploys only plugin-format bundles. Legacy `--format apm` tarballs (whole-project bundles produced by older `apm pack` invocations) are deployed via `apm unpack` and have no equivalent `install` path.
+- **Bundle formats.** `apm install` deploys only plugin-format bundles. Legacy `--format apm` tarballs (whole-project bundles produced by older `apm pack` invocations) are deployed via `apm unpack` and have no equivalent `install` path. `apm unpack` refuses a plugin-format bundle (root `plugin.json`) and points to `apm install`.
 - **Additive writes only.** Files not listed in the bundle's lockfile are left alone; the bundle never deletes project files.
 - **Overwrite on collision.** When a bundle file shares a path with a local file, the bundle file wins.
 - **Managed destinations only.** Every `deployed_files` entry must land under a known integration directory (`.github/`, `.claude/`, `.agents/`, ...) of the output directory, with no symlinked path component. Any other entry fails the unpack before a file is written. Bundle paths that run through a symlink are skipped.
