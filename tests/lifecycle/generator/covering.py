@@ -39,6 +39,8 @@ WORLD_KINDS: Mapping[str, tuple[str, ...]] = {
     "p-lsp": ("lsp",),
     "p-canvas": ("canvas",),
 }
+# Row packages the world serves from git; git refuses the LSP-only p-lsp (#4257).
+GIT_SOURCES = tuple(name for name in GIT_PUBLISHED if name in WORLD_KINDS and name != "p-lsp")
 # Project-scope surface prefixes of the non-MCP primitives (tests/lifecycle/rows.py
 # _SURFACE_GLOBS): an mcp-install must leave them byte-identical (U7).
 NON_MCP_SURFACES = (".agents/skills", ".github/hooks", ".github/lsp.json", ".github/extensions")
@@ -189,7 +191,7 @@ def _probes(plan: Plan, target: str, first: str, decided: str | None) -> list[St
             unchanged=EVERYTHING,
         ),
     ]
-    if plan.git and set(plan.packages) <= set(GIT_PUBLISHED):
+    if plan.git and set(plan.packages) <= set(GIT_SOURCES):
         # pack refuses local-path dependencies; pack x SRC is not a coordinate (U6).
         steps += [
             _cmd("pack", "pack", mods={"DRYRUN"}),
@@ -359,7 +361,7 @@ def _units(state: _State, step: Step, plan: Plan, kinds) -> list[dict[str, str]]
     names = step.names or state.declared
     units = []
     for name in names:
-        source = "git" if plan.git and name in GIT_PUBLISHED else "local-path"
+        source = "git" if plan.git and name in GIT_SOURCES else "local-path"
         for kind in kinds[name]:
             gate = (
                 "none" if kind in PLAIN_PRIMS else _GATE_STATES[state.gate.get(name, "unapproved")]
@@ -420,7 +422,7 @@ def plans() -> list[Plan]:
     result = []
     for size in range(1, len(names) + 1):
         for packages in combinations(names, size):
-            gits = (False, True) if set(packages) & set(GIT_PUBLISHED) else (False,)
+            gits = (False, True) if set(packages) & set(GIT_SOURCES) else (False,)
             gates = ("approve", "deny", "unapproved") if _executables(packages) else ("approve",)
             for git, multi, gate, mcp in product(gits, (False, True), gates, (False, True)):
                 result.append(Plan(packages, git, multi, gate, mcp))
@@ -440,7 +442,7 @@ def _gate_row(index: int, plan: Plan, obligations, covered: set[str]) -> tuple[R
         if fresh or step.essential:
             kept.append(replace(step, cells=tuple(fresh)))
             new.update(fresh)
-    sources = {name: "git" for name in plan.packages if plan.git and name in GIT_PUBLISHED}
+    sources = {name: "git" for name in plan.packages if plan.git and name in GIT_SOURCES}
     row = Row(f"cover-{index:02d}-{plan.slug}", "gate", plan.packages, targets, sources, kept)
     row.cell = {
         "OP": "install",
