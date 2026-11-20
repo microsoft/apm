@@ -41,7 +41,6 @@ from .engine import (
     _dependency_lifecycle_label,
     _dependency_public_label,
     _dry_run_uninstall,
-    _is_host_local_spelling,
     _preflight_uninstall_survivors,
     _project_transitive_orphans,
     _remove_packages_from_disk,
@@ -52,32 +51,6 @@ from .engine import (
     _validate_uninstall_packages,
     manifest_dependency_entries,
 )
-
-
-class _CleanupLabelLogger:
-    """Name target-cleanup lines with uninstall labels instead of lockfile keys."""
-
-    def __init__(self, logger: CommandLogger, lockfile, labels: dict[str, str]) -> None:
-        self._logger = logger
-        self._lockfile = lockfile
-        self._labels = labels
-
-    def _label(self, dep_key: str) -> str:
-        if dep_key in self._labels:
-            return self._labels[dep_key]
-        if dep_key.startswith("local:") or _is_host_local_spelling(dep_key):
-            locked = self._lockfile.dependencies.get(dep_key) if self._lockfile else None
-            return locked.repo_url if locked is not None else "local dependency"
-        return dep_key
-
-    def stale_cleanup(self, dep_key: str, count: int) -> None:
-        self._logger.stale_cleanup(self._label(dep_key), count)
-
-    def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str) -> None:
-        self._logger.cleanup_skipped_user_edit(rel_path, self._label(dep_key))
-
-    def __getattr__(self, name: str):
-        return getattr(self._logger, name)
 
 
 def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: int) -> str:
@@ -956,14 +929,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 remove_selected_ownership=True,
                 selected_outcome=cleanup_outcome,
                 user_scope=scope is InstallScope.USER,
-                logger=_CleanupLabelLogger(
-                    logger,
-                    lockfile,
-                    {
-                        _removed_lock_key(package, lockfile): _dependency_public_label(package)
-                        for package in (*packages_to_remove, *retained_packages)
-                    },
-                ),
+                logger=logger,
                 preserved_selected_values=profile_survivors,
             )
             _abort_if_retained_target_cleanup_paths(
