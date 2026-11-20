@@ -266,7 +266,7 @@ class RowReplay:
         return result
 
     def _advance(self, op: Operation, requested: ModelState, result: CommandResult) -> None:
-        if result.returncode != 0:
+        if result.returncode != 0 or "DRYRUN" in op.modifiers:
             return
         if op.command in _RECONCILING and "FROZEN" not in op.modifiers:
             self.model = requested.installed()
