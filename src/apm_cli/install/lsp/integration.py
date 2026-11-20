@@ -346,6 +346,13 @@ def run_owned_lsp_integration(
     return count
 
 
+def has_recorded_lsp_state(lockfile: "LockFile | None") -> bool:
+    """Return whether *lockfile* records LSP servers APM may need to reconcile."""
+    return lockfile is not None and bool(
+        lockfile.lsp_servers or lockfile.lsp_target_servers or lockfile.lsp_config_provenance
+    )
+
+
 def reconcile_lsp_after_uninstall(
     *,
     apm_package: "APMPackage",
@@ -357,9 +364,7 @@ def reconcile_lsp_after_uninstall(
     logger,
 ) -> bool:
     """Recompute trusted LSP state from every surviving declaration."""
-    if lockfile is None or not (
-        lockfile.lsp_servers or lockfile.lsp_target_servers or lockfile.lsp_config_provenance
-    ):
+    if not has_recorded_lsp_state(lockfile):
         return False
     if apm_package is None:
         raise ValueError("Cannot reconcile existing LSP state without a valid project manifest")
