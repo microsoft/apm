@@ -117,7 +117,28 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def do_GET(self) -> None:
-        self.send_error(502, "Hermetic fixture only tunnels HTTPS")
+        """Answer a plain-HTTP proxy request for a configured host (absolute form)."""
+        from urllib.parse import urlsplit
+
+        target = urlsplit(self.path)
+        host = (target.hostname or "").lower()
+        if target.scheme != "http" or host not in self.server.hosts:
+            self.send_error(502, "Hermetic fixture does not proxy external hosts")
+            return
+        with self.server.observations_lock:
+            self.server.observations.append(
+                HeaderObservation(
+                    host=host,
+                    method=self.command,
+                    path=target.path,
+                    headers=tuple(self.headers.items()),
+                )
+            )
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    do_HEAD = do_GET
 
 
 class LocalHeaderCaptureProxy:
@@ -146,12 +167,14 @@ class LocalHeaderCaptureProxy:
         }
 
     def child_environment(self, environment: Mapping[str, str]) -> dict[str, str]:
-        """Route a child's HTTPS through the proxy and trust only the fixture CA."""
+        """Route a child's HTTP and HTTPS through the proxy and trust only the fixture CA."""
         child = dict(environment)
-        for name in ("ALL_PROXY", "HTTP_PROXY", "all_proxy", "http_proxy", "CURL_CA_BUNDLE"):
+        for name in ("ALL_PROXY", "all_proxy", "CURL_CA_BUNDLE"):
             child.pop(name, None)
         child["HTTPS_PROXY"] = self.proxy_url
         child["https_proxy"] = self.proxy_url
+        child["HTTP_PROXY"] = self.proxy_url
+        child["http_proxy"] = self.proxy_url
         child["NO_PROXY"] = "localhost"
         child["no_proxy"] = "localhost"
         child["REQUESTS_CA_BUNDLE"] = str(self.ca_path)

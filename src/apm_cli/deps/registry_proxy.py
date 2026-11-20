@@ -11,10 +11,10 @@ Environment variables (canonical)::
     PROXY_REGISTRY_TOKEN    -- Bearer token for the proxy.
     PROXY_REGISTRY_ONLY     -- Set to ``1``/``true``/``yes`` to block all
                             direct VCS downloads.
-    PROXY_REGISTRY_ALLOW_HTTP -- Set to ``1`` to silence the plaintext-token
-                            warning when ``PROXY_REGISTRY_URL`` uses ``http://``
-                            and ``PROXY_REGISTRY_TOKEN`` is set (intended for
-                            trusted internal proxies; not recommended).
+    PROXY_REGISTRY_ALLOW_HTTP -- Set to ``1`` to authorize sending
+                            ``PROXY_REGISTRY_TOKEN`` over ``http://`` to a host
+                            that is not loopback or a private network address
+                            (intended for trusted internal proxies).
 
 Deprecated aliases (still functional, emit ``DeprecationWarning``)::
 
@@ -150,15 +150,9 @@ class RegistryConfig:
 
         token = os.environ.get("PROXY_REGISTRY_TOKEN") or _read_deprecated_token()
 
-        if token and parsed.scheme == "http" and not os.environ.get("PROXY_REGISTRY_ALLOW_HTTP"):
-            warnings.warn(
-                f"PROXY_REGISTRY_TOKEN is set but PROXY_REGISTRY_URL uses http:// "
-                f"({redact_url_userinfo(url)!r}); the bearer token will be transmitted in plaintext. "
-                f"Use https:// in production, or set PROXY_REGISTRY_ALLOW_HTTP=1 "
-                f"to silence this warning when targeting a trusted internal proxy.",
-                UserWarning,
-                stacklevel=2,
-            )
+        if token and not http_token_allowed(parsed.scheme, host):
+            _warn_http_token_withheld(url)
+            token = None
 
         enforce_str = os.environ.get("PROXY_REGISTRY_ONLY", "")
         if not enforce_str:
@@ -292,6 +286,34 @@ _REGISTRY_URL_MISSING_WARNING = (
     "set PROXY_REGISTRY_URL and PROXY_REGISTRY_TOKEN"
 )
 _emitted_warnings: set[str] = set()
+
+
+def http_token_allowed(scheme: str, host: str | None) -> bool:
+    """Whether ``PROXY_REGISTRY_TOKEN`` may be sent to ``scheme://host``.
+
+    Always over https. Over http only to a loopback or RFC 1918 private host,
+    or when ``PROXY_REGISTRY_ALLOW_HTTP=1`` explicitly authorizes it.
+    """
+    from apm_cli.utils.net import is_local_network_host
+
+    if (scheme or "").lower() != "http":
+        return True
+    return is_local_network_host(host) or os.environ.get("PROXY_REGISTRY_ALLOW_HTTP") == "1"
+
+
+def _warn_http_token_withheld(url: str) -> None:
+    """Say once per process that the proxy token is not sent over http."""
+    message = (
+        f"PROXY_REGISTRY_TOKEN is not sent to {redact_url_userinfo(url)!r}: the URL uses "
+        "http:// and the host is not loopback or a private network address. Use "
+        "https://, or set PROXY_REGISTRY_ALLOW_HTTP=1 to authorize sending it over http."
+    )
+    if message in _emitted_warnings:
+        return
+    _emitted_warnings.add(message)
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(message, symbol="warning", err=True)
 
 
 def _warn_token_without_registry_url() -> None:

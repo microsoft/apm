@@ -1868,9 +1868,11 @@
       "keyword": "SHOULD",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[loopback]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[public-host]"
       ]
     },
     {

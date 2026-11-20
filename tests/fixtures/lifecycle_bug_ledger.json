@@ -2495,6 +2495,20 @@
       ]
     },
     {
+      "issue": 4314,
+      "fixed_in": "Unreleased",
+      "summary": "PROXY_REGISTRY_TOKEN travels over http:// only to a loopback or private network host, or with the explicit PROXY_REGISTRY_ALLOW_HTTP=1 opt-in; otherwise it is not sent and a [!] line names the URL and the opt-in.",
+      "failure_modes": ["auth"],
+      "properties": ["auth.credentials_isolated"],
+      "regression_tests": [
+        "tests/unit/test_artifactory_support.py::TestRegistryConfig::test_http_url_to_a_public_host_does_not_send_the_token",
+        "tests/unit/test_artifactory_support.py::TestRegistryConfig::test_http_url_sends_the_token_with_the_explicit_opt_in",
+        "tests/unit/test_artifactory_support.py::TestRegistryConfig::test_http_url_sends_the_token_only_to_a_local_network_host",
+        "tests/integration/test_proxy_registry_http_token_lifecycle.py::test_public_http_proxy_gets_no_token_and_the_cli_says_why",
+        "tests/integration/test_proxy_registry_http_token_lifecycle.py::test_private_or_opted_in_http_proxy_gets_the_token"
+      ]
+    },
+    {
       "issue": 4323,
       "fixed_in": "Unreleased",
       "summary": "apm pack refuses, in every bundle format and under --dry-run, to pack a file whose name matches the credential-file patterns (.env, .env.*, *.pem, *.key, id_rsa, id_ed25519), naming each path and writing no bundle.",
