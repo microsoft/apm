@@ -7,7 +7,8 @@ import json
 import os
 import sys
 import uuid
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -487,6 +488,28 @@ class DeploymentMaterializationSession:
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
         cls(project_root, scope, None).retire(deleted)
+
+
+@contextmanager
+def recorded_writes(
+    skill_integrator: Any,
+    integrator: Any,
+    targets: Sequence[TargetProfile],
+    package_info: Any,
+) -> Iterator[None]:
+    """Record the final-rendered writes of one integrator call, even on failure (#3701).
+
+    Writes reported before the call (direct callers outside a package) belong
+    to no package here and are discarded; files written before a failure are
+    APM's bytes too and are recorded.
+    """
+    record_rendered_writes(None, integrator, targets=(), package_info=package_info)
+    try:
+        yield
+    finally:
+        record_rendered_writes(
+            skill_integrator, integrator, targets=targets, package_info=package_info
+        )
 
 
 def record_rendered_writes(

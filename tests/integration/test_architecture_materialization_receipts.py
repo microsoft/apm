@@ -85,8 +85,8 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
         ),
         (
             "install/services.py",
-            "integrators.skill, _integrator, targets=[_target], package_info=package_info",
-            "None, _integrator, targets=[_target], package_info=package_info",
+            "with recorded_writes(integrators.skill, _integrator, [_target], package_info):",
+            "with contextlib.nullcontext():",
         ),
         (
             "core/deployment_ledger.py",

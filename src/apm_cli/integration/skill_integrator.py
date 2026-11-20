@@ -1902,15 +1902,14 @@ class SkillIntegrator(BaseIntegrator):
                 continue
             dest_file = dest_bin / src_file.name
             ensure_path_within(dest_file, dest_bin)
-            if self._copy_plugin_file(
+            self._copy_plugin_file(
                 src_file,
                 dest_file,
                 force=force,
                 make_executable=True,
                 logger=logger,
                 rel_label=f"{rel_prefix}/bin/{src_file.name}",
-            ):
-                self.note_rendered_write(dest_file)
+            )
             deployed.append(dest_file)
         return deployed
 
@@ -1928,19 +1927,18 @@ class SkillIntegrator(BaseIntegrator):
             return None
         dest_manifest = skill_base / ".claude-plugin" / "plugin.json"
         dest_manifest.parent.mkdir(parents=True, exist_ok=True)
-        if self._copy_plugin_file(
+        self._copy_plugin_file(
             plugin_manifest,
             dest_manifest,
             force=force,
             make_executable=False,
             logger=logger,
             rel_label=f"{rel_prefix}/.claude-plugin/plugin.json",
-        ):
-            self.note_rendered_write(dest_manifest)
+        )
         return dest_manifest
 
-    @staticmethod
     def _copy_plugin_file(
+        self,
         src_file: Path,
         dest_file: Path,
         *,
@@ -1948,7 +1946,7 @@ class SkillIntegrator(BaseIntegrator):
         make_executable: bool,
         logger,
         rel_label: str,
-    ) -> bool:
+    ) -> None:
         """Hash-gated copy of one plugin file, optionally marking it executable.
 
         Skips the copy when an identical file already exists (unless *force*),
@@ -1969,6 +1967,7 @@ class SkillIntegrator(BaseIntegrator):
 
         if not skip_copy:
             shutil.copy2(src_file, dest_file)
+            self.note_rendered_write(dest_file)
 
         if make_executable and os.name == "posix":
             # User-only (0o700-style): set the exact deploy mode so group,
@@ -1979,7 +1978,6 @@ class SkillIntegrator(BaseIntegrator):
 
         if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")
-        return not skip_copy
 
     def sync_integration(
         self,

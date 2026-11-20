@@ -1388,6 +1388,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             'self.identity_path, installation + "\\n", new_file_mode=0o600, create_only=True',
             "create_only=not self._state_present",
             'take = getattr(integrator, "take_rendered_writes", None)',
+            "record_rendered_writes(None, integrator, targets=(), package_info=package_info)",
             "DeploymentMaterializationSession.receipt_owner(package_info),",
         ),
         _SKILL_INTEGRATOR: (
@@ -1451,8 +1452,8 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
     # install service records them for each integrator call (#3701).
     write_reports = {
         "src/apm_cli/install/services.py": (
-            "integrators.skill, _integrator, targets=[_target], package_info=package_info",
-            "integrators.skill, integrators.skill, targets=projection_targets",
+            "with recorded_writes(integrators.skill, _integrator, [_target], package_info):",
+            "with recorded_writes(integrators.skill, integrators.skill, projection_targets,",
         ),
         **{
             f"src/apm_cli/integration/{name}.py": ("note_rendered_write(",)
