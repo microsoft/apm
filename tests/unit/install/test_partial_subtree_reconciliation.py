@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -9,9 +13,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install import orphans
 from apm_cli.install.package_selection import previous_selected_subtree_keys
 from apm_cli.install.phases import cleanup
 from apm_cli.install.phases.lockfile import LockfileBuilder
+from apm_cli.install.presentation import dry_run
 from apm_cli.models.dependency.reference import DependencyReference
 
 pytestmark = pytest.mark.component
@@ -78,8 +84,8 @@ def test_replacement_bound_candidate_fails_closed():
 def test_retained_descendant_pins_its_dropped_ancestors():
     lock = _chain_lock()
     dropped = frozenset({"acme/b", "acme/c"})
-    assert cleanup._pin_retained_ancestors(lock, dropped, frozenset({"acme/c"})) == dropped
-    assert cleanup._pin_retained_ancestors(lock, dropped, frozenset()) == frozenset()
+    assert orphans._pin_retained_ancestors(lock, dropped, frozenset({"acme/c"})) == dropped
+    assert orphans._pin_retained_ancestors(lock, dropped, frozenset()) == frozenset()
 
 
 def _builder(existing: LockFile, **fields) -> LockfileBuilder:
@@ -165,6 +171,22 @@ def _materialize(root: Path, *relative: str) -> None:
         (root / path / "apm.yml").write_text("name: x\n", encoding="utf-8")
 
 
+def _targeted_decision(tmp_path: Path, lock: LockFile, *, retained=(), materialized=()):
+    return orphans.decide_orphan_removal(
+        operation=orphans.OrphanOperation.TARGETED_INSTALL,
+        roots=("acme/top",),
+        candidate_universe=lock,
+        installed_paths=orphans.InstalledPaths(root=tmp_path, packages=None),
+        resolved_keys=frozenset(),
+        intended=None,
+        materialized=list(materialized),
+        reachability=None,
+        deployment_claims=orphans.DeploymentClaims(
+            live_files=frozenset(), retained={key: {} for key in retained}
+        ),
+    )
+
+
 def test_pinned_nested_package_survives_parent_module_removal(tmp_path):
     parent = LockedDependency(repo_url="acme/repo", depth=2, resolved_by="acme/top")
     child = LockedDependency(
@@ -176,10 +198,93 @@ def test_pinned_nested_package_survives_parent_module_removal(tmp_path):
     )
     lock = _lock(parent, child)
     _materialize(tmp_path, "acme/repo", "acme/repo/skills/child")
-    dropped = frozenset({parent.get_unique_key(), child.get_unique_key()})
     ctx = _module_ctx(tmp_path, lock)
-    cleanup._remove_dropped_package_dirs(ctx, dropped, frozenset({child.get_unique_key()}))
+    decision = _targeted_decision(tmp_path, lock, retained=[child.get_unique_key()])
+    # Parent and child share a lock parent identity; both stay pinned (#4060).
+    assert decision.retained_keys == {parent.get_unique_key(), child.get_unique_key()}
+    assert decision.removed_keys == frozenset()
+    assert dry_run._preview_orphan_files(
+        lock, SimpleNamespace(only_packages=("acme/top",)), MagicMock()
+    ) == {path for files in decision.removed_files.values() for path in files}
+    cleanup._remove_dropped_package_dirs(ctx, decision)
     assert (tmp_path / "acme/repo/skills/child").is_dir()
+    assert (tmp_path / "acme/repo").is_dir()
+
+
+_SEEDED_DECISIONS = """
+import json, sys
+from pathlib import Path
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install import orphans
+
+def decide(entries, retained):
+    lock = LockFile()
+    for entry in entries:
+        lock.dependencies[entry.get_unique_key()] = entry
+    decision = orphans.decide_orphan_removal(
+        operation=orphans.OrphanOperation.TARGETED_INSTALL,
+        roots=("acme/top",),
+        candidate_universe=lock,
+        installed_paths=orphans.InstalledPaths(root=Path(sys.argv[1]), packages=None),
+        resolved_keys=frozenset(),
+        intended=None,
+        materialized=[],
+        reachability=None,
+        deployment_claims=orphans.DeploymentClaims(
+            live_files=frozenset(), retained={key: {} for key in retained}
+        ),
+    )
+    return [sorted(decision.retained_keys), sorted(decision.removed_keys)]
+
+top = {"depth": 2, "resolved_by": "acme/top"}
+print(json.dumps({
+    "shared-identity": decide(
+        [
+            LockedDependency(repo_url="acme/repo", **top),
+            LockedDependency(repo_url="acme/repo", virtual_path="skills/child",
+                             is_virtual=True, depth=3, resolved_by="acme/repo"),
+        ],
+        ["acme/repo/skills/child"],
+    ),
+    "distinct-identities": decide(
+        [
+            LockedDependency(repo_url="acme/a", **top),
+            LockedDependency(repo_url="acme/b", depth=3, resolved_by="acme/a"),
+            LockedDependency(repo_url="acme/c", **top),
+        ],
+        ["acme/b"],
+    ),
+    "no-dropped-ancestor": decide(
+        [LockedDependency(repo_url="acme/x", **top), LockedDependency(repo_url="acme/y", **top)],
+        ["acme/x"],
+    ),
+}, sort_keys=True))
+"""
+
+
+def test_shared_identity_retention_is_independent_of_hash_seed(tmp_path):
+    """The pin walk keeps the same partition under every PYTHONHASHSEED (#4060)."""
+    results = {}
+    for seed in range(12):
+        env = {**os.environ, "PYTHONHASHSEED": str(seed)}
+        completed = subprocess.run(
+            [sys.executable, "-c", _SEEDED_DECISIONS, str(tmp_path)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+            check=True,
+        )
+        results[seed] = json.loads(completed.stdout)
+
+    assert results == {
+        seed: {
+            "distinct-identities": [["acme/a", "acme/b"], ["acme/c"]],
+            "no-dropped-ancestor": [["acme/x"], ["acme/y"]],
+            "shared-identity": [["acme/repo", "acme/repo/skills/child"], []],
+        }
+        for seed in range(12)
+    }
 
 
 def test_unresolved_marketplace_declaration_does_not_block_module_removal(tmp_path):
@@ -189,7 +294,7 @@ def test_unresolved_marketplace_declaration_does_not_block_module_removal(tmp_pa
     unresolved = MagicMock()
     unresolved.get_install_path.side_effect = ValueError("marketplace entry not resolved")
     ctx = _module_ctx(tmp_path, lock, declared=[unresolved])
-    cleanup._remove_dropped_package_dirs(
-        ctx, frozenset({dropped_dep.get_unique_key()}), frozenset()
-    )
+    decision = _targeted_decision(tmp_path, lock, materialized=[unresolved])
+    assert decision.removed_paths == ("acme/dropped",)
+    cleanup._remove_dropped_package_dirs(ctx, decision)
     assert not (tmp_path / "acme/dropped").exists()

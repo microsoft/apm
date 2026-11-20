@@ -26,8 +26,6 @@ from ..core import project_name as _project_name
 from ..install.helpers.gitignore import (  # noqa: F401
     update_gitignore_for_apm_modules as _update_gitignore_for_apm_modules,
 )
-from ..install.orphans import build_expected_install_paths as _build_expected_install_paths
-from ..install.orphans import find_orphaned_packages as _find_orphaned_packages
 from ..models.manifest_bootstrap import (  # noqa: F401
     auto_detect_description as _auto_detect_description,
 )
@@ -267,14 +265,44 @@ def _check_orphaned_packages():
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
             declared_deps = apm_package.get_all_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
-            expected = _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir)
         except Exception:
             return []
 
         installed = _scan_installed_packages(apm_modules_dir)
-        return _find_orphaned_packages(installed, expected)
+        return list(
+            _inspect_installed_orphans(
+                declared_deps, lockfile, apm_modules_dir, installed
+            ).removed_paths
+        )
     except Exception:
         return []
+
+
+def _inspect_installed_orphans(declared_deps, lockfile, apm_modules_dir: Path, installed):
+    """Ask the orphan owner which installed roots the retained graph no longer needs."""
+    from ..install.orphans import (
+        InstalledPaths,
+        OrphanOperation,
+        ReachabilityProbe,
+        decide_orphan_removal,
+    )
+
+    return decide_orphan_removal(
+        operation=OrphanOperation.INSPECT,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=InstalledPaths(root=apm_modules_dir, packages=frozenset(installed)),
+        resolved_keys=None,
+        intended=declared_deps,
+        materialized=None,
+        reachability=ReachabilityProbe(
+            project_root=apm_modules_dir.parent,
+            apm_modules_dir=apm_modules_dir,
+            direct_refs=tuple(declared_deps),
+            dev_refs=(),
+        ),
+        deployment_claims=None,
+    )
 
 
 # ------------------------------------------------------------------

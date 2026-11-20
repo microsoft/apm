@@ -529,6 +529,7 @@ class TestRenderCiResults:
         ci_result = MagicMock()
         check = MagicMock()
         check.passed = passed
+        check.warned = False
         check.name = "test_check"
         check.message = "all good"
         check.details = []
