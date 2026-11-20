@@ -85,4 +85,4 @@ Edit `apm.yml`, add at least one script, and re-run `apm list`.
 
 - [`apm run`](../run/) -- execute a listed script.
 - [`apm install`](../install/) -- install the dependencies your scripts invoke.
-- [Package anatomy](../../../concepts/package-anatomy/) -- where `scripts:` sits in the manifest.
+- [Package anatomy](../../../producer/create-a-package/) -- where `scripts:` sits in the manifest.

@@ -522,6 +522,52 @@ def test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile(monke
     )
 
 
+@pytest.mark.req("req-rpl-002", "req-pl-018")
+def test_required_package_matching_follows_source_replacement(tmp_path, monkeypatch):
+    """req-rpl-002: policy matching evaluates the selected package; clause (g)
+    reads the lock entry under the original's lockfile identity. ``apm audit
+    --ci`` (``run_policy_checks``) judges the same projection as install."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.dependency.replacement import project_manifest_dependencies
+    from apm_cli.policy.policy_checks import run_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    replace = [
+        {
+            "for": {"git": "https://github.com/example-org/app"},
+            "with": {"git": "https://github.com/fork-org/app-fork", "ref": "v1.0.0"},
+        }
+    ]
+    dump_yaml(
+        {
+            "$schema": "https://microsoft.github.io/apm/specs/schemas/"
+            "manifest-source-replacements-v1.schema.json",
+            "name": "consumer",
+            "version": "1.0.0",
+            "dependencies": {"apm": ["example-org/app#v1.0.0"]},
+            "replace": replace,
+        },
+        tmp_path / "apm.yml",
+    )
+    (bound,) = project_manifest_dependencies(APMPackage.from_apm_yml(tmp_path / "apm.yml"))
+    lock = LockFile(replacements=replace)
+    lock.add_dependency(LockedDependency.from_dependency_ref(bound, "a" * 40, 1, None))
+    lock.write(tmp_path / "apm.lock.yaml")
+    assert list(lock.dependencies) == ["example-org/app"]
+
+    def presence(entry):
+        policy = ApmPolicy(dependencies=DependencyPolicy(require=(entry,)))
+        checks = run_policy_checks(tmp_path, policy, fail_fast=False).checks
+        names = ("required-packages", "required-packages-deployed")
+        return tuple(next(c for c in checks if c.name == name).passed for name in names)
+
+    assert presence("fork-org/app-fork") == (True, True)
+    assert presence("example-org/app") == (False, False)
+
+
 @pytest.mark.req("req-pl-018")
 def test_policy_identity_casing_matches_dependency_source_semantics():
     from apm_cli.deps.lockfile import LockedDependency, LockFile

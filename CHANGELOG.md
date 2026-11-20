@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit --ci` matches `dependencies.require` entries, and checks `registry_source`, against the package a root `replace:` selects, as `apm install` does. (#4069)
 - `apm approve` on a Claude plugin's hooks now takes effect on the next `apm install`; the approval and the install keyed the hook file differently, so it stayed parked. (#3290)
 - `apm install -g` and global `apm uninstall` now apply the `executables` approvals in `~/.apm/apm.yml` to hooks, MCP servers and LSP servers; they were ignored, so unapproved executables could deploy. (#3986)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native Agent Plugin is installed. (closes #3901, #3946)

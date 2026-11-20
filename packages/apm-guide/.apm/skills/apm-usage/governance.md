@@ -128,6 +128,10 @@ trusted host). An explicit proxy path (`host/artifactory/...`) is identified
 by the proxy host; prefer `PROXY_REGISTRY_URL` with plain shorthand.
 A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
 varies per machine, so org-wide policies should host-qualify every entry.
+Required-package matching follows source replacement: with a root
+`replace:` rule, an entry names the selected package (the fork), and the
+lock entry is read under the original's key. `apm install` and
+`apm audit --ci` agree, also on `registry_source`.
 
 ## Registry source governance (experimental)
 

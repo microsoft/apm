@@ -17,11 +17,12 @@ Skills, instructions, agents and prompts are text and are never gated.
 
 The executables gate covers hooks, MCP servers, LSP servers, `bin/` executables and
 canvas extensions from dependencies. It is **off by default**: everything deploys. It
-turns on when either:
+turns on when any of these holds:
 
 - the repository's `apm.yml` has an `executables:` block, even an empty one (the older
   spelling `allowExecutables:` still works and migrates on the next `apm approve`), or
-- the org policy carries a non-empty `executables:` block.
+- the org policy carries a non-empty `executables:` block, or
+- a developer has a personal deny (`apm deny --user`), on that machine only.
 
 Once on, a dependency's executables are **parked**: not deployed until someone approves
 them. In CI or any non-interactive run, `apm install` still succeeds and lists what it
