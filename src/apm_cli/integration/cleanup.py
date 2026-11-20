@@ -260,14 +260,30 @@ class DeploymentEvidence:
         *rendered_as* names where the locked render may place the same member
         instead (skill path migration renders the converged layout).
         """
+        try:
+            receipt = self._receipt_match(physical)
+            if receipt is True:
+                return AUTHORIZED
+        except OSError:
+            return UNREADABLE
+        # A stale receipt (the file was later adopted unchanged from a newer
+        # render) does not block the render comparison: receipt OR render.
+        rendered = self.render_verdict(claim, physical, rendered_as=rendered_as)
+        if rendered == UNPROVEN and receipt is False:
+            return EDITED
+        return rendered
+
+    def render_verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
+        """Classify *physical* against what this install and the locked versions render.
+
+        Receipts are not consulted: an overwrite takes receipts only from the
+        lock-bound session (#4360).
+        """
         from apm_cli.utils.content_hash import compute_file_hash
 
         try:
-            receipt = self._receipt_match(physical)
-            if receipt is True or self._rendered_now_match(physical, (claim, rendered_as)):
+            if self._rendered_now_match(physical, (claim, rendered_as)):
                 return AUTHORIZED
-            # A stale receipt (the file was later adopted unchanged from a newer
-            # render) does not block the render comparison: receipt OR render.
             claim = claim.replace("\\", "/")
             rendered = [
                 path
@@ -277,7 +293,7 @@ class DeploymentEvidence:
                 if not path.is_symlink() and path.is_file()
             ]
             if not rendered:
-                return EDITED if receipt is False else UNPROVEN
+                return UNPROVEN
             actual = compute_file_hash(physical)
             same = any(compute_file_hash(path) == actual for path in rendered)
         except OSError:

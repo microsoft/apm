@@ -796,3 +796,29 @@ class TestCommandIntegratorAdopt:
         # User content preserved; adopt did not fire.
         assert target.read_bytes() == user_body
         assert result.files_adopted == 0
+
+
+def test_gemini_command_adopts_its_rendered_toml(tmp_path: Path) -> None:
+    """A Gemini command is transformed to TOML; adopt compares that render (#4360)."""
+    pkg_dir = tmp_path / "pkg"
+    source = pkg_dir / ".apm" / "prompts" / "cmd.prompt.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "---\ndescription: cmd\ninput: [x]\n---\n# Cmd $ARGUMENTS\n", encoding="utf-8"
+    )
+    target = tmp_path / ".gemini" / "commands" / "cmd.toml"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        CommandIntegrator._render_gemini_command(source), encoding="utf-8", newline="\n"
+    )
+
+    result = CommandIntegrator().integrate_commands_for_target(
+        KNOWN_TARGETS["gemini"],
+        _make_package_info(pkg_dir),
+        tmp_path,
+        force=False,
+        managed_files=None,
+    )
+
+    assert result.files_adopted == 1
+    assert result.files_integrated == 0
