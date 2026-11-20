@@ -23,6 +23,8 @@ import pytest
 from apm_cli.utils import console, git_env
 from tests.utils import state_leaks
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 POLLUTER = (
     "tests/unit/core/test_output_mode.py::"

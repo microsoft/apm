@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..errors import InstallFailureAlreadyRendered, MCPNativeConflictError
 
 if TYPE_CHECKING:
@@ -112,6 +114,7 @@ def user_manifest_bootstrap_config(
 
 def run_mcp_policy_preflight(
     *,
+    policy_root: Path,
     mcp_name: str,
     transport: str | None,
     url: str | None,
@@ -126,6 +129,7 @@ def run_mcp_policy_preflight(
     *registry* is the ``(url, source)`` pair from ``_resolve_registry_url``;
     the registry override is active so the transport check resolves a
     registry server against the same registry the install will query.
+    *policy_root* is the scope manifest root (``$APM_HOME`` under ``-g``).
     """
     registry_url, registry_source = registry
     from ...models.dependency.mcp import MCPDependency
@@ -150,7 +154,7 @@ def run_mcp_policy_preflight(
             source=registry_source,
         ):
             run_policy_preflight(
-                project_root=Path.cwd(),
+                project_root=policy_root,
                 mcp_deps=[dependency],
                 no_policy=no_policy,
                 logger=logger,
@@ -190,9 +194,8 @@ def run_mcp_install(  # noqa: PLR0913
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
     ``manifest_path`` is derived from ``apm_dir`` (``apm_dir / 'apm.yml'``)."""
-    from ...constants import APM_YML_FILENAME
 
-    manifest_path = apm_dir / APM_YML_FILENAME
+    manifest_path = manifest_file(apm_dir)
     verbose = logger.verbose
     from ...models.dependency.mcp import MCPDependency
 

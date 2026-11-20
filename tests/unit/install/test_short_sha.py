@@ -13,6 +13,8 @@ import pytest
 
 from apm_cli.utils.short_sha import format_short_sha
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "value",

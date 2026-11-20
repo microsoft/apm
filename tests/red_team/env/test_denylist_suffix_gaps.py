@@ -20,6 +20,8 @@ from apm_cli.core.script_executors import _build_script_env, _expand_env_vars
 
 from .fixtures.helpers import capture_http_headers
 
+pytestmark = pytest.mark.component
+
 # Secret-bearing names that the suffix-anchored regex FAILS to catch.
 LEAKING_NAMES = [
     "GOOGLE_APPLICATION_CREDENTIALS",  # ends CREDENTIALS, not CREDENTIAL

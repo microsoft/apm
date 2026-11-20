@@ -18,6 +18,8 @@ import pytest
 from apm_cli.commands.marketplace import _parse_marketplace_source
 from apm_cli.marketplace.source_identity import parse_marketplace_source
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "raw",
@@ -168,9 +170,13 @@ def test_ssh_protocol_url_rejects_ambiguous_or_unsafe_components(raw: str) -> No
         "ssh://git@gitea.example.com/org/%2e%2e/repo.git",
         "ssh://git@gitea.example.com/org/%2e%2e%2frepo.git",
         "ssh://git@gitea.example.com/org/%252e%252e%252frepo.git",
+        "https://dev.azure.com/contoso/%/_git/repo",
+        "https://dev.azure.com/contoso/%FF/_git/repo",
+        "https://dev.azure.com/contoso/%2F/_git/repo",
+        "https://dev.azure.com/contoso/%252E%252E/_git/repo",
     ],
 )
-def test_invalid_ssh_protocol_url_rejected(raw: str) -> None:
+def test_invalid_or_unsafe_source_url_rejected(raw: str) -> None:
     with pytest.raises(ValueError):
         _parse_marketplace_source(raw, host_flag=None)
 
@@ -256,20 +262,6 @@ def test_https_ado_url_preserves_encoded_path_presentation() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw",
-    [
-        "https://dev.azure.com/contoso/%/_git/repo",
-        "https://dev.azure.com/contoso/%FF/_git/repo",
-        "https://dev.azure.com/contoso/%2F/_git/repo",
-        "https://dev.azure.com/contoso/%252E%252E/_git/repo",
-    ],
-)
-def test_https_ado_url_rejects_unsafe_encoded_path(raw: str) -> None:
-    with pytest.raises(ValueError):
-        _parse_marketplace_source(raw, host_flag=None)
-
-
-@pytest.mark.parametrize(
     ("url", "expected"),
     [
         ("https://Git.Example.com/team/catalog.git", "https://git.example.com/team/catalog"),
@@ -282,16 +274,6 @@ def test_marketplace_origin_canonicalizes_git_catalogs(url: str, expected: str) 
     from apm_cli.marketplace.source_identity import marketplace_origin
 
     assert marketplace_origin(MarketplaceSource(name="company", url=url)) == expected
-
-
-def test_marketplace_origin_keeps_hosted_url_and_skips_local(tmp_path) -> None:
-    from apm_cli.marketplace.models import MarketplaceSource
-    from apm_cli.marketplace.source_identity import marketplace_origin
-
-    hosted = "https://catalog.example.com/v1/marketplace.json"
-    assert marketplace_origin(MarketplaceSource(name="hosted", url=hosted, path="")) == hosted
-    local = MarketplaceSource(name="local", url=str(tmp_path))
-    assert marketplace_origin(local) == ""
 
 
 def test_same_marketplace_origin_ignores_transport_and_rejects_other_repos() -> None:

@@ -18,6 +18,8 @@ from apm_cli.policy._remote import _extract_org_host_port_from_git_remote
 from apm_cli.policy.inheritance import PolicyInheritanceError
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("req-pl-001", "req-pl-004", "req-pl-012")]
+
 
 def _git_project(root: Path, remotes: dict[str, str]) -> Path:
     root.mkdir(parents=True, exist_ok=True)

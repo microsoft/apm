@@ -29,6 +29,8 @@ from apm_cli.compilation.distributed_compiler import (
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -154,6 +156,7 @@ class TestCaseAGlobalInstructions:
             "suppressed_empty_paths must be non-empty when dedup fires and placement"
             " would be an empty shell"
         )
+        assert not any(path.exists() for path in result.suppressed_empty_paths)
 
     def test_case_a_no_dedup_still_writes_agents_md(self, project_global):
         """--no-dedup must always produce AGENTS.md even with .github/instructions/ present."""
@@ -271,6 +274,7 @@ class TestCaseBScopedInstructions:
         # be suppressed; root may or may not be in the placement depending on
         # context optimizer decisions.
         assert len(result.suppressed_empty_paths) >= 1
+        assert not any(path.exists() for path in result.suppressed_empty_paths)
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +356,7 @@ class TestInfoLogMessage:
             f"Expected INFO message containing 'not generated' and {coverage!r}.\n"
             f"Logged messages: {logged_messages}"
         )
+        assert not (tmp_path / "AGENTS.md").exists()
 
 
 # ---------------------------------------------------------------------------

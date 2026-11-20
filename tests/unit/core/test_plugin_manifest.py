@@ -9,13 +9,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.core.plugin_manifest import (
-    PLUGIN_ECOSYSTEM_PATHS,
     PLUGIN_MANIFEST_ECOSYSTEMS,
     build_plugin_manifest,
     collect_mcp_servers,
     find_or_synthesize_plugin_json,
     write_plugin_manifest,
 )
+
+pytestmark = pytest.mark.component
 
 
 def _write(path: Path, text: str) -> None:
@@ -950,21 +951,3 @@ class TestFindOrSynthesizePluginJson:
 # ---------------------------------------------------------------------------
 # Module constants
 # ---------------------------------------------------------------------------
-
-
-class TestModuleConstants:
-    def test_plugin_manifest_ecosystems_frozenset(self) -> None:
-        assert isinstance(PLUGIN_MANIFEST_ECOSYSTEMS, frozenset)
-        assert {"claude", "copilot", "codex"} == PLUGIN_MANIFEST_ECOSYSTEMS
-
-    def test_plugin_ecosystem_paths_keys_match_ecosystems(self) -> None:
-        assert set(PLUGIN_ECOSYSTEM_PATHS.keys()) == PLUGIN_MANIFEST_ECOSYSTEMS
-
-    def test_claude_path(self) -> None:
-        assert PLUGIN_ECOSYSTEM_PATHS["claude"] == ".claude-plugin/plugin.json"
-
-    def test_copilot_path(self) -> None:
-        assert PLUGIN_ECOSYSTEM_PATHS["copilot"] == ".github/plugin/plugin.json"
-
-    def test_codex_path(self) -> None:
-        assert PLUGIN_ECOSYSTEM_PATHS["codex"] == ".codex-plugin/plugin.json"

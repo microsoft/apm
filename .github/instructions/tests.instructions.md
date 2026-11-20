@@ -277,13 +277,28 @@ with one entry per line; entries may only be removed.
    names the promises it protects in its module-level `pytestmark`, using ids
    from `tests/quality/promise-catalog.json`: OpenAPM `req-*` ids,
    `P-OWN-<owner id>` architecture owners, `P-INV-I1`..`P-INV-I9` lifecycle
-   invariants and `P-LAW-<id>` lifecycle laws. Add a missing promise to the
+   invariants, `P-LAW-<id>` lifecycle laws and `P-DOC-<id>` documented-surface
+   promises. Add a missing promise to the
    catalog in the same pull request. A new id family (`P-<FAMILY>-<id>`) must
    first be declared in the catalog's `families`; undeclared families fail.
 
 ```python
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
 ```
+
+`scripts/check_test_assertions.py` (baseline
+`tests/quality/assertion_quality_baseline.json`) ratchets per-file counts the
+same way: AQ001 constant assertions, AQ002 `pytest.raises(Exception)`, AQ003
+component or e2e tests that assert no user-visible output, exit code or durable
+state, AQ004 tests that patch a symbol defined in an owner module they import,
+and AQ006 e2e modules that do not drive the real CLI (they use `CliRunner`,
+patch an owner module, or never run `apm` through `ApmLifecycleRunner`, the
+`apm_binary_path` or `apm_engine_command` fixtures, or the lifecycle `driver`).
+
+For consolidation, `uv run --frozen python scripts/check_exact_test_duplicates.py
+--report-equal-copies` lists equal copies that are safe to delete. A copy
+qualifies only if body, decorators, fixtures, class context, module bindings and
+CI lane all match its kept twin. The report never fails and never edits files.
 
 Moving a listed test or module to another directory under the same name keeps
 its allowance and is reported as moved. Prune stale or moved duplicate entries
@@ -346,7 +361,7 @@ assert the cross-platform contract, unless (per module) virtually
 every test in the file already exercises that same code path (in
 which case a module-level `pytestmark = pytest.mark.windows_compat`
 is the right level of granularity -- see
-`tests/unit/test_shepherd_owner_touch_gate.py` for an example where
+`tests/integration/test_shepherd_owner_touch_gate.py` for an example where
 nearly every test goes through the same git-executable-resolution
 helper).
 
@@ -375,7 +390,7 @@ helper).
    ```bash
    uv run --extra dev pytest -m windows_compat tests/integration --collect-only -q
    ```
-5. `tests/unit/test_windows_compat_gate_workflow.py` asserts the
+5. `tests/integration/test_windows_compat_gate_workflow.py` asserts the
    *shape* of the gate (marker-scoped, bounded, non-empty, required,
    no unit test run twice) -- it does not enumerate
    file names, so it does not need editing when you add or remove a

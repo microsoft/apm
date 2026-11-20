@@ -473,8 +473,8 @@ class TestActiveTargetsUserScope:
         assert "opencode" in names
 
 
-def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, monkeypatch) -> None:
-    """Grants come from $APM_HOME/apm.yml; org policy is still discovered from the deploy root."""
+def test_user_scope_grants_and_policy_root_are_apm_home(tmp_path, monkeypatch) -> None:
+    """Grants and the policy root are $APM_HOME at user scope, never the deploy root (#4087)."""
     from types import SimpleNamespace
 
     from apm_cli.security import executables
@@ -499,6 +499,6 @@ def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, m
         SimpleNamespace(allow_executables=None),
         user_scope=True,
     )
-    assert discovered == [home]
+    assert discovered == [apm_home]
     assert allow is not None and allow["owner/pkg"]["hooks"] is True
     assert "owner/decoy" not in allow

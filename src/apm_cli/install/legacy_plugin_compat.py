@@ -7,7 +7,8 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.constants import APM_DIR, APM_YML_FILENAME
+from apm_cli.constants import APM_DIR
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.plugin_parser import has_normalized_plugin_skill_sources_receipt
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.resolution_staging import ResolutionStagingSession
@@ -16,7 +17,7 @@ from apm_cli.models.validation import (
     gather_detection_evidence,
     validate_legacy_marketplace_plugin,
 )
-from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.content_hash import compute_package_hash, same_package_digest
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -121,7 +122,7 @@ def matches_fresh_legacy_plugin_hash(
     cleanup_issues = staging.rollback()
     if cleanup_issues:
         raise _staging_cleanup_error(dep_key, cleanup_issues)
-    return legacy_hash == locked_dependency.content_hash
+    return same_package_digest(legacy_hash, locked_dependency.content_hash)
 
 
 def upgrade_cached_legacy_plugin(
@@ -161,7 +162,7 @@ def validate_cached_legacy_plugin(
     if has_normalized_plugin_skill_sources_receipt(package_path):
         return None
 
-    apm_yml_path = package_path / APM_YML_FILENAME
+    apm_yml_path = manifest_file(package_path)
     apm_dir = package_path / APM_DIR
     if not apm_yml_path.is_file():
         raise _unsafe_upgrade_error(dep_key, package_path, "required apm.yml is missing")

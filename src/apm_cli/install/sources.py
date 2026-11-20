@@ -32,6 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.primitive_classification import warn_unrecognized_plugin_schema
 from apm_cli.install.registry_wiring import (
@@ -43,6 +44,8 @@ from apm_cli.install.source_helpers import (
     content_hash_mismatch_hint,
     download_registry_package,
     ensure_carried_licenses_match,
+    locked_content_mismatch,
+    locked_content_mismatch_line,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
@@ -127,7 +130,6 @@ class LocalDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
-        from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.core.scope import InstallScope
         from apm_cli.deps._shared import materialize_marketplace_manifest
         from apm_cli.deps.installed_package import (
@@ -237,7 +239,7 @@ class LocalDependencySource(DependencySource):
             details = "; ".join(validation.errors) or "validator returned no package"
             raise DirectDependencyError(f"Local Agent Plugin is invalid: {details}")
         elif validation.legacy_metadata_only:
-            local_apm_yml = install_path / APM_YML_FILENAME
+            local_apm_yml = manifest_file(install_path)
             local_pkg = APMPackage.from_apm_yml(
                 local_apm_yml,
                 source_path=original_src,
@@ -383,7 +385,6 @@ class CachedDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
-        from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import (
             InstalledPackage,
             extensions_from_resolved_package,
@@ -487,7 +488,7 @@ class CachedDependencySource(DependencySource):
                 )
             pkg_type = validation_result.package_type
         else:
-            apm_yml_path = install_path / APM_YML_FILENAME
+            apm_yml_path = manifest_file(install_path)
             pkg_type, _ = detect_package_type(install_path)
             pkg_type = preserve_normalized_marketplace_plugin_type(
                 install_path,
@@ -880,25 +881,23 @@ class FreshDependencySource(DependencySource):
                 and dep_key in ctx.package_hashes
             ):
                 _fresh_hash = ctx.package_hashes[dep_key]
-                if _fresh_hash != dep_locked_chk.content_hash:
-                    from apm_cli.install.legacy_plugin_compat import (
-                        matches_fresh_legacy_plugin_hash,
-                    )
-
-                    if not matches_fresh_legacy_plugin_hash(
-                        install_path,
-                        dep_key,
-                        lockfile=ctx.existing_lockfile,
-                        package_type=getattr(package_info, "package_type", None),
-                        exclude=_carried_paths,
-                    ):
-                        safe_rmtree(install_path, ctx.apm_modules_dir)
-                        raise DirectDependencyError(
-                            f"Content hash mismatch for {dep_key}: "
-                            f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
-                            "The downloaded content differs from the lockfile record. "
-                            + content_hash_mismatch_hint(ctx, dep_key)
+                if locked_content_mismatch(
+                    dep_key,
+                    dep_locked_chk,
+                    install_path,
+                    lockfile=ctx.existing_lockfile,
+                    package_info=package_info,
+                    exclude=_carried_paths,
+                    fresh_hash=_fresh_hash,
+                ):
+                    safe_rmtree(install_path, ctx.apm_modules_dir)
+                    raise DirectDependencyError(
+                        locked_content_mismatch_line(
+                            dep_key, dep_locked_chk.content_hash, _fresh_hash
                         )
+                        + " The downloaded content differs from the lockfile record. "
+                        + content_hash_mismatch_hint(ctx, dep_key)
+                    )
             ensure_carried_licenses_match(
                 ctx, dep_key, install_path, dep_locked_chk, resolved_commit
             )

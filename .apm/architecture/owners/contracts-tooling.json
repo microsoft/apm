@@ -9,6 +9,29 @@
       "guards": ["contracts-tooling-governance-evidence"]
     },
     {
+      "id": "ci-validation-topology",
+      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs; each sharded CI job's explicit per-shard test file list (scripts/ci_sharding.py shard_test_files), checked against a full collect on the same SHA; and merge-time validation topology: which merge_group jobs produce every merge-gate.yml merge_group EXPECTED_CHECKS name, how ci-integration.yml shards the merge-time integration corpus, and the alarm that fails when main moves without a merge_group run",
+      "owner": "scripts/ci_selections.py (SELECTIONS) + scripts/ci_sharding.py (shard_test_files) + .github/workflows/merge-gate.yml (merge_group EXPECTED_CHECKS) + .github/workflows/ci-integration.yml (merge-time lanes via the scripts/ci_sharding.py planner) + .github/workflows/merge-queue-freshness.yml with scripts/merge_queue_freshness.py (freshness alarm); closed-world guard in tests/quality/test_ci_topology.py",
+      "selectors": [
+        ".github/workflows/build-release.yml",
+        ".github/workflows/ci-integration.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/merge-gate.yml",
+        ".github/workflows/merge-queue-freshness.yml",
+        "scripts/architecture_linter/checks/contracts_ci_shard_file_lists.py",
+        "scripts/architecture_linter/checks/contracts_ci_topology.py",
+        "scripts/ci_selections.py",
+        "scripts/ci_sharding.py",
+        "scripts/merge_queue_freshness.py"
+      ],
+      "guards": [
+        "contracts-tooling-ci-merge-queue-freshness",
+        "contracts-tooling-ci-merge-time-topology",
+        "contracts-tooling-ci-shard-file-lists",
+        "contracts-tooling-ci-validation-topology"
+      ]
+    },
+    {
       "id": "onboarding-metadata-only",
       "decision": "Discovery inventory and consented consumer dependency delta; never source or deployment mutation",
       "owner": "adopt/discovery.py + adopt/materialize.py + adopt/manifest_edit.py",
@@ -166,24 +189,6 @@
         "scripts/architecture_linter/checks/contracts_strip_charset.py"
       ],
       "guards": ["contracts-tooling-strip-charset"]
-    },
-    {
-      "id": "ci-validation-topology",
-      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs; each sharded CI job's explicit per-shard test file list (scripts/ci_sharding.py shard_test_files), checked against a full collect on the same SHA",
-      "owner": "scripts/ci_selections.py (SELECTIONS) + scripts/ci_sharding.py (shard_test_files)",
-      "selectors": [
-        "scripts/ci_selections.py",
-        "scripts/ci_sharding.py",
-        "scripts/architecture_linter/checks/contracts_ci_topology.py",
-        "scripts/architecture_linter/checks/contracts_ci_shard_file_lists.py",
-        ".github/workflows/ci.yml",
-        ".github/workflows/build-release.yml",
-        ".github/workflows/ci-integration.yml"
-      ],
-      "guards": [
-        "contracts-tooling-ci-shard-file-lists",
-        "contracts-tooling-ci-validation-topology"
-      ]
     }
   ]
 }

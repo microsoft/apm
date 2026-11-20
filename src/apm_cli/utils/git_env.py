@@ -227,8 +227,10 @@ def _executable_exclusion_root() -> Path:
     for directory in ancestors:
         if (directory / ".git").exists():
             return directory
+    from apm_cli.core.scope import manifest_file
+
     for directory in ancestors:
-        if (directory / "apm.yml").is_file():
+        if manifest_file(directory).is_file():
             return directory
     return cwd
 

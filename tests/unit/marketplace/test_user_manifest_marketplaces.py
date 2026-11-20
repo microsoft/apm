@@ -28,6 +28,8 @@ from apm_cli.marketplace.user_manifest import (
 )
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _isolate_user_root(tmp_path, monkeypatch):

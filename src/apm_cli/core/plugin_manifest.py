@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from apm_cli.core.scope import manifest_file
+
 from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_info, _rich_success, _rich_warning
 from ..utils.path_security import ensure_path_within
@@ -302,10 +304,9 @@ def _authored_manifest_mcp_servers(project_root: Path) -> dict[str, dict]:
     only ecosystem that embeds them. Credential-bearing keys are removed later by
     :func:`_sanitize_mcp_servers`.
     """
-    from ..constants import APM_YML_FILENAME
     from ..models.apm_package import APMPackage
 
-    manifest = project_root / APM_YML_FILENAME
+    manifest = manifest_file(project_root)
     if not manifest.is_file():
         return {}
     try:

@@ -17,6 +17,8 @@ from apm_cli.deps.lockfile import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize("name", ["", 42])
 def test_malformed_mcp_omission_keys_rejected(name: str | int) -> None:
@@ -242,6 +244,7 @@ class TestLockFile:
         dep = DependencyReference.parse("github.com/team/skills")
         assert dep.get_unique_key() == "team/skills"
 
+    @pytest.mark.req("req-lk-001")
     def test_to_yaml(self):
         lock = LockFile(apm_version="1.0.0")
         lock.add_dependency(LockedDependency(repo_url="owner/repo"))
@@ -773,9 +776,18 @@ class TestLockFileSemanticEquivalence:
         assert not a.is_semantically_equivalent(b)
 
     def test_new_lockfile_vs_empty(self):
-        a = self._make_lock()
-        b = LockFile()
-        assert not a.is_semantically_equivalent(b)
+        """A freshly stamped lockfile with no deps matches an empty one (no dirty write)."""
+        new = LockFile(
+            lockfile_version="1",
+            generated_at="2026-11-20T08:00:00+00:00",
+            apm_version="9.9.9",
+        )
+        empty = LockFile()
+        assert new.lockfile_version == empty.lockfile_version
+        assert new.is_semantically_equivalent(empty)
+        assert empty.is_semantically_equivalent(new)
+        new.add_dependency(LockedDependency(repo_url="owner/repo", depth=1))
+        assert not new.is_semantically_equivalent(empty)
 
 
 # ---------------------------------------------------------------------------
