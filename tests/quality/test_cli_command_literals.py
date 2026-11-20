@@ -26,7 +26,7 @@ import pytest
 from tests.utils.click_tree import iter_commands, resolve
 
 pytestmark = [
-    pytest.mark.component,
+    pytest.mark.unit,
     pytest.mark.promise("P-DOC-cli-surface"),
 ]
 

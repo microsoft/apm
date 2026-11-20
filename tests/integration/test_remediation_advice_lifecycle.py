@@ -434,6 +434,10 @@ def test_command_remediation_clears_the_reported_state(
     assert advice not in _normalized(again), _result_evidence(again)
 
 
+# Later proof tables reuse this loop.
+_check_text_proof = test_command_remediation_clears_the_reported_state
+
+
 # -- W2 executed proofs (integration/, marketplace/, bundle/) -----------------
 # -- W2 integration proofs --
 #
@@ -553,6 +557,10 @@ def test_w2_integration_remediation_clears_the_reported_state(
     again = _run(world, proof.probe, "remediation-cleared")
     assert again.returncode == 0, _result_evidence(again)
     assert entry.option() not in _normalized(again), _result_evidence(again)
+
+
+# Later proof tables reuse this loop.
+_check_bound_proof = test_w2_integration_remediation_clears_the_reported_state
 
 
 # -- end W2 integration proofs --
@@ -1012,7 +1020,7 @@ W4_FROZEN_POLICY_PROOFS: tuple[_BoundProof, ...] = (
 def test_w4_frozen_policy_remediation_clears_the_reported_state(
     tmp_path: Path, apm_binary_path: Path, proof: _BoundProof
 ) -> None:
-    test_w2_integration_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+    _check_bound_proof(tmp_path, apm_binary_path, proof)
 
 
 # -- end W4 frozen-policy proofs --
@@ -1111,9 +1119,9 @@ def test_w4_drift_trust_remediation_clears_the_reported_state(
     tmp_path: Path, apm_binary_path: Path, proof: _TextProof | _BoundProof
 ) -> None:
     if isinstance(proof, _BoundProof):
-        test_w2_integration_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+        _check_bound_proof(tmp_path, apm_binary_path, proof)
     else:
-        test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+        _check_text_proof(tmp_path, apm_binary_path, proof)
 
 
 # -- end W4 drift-trust proofs --
@@ -1374,4 +1382,4 @@ _AREA_TEXT_PROOFS = (
 def test_area_remediation_clears_the_reported_state(
     tmp_path: Path, apm_binary_path: Path, proof: _TextProof
 ) -> None:
-    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+    _check_text_proof(tmp_path, apm_binary_path, proof)

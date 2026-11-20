@@ -15,6 +15,7 @@ Targets the uncovered branches in:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -236,7 +237,9 @@ class TestRenderFindingsTable:
             _render_findings_table(findings, verbose=False)
         assert "WARNING    test.md 1:5  U+200B  Zero-width space" in "".join(capsys.readouterr())
 
-    def test_severity_ordering(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_severity_ordering(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Critical findings should appear before warnings in output."""
         findings = {
             "file.md": [
@@ -244,6 +247,8 @@ class TestRenderFindingsTable:
                 _make_finding("critical", line=1),
             ]
         }
+        # Critical lines go to stderr (RA-004); interleave both streams to keep order.
+        monkeypatch.setattr(sys, "stderr", sys.stdout)
         with patch("apm_cli.commands.audit._get_console", return_value=None):
             _render_findings_table(findings, verbose=True)
         out = "".join(capsys.readouterr())

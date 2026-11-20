@@ -71,7 +71,7 @@ def _bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-def _install(binary: Path, project: Path, env: dict[str, str]) -> str:
+def _expect_install(binary: Path, project: Path, env: dict[str, str]) -> str:
     result = subprocess.run(
         (str(binary), "install"),
         cwd=project,
@@ -92,11 +92,11 @@ def test_converged_install_reports_no_change(apm_binary_path: Path, tmp_path: Pa
     env = isolated.subprocess_env()
     project = _project(isolated.work_root)
 
-    first = _install(apm_binary_path, project, env)
+    first = _expect_install(apm_binary_path, project, env)
     assert "Installed 1 APM dependency" in first, first
     converged = _bytes(project)
 
-    second = _install(apm_binary_path, project, env)
+    second = _expect_install(apm_binary_path, project, env)
 
     assert _bytes(project) == converged
     assert "integrated" not in second, second

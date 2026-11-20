@@ -5282,6 +5282,20 @@ def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str,
 # ---------------------------------------------------------------------------
 
 
+def _assert_only_rule_fires(
+    rule_ids: tuple[str, ...], rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Apply one mutation to *path*; among *rule_ids* only *rule_id* reports it."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, rule_ids, source_overrides={path: mutated})
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+    assert any(violation.path == path for violation in report.violations)
+
+
 @pytest.mark.parametrize(
     ("rule_id", "path", "old", "new"),
     [
@@ -5374,19 +5388,12 @@ def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str,
 )
 def test_output_owner_guards_catch_bypasses(rule_id: str, path: str, old: str, new: str) -> None:
     """Each owner sub-check catches its bypass, and only its rule fires (#4089)."""
-    source = _source(path)
-    assert source.count(old) == 1
-    mutated = source.replace(old, new, 1)
-    ast.parse(mutated, filename=path)
     rule_ids = (
         "registry_delegation.console_construction",
         "registry_delegation.experimental_flags",
         "registry_delegation.output_diagnostics",
     )
-    report = run_selected_rules(ROOT, rule_ids, source_overrides={path: mutated})
-    assert report.failures == ()
-    assert {violation.rule_id for violation in report.violations} == {rule_id}
-    assert any(violation.path == path for violation in report.violations)
+    _assert_only_rule_fires(rule_ids, rule_id, path, old, new)
 
 
 @pytest.mark.parametrize(
@@ -5417,14 +5424,8 @@ def test_output_owner_guards_catch_bypasses(rule_id: str, path: str, old: str, n
 )
 def test_remediation_guards_catch_regressions(rule_id: str, path: str, old: str, new: str) -> None:
     """DX5, DX6 and H7 regressions each trip only their own rule (#4090)."""
-    source = _source(path)
-    assert source.count(old) == 1
-    mutated = source.replace(old, new, 1)
-    ast.parse(mutated, filename=path)
     rule_ids = ("contracts-tooling-remediation-advice", "contracts-tooling-remediation-drift-kinds")
-    report = run_selected_rules(ROOT, rule_ids, source_overrides={path: mutated})
-    assert report.failures == ()
-    assert {violation.rule_id for violation in report.violations} == {rule_id}
+    _assert_only_rule_fires(rule_ids, rule_id, path, old, new)
 
 
 # ---------------------------------------------------------------------------

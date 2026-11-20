@@ -339,7 +339,7 @@ class TestCreateFilesTable:
     def test_returns_none_on_exception(self):
         from apm_cli.utils.console import _create_files_table
 
-        with patch("apm_cli.utils.console.new_table", side_effect=Exception("boom")):
+        with patch("rich.table.Table", side_effect=Exception("boom")):
             result = _create_files_table([{"name": "x", "description": "y"}])
         assert result is None
 

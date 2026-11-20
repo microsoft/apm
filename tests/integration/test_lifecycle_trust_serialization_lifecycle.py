@@ -130,7 +130,7 @@ def _run_cli(binary: Path, workspace: _Workspace, *args: str) -> subprocess.Comp
     )
 
 
-def _race_with_lock_holder(binary: Path, workspace: _Workspace, verb: str) -> str:
+def _check_lock_holder_race(binary: Path, workspace: _Workspace, verb: str) -> str:
     """Run ``apm lifecycle <verb>`` while another writer holds the lifecycle lock."""
     holder = subprocess.Popen(
         (sys.executable, "-c", _LOCK_HOLDER, str(workspace.holder_project / "apm.yml")),
@@ -178,7 +178,7 @@ def _race_with_lock_holder(binary: Path, workspace: _Workspace, verb: str) -> st
 def test_concurrent_lifecycle_trust_keeps_every_trust_record(
     apm_binary_path: Path, workspace: _Workspace
 ) -> None:
-    output = _race_with_lock_holder(apm_binary_path, workspace, "trust")
+    output = _check_lock_holder_race(apm_binary_path, workspace, "trust")
 
     assert "Trusted apm.yml lifecycle:" in output
     records = _records(workspace.store)
@@ -198,7 +198,7 @@ def test_concurrent_lifecycle_untrust_keeps_the_revocation(
     command_key = str((workspace.command_project / "apm.yml").resolve())
     assert command_key in _records(workspace.store)
 
-    output = _race_with_lock_holder(apm_binary_path, workspace, "untrust")
+    output = _check_lock_holder_race(apm_binary_path, workspace, "untrust")
 
     assert "Revoked trust for apm.yml lifecycle:" in output
     records = _records(workspace.store)

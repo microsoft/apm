@@ -29,13 +29,13 @@ def _project(tmp_path: Path, apm_binary_path: Path, name: str, manifest: dict | 
         dump_yaml(manifest, root / "apm.yml")
     runner = ApmLifecycleRunner((str(apm_binary_path),))
 
-    def apm(*args: str) -> str:
+    def expect_ok(*args: str) -> str:
         result = runner.run(args, cwd=root, env=env)
         output = result.stdout + result.stderr
         assert result.returncode == 0, output
         return output
 
-    return isolated, root, apm
+    return isolated, root, expect_ok
 
 
 def _manifest(targets: list[str], **extra) -> dict:
@@ -44,17 +44,19 @@ def _manifest(targets: list[str], **extra) -> dict:
 
 def test_frozen_install_announces_mcp_targets_once(tmp_path, apm_binary_path):
     """--frozen resolves MCP targets once, so the target line prints once."""
-    _isolated, _root, apm = _project(tmp_path, apm_binary_path, "frozen", _manifest(["copilot"]))
-    apm("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
+    _isolated, _root, expect_ok = _project(
+        tmp_path, apm_binary_path, "frozen", _manifest(["copilot"])
+    )
+    expect_ok("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
 
-    output = apm("install", "--frozen", "--no-policy")
+    output = expect_ok("install", "--frozen", "--no-policy")
 
     assert output.count("Targeting declared target from apm.yml: copilot") == 1, output
 
 
 def test_skill_bundle_reports_one_line_per_package(tmp_path, apm_binary_path):
     """A skills/ bundle reports its skills in one tree line, not two."""
-    isolated, root, apm = _project(
+    isolated, root, expect_ok = _project(
         tmp_path,
         apm_binary_path,
         "bundle",
@@ -71,7 +73,7 @@ def test_skill_bundle_reports_one_line_per_package(tmp_path, apm_binary_path):
         )
     dump_yaml({"name": "bundle", "version": "1.0.0"}, bundle / "apm.yml")
 
-    output = apm("install", "--no-policy")
+    output = expect_ok("install", "--no-policy")
 
     skill_lines = [line for line in output.splitlines() if "integrated" in line.lower()]
     assert skill_lines == ["  |-- 2 skill(s) integrated -> .claude/skills/"], output
@@ -89,10 +91,10 @@ def test_mcp_adapter_success_is_reported_once(
     tmp_path, apm_binary_path, target, config_dir, harness
 ):
     """Client adapters do not echo their own success line next to the install tree."""
-    _isolated, root, apm = _project(tmp_path, apm_binary_path, target, _manifest([target]))
+    _isolated, root, expect_ok = _project(tmp_path, apm_binary_path, target, _manifest([target]))
     (root / config_dir).mkdir()
 
-    output = apm("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
+    output = expect_ok("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
 
     assert output.count(f"fetch -> {harness} (configured)") == 1, output
     assert "Configured MCP server 'fetch'" not in output, output
@@ -100,9 +102,9 @@ def test_mcp_adapter_success_is_reported_once(
 
 def test_default_init_prints_no_third_party_tip(tmp_path, apm_binary_path):
     """The default init path only names APM next steps."""
-    _isolated, _root, apm = _project(tmp_path, apm_binary_path, "init", None)
+    _isolated, _root, expect_ok = _project(tmp_path, apm_binary_path, "init", None)
 
-    output = apm("init", "--yes")
+    output = expect_ok("init", "--yes")
 
     assert "APM project initialized" in output, output
     assert "agentrc" not in output, output
@@ -110,9 +112,11 @@ def test_default_init_prints_no_third_party_tip(tmp_path, apm_binary_path):
 
 def test_install_mcp_names_the_manifest_relatively(tmp_path, apm_binary_path):
     """install --mcp names the manifest it changed without the absolute path."""
-    _isolated, root, apm = _project(tmp_path, apm_binary_path, "mcp-path", _manifest(["copilot"]))
+    _isolated, root, expect_ok = _project(
+        tmp_path, apm_binary_path, "mcp-path", _manifest(["copilot"])
+    )
 
-    output = apm("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
+    output = expect_ok("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
 
     assert "  manifest: apm.yml" in output, output
     assert str(root) not in output, output
@@ -121,18 +125,20 @@ def test_install_mcp_names_the_manifest_relatively(tmp_path, apm_binary_path):
 
 def test_retired_experimental_flag_in_config_is_ignored(tmp_path, apm_binary_path):
     """A flag a user enabled before it was retired is ignored with one verbose note."""
-    isolated, _root, apm = _project(tmp_path, apm_binary_path, "retired", _manifest(["copilot"]))
+    isolated, _root, expect_ok = _project(
+        tmp_path, apm_binary_path, "retired", _manifest(["copilot"])
+    )
     isolated.config_root.mkdir(parents=True, exist_ok=True)
     (isolated.config_root / "config.json").write_text(
         json.dumps({"experimental": {"marketplace_authoring": True}}), encoding="utf-8"
     )
 
-    quiet = apm("experimental", "list")
-    verbose = apm("experimental", "list", "--verbose")
+    quiet = expect_ok("experimental", "list")
+    verbose = expect_ok("experimental", "list", "--verbose")
 
     assert "marketplace-authoring" not in quiet, quiet
     assert verbose.count("Ignoring 1 unknown or retired flag(s) in config") == 1, verbose
-    apm("install", "--no-policy")
+    expect_ok("install", "--no-policy")
 
 
 def test_json_audit_after_adapter_install_keeps_stdout_json(tmp_path, apm_binary_path):

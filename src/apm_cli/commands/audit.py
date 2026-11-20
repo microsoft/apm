@@ -582,8 +582,13 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
                         color="yellow" if check.warned else "red",
                         bold=True,
                     )
+                    # Details follow their header's stream (failed checks: stderr).
                     for detail in check.details:
-                        _rich_echo(f"    - {printable_ascii_text(detail)}", color="dim")
+                        _rich_echo(
+                            f"    - {printable_ascii_text(detail)}",
+                            color="dim",
+                            err=not check.warned,
+                        )
 
             console.print()
             summary = ci_result.to_json()["summary"]

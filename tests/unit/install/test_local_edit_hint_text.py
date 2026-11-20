@@ -6,10 +6,31 @@ import pytest
 
 from apm_cli.install.drift import DriftFinding, render_drift_text
 from apm_cli.install.local_edits import (
+    install_keeps_edit,
     local_edit_hint,
+    overwrite_notice,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-user-facing-output-diagnostics")]
+
+
+class TestLocalEditHint:
+    def test_audit_wording_points_at_export_patch(self) -> None:
+        text = local_edit_hint(2)
+        assert text.startswith("2 local edit(s) to managed files that the next 'apm install'")
+        assert "run 'apm export-patch'" in text
+        assert text.isascii()
+
+    def test_install_notice_names_the_overwritten_files(self) -> None:
+        text = overwrite_notice([".github/agents/a.agent.md"])
+        assert text.startswith("This install overwrites 1 locally edited managed file(s)")
+        assert ".github/agents/a.agent.md" in text
+        assert "run 'apm export-patch'" in text
+        assert text.isascii()
+
+    def test_skills_are_kept_by_install_other_kinds_are_not(self) -> None:
+        assert install_keeps_edit(".agents/skills/kit/SKILL.md")
+        assert not install_keeps_edit(".github/instructions/kit.instructions.md")
 
 
 class TestDriftTextHint:
