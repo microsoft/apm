@@ -72,7 +72,7 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 844, '"--update"'),
         Ev(_INSTALL, 848, '"--dry-run"'),
         Ev(_INSTALL, 850, '"--force"'),
-        Ev(_INSTALL, 855, '"--frozen"'),
+        Ev(_INSTALL, 855, '"--frozen/--no-frozen"'),
         Ev(_INSTALL, 879, '"--target"'),
         Ev(_INSTALL, 1011, '"--no-policy"'),
     ),
