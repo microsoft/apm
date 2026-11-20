@@ -1,9 +1,8 @@
 """Egress rows for HOST GitLab: gitlab.com.
 
-Unregistered, missing world support: E2|HOST=GitLab|*|EGRESS=marketplace-fetch
-(no GitLab repository-file API route is served, so marketplace add finds no
-marketplace.json) and E2|HOST=GitLab|*|EGRESS=policy-fetch (policy status with a
-gitlab.com origin sends no request the world answers).
+The world serves GitLab git, the /api/v4 repository files (JSON and raw) and
+commits, so marketplace-fetch and policy-fetch read their files from the
+host's own origin.
 """
 
 from __future__ import annotations
@@ -24,11 +23,18 @@ SLICE = HostSlice(
         *(
             EgressRow(f"E2|HOST=GitLab|CRED={cred}|EGRESS={egress}", cred, egress)
             for cred in ("PAT", "helper", "none")
-            for egress in ("api-probe", "clone")
+            for egress in ("api-probe", "clone", "marketplace-fetch", "policy-fetch")
         ),
+        EgressRow("EP|EGRESS=marketplace-fetch|HOST=GitLab", "PAT", "marketplace-fetch"),
+        EgressRow("EP|EGRESS=policy-fetch|HOST=GitLab", "PAT", "policy-fetch"),
         EgressRow("EP|EGRESS=api-probe|HOST=GitLab", "PAT", "api-probe"),
         EgressRow("EP|EGRESS=clone|HOST=GitLab", "PAT", "clone"),
         EgressRow("EP|HOST=GitLab|PROXY_ONLY=0", "PAT", "clone"),
         EgressRow("EP|HOST=GitLab|REDIRECT=none", "PAT", "clone"),
+        EgressRow("EP|HOST=GitLab|PROXY_ONLY=1", "PAT", "clone"),
+        *(
+            EgressRow(f"EP|HOST=GitLab|REDIRECT={kind}", "PAT", "clone")
+            for kind in ("same-origin", "cross-origin")
+        ),
     ),
 )

@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,10 @@ class EgressRow:
     smoke: bool = False
     # Strict expected failure: "S-pending (neutral issue to follow): <phrase>".
     xfail: str = ""
+    # Exit(s) the decisive command may end with (a refused anonymous request is 1).
+    exit: int | tuple[int, ...] = 0
+    # The host refuses anonymous requests (Azure DevOps: ``require_ado_auth``).
+    auth: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,12 @@ class HostSlice:
     spec: str  # dependency spec of p-skill on this host
     pat_env: str = ""  # the env variable APM reads a PAT for this host from
     env: Mapping[str, str] = field(default_factory=dict)  # extra env, e.g. GITHUB_HOST
+    # Password the ``helper`` credential answers with ("" = a sentinel the host rejects).
+    helper_password: str = ""
+    # api-probe: the spec whose install reaches the host's REST API ("" = ``spec``),
+    # and a setup that authors and serves it in the world (receives the World).
+    api_spec: str = ""
+    api_setup: Callable[[Any], None] | None = None
     rows: tuple[EgressRow, ...] = ()
 
 
