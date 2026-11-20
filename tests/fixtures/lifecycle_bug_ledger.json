@@ -531,8 +531,22 @@
       ]
     },
     {
+      "issue": 4045,
+      "fixed_in": "Unreleased",
+      "summary": "Uninstall loaded the post-removal manifest only for MCP cleanup, so a scope with recorded LSP servers but no MCP state exited 1 and left the removed package's LSP server configured and locked.",
+      "failure_modes": ["cleanup", "outcome"],
+      "properties": ["ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_lsp_only_uninstall_removes_the_server_and_keeps_survivors",
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_lsp_only_uninstall_clears_every_harness_it_wrote",
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_mixed_mcp_and_lsp_package_still_uninstalls_cleanly",
+        "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_unreadable_target_config_still_fails_closed",
+        "tests/integration/test_opencode_lsp_lifecycle.py::test_uninstall_removes_the_opencode_lsp_entry"
+      ]
+    },
+    {
       "issue": 4080,
-      "fixed_in": "0.37.0",
+      "fixed_in": "Unreleased",
       "summary": "apm unpack deployed bundle files without the shared install owners that apm install <bundle> uses: org policy, integrity under require_hashes, the lifecycle lock and the lockfile record.",
       "failure_modes": ["transaction", "ownership", "outcome"],
       "properties": ["transaction.failed_command_preserves_state", "ownership.preserve_unowned", "outcome.status_matches_state"],
@@ -549,7 +563,7 @@
     },
     {
       "issue": 4125,
-      "fixed_in": "0.37.0",
+      "fixed_in": "Unreleased",
       "summary": "apm update re-locked a registry dependency whose version did not move without verifying its locked hash, unlike a git dependency whose commit did not move.",
       "failure_modes": [
         "transaction",
