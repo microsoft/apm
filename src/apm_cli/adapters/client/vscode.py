@@ -13,6 +13,7 @@ from typing import ClassVar
 
 from ...core.command_logger import library_logger
 from ...core.docker_args import DockerArgsProcessor
+from ...core.remediation import MCP_REQUIRED_VARIABLES_UNSET
 from ...mcp_transport import canonical_remote_transport
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
@@ -403,8 +404,10 @@ class VSCodeClientAdapter(MCPClientAdapter):
                         library_logger().warning(
                             "Could not resolve required container run option "
                             f"'{variable_name}' for '{package.get('name', '')}'; "
-                            "target configuration was not changed. Set the required "
-                            "registry runtime variables and rerun 'apm install'."
+                            "target configuration was not changed. "
+                            + MCP_REQUIRED_VARIABLES_UNSET.bind(
+                                names="the required registry runtime variables"
+                            ).sentence()
                         )
                         return {}, []
                     args = self._ensure_docker_image_arg(["run", "-i", "--rm"], package.get("name"))

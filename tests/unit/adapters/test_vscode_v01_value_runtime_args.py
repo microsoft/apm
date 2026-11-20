@@ -562,7 +562,8 @@ class TestRenderedDockerLauncher(unittest.TestCase):
         warning.assert_called_once_with(
             "Could not resolve required container run option "
             f"'workdir' for '{IMAGE}'; target configuration was not changed. "
-            "Set the required registry runtime variables and rerun 'apm install'.",
+            "Set the required registry runtime variables in your environment, then run "
+            "'apm install' to configure the MCP server with them.",
             symbol="warning",
         )
 

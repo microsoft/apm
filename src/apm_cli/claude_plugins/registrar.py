@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.remediation import (
+    CLAUDE_PLUGIN_CONTENT_DIFFERS,
+    CLAUDE_PLUGIN_MARKETPLACE_MOVED,
+    CLAUDE_PLUGIN_SOURCE_MISSING,
+)
 from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
 from apm_cli.native_plugins.layout import (
     NativeLayoutError,
@@ -115,8 +120,8 @@ def _verify_next(
     if not source.is_dir():
         raise ClaudeNativePluginError(
             f"The source of native Claude plugin '{own.record.name}' ({key}) is missing from "
-            "apm_modules. Run 'apm install --global' to restore it; Claude settings were not "
-            "changed."
+            "apm_modules; Claude settings were not changed. "
+            + CLAUDE_PLUGIN_SOURCE_MISSING.sentence()
         )
     plan = prepared.get(key)
     if plan is not None and plan.bundle_hash != own.record.fingerprint:
@@ -230,8 +235,7 @@ def reconcile_claude_plugins(
                 "The previous apm.lock.yaml declared native Claude plugins under "
                 + ", ".join(f"{name} at {path}" for name, path in sorted(prior_bindings))
                 + f"; this APM home now uses {marketplace} at {root}. APM changed nothing. "
-                "Remove the old entries from Claude settings and ~/.agents/plugins, delete "
-                "apm.lock.yaml, then run 'apm install --global' again."
+                + CLAUDE_PLUGIN_MARKETPLACE_MOVED.sentence()
             )
         following = native_ownership(lockfile) if lockfile is not None else {}
         if not following and not prior_names:
@@ -366,5 +370,5 @@ def verify_claude_native_cache(*, modules_dir: Path, locked: Any, source_root: P
             raise AgentPluginDeploymentBoundaryError(
                 f"Native Claude plugin '{record.name}' {label} differs from apm.lock.yaml "
                 f"({path}): expected {record.fingerprint}, observed {observed}. "
-                "Run 'apm install --global' to restore it."
+                + CLAUDE_PLUGIN_CONTENT_DIFFERS.sentence()
             )

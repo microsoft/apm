@@ -104,7 +104,7 @@ def test_clean_gemini_leaves_no_dangling_import_or_contradictory_hint(
     assert cleaned.exit_code == 0, cleaned.output
     assert not (tmp_path / "AGENTS.md").exists()
     assert not (tmp_path / "GEMINI.md").exists()
-    assert "run 'apm compile --clean' to remove" not in cleaned.output
+    assert "'apm compile --clean' to remove" not in cleaned.output
     assert "produced no output files" not in cleaned.output
     assert "No instructions to compile" in cleaned.output
 

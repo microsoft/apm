@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from apm_cli.core.remediation import CLAUDE_PLUGIN_BIN_UNTRUSTED
 from apm_cli.core.scope import get_apm_home, is_user_scope
 from apm_cli.deps.plugin_parser import (
     claude_native_mcp_servers,
@@ -319,7 +320,7 @@ def plan_native_claude_plugin(
     elif ships_bin and skip_bin:
         return park(
             "its bin/ executables are not trusted in this run",
-            "Re-run: apm install --global --trust-bin",
+            CLAUDE_PLUGIN_BIN_UNTRUSTED.sentence(),
             name,
             fingerprint,
         )

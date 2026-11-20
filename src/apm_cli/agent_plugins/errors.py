@@ -9,25 +9,36 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from apm_cli.models.apm_package import DependencyReference, PackageInfo
 
-AGENT_PLUGIN_RECOVERY = (
-    "Use 'apm pack --claude-plugin' or ask the publisher for a legacy-compatible package."
-)
-AGENT_PLUGIN_DEPLOYMENT_BLOCKED = (
-    "Agent Plugins v1.0.0 deployment is blocked because this install's "
-    "effective target selection does not include 'copilot'. "
-    "Re-run with --target copilot. " + AGENT_PLUGIN_RECOVERY
-)
-AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED = (
-    "Agent Plugins v1.0.0 packages cannot be installed through the imperative "
-    "local-bundle route, which deploys loose primitives and owns no lockfile "
-    "row. Declare the plugin as a dependency in apm.yml (a local path works) "
-    "and run 'apm install --target copilot' so APM materializes it under "
-    "apm_modules and registers it natively with GitHub Copilot."
-)
-AGENT_PLUGIN_IR_MISSING = (
-    "Native Agent Plugin canonical IR is missing, so deployment was blocked. "
-    + AGENT_PLUGIN_RECOVERY
-)
+
+# Rendered lazily: apm_cli.core imports models, which import this module.
+def _recovery() -> str:
+    from apm_cli.core.remediation import AGENT_PLUGIN_LEGACY_PACKAGE
+
+    return AGENT_PLUGIN_LEGACY_PACKAGE.sentence() + " Otherwise, ask the publisher for one."
+
+
+def _deployment_blocked() -> str:
+    return (
+        "Agent Plugins v1.0.0 deployment is blocked because this install's "
+        "effective target selection does not include 'copilot'. "
+        "Re-run with --target copilot. " + _recovery()
+    )
+
+
+def _bundle_route_blocked() -> str:
+    from apm_cli.core.remediation import AGENT_PLUGIN_BUNDLE_CONSUMER
+
+    return (
+        "Agent Plugins v1.0.0 packages cannot be installed through the imperative "
+        "local-bundle route, which deploys loose primitives and owns no lockfile row. "
+        + AGENT_PLUGIN_BUNDLE_CONSUMER.sentence()
+        + " APM then materializes it under apm_modules and registers it natively "
+        "with GitHub Copilot."
+    )
+
+
+def _ir_missing() -> str:
+    return "Native Agent Plugin canonical IR is missing, so deployment was blocked. " + _recovery()
 
 
 class AgentPluginError(ValueError):
@@ -93,14 +104,14 @@ def enforce_agent_plugin_deployment_boundary(
         bundle_info is not None
         and getattr(bundle_info, "format", None) == BundleFormat.AGENT_PLUGIN.value
     ):
-        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED)
+        raise AgentPluginDeploymentBoundaryError(_bundle_route_blocked())
     if package_info is None:
         return
     if package_info.package_type is not PackageType.AGENT_PLUGIN:
         return
     package = getattr(package_info, "package", None)
     if package is None or getattr(package, "agent_plugin", None) is None:
-        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_IR_MISSING)
+        raise AgentPluginDeploymentBoundaryError(_ir_missing())
     capability = current_native_registration()
     if capability is not None and capability.supported:
         return
@@ -110,7 +121,7 @@ def enforce_agent_plugin_deployment_boundary(
     # reports, so there is nothing else to distinguish here. This is
     # skippable and non-fatal for the batch.
     raise AgentPluginTargetExcludedError(
-        capability.reason if capability is not None else AGENT_PLUGIN_DEPLOYMENT_BLOCKED
+        capability.reason if capability is not None else _deployment_blocked()
     )
 
 

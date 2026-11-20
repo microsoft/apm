@@ -493,6 +493,110 @@ RUNTIME_MISSING = _entry(
 # -- end W3: G4 ---------------------------------------------------------
 
 # -- W3: G5 ---------------------------------------------------------
+# Advice printed by MCP client adapters, native plugin registrars and compilation.
+
+MCP_CLIENT_CONFIG_UNREADABLE = _entry(
+    "mcp-client-config-unreadable",
+    "apm install",
+    "write the MCP server configuration",
+    before="check its permissions and UTF-8 encoding",
+)
+MCP_CLIENT_CONFIG_MALFORMED = _entry(
+    "mcp-client-config-malformed",
+    "apm install",
+    "write the MCP server configuration",
+    before="fix the file",
+)
+MCP_CLIENT_CONFIG_UNWRITABLE = _entry(
+    "mcp-client-config-unwritable",
+    "apm install",
+    "write the MCP server configuration",
+    before="check permissions and free space",
+)
+MCP_REQUIRED_VARIABLES_UNSET = _entry(
+    "mcp-required-variables-unset",
+    "apm install",
+    "configure the MCP server with them",
+    before="set {names} in your environment",
+)
+CODEX_PLUGIN_PROVENANCE_MISSING = _entry(
+    "codex-plugin-provenance-missing",
+    "apm install -g <saved-pinned-dependency> --target codex",
+    "re-admit it with its source provenance",
+    before="save its pinned declaration and run 'apm uninstall -g {dependency}'",
+)
+CODEX_PLUGIN_CACHE_DIFFERS = _entry(
+    "codex-plugin-cache-differs",
+    "apm install -g --frozen --target codex",
+    "re-admit the dependency from its locked source",
+    before="remove only this dependency's disposable apm_modules directory",
+)
+CODEX_PLUGIN_REGISTRATION_STALE = _entry(
+    "codex-plugin-registration-stale",
+    "apm install -g --target codex",
+    "re-register the Codex compatibility plugin",
+)
+CODEX_PLUGIN_PROJECT_SCOPE = _entry(
+    "codex-plugin-project-scope",
+    "apm install -g --target codex",
+    "register the Codex compatibility plugin at user scope",
+)
+CLAUDE_PLUGIN_SOURCE_MISSING = _entry(
+    "claude-plugin-source-missing",
+    "apm install --global",
+    "restore the plugin source in apm_modules",
+)
+CLAUDE_PLUGIN_CONTENT_DIFFERS = _entry(
+    "claude-plugin-content-differs",
+    "apm install --global",
+    "restore the plugin content locked in apm.lock.yaml",
+)
+CLAUDE_PLUGIN_MARKETPLACE_MOVED = _entry(
+    "claude-plugin-marketplace-moved",
+    "apm install --global",
+    "register the plugins under the current marketplace",
+    before="remove the old entries from Claude settings and ~/.agents/plugins, "
+    "and delete apm.lock.yaml",
+)
+CLAUDE_PLUGIN_BIN_UNTRUSTED = _entry(
+    "claude-plugin-bin-untrusted",
+    "apm install --global --trust-bin",
+    "deploy the plugin with its bin/ executables",
+)
+COPILOT_SETTINGS_INVALID = _entry(
+    "copilot-settings-invalid",
+    "apm install",
+    "register the Agent Plugin",
+    before="fix or delete the file",
+)
+AGENT_PLUGIN_LEGACY_PACKAGE = _entry(
+    "agent-plugin-legacy-package",
+    "apm pack --claude-plugin",
+    "produce a legacy-compatible package from the plugin source",
+)
+HAND_AUTHORED_OUTPUT_PROTECTED = _entry(
+    "hand-authored-output-protected",
+    "apm compile",
+    "regenerate the file",
+    before="{fix}",
+)
+NESTED_REPOSITORY_SKIPPED = _entry(
+    "nested-repository-skipped",
+    "apm compile",
+    "compile its AGENTS.md separately",
+    before="change to {root}",
+)
+AGENTS_FILES_DISTRIBUTED = _entry(
+    "agents-files-distributed",
+    "apm compile --single-agents",
+    "compile a single AGENTS.md instead",
+)
+ORPHANED_AGENTS_FILES = _entry(
+    "orphaned-agents-files",
+    "apm compile --clean",
+    "remove the orphaned AGENTS.md files",
+)
+
 
 # -- end W3: G5 ---------------------------------------------------------
 

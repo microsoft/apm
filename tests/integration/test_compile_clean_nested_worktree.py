@@ -147,7 +147,8 @@ def test_compile_root_reports_skipped_nested_repository_placement(
     assert "Compiled 1 output file (1 AGENTS.md file)" in result.stdout
     unwrapped_stdout = result.stdout.replace("\n", "")
     assert (
-        f"Run apm compile from {destination / 'src'} to compile it separately" in unwrapped_stdout
+        f"Change to {destination / 'src'}, then run 'apm compile' to compile its AGENTS.md "
+        "separately." in unwrapped_stdout
     )
 
 
