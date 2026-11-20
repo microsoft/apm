@@ -69,9 +69,14 @@ def test_obligations_cover_every_gate_operation_primitive_and_scope() -> None:
         rows = [row for row in parsed if row["scope"] == scope]
         assert {row["op"] for row in rows} >= _GATE_OPS, scope
         assert set(KINDS) <= {row["prim"] for row in rows}, scope
-        assert {"pending", "allow", "deny", "org-deny", "org-deny-all"} <= {
-            row["gate"] for row in rows
-        }, scope
+        gates = {row["gate"] for row in rows if row["src"] == "path"}
+        assert {"pending", "allow", "deny"} <= gates, scope
+        # User scope has no git remote and is not governed by org policy
+        # (#4087); only project scope reaches the org gates.
+        if scope == "project":
+            assert {"org-deny", "org-deny-all"} <= gates, scope
+        else:
+            assert not gates & {"org-deny", "org-deny-all"}, scope
     project_ops = {row["op"] for row in parsed if row["scope"] == "project"}
     assert {"audit-ci", "prune"} <= project_ops
 
