@@ -1681,3 +1681,36 @@ def test_license_review_retries_transient_failures_without_softening_policy() ->
     _license_review_steps(weakened)[1]["with"]["fail-on-severity"] = "critical"
     with pytest.raises(AssertionError):
         _assert_license_review_retries_without_softening(weakened)
+
+
+def _assert_pr_runs_cancel_superseded_pushes_only(workflow: WorkflowNode, name: str) -> None:
+    concurrency = workflow.get("concurrency")
+    assert isinstance(concurrency, dict), f"{name}: a PR concurrency group is required"
+    group = str(concurrency["group"])
+    assert "github.event.pull_request.number" in group, f"{name}: group PR runs per PR"
+    assert "github.run_id" in group, f"{name}: non-PR runs keep a unique group"
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}", (
+        f"{name}: only pull_request runs may be cancelled"
+    )
+
+
+def test_heavy_pr_workflows_spare_the_shared_actions_api_quota() -> None:
+    """Gate polling and superseded PR runs share one installation API quota."""
+    workflows = REPO_ROOT / ".github" / "workflows"
+    for name in ("ci.yml", "codeql.yml"):
+        workflow = load_workflow(workflows / name)
+        _assert_pr_runs_cancel_superseded_pushes_only(workflow, name)
+
+        unbounded = deepcopy(workflow)
+        unbounded["concurrency"]["cancel-in-progress"] = True
+        with pytest.raises(AssertionError):
+            _assert_pr_runs_cancel_superseded_pushes_only(unbounded, name)
+
+    gate = load_workflow(workflows / "merge-gate.yml")
+    poll = [
+        step["env"]["POLL_SEC"]
+        for job in gate["jobs"].values()
+        for step in job.get("steps", [])
+        if "POLL_SEC" in step.get("env", {})
+    ]
+    assert poll and all(int(value) >= 30 for value in poll), poll
