@@ -110,18 +110,18 @@ certify `outcome: passed`:
 
 | Obligation class (surfaces) | Required evidence | Floor `tier` |
 |---|---|---|
-| Lifecycle behavior and invariants (install pipeline, lockfile determinism, durable state across phases, ownership boundary, dry-run no-write, uninstall/cleanup) | installed CLI (packaged binary or `python -m apm_cli.cli`) driving real state, plus a before/after snapshot | `e2e` |
+| Lifecycle behavior and invariants (install pipeline, lockfile determinism, durable state across phases, ownership boundary, dry-run no-write, uninstall/cleanup) | installed CLI (packaged binary or `python -m apm_cli.cli`) driving real state, plus a before/after snapshot | `lifecycle-state-machine` |
 | Auth, transport, and egress (auth resolution, marketplace download + integrity, proxy routing, credential scoping) | component test with real credential and transport fixtures; egress log or header capture from a scripted proxy (mocked sessions prove nothing); plus one E2E per family | `integration-with-fixtures`, plus one `e2e` per family |
 | Owner decisions (canonical durable-fact owners) | table-driven test at the owner symbol (never patch the owner under test), plus one E2E through a consumer path | `integration-with-fixtures`, plus one `e2e` |
 | Spec requirements | a test that exercises the implementation; reading spec text or checking schema shape earns only `static` | `integration-with-fixtures` |
-| Gate monotonicity (deny, revoke, or policy tightening removes what is no longer allowed, on every deploy path) | E2E plus a snapshot showing absence after the NEXT mutating command; a gate unit test proves the decision, not the retirement | `e2e` |
+| Gate monotonicity (deny, revoke, or policy tightening removes what is no longer allowed, on every deploy path) | E2E plus a snapshot showing absence after the NEXT mutating command; a gate unit test proves the decision, not the retirement | `lifecycle-state-machine` |
 | CLI surface, error cascade, hook routing, cross-module flow | real argv, exit code, filesystem or boundary over real fixtures | `integration-with-fixtures` |
 | Error wording (string shape only) | string assertion | `unit` |
 
-Never emit `tier: lifecycle-state-machine`; the panelist schema
-rejects it. Lifecycle evidence is `e2e`. On durable-state surfaces,
-certify `e2e` only when the quoted assertion is a state fact (snapshot
-equality or absence, bytes, egress log) backed by `run_evidence`.
+Use `lifecycle-state-machine` for durable-state evidence and `e2e` for
+other end-to-end evidence. Certify `lifecycle-state-machine` only when
+the quoted assertion is a state fact (snapshot equality or absence,
+bytes, egress log) backed by `run_evidence`; otherwise it is `missing`.
 
 Three disciplines follow from this table:
 
@@ -133,10 +133,11 @@ Three disciplines follow from this table:
    security/auth/install promise AND no reasonable fixture path
    exists. Do NOT silence the lower row.
 2. **S7 PROBE RULE on integration evidence.** When you return
-   `outcome: passed` at `tier: integration-with-fixtures` or `e2e` on
-   a critical-promise surface, you MUST have RUN the test within this
-   review. Capture the invocation + pass/fail line + duration in
-   `evidence.run_evidence` (verbatim, under 240 chars). If the test
+   `outcome: passed` at `integration-with-fixtures`, `e2e`, or
+   `lifecycle-state-machine` on a critical-promise surface, you MUST
+   have RUN the test within this review. Capture the invocation +
+   pass/fail line + duration in `evidence.run_evidence` (verbatim,
+   under 240 chars). If the test
    needs a credential you lack, note the skip and downgrade to
    `outcome: unknown` -- do NOT certify on a read.
 3. **ApmLifecycle contract-test signal (LOAD-BEARING).** When the diff
@@ -146,16 +147,16 @@ Three disciplines follow from this table:
    a target root or user scope, `--dry-run`, cleanup / prune / drift /
    orphan handling, the executables gate, policy discovery or outcomes,
    integrity hashes, or proxy and egress routing, return exactly one
-   of: `passed` at `e2e` (name the lifecycle test, quote the state
-   assertion, `run_evidence` REQUIRED); `missing` at `e2e` (promise,
-   cell, file, test name, command SEQUENCE, oracle: snapshot equality,
-   snapshot absence, or egress log; `blocking` for ownership boundary,
+   of: `passed` at `lifecycle-state-machine` (name the lifecycle test,
+   quote the state assertion, `run_evidence` REQUIRED); `missing` at
+   `lifecycle-state-machine` (promise, cell, file, test name, command
+   SEQUENCE, oracle: snapshot equality, snapshot absence, or egress
+   log; `blocking` for ownership boundary,
    destructive paths, dry-run no-write, or gate monotonicity); or a
-   lower-tier `passed` row plus a `missing` `e2e` row. Silence is not an answer. Certify
-   only an observable state fact (file present or absent, bytes
-   unchanged, snapshot equivalence); a string or ledger-field compare
-   in a lifecycle file is `missing`, with a note that it does not
-   detect the regression it appears to guard.
+   lower-tier `passed` row plus a `missing` `lifecycle-state-machine`
+   row. Silence is not an answer. A string or ledger-field compare in a
+   lifecycle file is `missing`, with a note that it does not detect the
+   regression it appears to guard.
 
 ## Lifecycle test authoring (pointer)
 
@@ -255,25 +256,25 @@ listed evidence; without it, drop the finding.
    promise(s) its tests defend. Cite: the behavior-change file and the
    missing or uncited Scenario Evidence row.
 2. **Split authority** (`call-site-fix`) -- `recommended`; `blocking`
-   on security or gate decisions, or when another call site diverges. A fix made
-   at one call site for a decision that has (or should have) an owner:
-   ask for the owner fix + a closed-world guard + a mutation case that
-   disables only that guard. Cite: call site `file:line`, the owner
-   entry id (or "no entry"), and the grep of sibling call sites.
-3. **Side doors** (`side-door-uncovered`) -- `blocking` when the path writes durable state and
-   no test drives it; else `recommended`. A mutating path that skips
-   the install pipeline (local bundle, `--mcp`, the `--dry-run`
-   planner, unpack) needs its own coverage; pipeline tests do not
-   cover it. Cite: the entry point (command + flag) and the probe
-   showing no test invokes it.
+   on security or gate decisions, or when another call site diverges. A
+   fix made at one call site for a decision that has (or should have)
+   an owner: ask for the owner fix + a closed-world guard + a mutation
+   case that disables only that guard. Cite: call site `file:line`, the
+   owner entry id (or "no entry"), and the grep of sibling call sites.
+3. **Side doors** (`side-door-uncovered`) -- `blocking` when the path
+   writes durable state and no test drives it; else `recommended`. A
+   mutating path that skips the install pipeline (local bundle,
+   `--mcp`, the `--dry-run` planner, unpack) needs its own coverage;
+   pipeline tests do not cover it. Cite: the entry point (command +
+   flag) and the probe showing no test invokes it.
 4. **Defaults that hide defects** (`hidden-default`) -- `recommended`;
-   `blocking` when it masks a security promise. Flag `--no-policy` in E2E unless
-   the test targets `--no-policy`; mock-only assertions; a hermetic
-   sample that is not a twin of the real package; an anti-oracle (a
-   test asserting a current defect). Cite: test `file:line` and the
-   default that hides the defect.
-5. **Refusal is not success** (`refusal-as-success`) -- `recommended`. A
-   test proving APM refuses an input never counts toward the success
+   `blocking` when it masks a security promise. Flag `--no-policy` in
+   E2E unless the test targets `--no-policy`; mock-only assertions; a
+   hermetic sample that is not a twin of the real package; an
+   anti-oracle (a test asserting a current defect). Cite: test
+   `file:line` and the default that hides the defect.
+5. **Refusal is not success** (`refusal-as-success`) -- `recommended`.
+   A test proving APM refuses an input never counts toward the success
    path of the same promise. Cite: the refusal test and the uncovered
    success obligation.
 6. **Exit contract and invariants** -- `recommended`; `blocking` when
@@ -288,16 +289,16 @@ listed evidence; without it, drop the finding.
 7. **Printed hints** -- `recommended`. A CLI hint the diff adds or
    edits must be executed by a test that reaches the stated outcome.
    Cite: hint string `file:line` and the probe for a test running it.
-8. **Cut / merge review** (`unsafe-removal`) -- `blocking` without
-   the evidence below. A deletion or merge is
-   acceptable only if the test maps to no promise; or a STRONGER test
-   of the same cell strictly subsumes it; or it is an exact copy (same
-   body, fixtures, markers, conftest scope, CI lane) whose twin is
-   kept. Ask for the node-set diff (`pytest --collect-only -q`
-   before/after) and the per-owner coverage-context diff; check that
-   stronger markers (e.g. `platform_sensitive`) survive. "No promise
-   found" may only mean "no attribution found"; never accept a
-   percentage. Cite: the deleted node id and the rule applied.
+8. **Cut / merge review** (`unsafe-removal`) -- `blocking` without the
+   evidence below. A deletion or merge is acceptable only if the test
+   maps to no promise; or a STRONGER test of the same cell strictly
+   subsumes it; or it is an exact copy (same body, fixtures, markers,
+   conftest scope, CI lane) whose twin is kept. Ask for the node-set
+   diff (`pytest --collect-only -q` before/after) and the per-owner
+   coverage-context diff; check that stronger markers (e.g.
+   `platform_sensitive`) survive. "No promise found" may only mean "no
+   attribution found"; never accept a percentage. Cite: the deleted
+   node id and the rule applied.
 9. **Test file naming** -- `nit`. Name test files by promise or owner,
    never by phase, wave, or gap. Cite: the file path.
 
@@ -337,7 +338,7 @@ should live. "We should have more tests" is not a finding.
 - **Asserting "no test exists" without grepping.** A false positive
   destroys trust in the field.
 - **Reading a test instead of running it.** Certifying a critical
-  promise at `integration-with-fixtures` or `e2e` without a run
+  promise at `integration-with-fixtures` or above without a run
   breaks the S7 PROBE RULE.
 - **Accepting labels as coverage.** Markers, promise labels, and
   visited-cell events are not receipts; only an oracle that observed
@@ -432,16 +433,15 @@ Per outcome, the required shape:
   (verbatim line carrying the assertion, under 240 chars), `proves`
   REQUIRED (the user promise in user words), `principles` REQUIRED,
   `tier` REQUIRED (`unit` | `integration-with-fixtures` | `e2e` |
-  `manual-only` | `static`). When `tier` is
-  `integration-with-fixtures` or `e2e` AND the surface is in the
-  critical-promise list above, `run_evidence` REQUIRED (per the S7 PROBE RULE: you actually ran
-  the test, you didn't just read it). Use this shape when you affirm
-  a scenario is covered (often a `severity: recommended` follow-up
-  "this test should also assert X" or simply a body-text affirmation
-  in the rationale).
+  `lifecycle-state-machine` | `manual-only` | `static`). When `tier`
+  is `integration-with-fixtures`, `e2e`, or `lifecycle-state-machine`
+  AND the surface is in the critical-promise list above,
+  `run_evidence` REQUIRED (S7 PROBE RULE: you ran it, not read it).
+  Use this shape to affirm a scenario is covered (often a
+  `recommended` follow-up "this test should also assert X").
 - `outcome: failed` -- same shape as `passed` (including required
-  `tier` and `run_evidence` for integration/e2e on critical surfaces)
-  plus the failing assertion's actual-vs-expected line in the
+  `tier` and `run_evidence` at or above integration on critical
+  surfaces) plus the failing assertion's actual-vs-expected line in the
   rationale. This is the load-bearing case for `severity: blocking`.
   Reproduce the failure with the exact pytest command in `suggestion`.
 - `outcome: missing` -- `test_file` REQUIRED (the path where the
@@ -449,8 +449,8 @@ Per outcome, the required shape:
   it), `assertion_excerpt` REQUIRED (the line that WOULD assert,
   written as Python pseudocode), `proves` REQUIRED, `principles`
   REQUIRED, `tier` REQUIRED (the tier the surface FLOOR demands per
-  the obligation table above; `e2e` for lifecycle and gate classes,
-  `integration-with-fixtures` for most other critical surfaces).
+  the obligation table above; `lifecycle-state-machine` for lifecycle
+  and gate classes, `integration-with-fixtures` for most others).
   You MUST have probed via `view` / `grep` / `glob` to
   confirm absence at the floor tier before claiming `missing`. State
   the probe in the rationale (e.g. "grep'd `tests/integration/` for

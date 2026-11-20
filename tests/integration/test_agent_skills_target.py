@@ -27,6 +27,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from tests.utils.deployment_evidence import seed_receipts
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -338,6 +339,8 @@ def test_uninstall_agent_skills_cleans_dir(tmp_path: Path, monkeypatch: pytest.M
 
     # Stub the modules dir so uninstall's apm_modules cleanup is a no-op.
     (project / "apm_modules").mkdir()
+    # The deploying machine's receipt is the deletion evidence (#3701).
+    seed_receipts(project, [deployed], target="agent-skills", owner=pkg)
 
     result = _invoke(project, ["uninstall", pkg], monkeypatch)
 
