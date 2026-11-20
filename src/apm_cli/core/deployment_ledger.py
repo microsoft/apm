@@ -566,6 +566,8 @@ def record_bundle_receipts(
     """
     from apm_cli.utils.content_hash import compute_file_hash
 
+    if not written:
+        return
     session = DeploymentMaterializationSession(project_root, scope, lockfile)
     for claim in written:
         path = Path(claim)

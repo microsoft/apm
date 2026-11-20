@@ -319,18 +319,17 @@ def install_local_bundle(
             migrate_lockfile_if_needed(_bundle_lock_root(global_))
             lockfile_path = get_lockfile_path(_bundle_lock_root(global_))
             lockfile = LockFile.read(lockfile_path) or LockFile()
-            from ..core.deployment_ledger import DeploymentLedgerCodec
+            from ..core.deployment_ledger import DeploymentLedgerCodec, record_bundle_receipts
             from ..integration.cleanup import DeploymentEvidence
             from ..utils.diagnostics import DiagnosticCollector
 
             # Evidence for migration deletes is bound to the pre-install lock (#3701).
-            migration_diagnostics = DiagnosticCollector()
             migration_evidence = DeploymentEvidence.collect(
                 project_root,
                 user_scope=global_,
                 lockfile=lockfile,
                 lockfile_root=lockfile_path.parent,
-                diagnostics=migration_diagnostics,
+                diagnostics=(migration_diagnostics := DiagnosticCollector()),
             )
             DeploymentLedgerCodec.record_local_bundle_files(
                 lockfile,
@@ -341,17 +340,15 @@ def install_local_bundle(
                 staged_hashes=result.get("staged_file_hashes", {}),
                 staged_fallback_hashes=staged_fallbacks,
             )
-            if not dry_run:
-                from ..core.deployment_ledger import record_bundle_receipts
-
-                # Receipts are a bundle file's only deletion evidence (#4223).
-                record_bundle_receipts(
-                    project_root,
-                    scope=scope,
-                    targets=targets,
-                    written=result.get("written_files", []),
-                    lockfile=lockfile,
-                )
+            # Receipts are a bundle file's only deletion evidence (#4223); a
+            # dry run writes nothing, so it reports no written files.
+            record_bundle_receipts(
+                project_root,
+                scope=scope,
+                targets=targets,
+                written=result.get("written_files", []),
+                lockfile=lockfile,
+            )
 
             # Auto-migrate legacy per-client skill paths (#737).
             # After deploying new .agents/skills/ files, detect and clean up
