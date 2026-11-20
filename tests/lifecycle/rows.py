@@ -52,11 +52,19 @@ from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
-# Where a fixture package's surface lands, per (kind, target) at project scope.
-# Fixture convention: a package's skill is named after the package.
-_SURFACE_GLOBS: Mapping[tuple[str, str], str] = {
+# Where a fixture package's surface lands, per (kind, target) at project scope:
+# a glob, or (glob, marker) when the file is shared and must name the package's
+# entry. World convention (tests/lifecycle/world/packages.py): a package's skill
+# and canvas are named after it, its MCP server is "<pkg>-mcp" and its LSP
+# server "<pkg>-server". A (kind, target) with no entry has no surface there --
+# bin deploys only for Claude at user scope (integration/skill_integrator.py
+# _deploy_plugin_bin) -- so neither the model nor the observation counts it.
+_SURFACE_GLOBS: Mapping[tuple[str, str], str | tuple[str, str]] = {
     ("skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("hook", "copilot"): ".github/hooks/{pkg}-*.json",
+    ("mcp", "copilot"): (".mcp.json", '"{pkg}-mcp"'),
+    ("lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
+    ("canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
 _PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
@@ -163,7 +171,11 @@ class RowReplay:
         if "exit" in then:
             assert self.last is not None and self.last.returncode == then["exit"], self.last
         if then.get("deployed") == "expected":
-            wanted = {"/".join(cell) for cell in expected_deployed(self.model, self.kinds)}
+            wanted = {
+                "/".join(cell)
+                for cell in expected_deployed(self.model, self.kinds)
+                if (cell[1], cell[2]) in _SURFACE_GLOBS
+            }
             observed = set(self.observe().deployed)
             assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
         if "announce" in then:
@@ -178,8 +190,16 @@ class RowReplay:
         for package, kinds in self.kinds.items():
             for kind in kinds:
                 for target in self.model.targets:
-                    pattern = _SURFACE_GLOBS[(kind, target)].format(pkg=package)
-                    hits = [path for path in project.glob(pattern) if path.is_file()]
+                    surface = _SURFACE_GLOBS.get((kind, target))
+                    if surface is None:
+                        continue
+                    pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
+                    marker = marker.format(pkg=package)
+                    hits = [
+                        path
+                        for path in project.glob(pattern.format(pkg=package))
+                        if path.is_file() and marker in path.read_text(encoding="utf-8")
+                    ]
                     if hits:
                         deployed.add(f"{package}/{kind}/{target}")
                         managed.update(path.relative_to(project).as_posix() for path in hits)
