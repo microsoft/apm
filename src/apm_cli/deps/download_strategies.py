@@ -35,9 +35,7 @@ from ..utils.git_env import redact_git_diagnostic, validate_git_url_rewrite_safe
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
-    build_https_clone_url,
     build_raw_content_url,
-    build_ssh_url,
     default_host,
     is_github_hostname,
 )
@@ -255,34 +253,32 @@ class DownloadDelegate:
         self,
         repo_ref: str,
         use_ssh: bool = False,
-        dep_ref: DependencyReference = None,
-        token: str | None = None,
-        auth_scheme: str = "basic",
+        *,
+        dep_ref: DependencyReference,
     ) -> str:
-        """Build the appropriate repository URL for cloning.
+        """Build the credential-free repository URL for cloning.
 
         Supports both GitHub and Azure DevOps URL formats:
         - GitHub: https://github.com/owner/repo.git
         - ADO: https://dev.azure.com/org/project/_git/repo
 
+        Credentials are never embedded in the URL; they are injected via
+        git env (``http.extraheader`` / credential helpers) by
+        :class:`AuthResolver`.
+
         Args:
             repo_ref: Repository reference in format "owner/repo" or
-                "org/project/repo" for ADO
+                "org/project/repo" for ADO (kept for call-site symmetry;
+                the URL is derived from ``dep_ref``)
             use_ssh: Whether to use SSH URL for git operations
-            dep_ref: Optional DependencyReference for ADO-specific URL building
-            token: Optional per-dependency token override
-            auth_scheme: Auth scheme ("basic" or "bearer"). Bearer tokens are
-                injected via env vars, NOT embedded in the URL.
+            dep_ref: DependencyReference describing host, port, and repo
 
         Returns:
             str: Repository URL suitable for git clone operations
         """
-        # Resolve host (used for token-routing and as a fallback when
-        # ``dep_ref`` is missing for legacy callers).
-        if dep_ref and dep_ref.host:
-            host = dep_ref.host
-        else:
-            host = getattr(self._host, "github_host", None) or default_host()
+        # Fall back to the configured default host when the dep_ref
+        # carries none (e.g. shorthand ``owner/repo`` references).
+        host = dep_ref.host or getattr(self._host, "github_host", None) or default_host()
 
         # Pick the vendor-specific backend via ``classify_host`` -- this
         # replaces the in-line ``if is_ado / elif is_github / else`` ladder
@@ -294,64 +290,27 @@ class DownloadDelegate:
         )
 
         is_ado = backend.kind == "ado"
-        is_insecure = bool(getattr(dep_ref, "is_insecure", False)) if dep_ref is not None else False
-
-        # Resolve the effective token. ``token == ""`` is the explicit
-        # "suppress per-instance default" signal used by the
-        # TransportSelector for plain-HTTPS / SSH attempts.
-        if token == "":
-            effective_token: str | None = ""
-        elif token is not None:
-            effective_token = token
-        elif is_ado and dep_ref is not None:
-            effective_token = self._host.auth_resolver.resolve_for_dep(dep_ref).token
-        elif backend.is_github_family:
-            effective_token = self._host.github_token
-        elif backend.kind == "gitlab" and dep_ref is not None:
-            # GitLab tokens come from GITLAB_APM_PAT / GITLAB_TOKEN /
-            # credential helpers via the per-dep AuthResolver lookup.
-            effective_token = self._host.auth_resolver.resolve_for_dep(dep_ref).token
-        else:
-            # Generic hosts: backend never embeds tokens; pick None so the
-            # branch below produces the expected "no credential in URL" form.
-            effective_token = None
+        is_insecure = bool(getattr(dep_ref, "is_insecure", False))
 
         _debug(
-            f"build_repo_url: host={host}, kind={backend.kind}, "
-            f"dep_ref={'present' if dep_ref else 'None'}, "
-            f"ado_org={dep_ref.ado_organization if dep_ref else None}"
+            f"build_repo_url: host={host}, kind={backend.kind}, ado_org={dep_ref.ado_organization}"
         )
 
         # ADO without a parsed ``ado_organization`` cannot use the ADO
         # builders (they need org/project/repo). Fall through to the
         # generic GitHub-style URL the way the previous ladder did.
-        if is_ado and not (dep_ref and dep_ref.ado_organization):
+        if is_ado and not dep_ref.ado_organization:
             backend = backend_for(
                 None,
                 self._host.auth_resolver,
                 fallback_host=host,
             )
 
-        if dep_ref is None:
-            # Legacy no-dep_ref callers: preserve historical behaviour.
-            # Build URL directly from ``repo_ref`` + ``host`` since the
-            # backends require a dep_ref to read host/port/etc.
-            port = None
-            if use_ssh:
-                return build_ssh_url(host, repo_ref, port=port)
-            if is_insecure:
-                return f"http://{host}/{repo_ref}.git"
-            if backend.is_github_family and effective_token:
-                return build_https_clone_url(host, repo_ref, token=effective_token, port=port)
-            return build_https_clone_url(host, repo_ref, token=None, port=port)
-
         if use_ssh:
             return backend.build_clone_ssh_url(dep_ref)
         if is_insecure:
             return backend.build_clone_http_url(dep_ref)
-        return backend.build_clone_https_url(
-            dep_ref, token=effective_token, auth_scheme=auth_scheme
-        )
+        return backend.build_clone_https_url(dep_ref)
 
     # ------------------------------------------------------------------
     # Artifactory helpers
@@ -820,12 +779,7 @@ class DownloadDelegate:
                     *,
                     dep_ref: DependencyReference,
                 ) -> str:
-                    return self.build_repo_url(
-                        repo_ref,
-                        dep_ref=dep_ref,
-                        token="",
-                        auth_scheme="basic",
-                    )
+                    return self.build_repo_url(repo_ref, dep_ref=dep_ref)
 
                 transport_factory = self._git_file_transport_factory or GitSparseFileTransport
                 transport = transport_factory(
@@ -851,12 +805,7 @@ class DownloadDelegate:
             )
 
         auth_ctx = self._host.auth_resolver.resolve_for_dep(dep_ref)
-        remote_url = self.build_repo_url(
-            dep_ref.repo_url,
-            dep_ref=dep_ref,
-            token="",
-            auth_scheme="basic",
-        )
+        remote_url = self.build_repo_url(dep_ref.repo_url, dep_ref=dep_ref)
         if auth_ctx.token:
             git_env = self._host.auth_resolver.git_env_for_remote(auth_ctx, remote_url)
         else:
@@ -948,7 +897,6 @@ class DownloadDelegate:
             project_path,
             dep_ref=dep_ref,
             use_ssh=initial_transport_scheme(dep_ref, self._host._protocol_pref) == "ssh",
-            token="",
         )
         anonymous_plan = self._host._transport_selector.select(
             dep_ref=dep_ref,
@@ -990,7 +938,6 @@ class DownloadDelegate:
                 project_path,
                 dep_ref=dep_ref,
                 use_ssh=attempt.scheme == "ssh",
-                token="",
             )
             effective_url = attempt.effective_url or requested_url
             attempt_ctx = resolver.resolve_for_remote(

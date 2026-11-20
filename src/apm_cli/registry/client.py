@@ -12,6 +12,7 @@ from urllib.parse import quote, urlparse, urlunparse
 import requests
 
 from ..mcp_transport import canonical_remote_transport
+from ..utils.http_credentials import CredentialScopedSession
 
 _log = logging.getLogger(__name__)
 
@@ -370,7 +371,7 @@ class SimpleRegistryClient:
         # is unreachable: a network blip against a private registry must not
         # look like a successful install.
         self._is_custom_url = source != "default"
-        self.session = requests.Session()
+        self.session = CredentialScopedSession()
         self._timeout = _resolve_timeout()
         self._http_cache = self._init_http_cache()
 
@@ -384,21 +385,31 @@ class SimpleRegistryClient:
         manifest's own ``registry:`` URL are refused unless that URL names
         the configured registry (#3994).
         """
-        from apm_cli.deps.registry_proxy import is_enforce_only
+        from apm_cli.deps.egress_route import EgressSurface, is_refused
 
-        if not is_enforce_only() or self.registry_url_source in {"flag", "env", "config"}:
+        if not is_refused(EgressSurface.MCP_REGISTRY, operator_mirror=self._is_operator_mirror()):
             return
-        if self.registry_url_source == "explicit":
-            configured, configured_source = resolve_mcp_registry_url(None)
-            if configured_source != "default" and redact_mcp_registry_url(
-                normalize_mcp_registry_url(configured)
-            ) == redact_mcp_registry_url(self.registry_url):
-                return
         raise RegistryEgressRefusedError(
             f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
             f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
             "mcp-registry-url') at your proxied registry, or unset PROXY_REGISTRY_ONLY."
         )
+
+    def _is_operator_mirror(self) -> bool:
+        """Return whether the registry URL is the one the operator configured.
+
+        ``--registry``, ``MCP_REGISTRY_URL`` and ``apm config`` name the
+        operator's registry. A manifest's own ``registry:`` URL counts only
+        when it names that configured registry; the public default never does.
+        """
+        if self.registry_url_source in {"flag", "env", "config"}:
+            return True
+        if self.registry_url_source != "explicit":
+            return False
+        configured, configured_source = resolve_mcp_registry_url(None)
+        return configured_source != "default" and redact_mcp_registry_url(
+            normalize_mcp_registry_url(configured)
+        ) == redact_mcp_registry_url(self.registry_url)
 
     @staticmethod
     def _init_http_cache():

@@ -529,6 +529,19 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4088,
+      "fixed_in": "0.37.0",
+      "summary": "With PROXY_REGISTRY_ONLY set, apm install --update still probed GitLab, Azure DevOps and generic source hosts with git ls-remote before downloading through the registry proxy, because each call site opted in to registry-only routing on its own.",
+      "failure_modes": ["auth", "routing"],
+      "properties": ["auth.credentials_isolated"],
+      "regression_tests": [
+        "tests/integration/test_egress_route_policy_contract.py::test_update_preflight_sends_no_source_host_probe",
+        "tests/integration/test_egress_route_policy_contract.py::test_policy_fetch_goes_direct_in_registry_only_mode",
+        "tests/integration/test_egress_route_policy_contract.py::test_automatic_version_check_is_not_sent_in_registry_only_mode",
+        "tests/integration/test_egress_route_policy_contract.py::test_explicit_self_update_check_goes_direct_in_registry_only_mode"
+      ]
     }
   ],
   "lifecycle_contracts": [

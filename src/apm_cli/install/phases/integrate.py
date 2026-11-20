@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.deps.egress_route import EgressSurface, is_proxy_only
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
@@ -294,7 +295,7 @@ def _resolve_download_strategy(
     if (
         skip_download
         and ctx.registry_config
-        and ctx.registry_config.enforce_only
+        and is_proxy_only(EgressSurface.SOURCE_ARCHIVE)
         and not dep_ref.is_local
     ):
         if not _dep_locked_chk or _dep_locked_chk.registry_prefix is None:

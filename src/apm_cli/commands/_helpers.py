@@ -39,7 +39,7 @@ from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
 )
-from ..utils.console import _rich_echo, _rich_warning
+from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.git_env import get_git_executable
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.themed_console import _get_console, _rich_blank_line  # noqa: F401
@@ -354,6 +354,18 @@ def _check_and_notify_updates():
 
         # Skip version check in E2E test mode to avoid interfering with tests
         if os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes"):
+            return
+
+        from ..deps.egress_route import EgressSurface, is_refused
+
+        if is_refused(EgressSurface.VERSION_CHECK):
+            context = click.get_current_context(silent=True)
+            if context is not None and (context.obj or {}).get("verbose"):
+                _rich_info(
+                    "Update check skipped: PROXY_REGISTRY_ONLY is set"
+                    " (run 'apm self-update --check' to check explicitly)",
+                    symbol="info",
+                )
             return
 
         current_version = get_version()

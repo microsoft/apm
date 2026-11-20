@@ -18,6 +18,9 @@ from scripts.architecture_linter.checks.transport_cache_identity import (
     COLLECTORS as _CACHE_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_cache_identity import RULES as _CACHE_RULES
+from scripts.architecture_linter.checks.transport_egress_route import (
+    RULES as _EGRESS_ROUTE_RULES,
+)
 from scripts.architecture_linter.checks.transport_gitlab_sparse import (
     RULES as _GITLAB_SPARSE_RULES,
 )
@@ -53,6 +56,7 @@ RULES = (
     _AUTH_RULES
     + _AUTH_OUTCOME_RULES
     + _EGRESS_RULES
+    + _EGRESS_ROUTE_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
     + _SPARSE_RULES
