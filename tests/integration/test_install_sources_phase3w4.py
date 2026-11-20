@@ -175,7 +175,7 @@ class TestLocalDependencySourceUserScope:
         source = LocalDependencySource(ctx, dep_ref, tmp_path / "pkg", "owner/repo")
         result = source.acquire()
         assert result is None
-        ctx.diagnostics.warn.assert_called_once()
+        ctx.diagnostics.error.assert_called_once()
 
     def test_rejects_empty_local_path_at_user_scope(self, tmp_path):
         from apm_cli.install.sources import LocalDependencySource

@@ -627,11 +627,13 @@ class MCPClientAdapter(ABC):
         except FileNotFoundError:
             return {}
         except (OSError, UnicodeError) as exc:
-            _rich_warning(
-                f"Could not read {config_path}: {exc} -- skipping config write; "
-                "fix the file's permissions or encoding, or add this server manually",
-                symbol="warning",
-            )
+            if str(config_path) not in _UNREADABLE_CONFIGS_WARNED:
+                _UNREADABLE_CONFIGS_WARNED.add(str(config_path))
+                _rich_warning(
+                    f"Could not read {config_path}: {exc} -- skipping config write; "
+                    "fix the file's permissions or encoding, or add this server manually",
+                    symbol="warning",
+                )
             return None
         if not raw.strip():
             return {}

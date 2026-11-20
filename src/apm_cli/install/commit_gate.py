@@ -30,12 +30,18 @@ if TYPE_CHECKING:
 
 
 class _AnnouncedPolicyLogger:
-    """Forward to the install logger; the policy gate already announced the policy."""
+    """Forward to the install logger; the policy gate already announced the policy.
+
+    That includes the notice that policy enforcement is disabled.
+    """
 
     def __init__(self, logger: Any) -> None:
         self._logger = logger
 
     def policy_resolved(self, **_kwargs: Any) -> None:
+        return None
+
+    def policy_disabled(self, _reason: str) -> None:
         return None
 
     def __getattr__(self, name: str) -> Any:

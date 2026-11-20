@@ -111,8 +111,12 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:
 
     Writes to a temporary file first, then uses ``os.replace`` to move
     it into place so readers never see a partial write.  Errors are
-    logged and swallowed (advisory system).
+    logged and swallowed (advisory system). A preview writes nothing.
     """
+    from apm_cli.config import user_state_writes_suppressed
+
+    if user_state_writes_suppressed():
+        return
     path = _pins_path(pins_dir)
     tmp_path = path + ".tmp"
     try:

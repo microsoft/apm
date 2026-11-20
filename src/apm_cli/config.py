@@ -50,7 +50,7 @@ _CONFIG_CREATION_SUPPRESSED = False
 
 @contextlib.contextmanager
 def config_creation_suppressed():
-    """Never create ``config.json`` inside this block (``install --dry-run``).
+    """Never create ``config.json`` or other user state in this block (``install --dry-run``).
 
     Process-wide rather than per-thread: dependency resolution reads manifests
     on worker threads.
@@ -62,6 +62,11 @@ def config_creation_suppressed():
         yield
     finally:
         _CONFIG_CREATION_SUPPRESSED = previous
+
+
+def user_state_writes_suppressed() -> bool:
+    """Return True inside :func:`config_creation_suppressed` (a preview)."""
+    return _CONFIG_CREATION_SUPPRESSED
 
 
 def get_config(*, create: bool = True):

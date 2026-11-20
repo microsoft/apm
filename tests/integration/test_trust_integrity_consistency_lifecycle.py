@@ -243,10 +243,10 @@ def test_uninstall_survivor_rebuild_fails_closed_on_unverifiable_policy(
 
         text = output(result)
         assert "hash mismatch" in text.lower(), text
-        assert "integration cleanup is incomplete" in text, text
-        # The requested removal completes; the survivor's hooks are neither
-        # rebuilt nor re-admitted under the unverifiable policy.
-        assert lock_repo_urls(project) == {hooked.slug}
+        assert "no APM writes were made" in text, text
+        # The refusal comes before the first write (#4185): nothing is removed
+        # and the survivor's hooks are neither rebuilt nor re-admitted.
+        assert lock_repo_urls(project) == {hooked.slug, other.slug}
         assert file_digest(project / ".claude" / "settings.json") == settings_before
 
 

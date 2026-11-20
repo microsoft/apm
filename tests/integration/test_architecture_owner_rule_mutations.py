@@ -1946,8 +1946,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-cleanup-target-roots",
         rule_id="install-deployment-cleanup-target-roots",
         path="src/apm_cli/integration/base_integrator.py",
-        old="        target_roots = _target_root_dirs(stop_resolved)\n",
-        new="        target_roots = frozenset()\n",
+        old="            else _target_root_dirs(stop_resolved)\n",
+        new="            else frozenset()\n",
         intent="Empty-parent cleanup stops protecting target roots, so retiring a file removes .github/.",
     ),
     MutationCase(
@@ -2058,11 +2058,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-install-lockfile-preflight",
         rule_id="install-deployment-install-lockfile-preflight",
         path="src/apm_cli/install/helpers/plan_inputs.py",
-        old="    if not ctx.apm_dir or ctx.frozen or ctx.dry_run or ctx.lockfile_only:\n",
-        new=(
-            "    if not (ctx.update_refs and ctx.apm_dir) or ctx.frozen or ctx.dry_run "
-            "or ctx.lockfile_only:\n"
-        ),
+        old="        not ctx.apm_dir\n",
+        new="        not (ctx.update_refs and ctx.apm_dir)\n",
         intent="Only updates refuse a symlinked lockfile up front, so installs deploy first.",
     ),
     MutationCase(

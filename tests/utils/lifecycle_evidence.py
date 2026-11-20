@@ -385,9 +385,6 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
 
 
 _FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runtimes?)|Skipped targets without MCP support)"
-_POLICY_PHASE_BANNER = (
-    r"Policy enforcement disabled by --no-policy|Org policy at \S+ is present but empty"
-)
 
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
@@ -399,23 +396,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _scenario_runs("audit", "root-source-replacement"),
         r"JSON mode printed invalid JSON",
         output=r"\A\Z",
-    ),
-    KnownOutputCell(
-        "install-policy-banner-per-phase",
-        "I9",
-        "#4241",
-        _runs("install"),
-        _POLICY_PHASE_BANNER,
-        # The APM and MCP phases each print the policy banner (--no-policy or an empty org policy).
-        output=rf"^\[!\] (?:{_POLICY_PHASE_BANNER}).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
-        "install-org-policy-banner-per-phase",
-        "I9",
-        "#4249",
-        _runs("install"),
-        r"\[!\] Policy: org:",
-        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
         "install-org-policy-banner-when-mcp-blocked",
@@ -577,7 +557,8 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4334",
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
-        output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
+        # A perf line repeats anywhere; the restriction line only back to back.
+        output=r"^\s*(\[i\] perf: [^\n]*)$.*^\s*\1$|^\s*(Package target restriction[^\n]*)\n\s*\2$",
     ),
     KnownOutputCell(
         "pack-plugin-manifest-notes-twice",

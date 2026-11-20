@@ -326,6 +326,10 @@ def after_lockfile_commit(action: Callable[[], None]) -> None:
     scope.after_commit.append(action)
 
 
+class LockfileCommitError(OSError):
+    """The commit point could not write a staged lockfile; names the file."""
+
+
 def flush_lockfile_writes() -> None:
     """Commit what this command staged now; it keeps staging afterwards."""
     scope = _scope()
@@ -342,7 +346,10 @@ def _commit(scope: _WriteScope) -> None:
         document = scope.pending[key]
         if not isinstance(document, _Removed) and not _same_document(_disk_text(key), document):
             ensure_lockfile_writable(key)
-            atomic_write_text(key, document, new_file_mode=umask_file_mode(key))
+            try:
+                atomic_write_text(key, document, new_file_mode=umask_file_mode(key))
+            except OSError as exc:
+                raise LockfileCommitError(f"Could not generate {key.name}: {exc}") from exc
         del scope.pending[key]
     actions, scope.after_commit = scope.after_commit, []
     for action in actions:
