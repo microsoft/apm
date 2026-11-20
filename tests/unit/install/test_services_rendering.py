@@ -22,6 +22,7 @@ import pytest
 
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 
 def _to_bundle(d: dict) -> IntegratorBundle:
@@ -175,6 +176,7 @@ class TestMultiTargetCollapseRule:
                 force=False,
                 managed_files=None,
                 integrators=_to_bundle(kwargs),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         return _logger_lines(logger)
@@ -272,6 +274,7 @@ class TestAdoptedFileVisibility:
                 force=False,
                 managed_files=None,
                 integrators=_to_bundle(kwargs),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
         return _logger_lines(logger)
 
@@ -341,6 +344,7 @@ class TestWarmCacheAnnotation:
                 force=False,
                 managed_files=None,
                 integrators=_to_bundle(kwargs),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         lines = _logger_lines(logger)
@@ -371,6 +375,7 @@ class TestWarmCacheAnnotation:
                 force=False,
                 managed_files=None,
                 integrators=_to_bundle(kwargs),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         lines = _logger_lines(logger)
@@ -408,6 +413,7 @@ class TestWarmCacheAnnotation:
                 force=False,
                 managed_files=None,
                 integrators=_to_bundle(kwargs),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         lines = _logger_lines(logger)
@@ -445,6 +451,7 @@ class TestAggregateCounterPreserved:
                 force=False,
                 managed_files=None,
                 integrators=_to_bundle(kwargs),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert result["agents"] == 7
