@@ -227,9 +227,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 497, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 498, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 501, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 592, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 593, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 596, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -483,7 +483,7 @@ U_BIN_PIN = "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
 
 
 def u_bin_applies(cell: Mapping[str, str]) -> bool:
-    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:498)."""
+    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:593)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 

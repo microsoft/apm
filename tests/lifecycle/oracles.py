@@ -580,6 +580,8 @@ def _i7_x1_retirement(before: Observation, after: Observation, model) -> frozens
     may appear and no allowed surface may go; only the retired surfaces' own
     files (and the directories their cleanup emptied) may change.
     """
+    if after.deployed == before.deployed:
+        return frozenset()
     retired = before.deployed - after.deployed
     if after.deployed - before.deployed or retired & model.allowed_surfaces():
         return None

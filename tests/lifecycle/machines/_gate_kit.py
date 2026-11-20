@@ -564,8 +564,10 @@ class GateMachine(RuleBasedStateMachine):
             if result is None:
                 return []
             # The outcome comes first: a plain install or update on local
-            # packages succeeds; --frozen refuses only without a lockfile (#4133).
-            expected = 1 if mode == "frozen" and before.lock is None else 0
+            # packages succeeds; --frozen refuses without a lockfile (#4133) and
+            # when it retired a hook the lock still records (I7-X1, #4043).
+            retired = _frozen_after_tightening(self, Operation(name), before, after, result)
+            expected = 1 if mode == "frozen" and (before.lock is None or retired) else 0
             if result.returncode != expected:
                 return [f"{name} exited {result.returncode}, expected {expected}"]
             if result.returncode != 0 or mode != "plain":
