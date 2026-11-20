@@ -2068,6 +2068,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm update treats every locked commit as moved and skips the content-hash check.",
     ),
     MutationCase(
+        guard_id="install-deployment-update-registry-integrity",
+        rule_id="install-deployment-update-registry-integrity",
+        path="src/apm_cli/install/sources.py",
+        old="                    package_info = download_registry_package(\n",
+        new="                    package_info = _registry_resolver.download_package(\n",
+        intent="A registry update download skips the locked-hash check for an unchanged version.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
         rule_id="marketplace-integrations-agent-plugin-contract",
         path="src/apm_cli/agent_plugins/ir.py",

@@ -10,14 +10,19 @@ Hermetic chains against the installed CLI:
   org layer;
 * ``apm update`` on an unchanged commit refuses altered bytes and leaves the
   lock untouched, while a moved commit is accepted;
+* ``apm update`` verifies an unchanged registry version against its locked
+  hash, while a new registry version re-locks (#4125);
 * ``apm unpack`` never deploys executable content.
 """
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import shutil
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -37,9 +42,17 @@ from tests.integration._policy_scope_kit import (
     write,
 )
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_github_https_fixture import (
     local_github_https_fixture,
     openssl_executable,
+)
+from tests.utils.local_scripted_https_proxy import (
+    ScriptedHttpsProxy,
+    ScriptedRequest,
+    ScriptedResponse,
+    local_scripted_https_proxy,
 )
 
 pytestmark = [
@@ -303,6 +316,174 @@ def test_update_accepts_new_content_for_a_moved_commit(
 
         # Nothing moved, so nothing is reported.
         again = run_step(runner, ("update", "--yes"), cwd=project, env=env, step="update-again")
+        assert "New locked content" not in output(again), output(again)
+
+
+_REGISTRY_HOST = "registry.corp.example"
+_GUIDE = ".github/instructions/guide.instructions.md"
+
+
+def _registry_archive(version: str, body: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as package:
+        for name, text in (
+            ("apm.yml", f"name: widget\nversion: {version}\ndescription: fixture\n"),
+            (
+                ".apm/instructions/guide.instructions.md",
+                f"---\napplyTo: '**'\ndescription: guide\n---\n# {body}\n",
+            ),
+        ):
+            info = zipfile.ZipInfo(name, date_time=(2000, 1, 1, 0, 0, 0))
+            info.external_attr = 0o644 << 16
+            package.writestr(info, text)
+    return buffer.getvalue()
+
+
+def _archive_hash(data: bytes) -> str:
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+class _RegistryWorld:
+    """A consumer of ``acme/widget`` from a scripted REST registry, policy on.
+
+    PROMISE: source.ref_cache_coherent -- a registry package is its name plus
+    exact version; ``apm update`` re-locks only a moved version (#4125).
+    CELL: OP=update SRC=registry PRIM=instruction SCOPE=project TGT=copilot
+    """
+
+    def __init__(self, tmp_path: Path, apm_binary_path: Path) -> None:
+        self.isolated = IsolatedApmEnvironment.create(tmp_path / "w", base_env=dict(os.environ))
+        self.runner = _runner(apm_binary_path)
+        self.archives = {"1.0.0": _registry_archive("1.0.0", "one")}
+        self.project = self.isolated.work_root / "consumer"
+        write(self.project / ".github" / "copilot-instructions.md", "# c\n")
+        write(
+            self.project / "apm.yml",
+            "name: consumer\nversion: 1.0.0\ndescription: registry consumer\n"
+            "targets: [copilot]\n"
+            f"registries:\n  fixture:\n    url: https://{_REGISTRY_HOST}/apm\n"
+            "  default: fixture\ndependencies:\n  apm:\n    - acme/widget#^1.0.0\n",
+        )
+
+    def handle(self, request: ScriptedRequest) -> ScriptedResponse:
+        tail = request.path.rstrip("/").split("/v1/packages/acme/widget/", 1)[-1]
+        if tail == "versions":
+            entries = [
+                {
+                    "version": version,
+                    "digest": hashlib.sha256(data).hexdigest(),
+                    "published_at": "2026-01-01T00:00:00Z",
+                }
+                for version, data in self.archives.items()
+            ]
+            body = json.dumps({"versions": entries}).encode()
+            return ScriptedResponse(200, {"Content-Type": "application/json"}, body)
+        version = tail.removeprefix("versions/").removesuffix("/download")
+        if version in self.archives:
+            return ScriptedResponse(
+                200, {"Content-Type": "application/zip"}, self.archives[version]
+            )
+        return ScriptedResponse(404)
+
+    def serve(self):
+        return local_scripted_https_proxy(self.isolated.root / "tls", {_REGISTRY_HOST: self.handle})
+
+    def run(self, env: dict, *args: str, step: str, expected: int = 0):
+        result = run_step(
+            self.runner, args, cwd=self.project, env=env, step=step, expected=expected
+        )
+        for stream in (result.stdout, result.stderr):
+            assert stream.isascii(), output(result)
+            status = [line.strip() for line in stream.splitlines() if line.startswith("[")]
+            assert len(status) == len(set(status)), output(result)
+        return result
+
+    def install(self, proxy: ScriptedHttpsProxy) -> dict:
+        env = proxy.child_environment(self.isolated.subprocess_env())
+        env["APM_NON_INTERACTIVE"] = "1"
+        self.run(env, "experimental", "enable", "registries", step="enable")
+        self.run(env, "install", step="install")
+        return env
+
+    def locked(self) -> dict:
+        return load_yaml(self.project / "apm.lock.yaml")["dependencies"][0]
+
+    def snapshot(self) -> tuple[LifecycleStateSnapshot, dict[str, str]]:
+        state = LifecycleStateSnapshot.capture(self.project, targets=("copilot",))
+        return state, tree_snapshot(self.project, exclude=(".git", "apm_modules"))
+
+
+def _changed(before: dict[str, str], after: dict[str, str]) -> set[str]:
+    return {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+
+
+def test_update_refuses_altered_bytes_for_an_unchanged_registry_version(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _RegistryWorld(tmp_path, apm_binary_path)
+    with world.serve() as proxy:
+        env = world.install(proxy)
+        locked = world.locked()
+        assert locked["version"] == "1.0.0", locked
+        altered = _registry_archive("1.0.0", "altered")
+        world.archives["1.0.0"] = altered
+        shutil.rmtree(world.project / "apm_modules")
+        state_before, files_before = world.snapshot()
+
+        result = world.run(env, "update", "--yes", step="update-same-version", expected=1)
+
+        state_after, files_after = world.snapshot()
+        assert state_after == state_before, output(result)
+        assert _changed(files_before, files_after) == set(), output(result)
+        text = output(result)
+        flat = "".join(text.split())
+        assert "[x]" in text, text
+        assert "Contenthashmismatchforacme/widgetversion1.0.0" in flat, text
+        assert f"expected{locked['resolved_hash']},got{_archive_hash(altered)}" in flat, text
+
+        # Printed hint: clean the cache and retry; the same bytes still fail closed.
+        world.run(env, "cache", "clean", "--yes", step="hint-cache-clean")
+        world.run(env, "update", "--yes", step="hint-retry", expected=1)
+        assert world.snapshot()[1] == files_after
+
+        # Printed hint: drop the lock entry and run apm install to accept the bytes.
+        lock = load_yaml(world.project / "apm.lock.yaml")
+        lock["dependencies"] = []
+        dump_yaml(lock, world.project / "apm.lock.yaml")
+        hinted = world.run(env, "install", step="hint-install")
+        accepted = world.locked()
+        assert (accepted["version"], accepted["resolved_hash"]) == ("1.0.0", _archive_hash(altered))
+        # The dropped entry took its deployment record, so the file is announced as skipped.
+        assert "apm install --force" in output(hinted), output(hinted)
+        world.run(env, "install", "--force", step="hint-install-force")
+        assert "altered" in (world.project / _GUIDE).read_text(encoding="utf-8")
+
+
+def test_update_accepts_a_new_registry_version(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = _RegistryWorld(tmp_path, apm_binary_path)
+    with world.serve() as proxy:
+        env = world.install(proxy)
+        locked = world.locked()
+        world.archives["1.1.0"] = _registry_archive("1.1.0", "two")
+        state_before, files_before = world.snapshot()
+
+        result = world.run(env, "update", "--yes", "--verbose", step="update-moved-version")
+
+        state_after, files_after = world.snapshot()
+        assert _changed(files_before, files_after) == {"apm.lock.yaml", _GUIDE}, output(result)
+        assert state_after.manifest_bytes == state_before.manifest_bytes
+        after = world.locked()
+        assert after["version"] == "1.1.0", after
+        assert after["resolved_hash"] == _archive_hash(world.archives["1.1.0"])
+        assert after["content_hash"] != locked["content_hash"]
+        assert "two" in (world.project / _GUIDE).read_text(encoding="utf-8")
+        flat = "".join(output(result).split())
+        assert "Newlockedcontentfor1dependency" in flat, output(result)
+        assert after["content_hash"] in flat, output(result)
+
+        # I2: the converged update changes no bytes and reports nothing new.
+        again = world.run(env, "update", "--yes", step="update-again")
+        assert world.snapshot() == (state_after, files_after)
         assert "New locked content" not in output(again), output(again)
 
 

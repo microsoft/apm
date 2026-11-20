@@ -545,6 +545,25 @@
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_into_a_non_project_dir_announces_and_writes_no_lockfile",
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_waits_for_the_lifecycle_lock"
       ]
+    },
+    {
+      "issue": 4125,
+      "fixed_in": "0.37.0",
+      "summary": "apm update re-locked a registry dependency whose version did not move without verifying its locked hash, unlike a git dependency whose commit did not move.",
+      "failure_modes": [
+        "transaction",
+        "reference",
+        "outcome"
+      ],
+      "properties": [
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_altered_bytes_for_an_unchanged_registry_version",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_accepts_a_new_registry_version"
+      ]
     }
   ],
   "lifecycle_contracts": [
