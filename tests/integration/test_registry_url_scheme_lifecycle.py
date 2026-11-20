@@ -72,3 +72,20 @@ def test_loopback_or_insecure_http_registry_is_accepted(
 
     out = " ".join((result.stdout + result.stderr).split())
     assert "non-local host" not in out, out
+
+
+def test_config_set_http_registry_url_to_public_host_is_refused(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = World.create(tmp_path, apm_binary_path)
+    world.apm("experimental", "enable", "registries")
+    config = world.isolated.config_root / "config.json"
+    before = config.read_bytes()
+
+    result = world.apm("config", "set", "registry.corp.url", "http://public.example/apm", expect=1)
+
+    out = " ".join((result.stdout + result.stderr).split())
+    assert "Registry 'corp' uses http:// to a non-local host" in out, out
+    assert config.read_bytes() == before, out
+    world.apm("config", "set", "registry.corp.url", "http://127.0.0.1:9/apm")
+    assert "http://127.0.0.1:9/apm" in config.read_text()

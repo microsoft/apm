@@ -412,7 +412,11 @@ def set(key, value):  # noqa: F811
         from ..config import set_registry_default, set_registry_token, set_registry_url
 
         if field == "url":
-            set_registry_url(reg_name, value)
+            try:
+                set_registry_url(reg_name, value)
+            except ValueError as exc:
+                logger.error(str(exc))
+                sys.exit(1)
             logger.success(f"registry.{reg_name}.url set")
         elif field == "token":
             set_registry_token(reg_name, value)

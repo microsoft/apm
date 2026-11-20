@@ -188,8 +188,8 @@
     },
     {
       "id": "registry-url-scheme",
-      "decision": "Whether a registries.<name>.url is accepted: https, or http only when the entry sets insecure: true or the host is loopback or RFC 1918 private (OpenAPM v0.1 req-sc-006), under both manifest contracts (#4286)",
-      "owner": "deps/registry/url_scheme.py (registry_url_error; local hosts via utils/net.py is_loopback_host and parse_host_address); consumers: models/apm_package.py _parse_registries_block and _parse_v01_registries_block, deps/registry/config_loader.py _load_yaml_registries",
+      "decision": "Whether a registries.<name>.url is accepted: https, or http only when the entry sets insecure: true or the host is loopback or RFC 1918 private (OpenAPM v0.1 req-sc-006), under both manifest contracts and in user config (#4286)",
+      "owner": "deps/registry/url_scheme.py (registry_url_error; local hosts via utils/net.py is_loopback_host and parse_host_address); consumers: models/apm_package.py _parse_registries_block and _parse_v01_registries_block, deps/registry/config_loader.py _load_yaml_registries and _load_config_json_registries, config.py set_registry_url (apm config set registry.<name>.url), deps/registry/auth.py _credential_origin_matches",
       "selectors": ["src/apm_cli/deps/registry/url_scheme.py"],
       "guards": ["install-deployment-registry-url-scheme"]
     },

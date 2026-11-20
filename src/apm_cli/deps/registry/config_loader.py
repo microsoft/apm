@@ -55,6 +55,7 @@ def _load_config_json_registries(*, create_config: bool = False) -> dict[str, st
     """
     try:
         from ...config import _get_registries_section
+        from .url_scheme import registry_url_error
 
         result: dict[str, str] = {}
         for name, body in _get_registries_section(create_config=create_config).items():
@@ -62,7 +63,7 @@ def _load_config_json_registries(*, create_config: bool = False) -> dict[str, st
                 continue
             if isinstance(body, dict):
                 url = body.get("url")
-                if isinstance(url, str) and url.strip():
+                if registry_url_error(name, url, insecure=body.get("insecure")) is None:
                     result[name] = url.strip()
         return result
     except Exception:

@@ -3,10 +3,10 @@
 * ``deps/registry/url_scheme.py`` is the one owner of whether a
   ``registries.<name>.url`` is accepted (OpenAPM v0.1 req-sc-006); it asks the
   shared network-host owner (``utils/net.py``) whether a host is local.
-* Every function that reads a ``registries`` entry's ``url`` asks the owner
-  (``registry_url_error``) and holds no ``http://`` scheme decision of its own,
-  under both manifest contracts and for every manifest that declares
-  registries.
+* Every function that reads or writes a ``registries`` entry's ``url`` asks
+  the owner (``registry_url_error``) and holds no ``http://`` scheme decision of
+  its own: both manifest contracts, the workspace manifest, and user config
+  (``apm config set registry.<name>.url``, ``$APM_HOME/config.json``).
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ GUARD_REGISTRY_URL_SCHEME = "install-deployment-registry-url-scheme"
 
 _OWNER = "src/apm_cli/deps/registry/url_scheme.py"
 _OWNER_CALL = "registry_url_error"
+# User config (``apm config set registry.<name>.url``) is read through these.
+_REGISTRY_CONFIG_READERS = frozenset({"_get_registries_section", "get_registry_config"})
 _OWNER_NEEDLES = (
     "def registry_url_error(",
     "from ...utils.net import is_loopback_host, parse_host_address",
@@ -35,7 +37,7 @@ _OWNER_NEEDLES = (
 
 
 def _reads_registry_url(index, function: ast.AST) -> tuple[bool, set[str], set[str]]:
-    """Whether *function* reads ``registries`` entry URLs, its strings and callees."""
+    """Whether *function* reads or writes registry entry URLs, its strings and callees."""
     strings: set[str] = set()
     callees: set[str] = set()
     reads_url = False
@@ -53,7 +55,14 @@ def _reads_registry_url(index, function: ast.AST) -> tuple[bool, set[str], set[s
                 and node.args[0].value == "url"
             ):
                 reads_url = True
-    return reads_url and "registries" in strings, strings, callees
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value == "url"
+        ):
+            reads_url = True
+    registries = "registries" in strings or bool(callees & _REGISTRY_CONFIG_READERS)
+    return reads_url and registries, strings, callees
 
 
 def check_registry_url_scheme(provider: FactsProvider) -> tuple[Violation, ...]:

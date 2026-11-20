@@ -640,9 +640,18 @@ def get_registry_config(name: str) -> "dict | None":
 
 
 def set_registry_url(name: str, url: str) -> None:
-    """Write registry.<name>.url to config.json."""
+    """Write registry.<name>.url to config.json.
+
+    Raises:
+        ValueError: If the registry URL scheme owner does not accept *url*.
+    """
+    from apm_cli.deps.registry.url_scheme import registry_url_error
+
     regs = dict(_get_registries_section())
     entry = dict(regs.get(name) or {})
+    error = registry_url_error(name, url, insecure=entry.get("insecure"))
+    if error is not None:
+        raise ValueError(error)
     entry["url"] = url
     regs[name] = entry
     update_config({"registries": regs})
