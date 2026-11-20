@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 - `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
+- `apm install -g` installs a dependency's transitive relative local paths (`../sibling`, `./sub`), anchored on the declaring package, and any transitive local dependency that cannot be resolved now fails the install with exit 1 instead of being dropped silently. (closes #4153)
 
 ## [0.37.0] - 2026-11-20
 
