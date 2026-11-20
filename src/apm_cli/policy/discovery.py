@@ -1141,13 +1141,11 @@ def _fetch_from_url(
     try:
         policy, warnings = load_policy(content)
     except PolicyValidationError as e:
-        return PolicyFetchResult(
-            error=f"Invalid policy from {safe_url}: {e}",
-            source=source_label,
-            cache_ref=url,
-            outcome="malformed",
-            warnings=e.warnings,
+        result = _malformed_refresh(
+            cache_entry, f"Invalid policy from {safe_url}: {e}", source_label, e.warnings
         )
+        result.cache_ref = url
+        return result
 
     chain_refs = [url]
     actual_hash = _compute_hash_normalized(content, expected_hash)
@@ -1236,11 +1234,8 @@ def _fetch_from_repo(
     try:
         policy, warnings = load_policy(content)
     except PolicyValidationError as e:
-        return PolicyFetchResult(
-            error=f"Invalid policy in {repo_ref}: {e}",
-            source=source_label,
-            outcome="malformed",
-            warnings=e.warnings,
+        return _malformed_refresh(
+            cache_entry, f"Invalid policy in {repo_ref}: {e}", source_label, e.warnings
         )
 
     chain_refs = [repo_ref]
@@ -1428,11 +1423,8 @@ def _fetch_from_ado_repo(
     try:
         policy, warnings = load_policy(content)
     except PolicyValidationError as e:
-        return PolicyFetchResult(
-            error=f"Invalid policy in {repo_ref}: {e}",
-            source=source_label,
-            outcome="malformed",
-            warnings=e.warnings,
+        return _malformed_refresh(
+            cache_entry, f"Invalid policy in {repo_ref}: {e}", source_label, e.warnings
         )
 
     chain_refs = [repo_ref]
@@ -1799,6 +1791,25 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
             policy.executables.recommend,
             policy.executables.enforce,
         )
+    )
+
+
+def _malformed_refresh(
+    cache_entry: _CacheEntry | None,
+    error: str,
+    source_label: str,
+    warnings: list[str],
+) -> PolicyFetchResult:
+    """A refreshed policy failed validation: keep a usable cached policy (#4476).
+
+    Like a garbage response or a fetch failure, the refresh did not yield a
+    usable policy, so a cached one within the stale window stays applied.
+    Without one, the outcome is ``malformed``.
+    """
+    if cache_entry is not None:
+        return _stale_fallback_or_error(cache_entry, error, source_label, "malformed")
+    return PolicyFetchResult(
+        error=error, source=source_label, outcome="malformed", warnings=warnings
     )
 
 

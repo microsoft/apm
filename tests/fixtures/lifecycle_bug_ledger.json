@@ -3030,6 +3030,16 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4476,
+      "fixed_in": "Unreleased",
+      "summary": "An org policy refresh that returned valid YAML failing policy validation was reported as malformed and no policy was applied, while an unreachable host or a garbage response kept the cached policy. A validation-failed refresh now uses the same stale-cache fallback, so install and audit --ci keep applying a cached policy within its stale window.",
+      "failure_modes": ["outcome", "cache"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_invalid_refresh_lifecycle.py::test_invalid_refresh_keeps_the_cached_deny_for_install_and_audit"
+      ]
     }
   ],
   "lifecycle_contracts": [
