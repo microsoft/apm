@@ -9,12 +9,14 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.commands._helpers import _validate_plugin_name
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # CLI integration tests

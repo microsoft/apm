@@ -63,7 +63,7 @@ def check_gitlab_prepared_remote(provider: FactsProvider, rule_id: str) -> tuple
             )
             valid = (
                 bool(builders)
-                and all(_keywords(call).get("token") == "''" for call in builders)
+                and all("token" not in _keywords(call) for call in builders)
                 and isinstance(callback, ast.FunctionDef)
                 and len(callback.body) == 1
                 and isinstance(callback.body[0], ast.Return)
@@ -161,7 +161,7 @@ def _check_gitlab_sparse_plan(provider: FactsProvider) -> tuple[Violation, ...]:
         len(initial_calls) == 1
         and isinstance(candidate, ast.Call)
         and initial_calls[0] in index.walk(candidate)
-        and _keywords(candidate).get("token") == "''",
+        and "token" not in _keywords(candidate),
         "initial-scheme helper",
         method,
     )

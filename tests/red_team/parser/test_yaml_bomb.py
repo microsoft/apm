@@ -34,6 +34,8 @@ import pytest
 
 from .conftest import FIXTURES, run_guarded
 
+pytestmark = pytest.mark.component
+
 BOMB_UNKNOWN = FIXTURES / "apm_yml" / "bomb_unknown_events.yml"
 BOMB_UNDER_EVENT = FIXTURES / "apm_yml" / "bomb_under_event.yml"
 

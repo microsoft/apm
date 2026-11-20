@@ -16,6 +16,8 @@ import pytest
 from apm_cli.bundle.attest import verify_attested_file
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 
 def _write(tmp_path: Path, content: str) -> Path:
     target = tmp_path / "deployed.md"

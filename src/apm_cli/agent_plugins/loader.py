@@ -352,7 +352,9 @@ def _load_apm_configuration(
     identity: AgentPluginIdentity,
     manifest: dict[str, Any],
 ) -> tuple[ApmConfiguration | None, list[AgentPluginDiagnostic]]:
-    apm_yml_path = root / "apm.yml"
+    from apm_cli.core.scope import manifest_file
+
+    apm_yml_path = manifest_file(root)
     if not _has_exact_entry(root_entries, "apm.yml"):
         return None, []
     if not apm_yml_path.is_file() or apm_yml_path.is_symlink():

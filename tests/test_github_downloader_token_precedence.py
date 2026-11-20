@@ -3,11 +3,14 @@
 import os
 from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils import github_host
+
+pytestmark = pytest.mark.component
 
 
 class TestGitHubDownloaderTokenPrecedence:
@@ -73,21 +76,29 @@ class TestGitHubDownloaderTokenPrecedence:
             assert downloader.has_github_token is False
 
             # Build URL should work for public repos
-            public_url = downloader._build_repo_url("octocat/Hello-World", use_ssh=False)
+            public_url = downloader._build_repo_url(
+                "octocat/Hello-World",
+                use_ssh=False,
+                dep_ref=DependencyReference(repo_url="octocat/Hello-World"),
+            )
             expected_public = f"https://{github_host.default_host()}/octocat/Hello-World.git"
             assert public_url == expected_public
 
-    def test_private_repo_url_building_with_token(self):
-        """Test URL building for private repos with authentication."""
+    def test_private_repo_url_never_embeds_token(self):
+        """Private-repo URLs stay credential-free; the token travels via git env."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "private-repo-token"}, clear=True):
             downloader = GitHubPackageDownloader()
 
-            # Should build authenticated URL for private repos
-            auth_url = downloader._build_repo_url("private-org/private-repo", use_ssh=False)
+            auth_url = downloader._build_repo_url(
+                "private-org/private-repo",
+                use_ssh=False,
+                dep_ref=DependencyReference(repo_url="private-org/private-repo"),
+            )
             expected_url = github_host.build_https_clone_url(
-                github_host.default_host(), "private-org/private-repo", token="private-repo-token"
+                github_host.default_host(), "private-org/private-repo"
             )
             assert auth_url == expected_url
+            assert "private-repo-token" not in auth_url
 
     def test_ssh_url_building(self):
         """Test SSH URL building regardless of token availability."""
@@ -95,7 +106,9 @@ class TestGitHubDownloaderTokenPrecedence:
             downloader = GitHubPackageDownloader()
 
             # Should build SSH URL when requested
-            ssh_url = downloader._build_repo_url("user/repo", use_ssh=True)
+            ssh_url = downloader._build_repo_url(
+                "user/repo", use_ssh=True, dep_ref=DependencyReference(repo_url="user/repo")
+            )
             expected_ssh = github_host.build_ssh_url(github_host.default_host(), "user/repo")
             assert ssh_url == expected_ssh
 

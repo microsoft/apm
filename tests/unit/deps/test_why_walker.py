@@ -12,6 +12,8 @@ from apm_cli.deps.why_walker import (
     resolve_package_query,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _direct(repo_url: str, **kwargs) -> LockedDependency:
     return LockedDependency(repo_url=repo_url, depth=1, resolved_by=None, **kwargs)

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import BundleFormat, cli_format_choices, resolve_bundle_format
 from ..bundle.unpacker import unpack_bundle
 from ..core.build_orchestrator import (
@@ -382,7 +384,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     if not json_output:
         from ..export.authoring import warn_if_license_undeclared
 
-        warn_if_license_undeclared(project_root / "apm.yml", logger.warning)
+        warn_if_license_undeclared(manifest_file(project_root), logger.warning)
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
     # tested rather than a hardcoded "copilot".  ``pack.target`` is now
@@ -407,7 +409,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         effective_target = target
     options = BuildOptions(
         project_root=project_root,
-        apm_yml_path=project_root / "apm.yml",
+        apm_yml_path=manifest_file(project_root),
         bundle_format=bundle_format,
         bundle_target=effective_target,
         bundle_archive=archive,

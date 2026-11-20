@@ -20,6 +20,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _rich_blank_line
 # ---------------------------------------------------------------------------
@@ -204,6 +208,7 @@ class TestUpdateGitignoreReadError:
 
         mock_warn.assert_called_once()
         assert ".gitignore" in mock_warn.call_args[0][0].lower()
+        assert gitignore.read_text() == "some content\n"
 
 
 class TestUpdateGitignoreWriteError:
@@ -233,6 +238,7 @@ class TestUpdateGitignoreWriteError:
 
         mock_warn.assert_called_once()
         assert ".gitignore" in mock_warn.call_args[0][0].lower()
+        assert gitignore.read_text() == "node_modules/\n"
 
 
 # ---------------------------------------------------------------------------

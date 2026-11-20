@@ -10,27 +10,29 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.utils.git_env import git_subprocess_env
+
+pytestmark = pytest.mark.component
 
 
 class TestProxyEnvPreserved:
     """Verify proxy environment variables pass through to git subprocess."""
 
-    def test_https_proxy_in_subprocess_env(self) -> None:
-        with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.corp:8080"}):
+    @pytest.mark.parametrize(
+        ("var", "value"),
+        [
+            ("HTTPS_PROXY", "http://proxy.corp:8080"),
+            ("HTTP_PROXY", "http://proxy.corp:3128"),
+            ("NO_PROXY", "internal.corp,*.local"),
+        ],
+    )
+    def test_proxy_var_in_subprocess_env(self, var: str, value: str) -> None:
+        with patch.dict(os.environ, {var: value}):
             env = git_subprocess_env()
-            assert env["HTTPS_PROXY"] == "http://proxy.corp:8080"
-
-    def test_http_proxy_in_subprocess_env(self) -> None:
-        with patch.dict(os.environ, {"HTTP_PROXY": "http://proxy.corp:3128"}):
-            env = git_subprocess_env()
-            assert env["HTTP_PROXY"] == "http://proxy.corp:3128"
-
-    def test_no_proxy_in_subprocess_env(self) -> None:
-        with patch.dict(os.environ, {"NO_PROXY": "internal.corp,*.local"}):
-            env = git_subprocess_env()
-            assert env["NO_PROXY"] == "internal.corp,*.local"
+            assert env[var] == value
 
 
 class TestInsteadOfRewrite:
@@ -91,3 +93,4 @@ class TestInsteadOfRewrite:
 
         # No clone, no fetch, no rev-parse -- pure file-system hit
         assert mock_run.call_args_list == []
+        assert (git_dir / "HEAD").read_text(encoding="utf-8") == f"{sha}\n"

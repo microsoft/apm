@@ -59,7 +59,7 @@ def install_local_bundle(
     (project or user) lockfile.  Cleans up tarball extraction on exit.
     """
     from ..bundle.local_bundle import check_target_mismatch
-    from ..core.scope import InstallScope, get_manifest_path, get_source_root
+    from ..core.scope import InstallScope, get_manifest_path, get_source_root, manifest_root
     from ..core.target_detection import (
         EffectiveTargetDecision,
         resolve_manifest_target_decision,
@@ -210,7 +210,7 @@ def install_local_bundle(
             [resolved.name for resolved in targets], "bundle deployment targets"
         )
         admit_bundle(
-            policy_root=source_root,
+            policy_root=manifest_root(source_root, user_scope=global_),
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
             target_decision=deployment_decision,
@@ -519,22 +519,21 @@ def effective_bundle_allow_map(
     under ``-g``), never from the working directory's ``apm.yml`` at user
     scope.
     """
-    from ..core.scope import manifest_root
+    from ..core.scope import manifest_root, scope_manifest_path
     from ..policy.outcome_routing import resolve_trust_policy
     from ..security.executables import (
         exec_trust_context_for_project,
         materialize_exec_map,
-        project_manifest_path,
     )
 
     policy = resolve_trust_policy(
-        project_root,
+        manifest_root(project_root, user_scope=user_scope),
         no_policy=no_policy,
         announce=False,
         raise_blocking_errors=not dry_run,
         fetch_result=policy_fetch_result,
     )
-    grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
+    grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)
     return materialize_exec_map(
         exec_trust_context_for_project(
             grants_manifest,

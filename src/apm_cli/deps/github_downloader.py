@@ -315,7 +315,7 @@ class GitHubPackageDownloader:
         backend = backend_for(dep_ref, self.auth_resolver)
         if backend.is_github_family or backend.kind == "ado":
             return repository_url
-        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref, token="")
+        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref)
 
     def _cache_git_env(
         self, dep_ref: DependencyReference, remote_url: str | None = None
@@ -348,8 +348,6 @@ class GitHubPackageDownloader:
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token="",
-                auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
             )
         if auth_ctx is None:
             auth_ctx = self.auth_resolver.resolve_for_remote(
@@ -672,18 +670,11 @@ class GitHubPackageDownloader:
         self,
         repo_ref: str,
         use_ssh: bool = False,
-        dep_ref: DependencyReference = None,
-        token: str | None = None,
-        auth_scheme: str = "basic",
+        *,
+        dep_ref: DependencyReference,
     ) -> str:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.build_repo_url(
-            repo_ref,
-            use_ssh=use_ssh,
-            dep_ref=dep_ref,
-            token=token,
-            auth_scheme=auth_scheme,
-        )
+        return self._strategies.build_repo_url(repo_ref, use_ssh=use_ssh, dep_ref=dep_ref)
 
     def _clone_with_fallback(
         self,
@@ -1169,7 +1160,6 @@ class GitHubPackageDownloader:
                     dep_ref.repo_url,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
                 )
                 setup_env = self.auth_resolver.build_public_github_anonymous_git_env(
                     base_env=self.git_env,
@@ -1199,7 +1189,6 @@ class GitHubPackageDownloader:
                             dep_ref.repo_url,
                             use_ssh=False,
                             dep_ref=dep_ref,
-                            token="",
                         )
                         winning_url = authenticated_url
                     git_env = git_network_env(
@@ -1267,13 +1256,10 @@ class GitHubPackageDownloader:
 
             # Resolve per-dependency auth via AuthResolver.
             dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
             auth_url = self._build_repo_url(
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token="",
-                auth_scheme=dep_auth_scheme,
             )
             if dep_auth_ctx is not None:
                 env = self.auth_resolver.git_env_for_remote(

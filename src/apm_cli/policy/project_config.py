@@ -37,6 +37,7 @@ from typing import Any
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.utils.yaml_io import load_yaml_str
 
 _VALID_FETCH_FAILURE_DEFAULT = {"warn", "block"}
@@ -95,7 +96,7 @@ def read_project_fetch_failure_default(project_root: Path) -> str:
 
 
 def _read_or_default(project_root: Path, default: str) -> str:
-    apm_yml = project_root / "apm.yml"
+    apm_yml = manifest_file(project_root)
     if not apm_yml.is_file():
         return default
     try:
@@ -188,7 +189,7 @@ def read_project_policy_hash_pin(
     pin. A malformed pin raises :class:`ProjectPolicyConfigError` -- a
     silent skip would defeat the security guarantee.
     """
-    apm_yml = project_root / "apm.yml"
+    apm_yml = manifest_file(project_root)
     if not apm_yml.is_file():
         return None
     try:

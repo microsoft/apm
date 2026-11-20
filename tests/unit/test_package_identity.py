@@ -14,6 +14,8 @@ import pytest
 
 from src.apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 def _get_host_from_entry(entry: str) -> str | None:
     """Safely extract hostname from an entry using URL parsing.

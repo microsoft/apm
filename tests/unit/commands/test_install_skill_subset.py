@@ -5,6 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+import yaml
+
+pytestmark = pytest.mark.component
+
 
 def _make_apm_yml(path: Path, deps: list | None = None) -> Path:
     """Write a minimal apm.yml."""
@@ -118,6 +123,8 @@ def test_skill_subset_strips_whitespace(tmp_path):
     dep_ref = _run_validate(apm_yml, skill_subset=("  skill-a  ", "\tskill-b\t"))
 
     assert dep_ref.skill_subset == ["skill-a", "skill-b"]
+    persisted = yaml.safe_load(apm_yml.read_text(encoding="utf-8"))["dependencies"]["apm"]
+    assert persisted == [{"git": "org/repo", "skills": ["skill-a", "skill-b"]}]
 
 
 def test_skill_subset_rejects_empty_strings(tmp_path):
@@ -128,6 +135,8 @@ def test_skill_subset_rejects_empty_strings(tmp_path):
     dep_ref = _run_validate(apm_yml, skill_subset=("skill-a", "", "   ", "skill-b"))
 
     assert dep_ref.skill_subset == ["skill-a", "skill-b"]
+    persisted = yaml.safe_load(apm_yml.read_text(encoding="utf-8"))["dependencies"]["apm"]
+    assert persisted == [{"git": "org/repo", "skills": ["skill-a", "skill-b"]}]
 
 
 def test_skill_subset_deduplicates_preserving_order(tmp_path):
@@ -140,3 +149,5 @@ def test_skill_subset_deduplicates_preserving_order(tmp_path):
     )
 
     assert dep_ref.skill_subset == ["skill-a", "skill-b", "skill-c"]
+    persisted = yaml.safe_load(apm_yml.read_text(encoding="utf-8"))["dependencies"]["apm"]
+    assert persisted == [{"git": "org/repo", "skills": ["skill-a", "skill-b", "skill-c"]}]

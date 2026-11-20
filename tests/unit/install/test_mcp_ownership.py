@@ -23,6 +23,8 @@ from apm_cli.install.mcp.ownership import (
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.component
+
 ManagedClaude = tuple[ClaudeClientAdapter, dict, dict]
 
 

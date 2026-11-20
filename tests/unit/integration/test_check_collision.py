@@ -25,6 +25,8 @@ from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.script_trust import script_file_fingerprint
+
+pytestmark = pytest.mark.component
 
 
 def _fp(tmp_path: Path, name: str, text: str) -> str | None:

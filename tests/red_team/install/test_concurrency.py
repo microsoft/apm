@@ -20,6 +20,8 @@ import json
 import threading
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.lifecycle_scripts import (
     LifecycleEvent,
     LifecycleScriptRunner,
@@ -32,6 +34,8 @@ from apm_cli.core.script_trust import (
 )
 
 from .conftest import PYEXE, make_command_entry, trust, write_project
+
+pytestmark = pytest.mark.component
 
 
 def _event(wd: str) -> LifecycleEvent:
