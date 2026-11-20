@@ -103,7 +103,9 @@ def test_skill_bundle_install_prints_one_skill_line(tmp_path: Path, apm_binary_p
 
     replay = world.apm("install", "--frozen")
 
-    assert _integration_lines(replay) == expected, _evidence(replay)
+    # A converged replay integrates nothing and says so (#4184).
+    assert _integration_lines(replay) == [], _evidence(replay)
+    assert "  |-- (files unchanged)" in replay.stdout.splitlines(), _evidence(replay)
     assert world.snap() == after, "I2: frozen replay of a converged install changed state"
 
 

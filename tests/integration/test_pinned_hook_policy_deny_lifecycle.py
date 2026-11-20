@@ -39,7 +39,7 @@ _PKG = "../hooky"
 _BASE_POLICY = {"name": "contoso-policy", "version": "1.0.0", "enforcement": "block"}
 _DENY_ALL = {**_BASE_POLICY, "executables": {"deny_all": True}}
 _DENIED = f"hooks skipped (denied). Run 'apm policy explain {_PKG}'"
-_APPROVE_HINT = f"Run 'apm approve {_PKG}' to approve."
+_APPROVE_HINT = f"Run 'apm approve {_PKG}' to approve its hooks."
 
 
 def _hook_package(root: Path) -> None:

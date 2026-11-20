@@ -223,7 +223,7 @@ class TestDisplayValidationErrors:
             self._call(errors)
 
         captured = capsys.readouterr()
-        assert "file.md" in captured.out or "Missing" in captured.out
+        assert "file.md" in captured.err or "Missing" in captured.err
 
     def test_with_console_renders_rich_table(self) -> None:
         """When console is present, a Rich Table is printed."""
@@ -266,7 +266,7 @@ class TestDisplayValidationErrors:
             self._call(errors)
 
         captured = capsys.readouterr()
-        assert "file.md" in captured.out or "some error" in captured.out
+        assert "file.md" in captured.err or "some error" in captured.err
 
     def test_empty_errors_list(self) -> None:
         """Empty errors list should not raise."""

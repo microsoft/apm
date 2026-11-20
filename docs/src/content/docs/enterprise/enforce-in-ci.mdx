@@ -167,7 +167,7 @@ access to every `apm-policy` project in the group path.
 | Failed check | Fix |
 |---|---|
 | `lockfile-exists`, `ref-consistency`, `--frozen` refused | Run `apm install`, commit `apm.yml` and `apm.lock.yaml` |
-| `content-integrity`, `drift` | A deployed file was edited: run `apm export-patch` to keep the edit upstream, then `apm install --force` to restore the locked file (plain `apm install` keeps the edit). `content-integrity` also fails on critical hidden Unicode; review the file before you strip or replace it |
+| `content-integrity`, `drift` | A deployed file was edited: run `apm export-patch` to keep the edit upstream, then delete the file and run `apm install` to restore the locked file (a plain `apm install` overwrites edited instructions, agents, prompts, commands and rules, and refuses edited skills). `content-integrity` also fails on critical hidden Unicode; review the file before you strip or replace it |
 | `dependency-allowlist`, `dependency-denylist` | Use an allowed package, or open a pull request against the policy repository |
 | `apm policy status --check` | Discovery failed; see [Debug a policy failure](../apm-policy/#debug-a-policy-failure) |
 

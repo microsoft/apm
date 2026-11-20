@@ -44,6 +44,11 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.remediation import (
+    LOCKFILE_MISSING,
+    LOCKFILE_UNREADABLE,
+    PROJECT_MANIFEST_MISSING,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..constants import APM_YML_FILENAME
@@ -658,24 +663,25 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
     project_root = Path.cwd()
 
     if not manifest_file(project_root).exists():
-        logger.error(f"No {APM_YML_FILENAME} found. Run 'apm init' first.")
+        logger.error(f"No {APM_YML_FILENAME} found. {PROJECT_MANIFEST_MISSING.sentence()}")
         sys.exit(1)
 
     lockfile_path = get_lockfile_path(project_root)
     if not lockfile_path.exists():
-        logger.error("No lockfile found. Run 'apm install' first.")
+        logger.error(f"No lockfile found. {LOCKFILE_MISSING.sentence()}")
         sys.exit(1)
     try:
         lockfile = LockFile.read(lockfile_path)
     except LockfileFormatError as exc:
         logger.error(
             f"Lockfile at {lockfile_path} could not be parsed ({exc}); "
-            "fix it or re-run 'apm install'."
+            f"{LOCKFILE_UNREADABLE.bind(path=lockfile_path.name).clause()}."
         )
         sys.exit(1)
     if lockfile is None:
         logger.error(
-            f"Lockfile at {lockfile_path} could not be parsed; fix it or re-run 'apm install'."
+            f"Lockfile at {lockfile_path} could not be parsed; "
+            f"{LOCKFILE_UNREADABLE.bind(path=lockfile_path.name).clause()}."
         )
         sys.exit(1)
 

@@ -4,9 +4,19 @@ import builtins
 import contextlib
 import shlex
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 from uuid import uuid4
+
+from apm_cli.core.remediation import (
+    INTEGRATED_FILES_STALE,
+    LOCAL_DEPENDENCY_UNMAPPED,
+    LOCAL_DEPENDENCY_UNRESOLVED,
+    LOCKFILE_RECORDS_INCONSISTENT,
+    MARKETPLACE_REF_UNRESOLVED,
+    MCP_DEPENDENCY_DECLARED,
+    REGISTRY_CANONICAL_UNRECORDED,
+)
 
 from ...bundle.local_bundle import looks_like_local_bundle
 from ...constants import APM_MODULES_DIR
@@ -118,8 +128,8 @@ def _refuse_unsafe_marketplace_removals(
             label = _marketplace_declaration_label(entry)
             logger.error(
                 f"apm.lock.yaml records {len(rows)} packages for {label}, so uninstall "
-                "cannot tell which one to remove. Nothing was changed. Run 'apm install' "
-                "to refresh apm.lock.yaml, then retry."
+                "cannot tell which one to remove. Nothing was changed. "
+                f"{LOCKFILE_RECORDS_INCONSISTENT.sentence()}"
             )
             refused.append(label)
     if refused:
@@ -156,8 +166,18 @@ def _removed_lock_key(dep_entry: object, lockfile: LockFile | None) -> str:
         return target if isinstance(target, str) else str(target)
 
 
-def _dependency_public_label(dep_entry: object) -> str:
-    """Return a path-safe dependency label for user-facing uninstall output."""
+def _count_noun(count: int, singular: str, plural: str | None = None) -> str:
+    """Return ``count`` with a correctly pluralized noun (``1 file``, ``2 files``)."""
+    return f"{count} {singular if count == 1 else (plural or singular + 's')}"
+
+
+def _is_host_local_spelling(local_path: str) -> bool:
+    """Return whether a declared local path names a machine-specific location."""
+    return local_path.startswith(("/", "\\", "~")) or bool(PureWindowsPath(local_path).drive)
+
+
+def _dependency_lifecycle_label(dep_entry: object) -> str:
+    """Return the portable package name passed to uninstall lifecycle scripts."""
     try:
         dependency = _parse_dependency_entry(dep_entry)
     except (ValueError, TypeError, AttributeError, KeyError):
@@ -165,6 +185,23 @@ def _dependency_public_label(dep_entry: object) -> str:
     if dependency.is_local:
         return dependency.repo_url
     return dependency.get_identity()
+
+
+def _dependency_public_label(dep_entry: object) -> str:
+    """Return a path-safe dependency label for user-facing uninstall output.
+
+    Relative local declarations keep the manifest spelling (``./pkg``); a
+    declaration naming an absolute or home path falls back to the portable
+    ``_local/<name>`` key so diagnostics never print machine-specific paths.
+    """
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+        local_path = dependency.local_path if dependency.is_local else None
+    except (ValueError, TypeError, AttributeError, KeyError):
+        local_path = None
+    if local_path and not _is_host_local_spelling(local_path):
+        return local_path
+    return _dependency_lifecycle_label(dep_entry)
 
 
 def _is_private_local_identity(value: str) -> bool:
@@ -219,7 +256,7 @@ class _LocalRefreshLogger:
         self.failed = True
         self._logger.error(
             f"Failed to refresh {self._package_label} from its declared local path. "
-            "Check the exact path in apm.yml, run 'apm install', and retry."
+            f"{LOCAL_DEPENDENCY_UNRESOLVED.sentence()}"
         )
 
 
@@ -636,8 +673,8 @@ def _resolve_marketplace_packages(
                         logger.warning(
                             f"Registry resolved {plugin_name}@{marketplace_name} to "
                             f"{canonical}, but it is not recorded in apm.lock.yaml. "
-                            "Refusing as a supply-chain precaution; use "
-                            f"`apm uninstall {canonical}` directly if this is correct."
+                            "Refusing as a supply-chain precaution. "
+                            f"{REGISTRY_CANONICAL_UNRECORDED.bind(canonical=canonical).sentence()}"
                         )
                         canonical = None
                     elif lockfile is None:
@@ -664,9 +701,8 @@ def _resolve_marketplace_packages(
             else:
                 logger.error(
                     f"{plugin_name}@{marketplace_name} could not be resolved -- "
-                    "use owner/repo format to uninstall directly, or run "
-                    "`apm list` to find the owner/repo canonical name "
-                    "then use `apm uninstall owner/repo` directly."
+                    "find its owner/repo canonical name with `apm list`, then "
+                    f"{MARKETPLACE_REF_UNRESOLVED.clause()}."
                 )
 
         resolved[package] = canonical
@@ -695,9 +731,8 @@ def _mcp_server_hint(name: str, lockfile: "LockFile | None") -> str | None:
             "Uninstall that package to remove it."
         )
     return (
-        f"'{name}' is an MCP server, not a package. Remove '{name}' under "
-        "dependencies.mcp in apm.yml, then run 'apm install' to remove it "
-        "from your harnesses."
+        f"'{name}' is an MCP server, not a package. "
+        f"{MCP_DEPENDENCY_DECLARED.bind(name=name).sentence()}"
     )
 
 
@@ -831,7 +866,7 @@ def _validate_uninstall_packages(
             if canonical_for_match.startswith("_local/"):
                 logger.error(
                     f"{display_label} could not be mapped to one declared local dependency. "
-                    "Run 'apm install' to regenerate apm.lock.yaml, or use one exact "
+                    f"{LOCAL_DEPENDENCY_UNMAPPED.sentence()[:-1]}, or use one exact "
                     "path from apm.yml."
                 )
             elif is_local and looks_like_local_bundle(Path(package)):
@@ -975,7 +1010,7 @@ def _dry_run_uninstall(
         from ...deps.lockfile import get_lockfile_path
 
         lockfile = LockFile.read(get_lockfile_path(Path(".")))
-    logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
+    logger.progress(f"Dry run: Would remove {_count_noun(len(packages_to_remove), 'package')}:")
     for pkg in packages_to_remove:
         package_label = _dependency_public_label(pkg)
         logger.progress(f"  - {package_label} from apm.yml")
@@ -994,7 +1029,7 @@ def _dry_run_uninstall(
             if shared_survivors:
                 logger.progress(
                     f"  - refresh {package_label} in apm_modules/ for "
-                    f"{len(shared_survivors)} surviving declaration(s)"
+                    f"{_count_noun(len(shared_survivors), 'surviving declaration')}"
                 )
             else:
                 logger.progress(f"  - {package_label} from apm_modules/")
@@ -1062,7 +1097,7 @@ def _remove_packages_from_disk(
                     refreshed_survivor_keys.update(refresh.survivor_keys)
                 logger.progress(
                     f"Refreshed {package_label} in apm_modules/ for "
-                    f"{len(refresh.survivor_keys)} surviving declaration(s)"
+                    f"{_count_noun(len(refresh.survivor_keys), 'surviving declaration')}"
                 )
                 continue
 
@@ -1686,7 +1721,7 @@ def _sync_integrations_after_uninstall(
                 pkg_id = _dependency_public_label(dep_ref)
                 logger.warning(
                     f"Best-effort re-integration skipped for {pkg_id}. "
-                    "Run 'apm install' to rebuild integrated files."
+                    f"{INTEGRATED_FILES_STALE.sentence()}"
                 )
                 logger.verbose_detail(
                     f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
