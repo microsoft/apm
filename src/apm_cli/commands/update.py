@@ -1015,6 +1015,10 @@ def _run_dep_update_locked(
             sys.exit(1)
 
     if plan_state.proceeded:
+        # Name files cleanup kept (#3701) and other install warnings once.
+        update_diagnostics = getattr(result, "diagnostics", None)
+        if update_diagnostics is not None and update_diagnostics.has_diagnostics:
+            update_diagnostics.render_summary()
         # Report the number of dependencies that actually changed (per the
         # plan), not the total tree re-materialized (result.installed_count).
         # The latter counts unchanged deps that were re-integrated, which

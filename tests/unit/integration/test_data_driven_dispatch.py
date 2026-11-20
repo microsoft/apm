@@ -20,6 +20,7 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ------------------------------------------------------------------
 # Helpers
@@ -467,6 +468,7 @@ class TestSyntheticTargetProfile:
             apm_package,
             self.root,
             managed_files=managed,
+            evidence=receipted_evidence(self.root),
         )
 
         # The .newcode files should be removed
