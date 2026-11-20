@@ -102,6 +102,27 @@ class TestJourneyLoader:
         assert [step["id"] for step in result["journeys"][0]["steps"]] == ["J01.1", "J01.2"]
         assert result["counts"] == {"journeys": 1, "steps": 2, "consumer": 1}
 
+    def test_reads_index_yaml_field_names(self, tmp_path: Path) -> None:
+        index = tmp_path / "tests/lifecycle/journeys/index.yaml"
+        index.parent.mkdir(parents=True)
+        index.write_text(
+            "schema_version: 1\n"
+            "journeys:\n"
+            "  - id: J03\n    persona: consumer\n    steps:\n"
+            "      - n: 1\n        cmd: apm install --frozen\n        kind: apm\n"
+            "        argv: [[apm, install, --frozen]]\n        exit: 0\n"
+            "        key_lines: ['[i] Deployed files verified']\n"
+            "        forbidden_lines: [Traceback]\n",
+            encoding="utf-8",
+        )
+        step = journeys.load(tmp_path, None)["journeys"][0]["steps"][0]
+        assert (step["kind"], step["argv"], step["must_print"], step["must_not_print"]) == (
+            "apm",
+            [["apm", "install", "--frozen"]],
+            ["[i] Deployed files verified"],
+            ["Traceback"],
+        )
+
     def test_accepts_an_operator_supplied_json_catalogue(self, tmp_path: Path) -> None:
         path = tmp_path / "devx-journeys.json"
         doc = {
