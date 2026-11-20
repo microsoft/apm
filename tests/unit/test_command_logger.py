@@ -391,7 +391,7 @@ class TestInstallLogger:
         mock_warning.assert_called_once()
         assert mock_warning.call_args.args[0] == (
             f"Dry run incomplete: {count} locally known APM {noun}. "
-            "Run 'apm install' without --dry-run to resolve the full plan."
+            "Run 'apm install' to resolve and install the full plan."
         )
 
     @patch("apm_cli.core.command_logger._rich_warning")

@@ -270,7 +270,7 @@ def test_validate_provider_coordinates_rejects_mismatched_ado_fields() -> None:
 
     with pytest.raises(
         ValueError,
-        match=r"Run `apm install <original-ado-url>`",
+        match=r"Run 'apm install <original-ado-url>'",
     ):
         reference.validate_provider_coordinates()
 

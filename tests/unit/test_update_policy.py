@@ -159,7 +159,7 @@ class TestGetUpdateHintMessage:
     def test_returns_run_apm_self_update_when_enabled(self) -> None:
         with patch.object(policy_mod, "SELF_UPDATE_ENABLED", True):
             result = get_update_hint_message()
-        assert result == "Run apm self-update to upgrade"
+        assert result == "Run 'apm self-update' to update the APM CLI binary."
 
     def test_returns_disabled_message_when_disabled(self) -> None:
         custom = "Use your package manager to update."
