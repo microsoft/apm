@@ -30,36 +30,13 @@ def selected_dependency_identity(package: str, dependencies: Sequence[Dependency
     return _selected_dependency_reference(package, dependencies).get_identity()
 
 
-def selected_subtree_dependencies(
-    packages: Sequence[str],
+def _subtree_dependencies(
+    root_identities: set[str],
     tree: DependencyTree,
     dependencies: Sequence[DependencyReference],
-    *,
-    locked_keys: Collection[str] | None = None,
 ) -> list[DependencyReference]:
-    """Filter the complete graph's winners to selected roots and their descendants.
-
-    With *locked_keys* (the existing lock's dependency keys, empty when there
-    is no lock), a direct local-path dependency the lock does not record is
-    selected too: its files already live in the project, so the lock written
-    by this partial install must claim them (#4198).
-    """
-    resolved_refs = [node.dependency_ref for node in tree.nodes.values()]
-    only_identities: set[str] = set()
-    for package in packages:
-        try:
-            only_identities.add(selected_dependency_identity(package, resolved_refs))
-        except (ValueError, TypeError):
-            only_identities.add(package)
-    if locked_keys is not None:
-        only_identities.update(
-            node.dependency_ref.get_identity()
-            for node in tree.nodes.values()
-            if node.dependency_ref.is_local
-            and node.depth == 1
-            and node.dependency_ref.get_unique_key() not in locked_keys
-        )
-
+    """Return *dependencies* reached from the root identities through *tree*."""
+    only_identities = set(root_identities)
     expanded_nodes: set[int] = set()
 
     def collect_descendants(node: DependencyNode) -> None:
@@ -75,6 +52,43 @@ def selected_subtree_dependencies(
         if node.dependency_ref.get_identity() in only_identities:
             collect_descendants(node)
     return [dep for dep in dependencies if dep.get_identity() in only_identities]
+
+
+def selected_subtree_dependencies(
+    packages: Sequence[str],
+    tree: DependencyTree,
+    dependencies: Sequence[DependencyReference],
+) -> list[DependencyReference]:
+    """Filter the complete graph's winners to selected roots and their descendants."""
+    resolved_refs = [node.dependency_ref for node in tree.nodes.values()]
+    only_identities: set[str] = set()
+    for package in packages:
+        try:
+            only_identities.add(selected_dependency_identity(package, resolved_refs))
+        except (ValueError, TypeError):
+            only_identities.add(package)
+    return _subtree_dependencies(only_identities, tree, dependencies)
+
+
+def unlocked_local_dependencies(
+    tree: DependencyTree,
+    dependencies: Sequence[DependencyReference],
+    locked_keys: Collection[str],
+) -> list[DependencyReference]:
+    """Return direct local-path dependencies no lock row records, with their subtrees.
+
+    A partial install (``apm install <pkg>``) installs these alongside the
+    selection: their files already live in the project, so the lock it writes
+    must claim them (#4198). The selection itself, and its preview, is unchanged.
+    """
+    roots = {
+        node.dependency_ref.get_identity()
+        for node in tree.nodes.values()
+        if node.dependency_ref.is_local
+        and node.depth == 1
+        and node.dependency_ref.get_unique_key() not in locked_keys
+    }
+    return _subtree_dependencies(roots, tree, dependencies) if roots else []
 
 
 def existing_dependency_identities(current_dependencies: list[object]) -> set[str]:
