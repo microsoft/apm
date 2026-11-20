@@ -221,7 +221,7 @@ def test_parked_required_package_satisfies_presence_and_is_reported_separately()
     assert "acme/tools" in " ".join(missing.details)
 
 
-# --- passing clauses of req-sc-002 / req-sc-007 (ids report their xfails) -----
+# --- req-sc-002 archive extraction; req-sc-005; passing redaction clause of req-sc-007 --
 
 
 def _tarball(*members: tuple[str, bytes | None, bytes]) -> bytes:
@@ -239,6 +239,7 @@ def _tarball(*members: tuple[str, bytes | None, bytes]) -> bytes:
     return gzip.compress(buffer.getvalue())
 
 
+@pytest.mark.req("req-sc-002")
 @pytest.mark.parametrize(
     "bad",
     [("../escape.txt", None, b"x"), ("/abs.txt", None, b"x"), ("link", b"/etc/passwd", b"")],
@@ -252,7 +253,6 @@ def test_unsafe_archive_entry_is_rejected(tmp_path: Path, bad: tuple) -> None:
 
 
 @pytest.mark.req("req-sc-002")
-@pytest.mark.xfail(strict=True, reason="#4235: archive extraction is not cleaned up on failure")
 def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
     data = _tarball(("first.txt", None, b"ok"), ("../escape.txt", None, b"x"))
     out = tmp_path / "out"
