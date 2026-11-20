@@ -164,11 +164,14 @@ def compare(
     names: dict[str, list[str]],
     allowed_bodies: set[str],
     allowed_names: set[str],
+    present: set[str],
 ) -> Comparison:
     """Return new duplicates, stale entries and moved (re-keyed) entries.
 
     A test that leaves a baselined file and reappears under the same name in
-    another file is a move, not a new duplicate.
+    another file is a move, not a new duplicate. Only baselined tests absent
+    from the scanned corpus (``present``) can be the source of a move; a test
+    that still exists but became unique is merely stale.
     """
     growth: list[str] = []
     stale: list[str] = []
@@ -179,7 +182,7 @@ def compare(
         ("duplicate_names", names, allowed_names),
     ):
         observed = _members(groups)
-        moves = _match_moves(observed - allowed, allowed - observed)
+        moves = _match_moves(observed - allowed, allowed - present)
         moved.update({f"{key} {new}": f"{key} {old}" for new, old in moves.items()})
         stale += [f"{key} {nodeid}" for nodeid in sorted(allowed - observed - set(moves.values()))]
         keep[key] = (allowed & observed) | set(moves)
@@ -269,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     bodies = duplicate_bodies(digests)
     names = duplicate_names(qualnames)
-    result = compare(bodies, names, allowed_bodies, allowed_names)
+    result = compare(bodies, names, allowed_bodies, allowed_names, set(digests))
     if result.growth:
         for diagnostic in result.growth:
             print(f"[x] {diagnostic}", file=sys.stderr)

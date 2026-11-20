@@ -30,7 +30,12 @@ from tests.lifecycle.snapshot import restore_tree
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I4", "P-INV-I7"),
+]
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "gate_cell_obligations.json"
 MUTANT_PATH = Path(__file__).parents[2] / "fixtures" / "gate_mutants" / "skip_approval_check.py"

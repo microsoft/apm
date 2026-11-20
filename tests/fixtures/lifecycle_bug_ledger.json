@@ -570,6 +570,27 @@
       ]
     },
     {
+      "issue": 4080,
+      "fixed_in": "Unreleased",
+      "summary": "apm unpack deploys through the shared bundle-admission owner that apm install <bundle> uses: org policy, integrity under require_hashes, the lifecycle lock and the lockfile record.",
+      "failure_modes": ["transaction", "ownership", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_applies_org_dependency_policy",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_applies_org_target_policy",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_files_its_target_policy_cannot_place",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_an_unwritable_project_lockfile_before_writing",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_verifies_cross_target_mapped_files_under_require_hashes",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_reports_warn_policy_violations_and_deploys",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_altered_bytes_when_policy_requires_hashes",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_fails_closed_when_policy_is_unavailable_under_block",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_records_deployed_files_in_the_project_lockfile",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_into_a_project_keeps_unapproved_executables_out",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_into_a_non_project_dir_announces_and_writes_no_lockfile",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_waits_for_the_lifecycle_lock"
+      ]
+    },
+    {
       "issue": 4084,
       "fixed_in": "0.37.0",
       "summary": "Policy outcome routing consistency: apm audit --ci and apm approve handled some org policy discovery outcomes differently from apm install; every policy reader now takes one routed decision per outcome from a closed outcome set.",
@@ -578,6 +599,25 @@
       "regression_tests": [
         "tests/integration/test_policy_outcome_routing_lifecycle.py::test_every_policy_reader_routes_the_outcome_like_install",
         "tests/integration/test_policy_outcome_routing_lifecycle.py::test_approve_under_unreachable_policy_follows_fetch_failure_default"
+      ]
+    },
+    {
+      "issue": 4125,
+      "fixed_in": "Unreleased",
+      "summary": "apm update verifies a registry dependency whose version did not move against its locked hash, as it does for a git dependency whose commit did not move.",
+      "failure_modes": [
+        "transaction",
+        "reference",
+        "outcome"
+      ],
+      "properties": [
+        "source.ref_cache_coherent",
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_altered_bytes_for_an_unchanged_registry_version",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_accepts_a_new_registry_version"
       ]
     },
     {
@@ -601,6 +641,24 @@
       ]
     },
     {
+      "issue": 4188,
+      "fixed_in": "Unreleased",
+      "summary": "install --frozen and audit --ci disagreed on executable approval pins, and a hook whose pin no longer matched kept its config entries after install.",
+      "failure_modes": [
+        "cleanup",
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_hook_approval_pin_parity_lifecycle.py::test_frozen_and_audit_refuse_alike_when_a_hook_pin_does_not_match",
+        "tests/integration/test_hook_approval_pin_parity_lifecycle.py::test_install_retires_a_hook_whose_pin_no_longer_matches"
+      ]
+    },
+    {
       "issue": 4235,
       "fixed_in": "Unreleased",
       "summary": "Registry archive extraction applies one set of archive limits to every accepted format: entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries, with every entry validated before the first write.",
@@ -616,6 +674,18 @@
         "tests/unit/registry/test_extractor.py::test_zip_special_file_modes_are_refused",
         "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
         "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
+      ]
+    },
+    {
+      "issue": 4270,
+      "fixed_in": "Unreleased",
+      "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",
+      "failure_modes": ["cache", "outcome"],
+      "properties": ["source.ref_cache_coherent", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/install/test_legacy_plugin_compat.py::test_cached_pass_classifies_as_the_fresh_pass",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
+        "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
     }
   ],

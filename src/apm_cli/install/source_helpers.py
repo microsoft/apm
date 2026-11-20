@@ -258,6 +258,55 @@ def update_accepts_new_content(ctx: Any, locked_dep: Any, resolved_commit: str |
     return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, resolved_commit))
 
 
+def locked_version_unchanged(locked_dep: Any, version: str | None) -> bool:
+    """Return whether *version* is the registry version *locked_dep* records.
+
+    A registry package is identified by its name and exact version, so an
+    unchanged version must still hold its locked bytes (#4125).
+    """
+    return bool(
+        version
+        and getattr(locked_dep, "source", None) == "registry"
+        and version == getattr(locked_dep, "version", None)
+    )
+
+
+def download_registry_package(ctx: Any, dep_ref: Any, target_path: Path, locked_dep: Any) -> Any:
+    """Download *dep_ref* at its re-resolved registry version.
+
+    A moved version may lock new content; an unchanged version must match
+    the locked ``resolved_hash``, as an unchanged commit must match its
+    locked content hash (#4125). A mismatch removes the download and fails
+    closed before anything is deployed or locked.
+    """
+    from apm_cli.install.registry_wiring import get_registry_resolver
+
+    resolver = get_registry_resolver(ctx)
+    package_info = resolver.download_package(dep_ref, target_path)
+    dep_key = dep_ref.get_unique_key()
+    resolution = resolver.last_resolutions.get(dep_key)
+    version = getattr(resolution, "version", None)
+    expected = getattr(locked_dep, "resolved_hash", None)
+    actual = getattr(resolution, "resolved_hash", None)
+    if (
+        not expected
+        or not actual
+        or not locked_version_unchanged(locked_dep, version)
+        or expected.removeprefix("sha256:").lower() == actual.removeprefix("sha256:").lower()
+    ):
+        return package_info
+    from apm_cli.install.errors import DirectDependencyError
+    from apm_cli.utils.path_security import safe_rmtree
+
+    safe_rmtree(target_path, ctx.apm_modules_dir)
+    raise DirectDependencyError(
+        f"Content hash mismatch for {dep_key} version {version}: "
+        f"expected {expected}, got {actual}. "
+        "The registry archive differs from the lockfile record. "
+        + content_hash_mismatch_hint(ctx, dep_key)
+    )
+
+
 def ensure_carried_licenses_match(
     ctx: Any,
     dep_key: str,

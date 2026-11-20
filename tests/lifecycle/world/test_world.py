@@ -265,11 +265,6 @@ def test_each_package_installs_through_the_real_cli(
     assert world.services.egress_log() == [], "a local-path install reached the network"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="tracking #4270: whole-plugin bin/ not deployed after approve + --trust-bin",
-    raises=AssertionError,
-)
 @pytest.mark.parametrize("source", ["marketplace", "git"])
 def test_claude_plugin_bin_deploys_at_user_scope_after_trust(
     lifecycle_world: World, source: str

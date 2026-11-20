@@ -425,7 +425,8 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4178",
         _runs("approve"),
         r"\[!\] (Org policy not applied|Using stale cached org policy)",
-        output=r"^\[!\] (Org policy not applied|Using stale cached org policy)",
+        # Only runs that print the same warning line twice (a single warning is correct).
+        output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
     ),
     KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
