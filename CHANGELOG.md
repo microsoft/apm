@@ -96,6 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm uninstall` of a package declared more than once prints each removal line once and no longer warns about the copy it just removed. (#4425)
 - `apm install --verbose` names the package in its target-restriction and perf materialize lines, so they no longer repeat for each package. (#4426)
 - User-scope (`-g`) lifecycle scripts in `$APM_HOME/apm.yml` load once, as user-tier scripts. (closes #4365, #4345)
+- When the Git config cannot be read, `apm install` refuses and names Git's error, the config file at fault, and a command to inspect it. (#4442)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)
