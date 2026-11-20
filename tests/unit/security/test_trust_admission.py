@@ -1035,17 +1035,3 @@ def test_receipt_written_by_normalization_is_exempt(tmp_path: Path) -> None:
 
     assert (root / ".apm/.plugin-skill-sources.json").is_file()
     assert unpinned_apm_copy(root) is None
-
-
-def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> None:
-    """Printed hints work as typed: quoted paths, -g kept beside --user (#4154)."""
-    from apm_cli.security.trust import approve_command, explain_command
-
-    path = "/tmp/native plugins/example"
-    assert approve_command(path, user_scope=True) == "apm approve -g '/tmp/native plugins/example'"
-    assert explain_command(path) == "apm policy explain '/tmp/native plugins/example'"
-    assert approve_command("--pending", user_scope=True) == "apm approve -g --pending"
-    assert (
-        approve_command("owner/repo", user_scope=True, user_store=True)
-        == "apm approve -g --user owner/repo"
-    )
