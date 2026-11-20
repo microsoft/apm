@@ -162,6 +162,7 @@ def test_detector_wraps_every_other_function_autouse_fixture(
     for other in (
         "_reset_console_state",
         "_reset_config_cache",
+        "_reset_marketplace_registry_cache",
         "_isolate_discovery_state",
         "monkeypatch",
     ):

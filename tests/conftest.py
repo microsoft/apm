@@ -207,6 +207,21 @@ def _reset_config_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_marketplace_registry_cache():
+    """Drop the process-wide marketplace registry cache around each test.
+
+    ``marketplace.registry`` caches ``marketplaces.json`` for the process. A
+    test that registers a marketplace under a temporary HOME would otherwise
+    leave that alias visible to later tests on the worker.
+    """
+    from apm_cli.marketplace import registry
+
+    registry._invalidate_cache()
+    yield
+    registry._invalidate_cache()
+
+
+@pytest.fixture(autouse=True)
 def _restore_executable_caches():
     """Restore the process-wide git/gh executable caches after each test.
 
