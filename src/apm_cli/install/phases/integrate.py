@@ -896,6 +896,8 @@ def run(ctx: InstallContext) -> None:
     # a cowork target with a resolved_deploy_root is active.
     # ------------------------------------------------------------------
     _check_cowork_caps(ctx)
+    if session is not None:
+        ctx.legacy_adopted = session.legacy_adopted
     if session is not None and session.kept_overwrites:
         _keep_prior_entries(ctx, session.kept_overwrites, session.kept_edit_kinds)
         ctx.kept_overwrite_written = session.written_entries()
