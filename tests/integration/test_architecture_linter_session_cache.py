@@ -4,8 +4,10 @@ Owner: ``architecture-linter-performance`` (scripts/architecture_linter/session_
 
 * Guard 1 (transparency): every case's findings are byte-equal with and
   without the session. The always-on test covers the first owner case of
-  each rule group; the ``benchmark`` test replays the full owner mutation
-  matrix and runs in the scheduled nightly integration lane.
+  each rule group; the full-matrix replay (~15 min) runs on demand with
+  ``PYTEST_PERF=1 -m benchmark``. An explicit ``-m`` expression (as CI's
+  integration lanes pass) overrides the default benchmark deselection, so
+  the env gate keeps it out of the time-capped shards.
 * Guard 2 (parse once): replaying the full mutation matrix in one session
   builds every ``(path, content)`` exactly once and walks the tree once.
 
@@ -17,6 +19,7 @@ them here would test a mutated cache with itself.
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Sequence
 
 import pytest
@@ -102,6 +105,10 @@ def test_session_cache_findings_match_uncached_runs_per_group() -> None:
 
 
 @pytest.mark.benchmark
+@pytest.mark.skipif(
+    os.environ.get("PYTEST_PERF") != "1",
+    reason="full-matrix replay runs on demand: PYTEST_PERF=1 -m benchmark",
+)
 def test_session_cache_findings_match_uncached_runs_full_matrix() -> None:
     """Guard 1 (full matrix): every owner mutation case is byte-equal cached and cold."""
     digest = _assert_cache_transparent(_REPLAYED_CASES)
