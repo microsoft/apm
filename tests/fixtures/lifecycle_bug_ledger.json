@@ -2689,6 +2689,20 @@
       ]
     },
     {
+      "issue": 4196,
+      "fixed_in": "0.37.0",
+      "summary": "install --frozen resolves MCP targets once, so the targeting line prints once per run.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_command_output_owner_e2e.py::test_frozen_install_announces_mcp_targets_once"
+      ]
+    },
+    {
       "issue": 4198,
       "fixed_in": "0.37.0",
       "summary": "apm install <pkg> after apm init --discover --apply left the declared local dependency out of apm.lock.yaml and reported an identical pre-existing skill as integrated instead of adopted.",
