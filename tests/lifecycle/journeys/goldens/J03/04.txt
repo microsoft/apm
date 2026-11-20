@@ -3,8 +3,8 @@ $ apm install --frozen
 [exit 1]
 --- stdout
 [>] Installing dependencies from apm.yml...
-[x] --frozen: deployed files do not match the hashes recorded in apm.lock.yaml.
   - .agents/skills/style-checker/SKILL.md: expected sha256:<H>, observed sha256:<H>
-[i] Tip: nothing was deployed. To restore the locked content, delete the listed files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings). To keep local edits, run 'apm export-patch' or move them aside first.
-[x] Install failed after <DUR>.
+[i] Tip: nothing was deployed. Delete the edited skill files, then run 'apm install' to restore the locked content (a plain 'apm install' refuses to overwrite an edited skill), then commit the result. To keep the edits, run 'apm export-patch' to export the local edits as upstream patches first.
 --- stderr
+[x] --frozen: deployed files do not match the hashes recorded in apm.lock.yaml.
+[x] Install failed after <DUR>.

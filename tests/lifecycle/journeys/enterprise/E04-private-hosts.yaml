@@ -18,7 +18,7 @@ steps:
     run: [apm install lifecycle/p-skill#v1.0.0]
     exit: 0
     files: [apm.yml, apm.lock.yaml, .gitignore, apm_modules/, .agents/skills/p-skill/SKILL.md]
-    key_lines: ["[+] lifecycle/p-skill #v1.0.0 @<SHA8>", "Skill integrated -> .agents/skills/"]
+    key_lines: ["[+] lifecycle/p-skill #v1.0.0 @<SHA8>", "1 skill(s) integrated -> .agents/skills/"]
     forbidden_lines: [e04-ghes-token-111, Traceback]
   - n: 2
     env:

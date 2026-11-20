@@ -8,5 +8,5 @@ $ apm install --target copilot,claude
   |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
 [i] Added apm_modules/ to .gitignore
 
-[*] Installed 1 APM dependency in <DUR>.
+[*] Updated local content in <DUR>.
 --- stderr

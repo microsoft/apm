@@ -11,12 +11,10 @@ $ apm install --frozen
   [+] microsoft/apm-sample-package #<SHA40> @<SHA8>
   |-- 2 prompts adopted -> .github/prompts/
   |-- 2 agents adopted -> .claude/agents/, .github/agents/
-  |-- 2 commands integrated -> .claude/commands/
+  |-- 2 commands adopted -> .claude/commands/
   |-- 2 instruction(s) adopted -> .claude/rules/, .github/instructions/
-  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
-  [!] [apm-sample-package] Claude command accessibility-audit: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
-  [!] [apm-sample-package] Claude command design-review: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
-  [!] 1 dependency unpinned: github/awesome-copilot -- apm.lock.yaml pins the resolved commit; to track releases on update, add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)
+  |-- (files unchanged)
+
 [*] Installed 2 APM dependencies in <DUR>.
 [i] Deployed files verified against apm.lock.yaml.
 --- stderr

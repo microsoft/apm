@@ -18,8 +18,6 @@ $ apm install microsoft/apm-sample-package#v1.0.0
   |-- 2 instruction(s) integrated -> .claude/rules/, .github/instructions/
   |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
 [i] Added apm_modules/ to .gitignore
-  [!] [apm-sample-package] Claude command accessibility-audit: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
-  [!] [apm-sample-package] Claude command design-review: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
-  [!] 1 dependency unpinned: github/awesome-copilot -- apm.lock.yaml pins the resolved commit; to track releases on update, add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)
+
 [*] Installed 2 APM dependencies in <DUR>.
 --- stderr

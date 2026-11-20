@@ -49,19 +49,3 @@ steps:
     converged: true
     files: []
     forbidden_lines: [integrated]
-known_cells:
-  - id: j02-frozen-sample-claude-command-mode-key
-    law: FORBID
-    tracking: "#4182"
-    step: 2
-    match: "forbidden '\\[!\\]' printed: .*frontmatter keys not supported for claude commands"
-  - id: j02-frozen-warnings-beyond-the-docs-block
-    law: O2
-    tracking: "#4182"
-    step: 2
-    match: "extra diagnostic not in the docs block: '\\[!\\] "
-  - id: j02-converged-install-reports-integrated
-    law: FORBID
-    tracking: "#4184"
-    step: 5
-    match: "forbidden 'integrated' printed"

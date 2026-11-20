@@ -58,16 +58,6 @@ steps:
     files: [apm.lock.yaml, .mcp.json]
     key_lines: ["[i] Removed stale MCP server 'filesystem' from .mcp.json"]
 known_cells:
-  - id: mcp-add-prints-absolute-manifest-path
-    law: FORBID
-    tracking: "#4190"
-    step: 1
-    match: "apm.yml: <PROJECT>"
-  - id: frozen-mcp-targets-line-twice
-    law: O4
-    tracking: "#4196"
-    step: 4
-    match: "repeats .*Targeting declared targets from apm.yml"
   # No O1 golden until the defect is fixed: the targeting and MCP configure
   # lines print twice (O4), so regen_goldens refuses the transcript.
   - id: frozen-mcp-targets-line-twice-golden

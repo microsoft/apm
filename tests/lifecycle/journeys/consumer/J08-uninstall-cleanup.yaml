@@ -65,11 +65,11 @@ steps:
     files: []
     key_lines: ["No dependencies declared -- lockfile not required"]
 known_cells:
-  - id: uninstall-prints-absolute-manifest-path
-    law: FORBID
-    tracking: "#4190"
+  - id: uninstall-cleanup-unannounced
+    law: O6
+    tracking: "#4193"
     step: 1
-    match: "Updated <PROJECT>/apm.yml"
+    match: "skills/.+/SKILL.md changed but no output line announces it"
   - id: prune-cleanup-unannounced
     law: O6
     tracking: "#4193"

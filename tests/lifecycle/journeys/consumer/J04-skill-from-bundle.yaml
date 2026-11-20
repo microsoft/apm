@@ -38,7 +38,7 @@ steps:
       - apm.lock.yaml
       - .agents/skills/preview/SKILL.md
       - .claude/skills/preview/SKILL.md
-    key_lines: ["|-- 2 skill(s) integrated -> .agents/skills/, .claude/skills/"]
+    key_lines: ["|-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/"]
   - n: 3
     run: [apm install vercel-labs/agent-skills --skill nope]
     exit: 1
@@ -64,7 +64,7 @@ steps:
       - .claude/skills/composition-patterns/SKILL.md
       - .claude/skills/react-best-practices/SKILL.md
       - .claude/skills/web-design-guidelines/SKILL.md
-    key_lines: ["|-- 5 skill(s) integrated -> .agents/skills/, .claude/skills/"]
+    key_lines: ["|-- 3 skill(s) integrated -> .agents/skills/, .claude/skills/"]
   - n: 5
     run: [apm uninstall vercel-labs/agent-skills]
     exit: 0
@@ -78,11 +78,6 @@ steps:
       - "[i] Cleaned 20 stale deployed files for vercel-labs/agent-skills"
       - "[i] Removed vercel-labs/agent-skills from dependencies.apm in apm.yml"
 known_cells:
-  - id: skill-bundle-integrated-twice
-    law: FORBID
-    tracking: "#4207"
-    step: 1
-    match: "Skill integrated ->"
   - id: skill-miss-no-runnable-advice
     law: O8
     tracking: "#4206"

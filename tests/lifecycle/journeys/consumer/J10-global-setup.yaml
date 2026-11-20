@@ -29,7 +29,7 @@ steps:
     key_lines:
       - "[+]  fetch -> Claude Code (configured)"
       - "[+] Added MCP server 'fetch'"
-      - "apm.yml: <APM_HOME>/apm.yml"
+      - "manifest: ~/.apm/apm.yml"
     forbidden_lines: ["[!]", "[x]"]
   - n: 3
     run: [apm deps list -g]
@@ -54,9 +54,3 @@ steps:
     key_lines:
       - "[+] p-skill@lifecycle-market - found in apm.yml (as lifecycle/p-skill)"
       - "[i] Cleaned 2 stale deployed files for lifecycle/p-skill"
-known_cells:
-  - id: J10-frozen-global-repeats-targeting-line
-    law: O4
-    tracking: "#4196"
-    step: 4
-    match: "repeats '\\[i\\] Targeting specific runtime: claude'"

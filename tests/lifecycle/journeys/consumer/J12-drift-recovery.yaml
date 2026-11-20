@@ -26,7 +26,7 @@ steps:
       - "[x] Drift detected: 1 file(s)"
       - "- .agents/skills/p-skill/SKILL.md  [lifecycle/p-skill]"
       - "hash-drift: .agents/skills/p-skill/SKILL.md (dep=lifecycle/p-skill"
-      - "run 'apm export-patch' to export them as upstream patches"
+      - "run 'apm export-patch' to export the local edits as upstream patches"
     forbidden_lines: [Run 'apm install' to re-sync deployed files]
     remediate:
       - {delete: 'hash-drift: (\S+) \(dep='}

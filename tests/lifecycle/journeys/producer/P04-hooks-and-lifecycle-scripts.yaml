@@ -29,14 +29,14 @@ steps:
     files: []
     key_lines:
       - "[*] Dry-run: 'post-install' would fire 1 script(s) (no commands or requests are run)."
-      - "Trust status: [untrusted -- run: apm lifecycle trust]"
+      - "Trust status: [untrusted -- run 'apm lifecycle trust' to allow the project lifecycle scripts to run]"
       - "- command  touch lifecycle-ran (project)"
     forbidden_lines: ["[x]"]
   - n: 3
     run: [apm install, test ! -e lifecycle-ran]
     exit: 0
     files: []
-    key_lines: ["[!] Skipped 1 untrusted project script(s). Run 'apm lifecycle trust' to enable them."]
+    key_lines: ["[!] Skipped 1 untrusted project script(s). Run 'apm lifecycle trust' to allow the project lifecycle scripts to run."]
     forbidden_lines: ["[x]"]
   - n: 4
     run: [apm lifecycle trust, apm install, test -f lifecycle-ran, rm lifecycle-ran]
@@ -50,5 +50,5 @@ steps:
     files: []
     key_lines:
       - "[+] Revoked trust for apm.yml lifecycle:. Its scripts will no longer run."
-      - "[!] Skipped 1 untrusted project script(s). Run 'apm lifecycle trust' to enable them."
+      - "[!] Skipped 1 untrusted project script(s). Run 'apm lifecycle trust' to allow the project lifecycle scripts to run."
     forbidden_lines: ["[x]"]
