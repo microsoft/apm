@@ -161,7 +161,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 4-way sharding via pytest-split keeps wall-clock low. Each shard
+        # 4-way sharding keeps wall-clock low: scripts/ci_sharding.py
+        # writes each shard's disjoint test file list, balanced by the
+        # committed linux-x86_64 duration seed. Each shard
         # is an independent runner so HOME-mutating tests never race
         # across shards. xdist within a shard gives an additional 2x; the
         # 4 HOME-mutating files carry an xdist_group("home_env") marker
@@ -219,6 +221,13 @@ jobs:
             apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-
             apm-cache-shard${{ matrix.shard }}-
 
+      - name: Select shard test files
+        run: >-
+          uv run python -m scripts.ci_sharding files
+          --shard-count 4 --shard-index ${{ matrix.shard }}
+          --shard-durations .github/ci-durations/linux-x86_64.json
+          --out shard-files.txt tests/integration
+
       - name: Run integration tests (sharded + parallelized)
         env:
           APM_E2E_TESTS: "1"
@@ -231,7 +240,8 @@ jobs:
           # --dist loadgroup is required: it is the only xdist scheduler
           # that honors pytest.mark.xdist_group, which we use to keep
           # HOME-mutating tests serialized on a single worker.
-          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
+          PYTEST_TARGETS: "@shard-files.txt"
+          PYTEST_EXTRA_ARGS: "-n 2 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh

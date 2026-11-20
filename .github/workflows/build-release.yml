@@ -412,14 +412,18 @@ jobs:
       - *push-python
       - *push-uv
       - *push-sync
+      - name: Select shard test files
+        run: >-
+          uv run --frozen python -m scripts.ci_sharding files
+          --shard-count 3 --shard-index $env:SHARD
+          --shard-durations .github/ci-durations/windows-unit.json
+          --out shard-files.txt tests/unit tests/test_console.py
       - name: Run unit tests (Windows diagnostics)
         timeout-minutes: 60
         env: *windows-unit-env
         run: >-
-          uv run --frozen python -m pytest tests/unit tests/test_console.py -n auto --dist worksteal
+          uv run --frozen python -m pytest '@shard-files.txt' -n auto --dist worksteal
           -vv --tb=short --show-capture=no --no-showlocals
-          -p scripts.ci_sharding --shard-count 3 --shard-index $env:SHARD
-          --shard-durations .github/ci-durations/windows-unit.json
 
   windows-unit-2:
     name: Windows units (2/3)
@@ -699,18 +703,24 @@ jobs:
       - name: Install test dependencies
         run: uv sync --frozen --extra dev
 
+      # Every shard writes its test file list from the planner's count and
+      # durations; loadgroup keeps each xdist_group on one worker.
+      - name: Select shard test files
+        run: >-
+          uv run --frozen python -m scripts.ci_sharding files
+          --shard-count ${{ env.SHARD_COUNT }} --shard-index ${{ matrix.shard }}
+          --shard-durations shard-plan/${{ env.LANE }}.json
+          -m "$LANE_MARK_EXPR" --out shard-files.txt tests/integration
+
       - name: Run integration tests (Unix)
         env:
           APM_E2E_TESTS: "1"
           GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}    # Primary: APM module access
           PYTEST_MARK_EXPR: ${{ env.LANE_MARK_EXPR }}
-          # Every shard computes the planner's partition from the same
-          # durations; loadgroup keeps each xdist_group on one worker.
+          PYTEST_TARGETS: "@shard-files.txt"
           PYTEST_EXTRA_ARGS: >-
             -p scripts.ci_sharding
-            --shard-count ${{ env.SHARD_COUNT }} --shard-index ${{ matrix.shard }}
-            --shard-durations shard-plan/${{ env.LANE }}.json
             --shard-store-durations durations-${{ env.LANE }}-${{ matrix.shard }}.json
             -n 4 --dist loadgroup --durations=15
         run: |
