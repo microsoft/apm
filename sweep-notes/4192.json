@@ -1,0 +1,22 @@
+{
+  "changelog": "`apm install <bundle>` names the destination folders it deployed into, as package installs do (#4217)",
+  "ledger_row": {
+    "issue": 4192,
+    "fixed_in": "Unreleased",
+    "summary": "Local bundle install printed only 'Installed N file(s) from local bundle' and never named the folders it wrote to.",
+    "failure_modes": [
+      "outcome",
+      "observation"
+    ],
+    "properties": [
+      "outcome.status_matches_state"
+    ],
+    "regression_tests": [
+      "tests/integration/test_install_summary_destinations_lifecycle.py::test_local_bundle_install_names_destination_folders"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_install_summary_destinations_lifecycle.py::test_local_bundle_install_names_destination_folders -n 0 -p no:cacheprovider -q -> AssertionError: assert [] == ['  |-- 2 file(s) deployed -> .github/agents/, .agents/skills/'] (stdout ended at '[*] Installed 2 file(s) from local bundle')",
+  "green": "same command -> 1 passed (module: 3 passed)",
+  "owner": "src/apm_cli/install/deployed_paths.py (destination_folders + destination_tree_lines, shared with #4211); caller src/apm_cli/install/local_bundle_handler.py",
+  "notes": "New tree line after the success line: '  |-- N file(s) deployed -> <folders>' (N counts deployment claims; staged compile-input instructions keep their own warning). Verbose mode lists one folder per line like package installs. Records outside any target primitive folder are named by their parent directory (user scope shows home-relative folders, e.g. .copilot/agents/). Dry-run output (file list) unchanged. Neighbour run: 9 failures in unrelated network-dependent tests (test_plugin_e2e network, test_agent_skills_target github clone) and an architecture source-text check on phases/cleanup.py not touched here."
+}

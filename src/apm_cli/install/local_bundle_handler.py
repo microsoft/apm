@@ -440,6 +440,15 @@ def install_local_bundle(
         if skipped:
             msg += f" ({skipped} skipped)"
         logger.success(msg)
+        if deployed:
+            from .deployed_paths import destination_folders, destination_tree_lines
+
+            for line in destination_tree_lines(
+                f"{len(deployed)} file(s) deployed",
+                destination_folders(deployed, targets),
+                bool(getattr(logger, "verbose", False)),
+            ):
+                logger.tree_item(line)
 
         # Issue #1207 D2.b: post-install compile hint for staged instructions.
         if staged_instructions and not dry_run:

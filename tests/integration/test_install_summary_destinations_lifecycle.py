@@ -5,8 +5,9 @@ PROMISE: install output names where files landed, once per cause
 CELLS:
 - OP=install|install --frozen SRC=local PRIM=skill-bundle SELECT TGT=claude (#4207)
 - OP=install SRC=local PRIM=instruction TGT=claude,copilot,cursor (#4211)
+- OP=install SRC=local-bundle-archive PRIM=skill,agent TGT=copilot (#4192)
 OWNER: src/apm_cli/install/services.py (integrate_package_primitives),
-src/apm_cli/install/deployed_paths.py (format_target_collapse).
+src/apm_cli/install/deployed_paths.py (format_target_collapse, destination_folders).
 """
 
 from __future__ import annotations
@@ -62,12 +63,13 @@ class _World:
         # A wide terminal keeps Rich from hard-wrapping long summary lines.
         self.env = {**isolated.subprocess_env(), "COLUMNS": "200"}
         self.runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+        self.work_root = isolated.work_root
         self.packages = LocalPackageFactory(isolated.work_root)
         self.targets = targets
         self.project: LocalPackage = self.packages.create("consumer", targets=targets)
 
-    def apm(self, *args: str, exit_code: int = 0) -> CommandResult:
-        result = self.runner.run(args, cwd=self.project.root, env=self.env)
+    def apm(self, *args: str, exit_code: int = 0, cwd: Path | None = None) -> CommandResult:
+        result = self.runner.run(args, cwd=cwd or self.project.root, env=self.env)
         _assert_output_oracles(result)
         assert result.returncode == exit_code, _evidence(result)  # I8
         return result
@@ -130,3 +132,37 @@ def test_widened_install_names_every_destination_folder(
     _assert_lock_matches_deployed(world.project.root, after)
     assert world.apm("install").stdout.count(" targets") == 0
     assert world.snap() == after, "I2: converged install changed state"
+
+
+def test_local_bundle_install_names_destination_folders(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4192: a packed archive install names the folders it deployed into."""
+    world = _World(tmp_path, apm_binary_path, ())
+    producer = world.work_root / "producer"
+    (producer / ".apm" / "skills" / "bs").mkdir(parents=True)
+    (producer / ".apm" / "agents").mkdir()
+    (producer / "apm.yml").write_text(
+        "name: producer\nversion: 1.0.0\ndescription: p\nlicense: MIT\n"
+        "targets: [copilot]\ndependencies:\n  apm: []\n",
+        encoding="utf-8",
+    )
+    (producer / ".apm" / "skills" / "bs" / "SKILL.md").write_text(_skill("bs"), encoding="utf-8")
+    (producer / ".apm" / "agents" / "ba.agent.md").write_text(
+        "---\ndescription: a\n---\n# ba\n", encoding="utf-8"
+    )
+    world.apm("install", cwd=producer)
+    world.apm("pack", "--archive", "-o", "../build", cwd=producer)
+    archive = world.work_root / "build" / "producer-1.0.0.zip"
+    world.targets = ("copilot",)
+
+    installed = world.apm("install", str(archive), "--target", "copilot")
+
+    lines = installed.stdout.splitlines()
+    summary = lines.index("[*] Installed 2 file(s) from local bundle")
+    expected = "  |-- 2 file(s) deployed -> .github/agents/, .agents/skills/"
+    assert lines[summary + 1 : summary + 2] == [expected], _evidence(installed)
+    project = world.project.root
+    assert (project / ".agents" / "skills" / "bs" / "SKILL.md").is_file()
+    assert (project / ".github" / "agents" / "ba.agent.md").is_file()
+    _assert_lock_matches_deployed(project, world.snap())
