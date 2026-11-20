@@ -172,6 +172,7 @@ class EnterpriseRegistryWorld:
         step: str,
         allowed: str = REGISTRY_HOST,
         expect_failure: bool = False,
+        token_hosts: frozenset[str] | None = None,
     ) -> CommandResult:
         """Run one networked step; egress is judged before the exit code."""
         proxy.clear()
@@ -179,6 +180,9 @@ class EnterpriseRegistryWorld:
         foreign = [(o.host, o.method, o.path) for o in proxy.observations if o.host != allowed]
         assert foreign == [], f"step={step} reached hosts other than {allowed}: {foreign}"
         assert self.producer_git == [], f"step={step} contacted the producer Git host"
+        if token_hosts is not None:
+            leaked = proxy.hosts_receiving(TOKEN)
+            assert leaked == token_hosts, f"step={step} sent the registry token to {leaked}"
         failed = result.returncode != 0
         assert failed is expect_failure, f"step={step}\n{_evidence(result, proxy)}"
         return result
@@ -376,19 +380,18 @@ def test_employee_registers_and_browses_public_https_catalog(
     with world.serve() as proxy:
         env = world.env(world.employee, proxy)
         world.provision(world.employee, env, project)
-        added = world.egress_step(
-            proxy, env, project, "marketplace", "add", CATALOG_URL, step="add", allowed=CATALOG_HOST
-        )
-        browse = world.egress_step(
-            proxy,
-            env,
-            project,
-            *("marketplace", "browse", "corp-catalog"),
-            step="browse",
-            allowed=CATALOG_HOST,
-        )
-        assert [o.path for o in proxy.requests_to(CATALOG_HOST)] == ["/apm/marketplace.json"]
-        assert proxy.hosts_receiving(TOKEN) == set()
+        catalog_steps = {
+            "add": ("marketplace", "add", CATALOG_URL),
+            "browse": ("marketplace", "browse", "corp-catalog"),
+        }
+        results = {}
+        for step, args in catalog_steps.items():
+            results[step] = world.egress_step(
+                proxy, env, project, *args, step=step, allowed=CATALOG_HOST, token_hosts=frozenset()
+            )
+            fetched = [o.path for o in proxy.requests_to(CATALOG_HOST)]
+            assert fetched == ["/apm/marketplace.json"], f"step={step} fetched {fetched}"
+        added, browse = results["add"], results["browse"]
     assert "corp-catalog" in added.stdout, _evidence(added)
     listing = " ".join(browse.stdout.split())
     assert "widget" in listing and "Widget registry package" in listing, _evidence(browse)
