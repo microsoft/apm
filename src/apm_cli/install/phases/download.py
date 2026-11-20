@@ -39,6 +39,7 @@ def run(ctx: InstallContext) -> None:
         detect_ref_change,
         locked_copy_proof,
     )
+    from apm_cli.install.transaction import stage_existing_copy
 
     deps_to_install = ctx.deps_to_install
     existing_lockfile = ctx.existing_lockfile
@@ -113,6 +114,8 @@ def run(ctx: InstallContext) -> None:
         _pd_dlref = build_download_ref(
             _pd_ref, existing_lockfile, update_refs=update_refs, ref_changed=_pd_ref_changed
         )
+        if parallel_downloads > 0:
+            stage_existing_copy(ctx, _pd_path)
         _need_download.append((_pd_ref, _pd_path, _pd_dlref))
 
     if _need_download and parallel_downloads > 0:

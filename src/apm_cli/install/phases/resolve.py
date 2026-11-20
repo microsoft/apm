@@ -241,7 +241,6 @@ def _setup_downloader(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 3. Auth resolver + downloader
     # ------------------------------------------------------------------
-    import os as _os
 
     from apm_cli.core.auth import AuthResolver
     from apm_cli.deps import github_downloader as _ghd_mod
@@ -266,19 +265,9 @@ def _setup_downloader(ctx: InstallContext) -> None:
 
     # WS3 (#1116): attach persistent cross-run git cache unless disabled
     # via APM_NO_CACHE environment variable.
-    if not _os.environ.get("APM_NO_CACHE"):
-        from apm_cli.cache.paths import get_cache_root
+    from apm_cli.cache.git_cache import attach_persistent_git_cache
 
-        try:
-            from apm_cli.cache.git_cache import GitCache
-
-            _cache_root = get_cache_root()
-            downloader.persistent_git_cache = GitCache(
-                _cache_root,
-                refresh=ctx.refresh,
-            )
-        except (OSError, ValueError):
-            pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
+    attach_persistent_git_cache(downloader, refresh=ctx.refresh)
 
     # Perf #1433: attach the InstallLogger so the subdir download path
     # can emit verbose-only [perf] lines (subdir cache state, bare

@@ -663,6 +663,7 @@ class FreshDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.drift import build_download_ref
+        from apm_cli.install.transaction import stage_existing_copy
         from apm_cli.utils.path_security import safe_rmtree
 
         ctx = self.ctx
@@ -700,6 +701,8 @@ class FreshDependencySource(DependencySource):
                 ref_changed=ref_changed,
             )
 
+            if dep_key not in ctx.pre_download_results:
+                stage_existing_copy(ctx, install_path)
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":

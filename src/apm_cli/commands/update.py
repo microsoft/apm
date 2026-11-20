@@ -946,8 +946,11 @@ def _run_dep_update_locked(
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
-    except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
-        _rich_error(str(e), err=isinstance(e, PolicyViolationError))
+    except PolicyViolationError as e:
+        _rich_error(str(e), err=True)
+        sys.exit(1)
+    except (DirectDependencyError, RequiredIntegrationError) as e:
+        logger.error(str(e))
         sys.exit(1)
     except click.UsageError:
         raise
