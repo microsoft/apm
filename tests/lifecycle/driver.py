@@ -42,6 +42,12 @@ class DriverWorld(Protocol):
     env: dict[str, str]
 
 
+def command_cwd(world: DriverWorld, scope: str) -> Path:
+    """Project commands run in the project; user-scope ones outside it (no apm.yml)."""
+    user_cwd = getattr(world, "user_cwd", None)
+    return user_cwd if scope == "user" and user_cwd is not None else world.project
+
+
 def selected_driver() -> str:
     driver = os.environ.get(DRIVER_ENV, "engine")
     if driver not in DRIVERS:
@@ -88,7 +94,9 @@ def run(
     """Run *argv* in *world* and pass the result to every output hook."""
     args = command_args(argv, scope=scope)
     runner = ApmLifecycleRunner(entry_point or driver_command(), timeout_seconds=TIMEOUT_SECONDS)
-    result = runner.run(args, cwd=world.project, env=world.env, scenario_id=f"lifecycle-{args[0]}")
+    result = runner.run(
+        args, cwd=command_cwd(world, scope), env=world.env, scenario_id=f"lifecycle-{args[0]}"
+    )
     for hook in tuple(OUTPUT_HOOKS):
         hook(args, result, scope)
     return result
