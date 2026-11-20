@@ -1140,7 +1140,7 @@
       "regression_tests": [
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_fails_on_edit_of_every_primitive_type",
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_fails_when_locked_file_is_replaced_by_a_symlink",
-        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths",
+        "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_frozen_replay_of_unproven_cli_output_fails_closed_and_names_paths",
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_identical_unmanaged_native_skill_is_adopted_then_owned",
         "tests/integration/test_frozen_deployed_hash_lifecycle.py::test_warm_frozen_with_kept_skill_edit_fails_closed",
         "tests/integration/test_skill_materialization_receipt_lifecycle.py::test_device_only_root_change_is_rebound_by_installed_cli",
@@ -1407,7 +1407,7 @@
       "failure_modes": ["cleanup", "ownership"],
       "properties": ["ownership.preserve_unowned"],
       "regression_tests": [
-        "tests/integration/test_file_primitive_receipt_lifecycle.py::test_adopted_identical_files_get_no_receipt",
+        "tests/integration/test_file_primitive_receipt_lifecycle.py::test_adopted_identical_files_get_a_receipt",
         "tests/integration/test_file_primitive_receipt_lifecycle.py::test_every_deployed_file_of_a_fresh_install_has_a_receipt",
         "tests/integration/test_file_primitive_receipt_lifecycle.py::test_install_records_a_receipt_for_every_file_primitive_write"
       ]
@@ -3385,7 +3385,10 @@
       "regression_tests": [
         "tests/integration/test_marketplace_update_provenance_lifecycle.py::test_update_restores_or_refuses_altered_marketplace_provenance",
         "tests/integration/test_marketplace_update_provenance_lifecycle.py::test_update_refuses_a_marketplace_declaration_whose_lock_row_lost_provenance",
-        "tests/lifecycle/security/test_origin_and_credentials.py::test_origin_row"
+        "tests/lifecycle/security/test_origin_and_credentials.py::test_origin_row",
+        "tests/lifecycle/security/test_integrity.py::test_missing_digest_with_a_matching_registration_is_restored_in_one_write",
+        "tests/lifecycle/security/test_integrity.py::test_missing_digest_with_no_registration_refuses_and_the_remedy_converges",
+        "tests/lifecycle/security/test_integrity.py::test_missing_digest_for_a_repointed_alias_refuses_and_the_remedy_converges"
       ]
     },
     {
@@ -4266,6 +4269,39 @@
       ]
     },
     {
+      "issue": 4444,
+      "fixed_in": "Unreleased",
+      "summary": "apm update retires a deployed native Claude plugin MCP server whose definition changed since approval, through the gate retirement owner install uses (install/exec_gate.py gate_retirements), instead of reporting every dependency up to date and keeping it.",
+      "failure_modes": ["cleanup", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_native_plugin_retirement_lifecycle.py::test_update_retires_a_native_plugin_whose_definition_changed",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
+      "issue": 4445,
+      "fixed_in": "Unreleased",
+      "summary": "apm update and apm update --yes exit 1 and name the denied dependency and the policy reason when org policy denies an installed native Claude plugin, matching apm install, instead of exiting 0.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_native_plugin_retirement_lifecycle.py::test_update_refuses_a_native_plugin_the_org_policy_denies",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
+      "issue": 4446,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall of another package re-evaluates the remaining gated MCP servers and hooks through the gate retirement owner and removes any the current gates no longer allow (deny, revoke, org deny, org gate on, changed definition, policy dependency deny), instead of admitting every recorded server and keeping every deployed hook; a direct local survivor whose source changed since the lock is re-copied first, as install does.",
+      "failure_modes": ["cleanup", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_native_plugin_retirement_lifecycle.py::test_uninstalling_another_package_retires_a_disallowed_native_plugin",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
       "issue": 4447,
       "fixed_in": "Unreleased",
       "summary": "audit --ci names a local dependency whose content differs from its locked snapshot, through the same verdict install --frozen applies.",
@@ -4447,6 +4483,16 @@
       ]
     },
     {
+      "issue": 4502,
+      "fixed_in": "Unreleased",
+      "summary": "The install summary for skills deployed to a configured Cowork skills directory names that directory (home-relative under the user-scope root, absolute otherwise) instead of a '<label>/skills/' placeholder that does not exist on disk.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_cowork_skill_summary_lifecycle.py::test_cowork_install_summary_names_the_configured_skills_dir"
+      ]
+    },
+    {
       "issue": 4517,
       "fixed_in": "Unreleased",
       "summary": "apm install --frozen refuses, before any write, a lock that still records files of a target apm.yml dropped, naming the target, its files and the catalog remedy, instead of deleting them and then failing; apm audit --ci fails the same state (lockfile-targets-current), and the executed remedy converges both.",
@@ -4465,6 +4511,18 @@
       "regression_tests": [
         "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout",
         "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_a_lock_rewrite_before_the_mcp_phase_keeps_the_heal_pending"
+      ]
+    },
+    {
+      "issue": 4526,
+      "fixed_in": "Unreleased",
+      "summary": "APM rewrote a user-edited MCP config (.github/mcp.json, .mcp.json, ~/.claude.json, the IntelliJ MCP config) in 2-space style; it now keeps the file's indentation, final newline, line endings and literal non-ASCII text (other layout such as inline arrays is normalized), so removing its entries from a file in that layout restores the user's bytes.",
+      "failure_modes": ["ownership", "idempotency"],
+      "properties": ["ownership.preserve_unowned", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_mcp_json_style_lifecycle.py::test_a_user_formatted_mcp_config_survives_install_update_and_uninstall",
+        "tests/unit/install/test_mcp_json_style_retired.py::test_heal_removing_apm_entry_returns_the_user_bytes",
+        "tests/unit/integration/test_mcp_json_style_integrator.py::test_add_then_remove_round_trips_byte_identical"
       ]
     }
   ],

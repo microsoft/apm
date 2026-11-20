@@ -2863,3 +2863,48 @@ def test_uninstalling_one_shared_root_retains_shared_dependency_ownership(
         cwd=project.root,
         env=environment,
     )
+
+
+def test_ambiguous_harness_hints_name_every_detected_target_and_converge(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Both printed remedies for 'Multiple harnesses detected' run and converge."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "ambiguous", base_env=dict(os.environ))
+    package_factory = LocalPackageFactory(isolated.package_root)
+    package = package_factory.create("two-harness-kit")
+    package_factory.add_instruction(
+        package, "two-harness-kit-instruction", _instruction("two-harness-kit-instruction")
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        f"name: consumer\nversion: 0.1.0\ndependencies:\n  apm:\n    - {package.root.as_posix()}\n",
+        encoding="utf-8",
+    )
+    (project / ".cursor").mkdir()
+    (project / ".codex").mkdir()
+    runner = _runner(apm_binary_path)
+    env = isolated.subprocess_env()
+
+    refused = runner.run(("install",), scenario_id="ambiguous", cwd=project, env=env)
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+    hint = refused.stderr
+    assert "Multiple harnesses detected: codex, cursor" in hint
+    assert "Multiple harnesses detected" not in refused.stdout, refused.stdout
+    assert "  apm install --target codex,cursor\n" in hint
+    assert "  targets:\n    - codex\n    - cursor" in hint
+
+    flagged = runner.run(
+        ("install", "--target", "codex,cursor"), scenario_id="hint-flag", cwd=project, env=env
+    )
+    assert flagged.returncode == 0, flagged.stdout + flagged.stderr
+
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "targets:\n  - codex\n  - cursor\n",
+        encoding="utf-8",
+    )
+    declared = runner.run(("install",), scenario_id="hint-yaml", cwd=project, env=env)
+    assert declared.returncode == 0, declared.stdout + declared.stderr
+    assert "Targets: codex, cursor" in declared.stdout, declared.stdout

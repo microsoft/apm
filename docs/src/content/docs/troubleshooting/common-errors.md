@@ -145,14 +145,14 @@ See also: [Install failures](../install-failures/)
 ```
 [x] Content hash mismatch for <owner>/<repo>: expected <sha>, got <sha>.
 The downloaded content differs from the lockfile record. This may
-indicate a supply-chain attack. Run 'apm cache clean --yes' to discard the
-cached package copies, then retry. If the lockfile itself changed, restore
-<project>/apm.lock.yaml from version control (for example 'git checkout --
-<project>/apm.lock.yaml'), then run 'apm install' to verify the dependencies
-against the restored lockfile.
+indicate a supply-chain attack. If the package copies changed, run
+'apm cache clean --yes' to discard the cached package copies, then retry.
+If <project>/apm.lock.yaml changed, restore <project>/apm.lock.yaml from
+version control (for example 'git checkout -- <project>/apm.lock.yaml'), then
+run 'apm install' to verify the dependency against the committed lockfile.
 ```
 
-At user scope the hint names `$APM_HOME/apm.lock.yaml` and `apm install -g`.
+`apm install`, `apm install --frozen`, `apm audit --ci` and `apm update` refuse the same way, so `apm update` with no ref change still fails closed. At user scope the hint names `$APM_HOME/apm.lock.yaml` and `apm install -g`.
 
 Cause: the bytes APM downloaded for a locked dependency do not match the `content_hash` recorded in `apm.lock.yaml`. Usually a force-pushed tag, a mutated branch, or a tampered mirror. Older APM versions on Windows also recorded CRLF hashes when Git's host settings (`core.autocrlf=true`, or `core.eol`, which defaults to CRLF on Windows, for `.gitattributes` `text=auto` files) expanded LF-committed files. Current APM pins `core.autocrlf=false` and `core.eol=lf` on its dependency checkouts and rematerializes older cache shards, but `--frozen` cannot rewrite a lockfile that already stored that CRLF hash.
 
@@ -305,7 +305,7 @@ See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matr
 
 Cause: APM found markers for more than one harness and cannot pick.
 
-Fix: pin a target with `--target <harness>` or declare `targets:` in `apm.yml`. Use `apm install --dry-run` to preview each option.
+Fix: deploy to every detected harness with `apm install --target <a>,<b>`, or declare them once under `targets:` in `apm.yml` so plain `apm install` works. Add `--dry-run` to preview.
 
 See also: [`apm targets` reference](../../reference/cli/targets/)
 

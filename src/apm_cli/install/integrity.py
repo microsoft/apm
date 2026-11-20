@@ -50,11 +50,14 @@ def unhashed_dependencies(
 def unhashed_dependency_names(deps: list[LockedDependency]) -> str:
     """Name unhashed entries by their dependency key, as apm.yml and the lockfile do.
 
-    A key is an identity (``owner/repo``, ``host/owner/repo``), never a URL, so
-    it is not passed through the MCP registry URL redactor, which renders any
-    non-URL as an invalid registry URL.
+    A key such as ``owner/repo`` is shown as is: the URL redactor would render
+    it as an invalid registry URL. A key that is itself a URL (a repo_url that
+    may carry ``user:token@`` credentials) is redacted first.
     """
-    return ", ".join(sorted(dep.get_unique_key() for dep in deps))
+    from .mcp.registry import _redact_url_credentials
+
+    keys = (dep.get_unique_key() for dep in deps)
+    return ", ".join(sorted(_redact_url_credentials(key) if "://" in key else key for key in keys))
 
 
 def unhashed_dependencies_advisory(

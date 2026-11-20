@@ -2009,6 +2009,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="An adapter serializes MCP JSON straight to a file instead of the owner writer.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-json-config-writer",
+        rule_id="mutation_writes.mcp_json_config_writer",
+        path="src/apm_cli/utils/json_config.py",
+        old="normalize_line_endings=False",
+        new="normalize_line_endings=True",
+        intent="The MCP JSON config owner rewrites a user's CRLF file with LF line endings.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-omission-evidence",
         rule_id="mutation_writes.mcp_omission_evidence",
         path="src/apm_cli/integration/mcp_config_view.py",
@@ -2271,6 +2279,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    def enforce_frozen(",
         new="    def enforce_frozen_disabled(",
         intent="InstallService stops owning the frozen-install mutation preflight.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        admission=McpAdmission.for_project(deploy_root, user_scope=user_scope),\n",
+        new="        admission=McpAdmission.admit_all(),\n",
+        intent="Uninstall keeps servers the gates no longer allow by admitting every recorded one.",
     ),
     MutationCase(
         guard_id="install-deployment-hook-pin-frozen-audit-parity",

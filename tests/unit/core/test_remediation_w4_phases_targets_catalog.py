@@ -42,6 +42,7 @@ _FAULT = "needs a filesystem fault or race the hermetic world cannot induce"
 _ROOT = "needs an unreadable file; the hermetic tests may run as root, which reads it anyway"
 _CODEX = "needs a real Codex native plugin registration"
 _HINT = "advisory hint printed after every qualifying install; compile does not suppress it"
+_HASH = "needs a user-scope lockfile changed under a locked commit, restored from a backup"
 _RESTORE = (
     "executed end to end against a same-commit hash mismatch by "
     "tests/integration/test_locked_source_cache_parity_lifecycle.py (RA-004)"
@@ -68,7 +69,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "skill-path-migration-conflict": _LEGACY_SKILLS,
     "skill-path-migration-legacy": _LEGACY_SKILLS,
     "content-hash-cache-clean": _RESTORE,
-    "lockfile-restore": _RESTORE,
+    "content-hash-lock-restore": _RESTORE,
+    "content-hash-lock-restore-global": _HASH,
     "materialized-manifest-invalid": "needs an acquired package whose apm.yml turns invalid "
     "after resolution",
     "hook-reconcile-incomplete": _FAULT,

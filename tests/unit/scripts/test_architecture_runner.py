@@ -650,6 +650,7 @@ install-deployment-cleanup-ownership-release
 install-deployment-cleanup-target-roots
 install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
+install-deployment-gate-retirement
 install-deployment-codex-agent-link-resolution
 install-deployment-agent-render-then-adopt
 install-deployment-command-render-then-adopt
@@ -780,6 +781,7 @@ mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
 mutation_writes.mcp_declaration_scope
 mutation_writes.mcp_json_config_write
+mutation_writes.mcp_json_config_writer
 mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
 mutation_writes.mcp_passthrough_denylist

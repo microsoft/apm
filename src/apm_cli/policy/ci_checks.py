@@ -1185,6 +1185,29 @@ def _check_includes_consent(
 DRIFT_SKIP_PREFIX = "drift skipped"
 
 
+def _without_pre037_renders(
+    findings: list[DriftFinding], lockfile: LockFile, deployment_root: Path
+) -> list[DriftFinding]:
+    """Drop rendering changes of files an APM before 0.37 deployed (#4398).
+
+    ``install --frozen`` adopts such a file as committed and a plain install
+    migrates it once, so audit agrees: it is not drift.
+    """
+    from ..core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
+
+    recorded = legacy_lock_hashes(lockfile)
+    if not recorded:
+        return findings
+    return [
+        finding
+        for finding in findings
+        if not (
+            finding.kind == "modified"
+            and legacy_bytes_owned(deployment_root / finding.path, recorded.get(finding.path))
+        )
+    ]
+
+
 def _check_drift(
     project_root: Path,
     lockfile: LockFile,
@@ -1350,6 +1373,7 @@ def _check_drift(
             replace(finding, path=str(live_root / finding.path)) for finding in external_findings
         )
 
+    findings = _without_pre037_renders(findings, lockfile, deployment_root)
     if not findings:
         logger.clean()
         return (

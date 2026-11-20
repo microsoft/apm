@@ -11,7 +11,7 @@ import builtins
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from apm_cli.core.remediation import (
     BIN_EXECUTABLES_NOT_RETRUSTED,
@@ -489,6 +489,135 @@ def recorded_exec_status_is_stale(
     if recorded in ungated and current in ungated:
         return False
     return recorded != current or tuple(recorded_allowed) != tuple(current_allowed)
+
+
+def policy_denied_locked_packages(lockfile: Any, policy: Any) -> dict[str, str]:
+    """Return lock key -> reason for each locked dependency the org policy now denies.
+
+    The same dependency check the install policy gate applies
+    (:func:`~apm_cli.policy.matcher.check_dependency_allowed`).
+    """
+    from apm_cli.policy.matcher import check_dependency_allowed
+
+    dependency_policy = getattr(policy, "dependencies", None)
+    if dependency_policy is None:
+        return {}
+    denied: dict[str, str] = {}
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == ".":
+            continue
+        allowed, reason = check_dependency_allowed(dep.to_dependency_ref(), dependency_policy)
+        if not allowed:
+            denied[key] = f"org policy: {reason}"
+    return denied
+
+
+class GateRetirements(NamedTuple):
+    """What the current gates no longer allow, by surface (see gate_retirements)."""
+
+    denied_packages: dict[str, str]
+    parked_servers: dict[str, str]
+    hook_pins: dict[str, str]
+    # Lock key -> why the hooks it recorded as deployed are no longer allowed.
+    hook_packages: dict[str, str]
+
+
+def gate_retirements(
+    lockfile: Any, modules_dir: Path, apm_package: Any, project_root: Path, *, user_scope: bool
+) -> GateRetirements | None:
+    """What the current gates no longer allow on a path that skips install's gate.
+
+    The one owner of gate monotonicity for ``apm update`` and ``apm uninstall``
+    (#4444, #4445, #4446): locked dependencies the org policy denies, recorded
+    MCP servers that install's own MCP admission
+    (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
+    revoked approval or a changed definition -- recorded hook files whose
+    pinned approval no longer admits them (:func:`locked_hook_pin_mismatches`,
+    the ``--frozen`` and audit owner), and the packages whose recorded hooks
+    install's executables gate no longer deploys (:func:`locked_hooks_retired`).
+    ``None`` when the org policy blocks or is unresolved: install's policy
+    preflight owns that outcome.
+    """
+    from apm_cli.core.scope import manifest_root
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.policy.outcome_routing import classify_project_policy
+    from apm_cli.security.executables import resolve_project_exec_allow_map
+    from apm_cli.security.trust import McpAdmission
+
+    if lockfile is None:
+        return GateRetirements({}, {}, {}, {})
+    route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
+    if route.blocks or route.unresolved:
+        return None
+    denied = policy_denied_locked_packages(lockfile, route.policy)
+    # recorded=None, as install selects: folding recorded omissions in first
+    # would put each parked server's locked config back and hide the problem.
+    view = CurrentMcpConfigView.select(
+        apm_package,
+        lockfile,
+        modules_dir,
+        admission=McpAdmission.for_project(project_root, user_scope=user_scope),
+        recorded=None,
+    )
+
+    trust: builtins.list[Any] = []
+
+    def _trust_ctx() -> Any:
+        if not trust:
+            allow = resolve_project_exec_allow_map(project_root, apm_package, user_scope=user_scope)
+            trust.append(getattr(allow, "trust_context", None))
+        return trust[0]
+
+    pins = locked_hook_pin_mismatches(lockfile, modules_dir, _trust_ctx)
+    hooks = {f"{item.package}/{item.item}": item.describe() for item in pins}
+    retired = locked_hooks_retired(
+        lockfile, modules_dir, _trust_ctx, pinned={item.package for item in pins}
+    )
+    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired)
+
+
+def locked_hooks_retired(
+    lockfile: Any, modules_dir: Path, trust_ctx: Callable[[], Any], *, pinned: set[str]
+) -> builtins.dict[str, str]:
+    """Return lock key -> reason for each package whose recorded hooks the gate now refuses.
+
+    A row recorded as deploying hooks (ungated, or ``hooks`` among
+    ``exec_allowed_types``) is judged with :func:`current_exec_decision`, the
+    install gate's own verdict: a deny, a revoked approval or a newly
+    enabled gate leaves hooks out of the types it allows. A package named in
+    *pinned* (its pinned hook approval no longer admits a file) is retired
+    too. A package that cannot be read is left to install, which reports it.
+    """
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import (
+        EXEC_TYPE_HOOKS,
+        TRUST_ABSENT,
+        TRUST_DENIED,
+        TRUST_DEPLOYED,
+        _strip_version,
+    )
+
+    ungated = {None, TRUST_DEPLOYED}
+    retired: builtins.dict[str, str] = {}
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.exec_status == TRUST_ABSENT:
+            continue
+        recorded_allowed = tuple(dep.exec_allowed_types or ())
+        if dep.exec_status not in ungated and EXEC_TYPE_HOOKS not in recorded_allowed:
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        try:
+            package_info = _build_package_info(dep, install_path)
+            status, allowed = current_exec_decision(trust_ctx, package_info, dep.get_unique_key())
+        except (ExecPolicyUnavailable, OSError, ValueError):
+            continue
+        if _strip_version(resolve_package_key(package_info, dep.get_unique_key())) in pinned:
+            retired[key] = "hook definition changed since approval"
+        elif status not in ungated and EXEC_TYPE_HOOKS not in allowed:
+            retired[key] = "denied" if status == TRUST_DENIED else "not approved"
+    return retired
 
 
 @dataclass(frozen=True)

@@ -21,10 +21,6 @@ _LOCAL = ("local-deny", "revoke-approval")
 _STALE_EXEC_STATUS = (
     "#4053 apm install --frozen accepts a lock whose exec_status is out of date after a gate change"
 )
-_UNINSTALL_SIBLING = (
-    "#4215 apm uninstall of another package exits 1 and reports incomplete integration "
-    "cleanup after removing an LSP server the gate no longer allows"
-)
 _XFAIL = {
     **{
         f"G|{path}|{change}|lsp": _STALE_EXEC_STATUS
@@ -33,7 +29,6 @@ _XFAIL = {
         if change != "policy-dep-deny"
     },
     **{f"G|frozen-g|{change}|lsp": _STALE_EXEC_STATUS for change in _LOCAL},
-    "G|uninstall-prune-rebuild|policy-dep-deny|lsp": _UNINSTALL_SIBLING,
 }
 _SMOKE = {"G|install|local-deny|lsp"}
 

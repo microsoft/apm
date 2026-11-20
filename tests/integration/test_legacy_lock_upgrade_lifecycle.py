@@ -472,6 +472,14 @@ def test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout(
 _USER_SERVER = {"type": "local", "command": "uvx", "args": ["my-server"], "tools": ["*"]}
 
 
+_USER_ONLY_MCP_JSON = (
+    b'{\n    "mcpServers": {\n        "mine": {\n            "type": "local",\n'
+    b'            "command": "uvx",\n            "args": [\n                "my-server"\n'
+    b'            ],\n            "tools": [\n                "*"\n            ]\n'
+    b"        }\n    }\n}\n"
+)
+
+
 def _user_mcp_json(servers: dict) -> bytes:
     """A hand-written file in the user's own style (4-space indent, final newline)."""
     return (json.dumps({"mcpServers": servers}, indent=4) + "\n").encode("utf-8")
@@ -489,7 +497,8 @@ def test_c7_036_user_created_copilot_mcp_file_keeps_user_server_on_upgrade(
 
     assert code == 0, f"{out}\n{err}"
     assert legacy.is_file()
-    assert json.loads(legacy.read_text(encoding="utf-8")) == {"mcpServers": {"mine": _USER_SERVER}}
+    # Byte-identical to the user's file minus APM's entry (#4526), hand-written.
+    assert legacy.read_bytes() == _USER_ONLY_MCP_JSON
     root_servers = _mcp_servers(world.project / ".mcp.json")
     assert "mine" not in root_servers
     assert root_servers["notes"] == {"type": "stdio", "command": "node", "args": ["server.js"]}

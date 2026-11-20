@@ -107,7 +107,7 @@ class TestUpdateConfig:
         adapter = _make_adapter(tmp_path)
         logger = MagicMock()
         with patch(
-            "apm_cli.adapters.client.base.atomic_write_text",
+            "apm_cli.utils.json_config.atomic_write_text",
             side_effect=PermissionError("denied"),
         ):
             result = adapter.update_config({"servers": {}}, logger=logger)
@@ -118,7 +118,7 @@ class TestUpdateConfig:
         (tmp_path / ".vscode").mkdir()
         adapter = _make_adapter(tmp_path)
         with patch(
-            "apm_cli.adapters.client.base.atomic_write_text",
+            "apm_cli.utils.json_config.atomic_write_text",
             side_effect=PermissionError("denied"),
         ):
             result = adapter.update_config({"servers": {}})

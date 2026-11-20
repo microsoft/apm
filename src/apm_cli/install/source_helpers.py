@@ -83,23 +83,20 @@ def content_hash_mismatch_hint(ctx: Any, dep_key: str) -> str:
 
 
 def locked_content_remediation(dep_key: str, *, user_scope: bool, apm_dir: Path | None) -> str:
-    """Remediation for a dependency whose bytes contradict its locked content hash.
-
-    Copies and the lock cannot be told apart from here, so both remedies only
-    restore: discard the cached copies, or restore the lockfile from version
-    control. Neither edits the lock (RA-004).
-    """
-    from apm_cli.core.remediation import CONTENT_HASH_CACHE_CLEAN, LOCKFILE_RESTORE
+    """Remediation for a dependency whose bytes contradict its locked content hash."""
+    from apm_cli.core.remediation import (
+        CONTENT_HASH_CACHE_CLEAN,
+        CONTENT_HASH_LOCK_RESTORE,
+        CONTENT_HASH_LOCK_RESTORE_GLOBAL,
+    )
     from apm_cli.deps.lockfile import get_lockfile_path
 
+    restore = CONTENT_HASH_LOCK_RESTORE_GLOBAL if user_scope else CONTENT_HASH_LOCK_RESTORE
     lockfile = get_lockfile_path(apm_dir) if apm_dir is not None else "apm.lock.yaml"
-    restore = LOCKFILE_RESTORE.bind(lockfile=lockfile)
-    if user_scope:
-        restore = restore.with_command("apm install -g")
     return (
         "This may indicate a supply-chain attack. "
-        f"{CONTENT_HASH_CACHE_CLEAN.sentence()} "
-        f"If the lockfile itself changed, {restore.clause()}."
+        f"If the package copies changed, {CONTENT_HASH_CACHE_CLEAN.clause()}. "
+        f"If {lockfile} changed, {restore.bind(lockfile=lockfile).clause()}."
     )
 
 

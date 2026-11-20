@@ -119,6 +119,7 @@ class _UpdateRunState:
     proceeded: bool = False
     revision_pins_applied: bool = False
     cache_rehydration_requested: bool = False
+    gate_retirement: bool = False
 
 
 def _stdin_is_tty() -> bool:
@@ -150,6 +151,29 @@ def _module_cache_needs_rehydration(
         if install_path.exists():
             return False
     return has_locked_dependency
+
+
+def _locked_copy_contradicts_lock(lockfile: LockFile | None, modules_dir: Path) -> bool:
+    """Whether a materialized locked package no longer matches its ``content_hash``.
+
+    An update with no ref change still runs install when a copy contradicts
+    the lock, so install's locked-source verdict
+    (:func:`~apm_cli.install.source_helpers.locked_content_mismatch`) re-fetches
+    it or refuses, as ``apm install``, ``--frozen`` and ``audit --ci`` do (#4385).
+    """
+    if lockfile is None:
+        return False
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    for key, dependency in lockfile.dependencies.items():
+        if key == "." or not dependency.content_hash:
+            continue
+        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
+        if install_path.is_dir() and locked_content_mismatch(
+            key, dependency, install_path, lockfile=lockfile
+        ):
+            return True
+    return False
 
 
 def _executables_need_reconcile(
@@ -193,6 +217,46 @@ def _executables_need_reconcile(
         ),
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
     )
+
+
+def _gate_retirements_pending(
+    lockfile: LockFile | None, modules_dir: Path, scope: InstallScope, apm_package: Any
+) -> bool:
+    """Whether the current gates no longer allow something deployed (#4444, #4445).
+
+    Asked once the resolver restaged local packages, so a changed local
+    definition is judged as install judges it: a policy-denied dependency or
+    a server install's MCP admission now parks also runs the install gate,
+    which refuses or retires it.
+    """
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root
+    from apm_cli.install.exec_gate import gate_retirements
+
+    try:
+        retirements = gate_retirements(
+            lockfile,
+            modules_dir,
+            apm_package,
+            get_deploy_root(scope),
+            user_scope=scope is _Scope.USER,
+        )
+    except (OSError, ValueError):
+        return False
+    # An unresolved or blocking org policy is the policy preflight's outcome.
+    return retirements is not None and any(retirements)
+
+
+def _reconcile_note(exec_reconcile_required: bool, gate_retirement: bool) -> str | None:
+    """The info line for an update that reconciles deployed state without moving refs."""
+    if gate_retirement:
+        return "Re-checking deployed items against the current gates, as install does."
+    if exec_reconcile_required:
+        return (
+            "Executables approvals changed since the last install; "
+            "reconciling deployed executables."
+        )
+    return None
 
 
 def _enforce_policy_without_changes(
@@ -539,7 +603,7 @@ def _no_ref_change_summary(exec_reconciled: bool, provenance_restored: bool) -> 
     return "Restored dependency cache without changing refs."
 
 
-def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
+def _reverified_lock(lockfile, lock_path: Path, logger):
     """Re-verify locked marketplace provenance before planning; fail closed (#4228).
 
     Returns ``(lockfile, restored)``: the lockfile with restored rows applied
@@ -554,8 +618,10 @@ def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
     rows = lockfile.dependencies if lockfile is not None else {}
     before = {key: locked_provenance(dep) for key, dep in rows.items()}
     try:
-        # A dry run reads catalogs but persists nothing (#4484).
-        with catalog_cache_read_only(dry_run):
+        # Re-verification reads catalogs but persists nothing, so a refused
+        # update leaves the catalog cache unchanged; the install that follows
+        # refreshes it (#4484).
+        with catalog_cache_read_only():
             restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
     except MarketplaceError as exc:
         _rich_error(str(exc), symbol="error")
@@ -953,11 +1019,12 @@ def _run_dep_update_locked(
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            if _exec_reconcile_required:
-                logger.info(
-                    "Executables approvals changed since the last install; "
-                    "reconciling deployed executables."
-                )
+            plan_state.gate_retirement = not _exec_reconcile_required and (
+                _gate_retirements_pending(_existing_lock, _modules_dir, scope, staged_apm_package)
+            )
+            reconcile_note = _reconcile_note(_exec_reconcile_required, plan_state.gate_retirement)
+            if reconcile_note:
+                logger.info(reconcile_note)
             elif not _cache_rehydration_required and not _restored_provenance:
                 retained_count = len(revision_pin_resolution.skips)
                 if retained_count:
@@ -1012,12 +1079,12 @@ def _run_dep_update_locked(
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
     _existing_lock, _restored_provenance = _reverified_lock(
-        LockFile.read(_lock_path), _lock_path, logger, dry_run
+        LockFile.read(_lock_path), _lock_path, logger
     )
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
-    )
+    ) or _locked_copy_contradicts_lock(_existing_lock, _modules_dir)
     _exec_reconcile_required = not _cache_rehydration_required and _executables_need_reconcile(
         _existing_lock, _modules_dir, scope, apm_package
     )
@@ -1170,7 +1237,10 @@ def _run_dep_update_locked(
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif plan_state.cache_rehydration_requested and installed:
             logger.success(
-                _no_ref_change_summary(_exec_reconcile_required, bool(_restored_provenance)),
+                _no_ref_change_summary(
+                    _exec_reconcile_required or plan_state.gate_retirement,
+                    bool(_restored_provenance),
+                ),
                 symbol="check",
             )
         elif revision_pin_updates:

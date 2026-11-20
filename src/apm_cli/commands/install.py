@@ -233,6 +233,19 @@ except ImportError as e:
     _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
 
 
+def _frozen_verified_line(result) -> str:
+    """The closing line of a successful --frozen replay."""
+    adopted = int(getattr(result, "legacy_adopted", 0) or 0)
+    if not adopted:
+        return "Deployed files verified against apm.lock.yaml."
+    from apm_cli.core.remediation import LEGACY_RENDER_MIGRATE
+
+    return (
+        f"Adopted {adopted} file(s) deployed by APM before 0.37, unchanged as committed. "
+        f"{LEGACY_RENDER_MIGRATE.sentence()}"
+    )
+
+
 def _scoped_lockfile(scope):
     """Read the lockfile the scope's marketplace entries were locked in (#3959)."""
     from ..core.scope import InstallScope, get_apm_dir
@@ -1611,10 +1624,7 @@ def install(  # noqa: PLR0913
             ):
                 # --frozen verified lockfile structure and deployed hashes (req-lk-017),
                 # also on a converged run that installs nothing (#4184).
-                logger.info(
-                    "Deployed files verified against apm.lock.yaml.",
-                    symbol="info",
-                )
+                logger.info(_frozen_verified_line(command_result), symbol="info")
 
     except AgentPluginError as e:
         logger.error(str(e))

@@ -19,14 +19,6 @@ _ALL = (
 )
 # Plain files of the plugin survive an executable-level gate change.
 _SKILL = {"project": (".claude/skills/p-native-claude",)}
-_UPDATE_KEEPS_CHANGED = (
-    "#4444 apm update keeps a native Claude plugin's executables deployed after their "
-    "definition changed since approval"
-)
-_UNINSTALL_KEEPS_GATED = (
-    "#4446 apm uninstall of another package leaves a native Claude plugin deployed after "
-    "it is no longer allowed"
-)
 # gate_paths/native_plugin.py: the git-served p-native-claude-bin at user scope; the
 # approved plugin lands whole under ~/.agents/plugins and goes as one unit.
 _PLUGIN = {"home": (".agents/plugins/p-native-claude-bin/.claude-plugin/plugin.json",)}
@@ -40,8 +32,6 @@ _PLUGIN_CHANGES = (
 )
 _USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL = {
-    "G|update|definition-changed|native": _UPDATE_KEEPS_CHANGED,
-    **{f"G|uninstall-prune-rebuild|{change}|native": _UNINSTALL_KEEPS_GATED for change in _ALL},
     **{
         f"G|native-plugin|{change}|native": _USER_ORG
         for change in ("org-deny", "org-enables-gate", "policy-dep-deny")

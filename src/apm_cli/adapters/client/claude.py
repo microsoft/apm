@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from ...core.command_logger import library_logger
-from ...utils.atomic_io import atomic_write_text
+from ...utils.json_config import write_json_config
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from ._remote_shapes import remote_shape_row
 from .base import _ENV_VAR_RE, _translate_env_placeholder
@@ -595,9 +595,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             if data is None:
                 return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
-            payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, payload, new_file_mode=0o600)
+            write_json_config(path, data, default_trailing_newline=True, new_file_mode=0o600)
             _log.debug("Claude user-scope MCP config written to %s", path)
             return True
         except OSError:

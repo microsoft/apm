@@ -54,6 +54,7 @@ from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _RECONCILING, Row, RowRe
 from tests.lifecycle.world import World
 from tests.lifecycle.world.builder import TAG
 from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
 pytestmark = [
     pytest.mark.e2e,
@@ -469,8 +470,34 @@ def _edit_skill_package_copies(world: World, stack: contextlib.ExitStack) -> Non
 
 def _edit_recorded_content_hash(world: World, stack: contextlib.ExitStack) -> None:
     del stack
+    # The project commits its lock first, so the refusal's restore path is real.
+    if not (world.project / ".git").exists():
+        _git(world, "-C", str(world.project), "init", "-q", "--initial-branch=main")
+    _git(world, "-C", str(world.project), "add", "apm.lock.yaml")
+    _git(world, "-C", str(world.project), "commit", "-q", "-m", "lock")
     recorded = _dependency(_lock(world), "lifecycle/p-skill")["content_hash"]
     _replace_in_lock(world, recorded, "sha256:" + "2" * 64)
+
+
+def _converges(world: World, *remedy: list[str]) -> None:
+    """Run the refusal's remedy, then every reader of the lock agrees and passes (rule B)."""
+    for step in remedy:
+        if step[0] == "git":
+            _git(world, "-C", str(world.project), *step[1:])
+        else:
+            result = driver.run(world, step)
+            assert result.returncode == 0, f"{step}: {result.stdout}{result.stderr}"
+    for args in (["update", "--yes"], ["install"], ["install", "--frozen"], ["audit", "--ci"]):
+        result = driver.run(world, args)
+        assert result.returncode == 0, f"{args} after {remedy}: {result.stdout}{result.stderr}"
+
+
+def _cache_clean_converges(world: World) -> None:
+    _converges(world, ["cache", "clean", "--yes"])
+
+
+def _lock_restore_converges(world: World) -> None:
+    _converges(world, ["git", "checkout", "--", "apm.lock.yaml"])
 
 
 def _drop_recorded_content_hash(world: World, stack: contextlib.ExitStack) -> None:
@@ -524,9 +551,20 @@ GIT_CONTENT_HASH = ArtifactSlice(
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK)),
         ("uninstall-prune", "upstream-or-proxy"): Expect(0, absent=(SKILL, LOCK)),
-        # An unchanged commit takes no new content (update.md).
-        ("update", "disk-or-cache"): Expect(0, unchanged=_SKILL_STATE),
-        ("update", "lock-edited"): Expect(0, unchanged=_SKILL_STATE),
+        # Same commit: a copy or a lock that contradicts the other fails closed, as
+        # install, --frozen and audit --ci do (I3); each remedy converges (rule B).
+        ("update", "disk-or-cache"): Expect(
+            1,
+            (_CONTENT_MISMATCH, r"apm cache clean --yes"),
+            unchanged=_SKILL_STATE,
+            check=_cache_clean_converges,
+        ),
+        ("update", "lock-edited"): Expect(
+            1,
+            (_CONTENT_MISMATCH, r"git checkout -- \S*apm\.lock\.yaml"),
+            unchanged=_SKILL_STATE,
+            check=_lock_restore_converges,
+        ),
         ("update", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("update", "upstream-or-proxy"): Expect(
             0, (r"New locked content for 1 dependency",), check=_skill_moved_in
@@ -1009,6 +1047,23 @@ def _change_upstream_policy(world: World, stack: contextlib.ExitStack) -> None:
     _expire_policy_cache(world)
 
 
+def _pin_refusal_agrees_and_remedy_converges(world: World) -> None:
+    """install and --frozen refuse the changed bytes alike (I3); re-pinning converges."""
+    for argv in ("apm install", "apm install --frozen"):
+        refused = driver.run(world, argv)
+        assert refused.returncode == 1, (argv, refused.stdout + refused.stderr)
+        assert re.search(_HASH_MISMATCH, refused.stdout + refused.stderr), argv
+    # The remedy edits the user-authored pin in apm.yml, never the lock.
+    manifest = world.project / MANIFEST
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    changed = POLICY_BYTES + b"# changed upstream\n"
+    data["policy"]["hash"] = "sha256:" + hashlib.sha256(changed).hexdigest()
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    for argv in ("apm update --yes", "apm install --frozen"):
+        converged = driver.run(world, argv)
+        assert converged.returncode == 0, (argv, converged.stdout + converged.stderr)
+
+
 _PIN_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill", ".github")
 
 POLICY_HASH_PIN = ArtifactSlice(
@@ -1057,8 +1112,18 @@ POLICY_HASH_PIN = ArtifactSlice(
         ("bundle-install", "upstream-or-proxy"): Expect(
             1, (_HASH_MISMATCH,), unchanged=_PIN_STATE, policy_fetch=True
         ),
-        # Update with nothing to change consults no policy and writes nothing.
-        ("update", "upstream-or-proxy"): Expect(0, unchanged=_PIN_STATE),
+        # Update never bypasses a pin install enforces (I4): it refuses alike,
+        # writes nothing and names the pin as the remedy.
+        ("update", "upstream-or-proxy"): Expect(
+            1,
+            (
+                _HASH_MISMATCH,
+                r"Update apm\.yml policy\.hash or contact your org admin\. Nothing was written\.",
+            ),
+            unchanged=_PIN_STATE,
+            policy_fetch=True,
+            check=_pin_refusal_agrees_and_remedy_converges,
+        ),
     },
 )
 
@@ -1152,6 +1217,31 @@ def _rebound_to_catalog(world: World) -> None:
     assert repos == ["lifecycle/p-exec"], repos
 
 
+# The digest a fresh install of p-skill@lifecycle-market records (hand-pinned).
+_FRESH_DIGEST = "sha256:2d425bfc40e6821a688090f019c149cede6e0e7294224643d22d53d2f93933a8"
+_RESTORED = (
+    r"Restored marketplace provenance for lifecycle/p-skill "
+    r"\(p-skill@lifecycle-market\) from its catalog\."
+)
+
+
+def _modern_stamp(world: World) -> None:
+    stamp = str(_lock(world).get("apm_version", ""))
+    major, minor = (int(part) for part in stamp.split(".")[:2])
+    assert (major, minor) >= (0, 37), stamp
+
+
+def _digest_restored_and_stable(world: World) -> None:
+    """The restored digest is the fresh-install value; replays agree; update is stable."""
+    _modern_stamp(world)
+    assert _marketplace_row(world)["source_digest"] == _FRESH_DIGEST
+    restored = (world.project / LOCK).read_bytes()
+    for argv in ("apm install --frozen", "apm audit --ci", "apm update --yes"):
+        result = driver.run(world, argv)
+        assert result.returncode == 0, (argv, result.stdout + result.stderr)
+    assert (world.project / LOCK).read_bytes() == restored
+
+
 _MK_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
 _REPLAY_ONLY = ("audit-ci", "frozen", "install")
 _MK_CELLS: dict[tuple[str, str], Expect] = {}
@@ -1163,7 +1253,15 @@ for _tamper in ("disk-or-cache", "lock-edited", "missing-hash", "upstream-or-pro
 # Update revalidates the catalog: an edited cache is not used, a missing
 # digest is provenance only, a recorded origin that differs fails and names both.
 _MK_CELLS[("update", "disk-or-cache")] = Expect(0, unchanged=_MK_STATE, catalog_fetch=True)
-_MK_CELLS[("update", "missing-hash")] = Expect(0, (), present=(SKILL,), catalog_fetch=True)
+# A modern row's missing digest is provenance, not integrity evidence: update
+# restores it from the catalog the user registered (origin already matched).
+_MK_CELLS[("update", "missing-hash")] = Expect(
+    0,
+    (_RESTORED,),
+    present=(SKILL,),
+    check=_digest_restored_and_stable,
+    catalog_fetch=True,
+)
 _MK_CELLS[("update", "lock-edited")] = Expect(1, (r"lifecycle/other-market",), unchanged=_MK_STATE)
 # A catalog change in the same marketplace is what update moves to.
 _MK_CELLS[("update", "upstream-or-proxy")] = Expect(
@@ -1306,3 +1404,124 @@ def test_every_row_is_a_generated_integrity_obligation() -> None:
         for slice_ in slices:
             assert set(slice_.ops) >= {op for op, _ in slice_.cells}, artifact
             assert set(slice_.tampers) >= {tamper for _, tamper in slice_.cells}, artifact
+
+
+# -- a missing marketplace digest whose origin cannot be confirmed (#4228) ------
+#
+# Update restores a missing digest only when the row's origin is the user's
+# registration for its alias. Otherwise it refuses, writes nothing (catalog
+# cache included), names a CLI remedy, and that remedy converges.
+
+
+def _registrations(world: World) -> Path:
+    return world.apm_home / "marketplaces.json"
+
+
+def _edit_registration(world: World, change: Callable[[list[dict]], list[dict]]) -> None:
+    path = _registrations(world)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    key = "marketplaces" if isinstance(data, dict) else None
+    entries = data[key] if key else data
+    entries = change(entries)
+    if key:
+        data[key] = entries
+    path.write_text(json.dumps(data if key else entries, indent=2), encoding="utf-8")
+
+
+def _catalog_cache_bytes(world: World) -> dict[str, bytes]:
+    root = world.apm_home / "cache" / "marketplace"
+    return {p.name: p.read_bytes() for p in sorted(root.glob("*"))} if root.is_dir() else {}
+
+
+def _refused_digest_update(world: World, tamper: Callable[[World], None]) -> CommandResult:
+    """Arrange the marketplace row, drop its digest, apply *tamper*; update must refuse."""
+    with contextlib.ExitStack() as stack:
+        MARKETPLACE_ORIGIN.setup(world, stack)
+        replay = _arranged(world, MARKETPLACE_ORIGIN, "marketplace-origin(source_url/digest)")
+        _drop_locked_digest(world, stack)
+        tamper(world)
+        replay.tampered = True
+        cache = _catalog_cache_bytes(world)
+        lock = (world.project / LOCK).read_bytes()
+        world.services.reset()
+        replay._run("apm update --yes", pinned_exit=1)
+        result = replay.last
+    assert (world.project / LOCK).read_bytes() == lock
+    assert _catalog_cache_bytes(world) == cache, "a refused update wrote the catalog cache"
+    assert "Nothing was changed" in result.stdout + result.stderr or "not registered" in (
+        result.stdout + result.stderr
+    ), result.stdout + result.stderr
+    return result
+
+
+def test_missing_digest_with_a_matching_registration_is_restored_in_one_write(
+    lifecycle_world: World,
+) -> None:
+    """The restore line is on stdout only, and the lock is written exactly once."""
+    world = lifecycle_world
+    with contextlib.ExitStack() as stack:
+        MARKETPLACE_ORIGIN.setup(world, stack)
+        replay = _arranged(world, MARKETPLACE_ORIGIN, "marketplace-origin(source_url/digest)")
+        _drop_locked_digest(world, stack)
+        replay.tampered = True
+        world.services.reset()
+        if INOTIFY_AVAILABLE:
+            with count_lockfile_writes(world.project) as counter:
+                replay._run("apm update --yes", pinned_exit=0)
+            assert counter.writes == 1, counter.events
+            assert counter.in_place_writes == 0, counter.events
+        else:
+            replay._run("apm update --yes", pinned_exit=0)
+        result = replay.last
+    assert re.search(_RESTORED, result.stdout), result.stdout
+    assert not re.search(_RESTORED, result.stderr), result.stderr
+    _digest_restored_and_stable(world)
+
+
+def _converges_after(world: World, remedy: str) -> None:
+    applied = driver.run(world, remedy)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    updated = driver.run(world, "apm update --yes")
+    assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert re.search(_RESTORED, updated.stdout), updated.stdout
+    assert _marketplace_row(world)["source_digest"] == _FRESH_DIGEST
+
+
+def test_missing_digest_with_no_registration_refuses_and_the_remedy_converges(
+    lifecycle_world: World,
+) -> None:
+    world = lifecycle_world
+
+    def unregister(world: World) -> None:
+        _edit_registration(world, lambda rows: [r for r in rows if r.get("name") != MARKETPLACE])
+
+    result = _refused_digest_update(world, unregister)
+    output = result.stdout + result.stderr
+    assert f"Marketplace '{MARKETPLACE}' is not registered" in output, output
+    assert "apm marketplace add" in output, output
+    _converges_after(world, f"apm marketplace add {MARKETPLACE_SLUG}")
+
+
+def test_missing_digest_for_a_repointed_alias_refuses_and_the_remedy_converges(
+    lifecycle_world: World,
+) -> None:
+    world = lifecycle_world
+    elsewhere = "https://github.com/lifecycle/other-market"
+
+    def repoint(world: World) -> None:
+        def change(rows: list[dict]) -> list[dict]:
+            for row in rows:
+                if row.get("name") == MARKETPLACE:
+                    row.update(url=elsewhere, owner="lifecycle", repo="other-market")
+            return rows
+
+        _edit_registration(world, change)
+
+    result = _refused_digest_update(world, repoint)
+    output = result.stdout + result.stderr
+    assert elsewhere in output, output
+    locked = _dependency(_lock(world), "lifecycle/p-skill")["source_url"]
+    assert locked in output, output
+    remedy = re.search(r"apm marketplace add (\S+) --name (\S+)", output)
+    assert remedy, output
+    _converges_after(world, f"apm marketplace add {remedy.group(1)} --name {MARKETPLACE}")

@@ -58,6 +58,7 @@ from .engine import (
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
+    gate_retired_hook_survivors,
     manifest_dependency_entries,
 )
 
@@ -428,6 +429,30 @@ def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
     )
 
 
+def _with_orphans(removed_keys: builtins.set, orphans: Any) -> builtins.set:
+    """Add the removed packages' orphans to *removed_keys* in place and return it."""
+    removed_keys.update(orphans)
+    return removed_keys
+
+
+def _gate_denied_package_keys(
+    apm_package: Any, lockfile: Any, modules_dir: Any, deploy_root: Any, user_scope: bool
+) -> frozenset[str]:
+    """Survivors the org policy now denies, from the gate retirement owner (#4446)."""
+    from pathlib import Path
+
+    from ...install.exec_gate import gate_retirements
+    from ...install.lsp.integration import has_recorded_lsp_state
+
+    if apm_package is None or not has_recorded_lsp_state(lockfile):
+        return frozenset()
+
+    retirements = gate_retirements(
+        lockfile, Path(modules_dir), apm_package, Path(deploy_root), user_scope=user_scope
+    )
+    return frozenset(retirements.denied_packages) if retirements is not None else frozenset()
+
+
 def _cleanup_stale_lsp(
     *,
     apm_package: Any,
@@ -453,6 +478,9 @@ def _cleanup_stale_lsp(
         if apm_package is None and has_recorded_lsp_state(lockfile):
             apm_package = APMPackage.from_apm_yml(manifest_path)
         updated = reconcile_lsp_after_uninstall(
+            excluded_package_keys=_gate_denied_package_keys(
+                apm_package, lockfile, modules_dir, deploy_root, user_scope
+            ),
             apm_package=apm_package,
             lockfile=lockfile,
             lock_path=lockfile_path,
@@ -1157,7 +1185,18 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
 
         # Step 8: Collect deployed files for removed packages (before lockfile mutation)
-        removed_keys.update(actual_orphans)
+        # Orphans join the removed set; survivors whose hooks the gates no longer
+        # allow are redeployed in full under install's gate (#4446).
+        refreshed_survivor_keys, gate_excluded = gate_retired_hook_survivors(
+            lockfile,
+            modules_dir,
+            manifest_path,
+            deploy_root,
+            _with_orphans(removed_keys, actual_orphans),
+            refreshed_survivor_keys,
+            user_scope=scope is InstallScope.USER,
+            logger=logger,
+        )
         if lockfile:
             all_deployed_files, all_deployed_file_hashes = _collect_deployed_cleanup_state(
                 lockfile,
@@ -1206,7 +1245,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             modules_dir=modules_dir,
             deployed_file_hashes=all_deployed_file_hashes,
             default_counts=cleaned,
-            excluded_survivor_keys=profile_keys,
+            excluded_survivor_keys=profile_keys | gate_excluded,
             evidence=deletion_evidence,
             executable_context=survivor_trust,
         )

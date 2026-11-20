@@ -233,6 +233,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
             ),
             claude_native_keys=frozenset(getattr(ctx, "claude_native_keys", ())),
             mcp_policy_enforced=bool(getattr(ctx, "mcp_policy_enforced", False)),
+            legacy_adopted=int(getattr(ctx, "legacy_adopted", 0)),
         ),
         force=bool(getattr(ctx, "force", False)),
     )

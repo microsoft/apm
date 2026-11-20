@@ -228,9 +228,11 @@ def reverify_locked_provenance(
     carried forward on the lock's word alone. A row's alias and plugin name
     must both be recorded and still resolve, and a lock from APM 0.37 or later
     must carry the row's origin evidence; its origin must match the registered
-    catalog (:func:`require_locked_row_origin`). A stale catalog digest is
-    replaced by the catalog's current one, and each changed row is returned
-    so the caller can report it. A pre-0.37 lock (:func:`_legacy_lock`) is
+    catalog (:func:`require_locked_row_origin`). A stale or missing catalog
+    digest is replaced by the catalog's current one: the digest records
+    provenance and is not a trust anchor, and the row's origin already matched
+    the user's registration. Each changed row is returned so the caller can
+    report it. A pre-0.37 lock (:func:`_legacy_lock`) is
     accepted without origin evidence; its next lock write records it.
 
     Raises:
@@ -279,7 +281,7 @@ def reverify_locked_provenance(
             value = current.get(field)
             if not value:
                 continue
-            if not getattr(dep, field):
+            if not getattr(dep, field) and field != "source_digest":
                 raise MarketplaceProvenanceError(
                     f"apm.lock.yaml records no marketplace {field} for {key} "
                     f"({plugin}@{alias}). {_NEXT_STEP}"

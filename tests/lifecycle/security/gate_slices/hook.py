@@ -16,15 +16,18 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_UPDATE_REDEFINED = "#4444 update and install agreement on gated surfaces after a definition change"
-_UNINSTALL_SIBLING = "#4446 uninstall rebuild agreement on gated surfaces"
-_XFAIL = {
-    "G|update|definition-changed|hook": _UPDATE_REDEFINED,
-    **{f"G|uninstall-prune-rebuild|{change}|hook": _UNINSTALL_SIBLING for change in _ALL},
+_XFAIL: dict[str, str] = {}
+_ANNOUNCE = {
+    # A bundle approval pins the whole bundle digest: a changed definition reads
+    # as a bundle that is not approved yet.
+    "G|bundle-install|definition-changed|hook": r"not approved for this exact bundle",
+    # Uninstall refreshes the changed local survivor from its source and says so,
+    # then retires the redefined hook (#4446).
+    "G|uninstall-prune-rebuild|definition-changed|hook": (
+        r"(?s)(?=.*Refreshed local package \S+ from its source)"
+        r"(?=.*hooks are no longer allowed)(?=.*definition changed since approval)"
+    ),
 }
-# A bundle approval pins the whole bundle digest: a changed definition reads as
-# a bundle that is not approved yet.
-_ANNOUNCE = {"G|bundle-install|definition-changed|hook": r"not approved for this exact bundle"}
 _SMOKE = {"G|install|revoke-approval|hook", "G|frozen|local-deny|hook"}
 
 # G path -> (changes with a row, surface files)

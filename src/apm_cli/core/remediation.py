@@ -183,6 +183,12 @@ RESTORE_EDITED_SKILL = _entry(
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+# Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
+LEGACY_RENDER_MIGRATE = _entry(
+    "legacy-render-migrate",
+    "apm install",
+    "re-render them for this version",
+)
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
     "apm install --force",
@@ -1454,11 +1460,19 @@ CONTENT_HASH_CACHE_CLEAN = _entry(
     "discard the cached package copies",
     then="retry",
 )
-LOCKFILE_RESTORE = _entry(
-    "lockfile-restore",
+# The refusal cannot tell a changed copy from a changed lock, so it offers a
+# restore path for each; the lock is restored whole, never edited (#4385).
+CONTENT_HASH_LOCK_RESTORE = _entry(
+    "content-hash-lock-restore",
     "apm install",
-    "verify the dependencies against the restored lockfile",
+    "verify the dependency against the committed lockfile",
     before="restore {lockfile} from version control (for example 'git checkout -- {lockfile}')",
+)
+CONTENT_HASH_LOCK_RESTORE_GLOBAL = _entry(
+    "content-hash-lock-restore-global",
+    "apm install -g",
+    "verify the dependency against the saved lockfile",
+    before="restore {lockfile} from your backup",
 )
 MATERIALIZED_MANIFEST_INVALID = _entry(
     "materialized-manifest-invalid",
