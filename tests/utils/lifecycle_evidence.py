@@ -545,14 +545,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
     KnownOutputCell(
-        "update-deny-all-lifecycle-notice-repeats",
-        "I9",
-        "#4333",
-        _runs("update"),
-        r"Lifecycle scripts suppressed by org policy",
-        output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
         "install-verbose-diagnostics-repeat",
         "I9",
         "#4334",
