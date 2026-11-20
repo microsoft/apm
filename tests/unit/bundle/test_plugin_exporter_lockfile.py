@@ -273,3 +273,46 @@ class TestPluginExportWithoutProjectLockfile:
         )
         errors = verify_bundle_integrity(result.bundle_path, lock_data)
         assert any("skills/foo/SKILL.md" in err for err in errors)
+
+
+def test_plugin_pack_names_each_lsp_server_it_cannot_carry(tmp_path: Path, capsys) -> None:
+    """RA-034: a Claude plugin has no LSP surface, so pack names every server it drops (I8)."""
+    import json
+
+    project = _setup_project_with_skill(tmp_path)
+    _write_apm_yml(
+        project,
+        deps={
+            "lsp": [
+                {
+                    "name": "pyright",
+                    "command": "pyright-langserver",
+                    "extensionToLanguage": {".py": "python"},
+                }
+            ]
+        },
+    )
+    lock = LockFile.read(project / "apm.lock.yaml") or LockFile()
+    lock.lsp_servers = ["gopls"]
+    lock.write(project / "apm.lock.yaml")
+    (project / ".lsp.json").write_text(
+        json.dumps({"lspServers": {"rust-analyzer": {"command": "rust-analyzer"}}}),
+        encoding="utf-8",
+    )
+
+    result = export_plugin_bundle(project, tmp_path / "out")
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert (
+        "Claude plugin bundles do not carry LSP servers; not packed: gopls, pyright, "
+        "rust-analyzer. Configure LSP in the target client instead."
+    ) in output
+    assert not any("lsp" in str(path).lower() for path in result.files)
+
+
+def test_plugin_pack_without_lsp_warns_nothing_about_lsp(tmp_path: Path, capsys) -> None:
+    project = _setup_project_with_skill(tmp_path)
+
+    export_plugin_bundle(project, tmp_path / "out")
+
+    assert "LSP" not in capsys.readouterr().out
