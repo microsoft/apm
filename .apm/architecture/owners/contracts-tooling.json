@@ -165,7 +165,8 @@
       "selectors": [
         "src/apm_cli/deps/lockfile_write_authority.py",
         "src/apm_cli/deps/lockfile_extensions.py",
-        "src/apm_cli/models/extension_keys.py"
+        "src/apm_cli/models/extension_keys.py",
+        "src/apm_cli/deps/lockfile_container.py"
       ],
       "guards": ["contracts-tooling-lockfile-write-authority"]
     },
