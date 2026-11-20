@@ -31,6 +31,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
+    pytest.mark.promise("P-INV-I8"),
 ]
 
 _PACKAGE = "pkg-drift"
