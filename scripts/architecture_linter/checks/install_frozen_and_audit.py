@@ -247,7 +247,7 @@ _MCP_OWNERSHIP_OWNER = "src/apm_cli/install/mcp/ownership.py"
 _MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator_install.py"
 _MCP_OWNERSHIP_CONSUMERS = (
     "src/apm_cli/install/mcp/integration.py",
-    "src/apm_cli/install/mcp/command.py",
+    "src/apm_cli/install/mcp/entry_integration.py",
     "src/apm_cli/commands/uninstall/engine.py",
 )
 

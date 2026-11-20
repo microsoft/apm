@@ -62,7 +62,7 @@ _MCP_OWNERSHIP = "src/apm_cli/install/mcp/ownership.py"
 _MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
 _SERVICE_INTEGRATION = "src/apm_cli/install/service_integration.py"
 _UPDATE_COMMAND = "src/apm_cli/commands/update.py"
-_MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
+_MCP_ENTRY = "src/apm_cli/install/mcp/entry_integration.py"
 _UNINSTALL_ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 
 
@@ -340,7 +340,7 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
             _MCP_INTEGRATION,
             _SERVICE_INTEGRATION,
             _UPDATE_COMMAND,
-            _MCP_COMMAND,
+            _MCP_ENTRY,
             _UNINSTALL_ENGINE,
         ),
     )
@@ -398,7 +398,7 @@ def _check_copilot_cli_mcp_paths(provider: FactsProvider) -> Iterable[Violation]
                 "bundle MCP reconciliation must split retired MCP claims off first",
             ),
             (
-                _MCP_COMMAND,
+                _MCP_ENTRY,
                 "retired = split_mcp_claims(",
                 "install --mcp must split retired MCP claims off before acting on them",
             ),

@@ -832,6 +832,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         registry_source=registry_source,
         initial_manifest_config=initial_manifest_config,
         retry_args=builtins.tuple(retry_args),
+        no_policy=no_policy,
     )
 
 

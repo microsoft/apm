@@ -572,6 +572,7 @@
         "tests/integration/test_install_commit_order_lifecycle.py::test_blocked_transitive_mcp_keeps_previous_install_byte_identical",
         "tests/integration/test_install_commit_order_lifecycle.py::test_dry_run_reaches_the_install_decision_for_transitive_mcp",
         "tests/integration/test_install_commit_order_lifecycle.py::test_direct_mcp_entry_reaches_the_install_policy_verdict",
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_install_mcp_entry_commits_once_and_converges_with_install",
         "tests/integration/test_policy_install_e2e.py::TestI8TransitiveMCPDenied::test_transitive_mcp_blocked"
       ]
     },

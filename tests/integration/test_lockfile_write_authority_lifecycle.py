@@ -201,6 +201,40 @@ def test_install_with_mcp_and_lsp_commits_once_and_is_byte_stable(
 
 
 @_needs_inotify
+def test_install_mcp_entry_commits_once_and_converges_with_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``install --mcp`` commits one lockfile that a following install leaves untouched.
+
+    The direct entry records the new server beside the package's transitive
+    MCP server and the LSP rows, through the install's MCP service stage.
+    """
+    scenario = _new_scenario(
+        tmp_path / "mcp-entry", apm_binary_path, ("copilot", "claude"), lsp=True
+    )
+    installed = _run(scenario, _INSTALL, "mcp-entry-baseline")
+    assert installed.returncode == 0, _evidence(installed)
+    lock_path = scenario.project.root / _LOCKFILE
+    before = load_yaml(lock_path)
+
+    with count_lockfile_writes(scenario.project.root) as counter:
+        added = _run(scenario, ("install", "--mcp", "entry-server", "--", "npx", "entry"), "add")
+    assert added.returncode == 0, _evidence(added)
+    assert counter.writes == 1, (counter.events, _evidence(added))
+    lock = load_yaml(lock_path)
+    assert lock["mcp_servers"] == sorted([*before["mcp_servers"], "entry-server"]), lock
+    assert lock.get("lsp_servers") == before.get("lsp_servers"), lock
+    assert lock["dependencies"] == before["dependencies"], lock
+
+    committed = lock_path.read_bytes()
+    with count_lockfile_writes(scenario.project.root) as counter:
+        rerun = _run(scenario, _INSTALL, "mcp-entry-rerun")
+    assert rerun.returncode == 0, _evidence(rerun)
+    assert counter.writes == 0, (counter.events, _evidence(rerun))
+    assert lock_path.read_bytes() == committed
+
+
+@_needs_inotify
 def test_frozen_install_never_flushes_the_lockfile(tmp_path: Path, apm_binary_path: Path) -> None:
     """--frozen withholds every lockfile write, so the committed bytes stay put."""
     scenario = _new_scenario(tmp_path / "frozen", apm_binary_path, ("copilot",))
