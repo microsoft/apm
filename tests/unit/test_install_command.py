@@ -669,7 +669,8 @@ class TestValidationFailureReasonMessages:
             result = self.runner.invoke(cli, ["install", "owner/repo"])
             # Normalize terminal line-wrapping before checking
             output = " ".join(result.output.split())
-            assert "run with --verbose for auth details" in output
+            # The next step is a runnable command naming the package (#4174).
+            assert "Run 'apm install --verbose owner/repo' to see each probe" in output
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_validation_failure_with_verbose_omits_verbose_hint(self, mock_validate):
@@ -678,7 +679,7 @@ class TestValidationFailureReasonMessages:
             Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
             result = self.runner.invoke(cli, ["install", "owner/repo", "--verbose"])
             assert "not accessible or doesn't exist" in result.output
-            assert "run with --verbose for auth details" not in result.output
+            assert "to see each probe and credential" not in " ".join(result.output.split())
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_failure_names_all_probes(self, mock_validate):
