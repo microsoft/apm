@@ -90,6 +90,7 @@ def _heal(project: Path):
         stored_configs={"notes": _NOTES},
         native_hashes={},
         project_root=project,
+        keep_signal_files=False,
     )
 
 
