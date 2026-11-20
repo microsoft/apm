@@ -36,20 +36,15 @@ def _withheld_sources(
     An unscoped install keeps its lock beside its manifest.
     """
     from apm_cli.constants import APM_MODULES_DIR
-    from apm_cli.core.scope import get_source_root, is_user_scope, manifest_root
+    from apm_cli.core.scope import get_source_root, is_user_scope, scope_manifest_path
     from apm_cli.install.exec_gate import withheld_executable_sources
     from apm_cli.policy.outcome_routing import resolve_trust_policy
-    from apm_cli.security.executables import project_manifest_path
 
-    manifest_dir = (
-        lockfile_dir
-        if scope is None
-        else manifest_root(get_source_root(scope), user_scope=is_user_scope(scope))
-    )
+    source_root = lockfile_dir if scope is None else get_source_root(scope)
     return withheld_executable_sources(
         lockfile,
         lockfile_dir / APM_MODULES_DIR,
-        project_manifest_path(manifest_dir),
+        scope_manifest_path(source_root, user_scope=is_user_scope(scope)),
         policy_provider=lambda: resolve_trust_policy(
             deploy_root, no_policy=no_policy, announce=False, raise_blocking_errors=False
         ),
