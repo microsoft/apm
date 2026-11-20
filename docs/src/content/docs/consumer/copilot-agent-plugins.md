@@ -95,6 +95,9 @@ silently replace the owner recorded in APM's ledger.
 APM does not require Copilot to be installed when it materializes or registers
 the plugin. A canonical Agent Plugin is admitted when its effective targets
 include `copilot` and its integrity, security, and executable gates pass.
+Its root `mcp.json` is an executable: `mcp`, plus `bin` for a server that runs
+a command. Approve the whole plugin with `apm approve <package>`; see
+[apm approve](../../reference/cli/approve/).
 
 Loading the generated projection is supported with stable GitHub Copilot CLI
 **1.0.81 or newer**. Older clients may copy plugins into private Copilot state

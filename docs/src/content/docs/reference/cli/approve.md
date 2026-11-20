@@ -121,6 +121,10 @@ file and executable bit in the plugin root (as installed in `apm_modules/`).
 Any byte or mode change parks the whole plugin: it is not registered, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
+An Agent Plugin's root `mcp.json` counts: `mcp`, plus `bin` when a server
+runs a command. `apm approve --pending`, `--list` and `apm policy explain`
+list those types, and a type-level grant must cover both; one that misses a
+type parks the plugin with `not approved (missing grant: bin)`.
 A plugin that runs files under its root `.apm/` or `apm.yml` that are not
 copies of pinned files cannot be pinned: `apm approve` refuses it (exit 1)
 with `APM cannot pin files under .apm/ or apm.yml`, and install parks it.
