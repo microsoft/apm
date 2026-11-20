@@ -6,7 +6,6 @@ import ast
 import inspect
 import itertools
 import json
-import os
 import shutil
 import textwrap
 from dataclasses import dataclass
@@ -55,6 +54,7 @@ from tests.utils.artifact_snapshot import (
 )
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_package import LocalPackage
+from tests.utils.world_snapshot import restore_tree
 
 pytestmark = [
     pytest.mark.integration,
@@ -915,45 +915,11 @@ class _SpineWorld:
         return cls(model.fixture, pristine, reference), model
 
     def restore(self) -> _LifecycleReferenceModel:
-        _sync_tree(self.pristine, self.fixture.scenario.isolated.root)
+        restore_tree(self.pristine, self.fixture.scenario.isolated.root)
         model = _LifecycleReferenceModel(self.fixture)
         for name, value in self.reference:
             setattr(model, name, value)
         return model
-
-
-def _sync_tree(source: Path, destination: Path) -> None:
-    """Make *destination* byte-equal to *source* while keeping surviving directories.
-
-    Deployment receipts bind to the deployment root's inode, so a directory
-    present on both sides is synchronized in place rather than recreated.
-    """
-    destination.mkdir(exist_ok=True)
-    wanted = {entry.name: entry for entry in os.scandir(source)}
-    for entry in os.scandir(destination):
-        if entry.name not in wanted:
-            _remove_path(Path(entry.path))
-    for name, entry in wanted.items():
-        target = destination / name
-        if entry.is_dir(follow_symlinks=False):
-            if target.is_symlink() or (target.exists() and not target.is_dir()):
-                _remove_path(target)
-            _sync_tree(Path(entry.path), target)
-            continue
-        if target.is_symlink() or target.exists():
-            _remove_path(target)
-        if entry.is_symlink():
-            target.symlink_to(os.readlink(entry.path))
-        else:
-            shutil.copy2(entry.path, target)
-    shutil.copystat(source, destination)
-
-
-def _remove_path(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
 
 
 @pytest.mark.parametrize("variant", _VARIANTS)
