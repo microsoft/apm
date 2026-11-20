@@ -398,7 +398,9 @@ class CleanupResult:
         prefix = "~/" if self.user_scope else ""
         announced: list[str] = []
         for path in sorted(dict.fromkeys(path.rstrip("/") for path in self.deleted)):
-            if any(path.startswith(f"{directory}/") for directory in directories):
+            # Check each ancestor against the set: cost scales with path depth.
+            parts = path.split("/")
+            if any("/".join(parts[:depth]) in directories for depth in range(1, len(parts))):
                 continue
             shown = f"{path}/" if path in directories else path
             announced.append(shown if "://" in shown else prefix + shown)

@@ -21,6 +21,7 @@ from apm_cli.install.helpers.ref_reuse import (
     requires_remote_ref_resolution as _requires_remote_ref_resolution,
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+from apm_cli.install.outcome import uninstall_next_step
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
 from apm_cli.install.source_helpers import download_registry_package
 from apm_cli.install.transaction import resolution_for_context
@@ -757,9 +758,7 @@ def _resolve_dependencies(
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
             fail_msg = _with_preserved_install_hint(fail_msg, install_path)
             if is_direct and _reports_repository_not_found(e):
-                fail_msg += (
-                    f" Run 'apm uninstall {dep_ref.get_identity()}' to remove it from apm.yml."
-                )
+                fail_msg += uninstall_next_step(dep_ref, getattr(ctx, "scope", None))
 
             # The deferred diagnostics summary prints the failure once, in
             # every mode (#4199). F7 (#1116): one critical section so

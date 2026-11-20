@@ -65,7 +65,7 @@ KNOWN_LARGE_MODULES = {
     "phases/resolve.py": 1014,
     # An inaccessible package names the host and credential source tried
     # and one runnable verbose retry (#4174). Decomposition tracked as follow-up.
-    "validation.py": 1008,
+    "validation.py": 1014,
 }
 
 

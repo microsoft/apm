@@ -2,6 +2,7 @@
 
 import json  # noqa: F401
 import re
+from pathlib import Path
 from unittest.mock import MagicMock, patch  # noqa: F401
 from urllib.parse import urlparse
 
@@ -989,7 +990,7 @@ def test_registration_source_keeps_hash_in_local_paths(tmp_path):
     parsed = parse_registration_source(f"{tmp_path}/team#1")
 
     assert parsed.kind == "local"
-    assert parsed.url.endswith("/team#1")
+    assert Path(parsed.url).name == "team#1"
     assert parsed.fragment_ref == ""
 
 

@@ -105,12 +105,14 @@ def require_requested_components(
     available: Collection[str],
     package: str,
     install_spec: str | None = None,
+    user_scope: bool = False,
 ) -> bool:
     """Record one canonical failure when requested components are unavailable.
 
     *install_spec* is the ``apm install`` argument that reinstalls *package*;
     when given, the failure ends with one runnable ``apm install`` command
-    that selects available components instead of free-text advice.
+    that selects available components instead of free-text advice, in the
+    original scope (``-g`` when *user_scope*).
     """
     requested_values = tuple(str(value) for value in requested)
     available_names = frozenset(_component_value(str(value)) for value in available)
@@ -134,6 +136,7 @@ def require_requested_components(
             install_spec=install_spec,
             requested=requested_values,
             available=available_names,
+            user_scope=user_scope,
         )
     else:
         message += (
@@ -150,6 +153,7 @@ def _available_components_next_step(
     install_spec: str,
     requested: tuple[str, ...],
     available: frozenset[str],
+    user_scope: bool = False,
 ) -> str:
     """Return the one runnable install command that selects available components."""
     kept = [
@@ -158,7 +162,7 @@ def _available_components_next_step(
         if value in available
     ]
     selection = kept or sorted(available)[:1]
-    argv = ["apm", "install", install_spec]
+    argv = ["apm", "install", *(["-g"] if user_scope else []), install_spec]
     for value in selection:
         argv.extend((option, value))
     command = " ".join(
@@ -250,3 +254,11 @@ def raise_direct_dependency_failure(ctx: InstallContext) -> NoReturn:
     raise DirectDependencyError(
         "One or more direct dependencies failed validation. Run with --verbose for details."
     )
+
+
+def uninstall_next_step(dep_ref, scope) -> str:
+    """The runnable command that removes a missing declared dependency, in its scope."""
+    from apm_cli.core.scope import is_user_scope
+
+    flag = "-g " if is_user_scope(scope) else ""
+    return f" Run 'apm uninstall {flag}{shlex.quote(dep_ref.get_identity())}' to remove it from apm.yml."

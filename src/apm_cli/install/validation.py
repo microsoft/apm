@@ -27,6 +27,7 @@ _generic_host_ambiguous_subpath_hint
 """
 
 import re
+import shlex
 from pathlib import Path
 
 import requests
@@ -869,11 +870,14 @@ def _validate_parse_failure_fallback(
         return False
 
 
-def inaccessible_package_reason(dep_ref, package: str, auth_resolver, verbose: bool) -> str:
+def inaccessible_package_reason(
+    dep_ref, package: str, auth_resolver, verbose: bool, *, user_scope: bool = False
+) -> str:
     """Explain a package the host did not serve: host, credential tried, next step.
 
     Names credential sources, never their values. Outside verbose mode the
-    reason ends with the one command that shows each probe and credential.
+    reason ends with the one command that shows each probe and credential,
+    quoted for the shell and in the original scope.
     """
     host = dep_ref.host or default_host()
     tried = (
@@ -889,7 +893,9 @@ def inaccessible_package_reason(dep_ref, package: str, auth_resolver, verbose: b
     reason = f"not accessible or doesn't exist (host: {host}, {tried})"
     if verbose:
         return reason
-    return f"{reason}. Run 'apm install --verbose {package}' to see each probe and credential."
+    scope = "-g " if user_scope else ""
+    retry = f"apm install {scope}--verbose {shlex.quote(package)}"
+    return f"{reason}. Run '{retry}' to see each probe and credential."
 
 
 def _uses_clone_root_probe(dep_ref) -> bool:

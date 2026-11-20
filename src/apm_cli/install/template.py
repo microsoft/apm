@@ -498,6 +498,7 @@ def _integrate_materialization(
         return _record_agent_plugin_boundary_failure(source, m, exc)
 
     if ctx.skill_subset_from_cli and ctx.skill_subset:
+        from apm_cli.core.scope import is_user_scope
         from apm_cli.install.outcome import require_requested_components
         from apm_cli.integration.skill_integrator import SkillIntegrator
 
@@ -510,6 +511,7 @@ def _integrate_materialization(
             available=available_skills,
             package=dep_key,
             install_spec=_reinstall_spec(dep_ref),
+            user_scope=is_user_scope(getattr(ctx, "scope", None)),
         ):
             ctx.package_deployed_files[dep_key] = []
             return deltas

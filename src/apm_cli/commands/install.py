@@ -505,7 +505,13 @@ def _resolve_package_references(
                     if not verbose:
                         reason += " (run with --verbose for the git output)"
                 else:
-                    reason = inaccessible_package_reason(dep_ref, package, auth_resolver, verbose)
+                    reason = inaccessible_package_reason(
+                        dep_ref,
+                        package,
+                        auth_resolver,
+                        verbose,
+                        user_scope=scope is _InstallScope.USER,
+                    )
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
