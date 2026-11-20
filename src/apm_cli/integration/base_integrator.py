@@ -467,8 +467,12 @@ class BaseIntegrator:
                     )
                 ):
                     # A kept edit blocks the requested state only when the
-                    # package brings new bytes for the file (an upgrade).
-                    blocking = expected is None or compute_file_hash(source_file) != expected
+                    # package brings new bytes for the file (an upgrade) that
+                    # the file does not already hold.
+                    blocking = expected is None or compute_file_hash(source_file) not in (
+                        expected,
+                        compute_file_hash(target_file),
+                    )
                     if expected is None:
                         message = self.untrusted_member_message(
                             entry, path_entry(destination), destination
