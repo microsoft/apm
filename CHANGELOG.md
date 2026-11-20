@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
+- **BREAKING:** Hostless `dependencies.require` entries name only the default host (`GITHUB_HOST`, else `github.com`); host-qualify others or `enforcement: block` fails `apm install` and `apm audit --ci`. (closes #3993, #4008)
+- Hash framing hardening: `apm install` moves `apm.lock.yaml` to `lockfile_version: "4"`, which older APM refuses; update CI to APM 0.37 before committing it. (closes #4000, #4026)
 - **BREAKING:** Copilot project MCP servers move from `.github/mcp.json` and `.vscode/mcp.json` to root `.mcp.json`; run `apm install`, review static `env:` values, and commit the result. (#3875)
 - `.mcp.json` is shared with Claude Code, so Copilot's `tools` allow-list does not restrict Claude; users of VS Code's deprecated Local mode should switch to the Copilot harness. (#3875)
 - Replace the deprecated `vscode` target with `copilot`; lockfiles that recorded `vscode` still install. (#3875)
@@ -28,20 +30,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pinned approvals in `apm.yml` need APM 0.37 or later on every machine; older clients reject them and fail closed. (#3918)
 - `hooks: true` and `mcp: true` approvals still deploy but now warn; run `apm approve <pkg>` to pin them to content. (#3918)
 - `apm lifecycle test --execute` now fires only what an install would: run `apm lifecycle trust` for project scripts; `APM_NO_SCRIPTS` and org `deny_all` apply. (#3988)
+- `apm install -g --target claude` installs Claude plugins intact through Claude settings, including MCP and LSP servers and `bin/` under one approval and org policy; plugins with `monitors/` or `workflows/` are parked with a warning, and loose Claude hooks from older installs need `apm uninstall -g <package>` then reinstall. (closes #3181, #3191, #3290)
+- `apm install --frozen` now fails before deploying on any edited deployed file, of every primitive type; delete the files, rerun `apm install`, and commit. (closes #3994, #4004)
+- `PROXY_REGISTRY_ONLY=1` also refuses unsanctioned MCP registries and marketplace catalogs the proxy cannot serve; set `MCP_REGISTRY_URL` to a proxied registry. (closes #3994, #4004)
 
 ### Added
 
 - Codex installs `targets: [codex]` packages at their real version with root `skills/` and `.mcp.json`: `apm pack` writes `.codex-plugin/plugin.json`. (closes #3077, #3906)
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
 - `apm approve` lists what each package runs and pins MCP servers, hook files and whole native plugins to their content; changed content is parked until re-approved. (#3918)
+- `targets:` on `dependencies.mcp` entries limits which targets get each server, is never written into native config, and target-scoped installs keep servers declared elsewhere. (closes #2606, #3989)
 
 ### Changed
 
+- Docs are rebuilt around the agent supply chain: skills, plugins and MCP quickstart, govern-your-organization journey, diagrams; old URLs redirect. (#3996)
 - Azure DevOps installs tell your Git credential helper about success or HTTP 401, so Git Credential Manager can replace an expired credential; `ADO_APM_PAT` and `az` tokens are never reported. (#3765, #3818)
 - OpenAPM v0.1 adopts amendments 0.1.61-0.1.63 (`vscode` alias, `hermes` and `grok-bot` targets, stricter-wins `fetch_failure`, per-file `.mcp.json` ownership); deprecation windows start 2026-11-19. (#3851, #3865, #3875, #3888, #3905)
+- `apm lock export` identifies GitHub packages as `pkg:github/<owner>/<repo>@<commit>`, adds `#<subpath>` for subdirectory packages, and includes labelled lock hashes. (closes #3994, #4004)
+- `apm init --apply` implies `--discover`, and `apm plugin init` scaffolds a commented `license:` line without choosing a license. (closes #3994, #4004)
+- Tables and panels render in ASCII, and `apm marketplace browse` lists full install names instead of a truncated table. (closes #3994, #4004)
+- `--frozen` help describes its hash check, `audit --policy` is no longer marked experimental, `apm --help` drops `apm run`, and the unpinned warning credits the lockfile and suggests a semver range (`#^1.0.0`) to track releases. (closes #3994, #4004)
+
+### Removed
+
+- The unused `marketplace-authoring` experimental flag; marketplace authoring has been GA since 0.11. (closes #3994, #4004)
 
 ### Fixed
 
+- `apm audit --ci` matches `dependencies.require` entries, and checks `registry_source`, against the package a root `replace:` selects, as `apm install` does. (#4069)
+- `apm approve` on a Claude plugin's hooks now takes effect on the next `apm install`; the approval and the install keyed the hook file differently, so it stayed parked. (#3290)
 - `apm install -g` and global `apm uninstall` now apply the `executables` approvals in `~/.apm/apm.yml` to hooks, MCP servers and LSP servers; they were ignored, so unapproved executables could deploy. (#3986)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native Agent Plugin is installed. (closes #3901, #3946)
 - Kiro agents using current tool IDs or `@server` selectors now deploy; an unsupported tool skips only that agent with a warning (exit 0) instead of failing the install. (closes #2671, #3947)
@@ -88,10 +105,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After `apm deny`, `--frozen` names the executables gate, `apm approve` clears the deny and says so, and `apm deny --user` works outside a project. (closes #3957, #3988)
 - `apm targets` lists the targets `apm.yml` declares as active, as install resolves them. (closes #3792, #3988)
 - Messages name `targets:`, `executables.allow` and "marketplace", and generated `apm.yml` headers and target errors no longer list the deprecated `vscode`. (#3988)
+- Local-bundle MCP servers pass `apm audit --ci` and `apm install --frozen`, and survive installing or uninstalling other packages. (closes #3955, #3989)
+- `apm approve --all` and `--recommended` skip a package that any layer denies, including org policy, and write no approval for it. (#3957, #3989)
+- Packed bundle lockfiles name the APM that packed them, and an unchanged `apm.lock.yaml` is no longer rewritten, so its comments and formatting survive. (#3962, #3989)
+- `apm install -g <bundle>` records the bundle's files and MCP servers in the user lockfile, so `apm install -g --frozen` replays them. (#3955, #3989)
+- `apm audit --ci` no longer fails on a correct lock when `apm_modules` holds stale copies; it replays the locked packages as install does. (closes #3964, #3989)
+- `apm pack` on a plugin-only package prints the `target:`, `vscode` and `compilation.target` deprecation warnings like every other command. (closes #3965, #3989)
+- A multi-package `apm install` where one package fails to resolve or download now integrates nothing, so no untracked files are left behind. (closes #3874, #3989)
+- Plain `apm audit` reports an edited local-bundle file as drift, as `apm audit --ci` does; removing the last MCP server is reported as a change, not "No changes". (#3989)
+- `apm update` re-gates executables recorded while the gate was off once org policy turns it on, as `apm install` does. (closes #3990, #3989)
+- `apm update` retires an executable type whose approval was removed from a partially approved package; the lock records the approved types in `exec_allowed_types`. (closes #3991, #3989)
+- Native plugin approvals are portable: the `plugin:` pin covers file paths and bytes, not executable bits, so a pin made on macOS holds on Windows. (#3989)
+- `apm install -g --target antigravity` deploys skills to `~/.gemini/config/skills/`, read by the Antigravity App, CLI and IDE, and removes APM's old `~/.gemini/antigravity-cli/skills/` copies. (closes #3940, #3992)
+- `target: agents` warns once per run, and `apm update -g` names the user manifest it read. (#3967, #3992)
+- `apm uninstall` reports MCP entries it heals out of retired files; `.github/mcp.json` is emptied, never deleted. (#3967, #3992)
+- `--exclude` accepts runtime names in any case and aliases like `--target` does, for MCP and LSP servers in project and user installs, and warns on unknown names. (#3967, #3992)
+- `apm deps list` and `apm find` show a package on a non-default port under its own `host:port` identity. (#3967, #3992)
+- `apm install -g --help` keeps no runtime list of its own; the skip warning names the user-scope runtimes from the runtime adapters, so it cannot drift. (#3967, #3992)
+- `apm view plugin@marketplace` no longer suggests installing an entry `apm install` would refuse. (#3967, #3992)
+- Every command, `apm install` included, prints the newer-lockfile refusal on stderr with the same `[x]` prefix and names the user-scope lockfile by its path. (#3967, #3992)
+- Org-policy refusals from `apm install`, `apm install --frozen` and `apm update`, and the bare `apm approve` usage error, print on stderr; exit codes are unchanged. (#3992)
+- `apm install --dry-run` shows apm.yml declaration errors install would refuse (such as two hosts sharing one `apm_modules` directory) without `--verbose`. (#3967, #3992)
+- `apm install --dry-run` previews which MCP servers move from `.github/mcp.json` or `.vscode/mcp.json` to `.mcp.json`, and which are only removed there because they are no longer declared or another target now receives them. (#3967, #3992)
+- `apm approve owner/repo` on a package installed with a port names the `host:port/owner/repo` key to approve. (#3967, #3992)
+- `apm runtime setup codex` writes `wire_api = "chat"` for Codex v0.116 and later, which GitHub Models needs. (#3967, #3992)
+- The policy docs no longer call `apm-policy.yml` an experimental feature. (#3948, #3992)
+- `apm uninstall` and `apm prune` print `Run 'apm compile' to update AGENTS.md` (or `GEMINI.md`) when a removed package's instructions are still compiled there for Codex, Gemini or OpenCode. (#3992)
+- `apm compile --clean` reports the orphaned `AGENTS.md` it removes (or, with `--dry-run`, would remove) instead of telling you to run `apm compile --clean` to remove it. (#3992)
+- `apm run` labels a script with no detected runtime as `Shell script` instead of `Unknown`. (#3992)
+- `apm audit --ci` applies org MCP policy to every server the lock keeps, including transitive and local-bundle servers, and accepts a `bundle:` server only when the lock records its deployment. (#3989)
+- `apm install -g <bundle>` reads executables approvals from the user manifest (`~/.apm/apm.yml`), never the current directory's `apm.yml`, and its skip hint names that file. (#3989)
+- A cold `apm install` of a locked marketplace package with catalog-defined MCP or LSP servers reads only server metadata from the catalog and keeps the locked commit; if the catalog now selects another commit it fails with an `apm update <name>@<marketplace>` hint instead of re-pinning. (#3989)
+- `apm install` output prints each package header above its own files with the ref once, and drops the spurious `bin/` skip and inactive-resolver lines. (closes #3994, #4004)
+- `apm install` adopts an unmanaged skill directory identical to what it would deploy instead of skipping it, so `apm audit` reports no drift. (closes #3994, #4004)
+- Codex `marketplace.json` records full `https://` source URLs, and a plugin declaring a missing component names the likely upstream cause. (closes #3994, #4004)
+- `apm pack` names the command each format needs (`apm unpack` for `--format apm`), reports the bundle in `--json`, and counts the embedded lockfile. (closes #3994, #4004)
+- `apm pack --format agent-plugin` packs a dependency-free project without a lockfile; `apm unpack` points plugin-format bundles to `apm install`. (closes #3994, #4004)
+- Hints copy-paste as printed: commands and URLs never wrap, bulk trust appears only with an org set, and `apm init` adds `-t <harness>` when needed. (closes #3994, #4004)
+- Policy blocks name a bypass the command accepts (`--no-policy` for install, a one-shot `APM_POLICY_DISABLE=1 apm update` for update), warn-mode `apm audit --ci` names the dependencies, and `apm policy explain` stops promising deployment. (closes #3994, #4004)
+- `apm uninstall` names the removal route for an MCP server and states that local bundles cannot be uninstalled yet; `apm install -g` warns only for selected targets. (closes #3994, #4004)
+- `apm audit` tells you to reinstall the bundle to restore an edited file a local bundle deployed. (closes #3994, #4004)
+- MCP installs print one success line per server with product names and name the files they write outside each harness: root `.mcp.json` and Windsurf's `~/.codeium/windsurf/mcp_config.json`. (closes #3994, #4004)
+- `apm compile` names `.agents/skills/`, never leaves `GEMINI.md` importing a missing `AGENTS.md`, and skips the zero-output warning for empty or `.claude/rules/` projects. (closes #3994, #4004)
+- `apm deps list` no longer exits 1 in a project with its own `.apm/` content. (closes #3994, #4004)
+- `apm mcp show` offers `apm install --mcp <name>`; `apm run` passes `exec` once to Codex and no literal `<` to `llm`; `apm preview` keeps `--param`. (closes #3994, #4004)
+- Output reads cleanly: ASCII `...` truncation, folded long names, singular counts, one script success line, path-named prune previews, and `apm find` errors on stderr. (closes #3994, #4004)
+- Errors lead somewhere real: a failed first `marketplace add` says rerun it, Git failures stop citing unprinted stderr, and help examples print one command per line. (closes #3994, #4004)
+- `apm init` lists `apm config set target` in its target precedence comment, `apm plugin init --target claude` advertises only formats that pack, and `apm outdated` never crops columns at 80 characters. (closes #3994, #4004)
+- `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
 - Orphan previews in `apm install --dry-run` and `apm uninstall --dry-run` now match the real run; every command's orphan removal comes from one owner. (#4021)
 
 ### Security
 
+- Trust and integrity consistency hardening. (#4051)
+- Trust and integrity consistency hardening, part 2. (#4061)
 - `apm pack` builds plugin MCP servers from `apm.yml` and authored `.mcp.json` entries, never the copies `apm install` renders, so output matches before and after install without credentials. (closes #3966, #3988)
 - `apm approve` and `apm deny` match package names exactly and refuse names matching several packages; a partial name could approve another package's executables. (#3988)
 - `apm update` with no ref change and `apm audit --ci` honour the current executables decision, so hooks left after `apm deny` are retired or reported. (closes #3958, #3988)

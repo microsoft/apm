@@ -719,7 +719,9 @@ class TestCleanupStaleMcp:
         with (
             patch(
                 "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-                return_value=SimpleNamespace(dependencies=[], configs={}, provenance={}),
+                return_value=SimpleNamespace(
+                    dependencies=[], configs={}, provenance={}, bundle_owned=frozenset()
+                ),
             ),
             patch(
                 "apm_cli.utils.atomic_io._replace_atomic_file",

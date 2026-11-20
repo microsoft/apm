@@ -21,9 +21,10 @@ from ..install.orphans import (
     ReachabilityProbe,
     decide_orphan_removal,
 )
+from ..install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
-from ..models.apm_package import APMPackage
+from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
 from ._helpers import _scan_installed_packages
@@ -99,6 +100,11 @@ def prune(ctx, dry_run):
 
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            from ..install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+            reconcile_scope_bundle_hooks(
+                InstallScope.PROJECT, apm_package, logger=logger, dry_run=dry_run
+            )
             declared_deps = apm_package.get_all_apm_dependencies()
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)
@@ -234,10 +240,13 @@ def prune(ctx, dry_run):
                     removed_owners = set(violation.invalid_owners)
                     if violation.invalid_active_owner is not None:
                         removed_owners.add(violation.invalid_active_owner)
+                    locator = violation.locator
+                    # Name the path and target; the composite ledger key is internal (#3994).
                     logger.dry_run_notice(
-                        f"repair {violation.locator.key} "
-                        f"(remove owner(s): {', '.join(sorted(removed_owners))})"
+                        f"repair {locator.value} ({locator.target}): "
+                        f"remove owner(s) {', '.join(sorted(removed_owners))}"
                     )
+                    logger.verbose_detail(f"    ledger key: {locator.key}")
             logger.success("Dry run complete - no changes made")
             return
 
@@ -247,6 +256,9 @@ def prune(ctx, dry_run):
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
+        compile_inputs = snapshot_compile_inputs(
+            project_root, package_target_selection(apm_package), apm_modules_dir
+        )
         for org_repo_name in orphaned_packages:
             path_parts = org_repo_name.split("/")
             pkg_path = apm_modules_dir.joinpath(*path_parts)
@@ -396,6 +408,8 @@ def prune(ctx, dry_run):
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
                     "stale -- run 'apm install' to rebuild hook configuration."
                 )
+
+        hint_compile_after_removal(compile_inputs, apm_modules_dir, logger)
 
         if failed_count:
             logger.error(

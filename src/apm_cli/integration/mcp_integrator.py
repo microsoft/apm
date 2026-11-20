@@ -1010,11 +1010,14 @@ class MCPIntegrator:
                 )
 
         if "windsurf" in target_runtimes:
+            from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
+
             _clean_json_mcp_config(
                 Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
                 expanded_stale,
                 logger,
-                "Windsurf config",
+                f"{WindsurfClientAdapter.user_wide_config_display} "
+                "(user-wide: all Windsurf workspaces)",
                 use_rich=True,
                 fail_on_write_error=fail_on_write_error,
             )

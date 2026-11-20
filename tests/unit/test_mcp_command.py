@@ -245,6 +245,23 @@ class TestMcpShow:
 
         assert result.exit_code == 0
 
+    def test_show_install_guide_offers_only_working_commands(self):
+        """No "coming soon" step or GitHub-toolsets claim for io.github.* names (#3994)."""
+        runner = make_runner()
+        table = MagicMock()
+        with (
+            patch_registry(detail_result=FAKE_SERVER_DETAIL),
+            patch("apm_cli.commands.mcp._get_console", return_value=MagicMock()),
+            patch("rich.table.Table", table),
+        ):
+            result = runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
+
+        assert result.exit_code == 0
+        rows = " ".join(str(c.args) for c in table.return_value.add_row.call_args_list)
+        assert "apm install --mcp io.github.acme/cool-server" in rows
+        assert "coming soon" not in rows
+        assert "GITHUB_TOOLSETS" not in rows
+
     def test_show_rich_not_found_exits_1(self):
         """show with Rich console exits 1 when server not found."""
         runner = make_runner()

@@ -170,7 +170,7 @@ def _activate_validated_candidate(
     """Publish one accepted candidate, then expose its download metadata."""
     from apm_cli.utils.content_hash import compute_package_hash
 
-    content_hash = compute_package_hash(candidate_path)
+    content_hash = compute_package_hash(candidate_path, framed=True)
     live_path = staging_session.publish_replacement(candidate_path)
     with callback_lock:
         pending = pending_downloads.pop(candidate_path, None)
@@ -579,8 +579,6 @@ def _resolve_dependencies(
                     # At user scope, relative local paths have no meaningful
                     # root (cwd is arbitrary, $HOME is not a project).  Only
                     # absolute paths are unambiguous; reject relative refs.
-                    # Note: callback_failures is a set (see line ~105),
-                    # so use .add() rather than dict-style assignment.
                     with callback_lock:
                         callback_failures.add(dep_ref.get_unique_key())
                     _tui = getattr(ctx, "tui", None)
@@ -617,6 +615,8 @@ def _resolve_dependencies(
                             None,
                         )
                     return replacement_path
+                with callback_lock:  # not a package: the barrier stops (#3874)
+                    callback_failures.add(dep_ref.get_unique_key())
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
                     _tui.task_failed(dep_ref.get_unique_key())

@@ -218,6 +218,10 @@ def test_harnesses_outside_the_changed_rows_keep_their_remote_shape(
     assert result.returncode == 0, describe(result)
     for harness, expected in _LOCKED_SHAPES.items():
         assert scene.servers(harness, user=user).get(_SHORT_NAME) == expected, harness
+    # A registry install for Windsurf writes its user-wide file even at project
+    # scope; the output names it there, as the self-defined route does (#3994).
+    named = "user-wide: ~/.codeium/windsurf/mcp_config.json" in " ".join(result.stdout.split())
+    assert named is not user, describe(result)
 
 
 @pytest.mark.parametrize(

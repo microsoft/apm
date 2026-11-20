@@ -95,6 +95,9 @@ class CheckResult:
     # Structured per-dependency / per-MCP-server violations. Not serialized:
     # ``details`` stays the report contract for ``apm audit``.
     subjects: tuple[PolicySubject, ...] = ()
+    # A violation downgraded to pass by ``enforcement: warn``; text output
+    # still names its subjects (#3994). Not serialized: ``passed`` is the contract.
+    warned: bool = False
 
     def violation_subjects(self) -> tuple[PolicySubject, ...]:
         """Return one :class:`PolicySubject` per violation to report.

@@ -398,6 +398,7 @@ class TestResolveScopeDepsAdditional:
 
         mock_lockfile = MagicMock()
         mock_lockfile.dependencies = {"owner/repo": insecure_dep}
+        mock_lockfile.get_package_dependencies.return_value = [insecure_dep]
 
         with patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls:
             with patch("apm_cli.deps.lockfile.get_lockfile_path") as mock_glp:

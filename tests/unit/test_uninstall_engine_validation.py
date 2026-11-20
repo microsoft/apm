@@ -146,6 +146,43 @@ class TestValidateUninstallPackages:
         )
         assert "org/repo" in not_found
 
+    def test_local_bundle_states_the_limitation(self, tmp_path, monkeypatch):
+        """A bundle path is not sent to 'apm deps list' for a key (#3994)."""
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        (tmp_path / "project-1.0.0.zip").write_bytes(b"PK")
+        monkeypatch.chdir(tmp_path)
+        logger = _make_logger()
+        _removed, not_found = _validate_uninstall_packages(["./project-1.0.0.zip"], [], logger)
+        assert not_found == ["./project-1.0.0.zip"]
+        message = logger.error.call_args.args[0]
+        assert "'project-1.0.0.zip' is a local bundle" in message
+        assert "cannot remove local-bundle content" in message
+        assert "deps list" not in message
+
+    @pytest.mark.parametrize(
+        ("provenance", "expected"),
+        [
+            ({}, "Remove 'fetch' under dependencies.mcp in apm.yml, then run 'apm install'"),
+            ({"fetch": "acme/tools"}, "brought in by package 'acme/tools'"),
+            ({"fetch": "bundle:proj"}, "from a local bundle"),
+        ],
+        ids=["root", "package", "bundle"],
+    )
+    def test_mcp_server_name_routes_to_its_removal(self, provenance, expected):
+        """'apm uninstall <server>' names how that server is removed (#3994)."""
+        from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
+
+        lockfile = _make_lockfile()
+        lockfile.mcp_servers = ["fetch"]
+        lockfile.mcp_config_provenance = provenance
+        logger = _make_logger()
+        _removed, not_found = _validate_uninstall_packages(["fetch"], [], logger, lockfile)
+        assert not_found == ["fetch"]
+        message = logger.error.call_args.args[0]
+        assert expected in message
+        assert "Invalid package format" not in message
+
     def test_marketplace_resolved_none_adds_to_not_found(self):
         from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
 

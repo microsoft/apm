@@ -159,8 +159,9 @@ class TestDefaultPortNormalisationE2E:
 
         loaded = LockFile.read(lock_path)
         assert loaded is not None
-        # Non-default host (#773): lockfile dedup key is host-qualified.
-        reloaded_dep = loaded.dependencies.get("bitbucket.corp.com/team/repo")
+        # Non-default host (#773) and port (#3932) are both part of the identity key.
+        assert locked.get_unique_key() == "bitbucket.corp.com:7990/team/repo"
+        reloaded_dep = loaded.dependencies.get(locked.get_unique_key())
         assert reloaded_dep is not None
         assert reloaded_dep.port == 7990
 

@@ -36,7 +36,17 @@ _ROUTES = (
     ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "locked_marketplace_replay"),
     ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "frozen_marketplace_refusal"),
     ("src/apm_cli/marketplace/resolver.py", "resolve_marketplace_plugin", "build_tag_regex"),
+    # A cold server-owning row reads the catalog for metadata only; the lock
+    # row keeps pinning the download (#3989).
+    ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep", "catalog_metadata_refusal"),
+    ("src/apm_cli/drift.py", "catalog_metadata_refusal", "locked_marketplace_row"),
+    ("src/apm_cli/drift.py", "catalog_metadata_refusal", "detect_ref_change"),
 )
+# The only consumer of a ``catalog-metadata`` replay decision outside its owner
+# is the resolver entry that applies catalog_metadata_refusal (closed world).
+_CATALOG_METADATA_NAME = "MARKETPLACE_CATALOG_METADATA"
+_CATALOG_METADATA_OWNER = "src/apm_cli/drift.py"
+_CATALOG_METADATA_CONSUMER = ("src/apm_cli/deps/apm_resolver.py", "_resolve_marketplace_dep")
 # Lock-first replay (#3911): the replay decision precedes any catalog call.
 _ORDERED = (
     (
@@ -238,7 +248,41 @@ def _check(provider: FactsProvider) -> tuple[Violation, ...]:
         }
         if not lines[first] or (lines[then] and min(lines[then]) < min(lines[first])):
             findings.append(violation(RULE_ID, path, f"{function} must call {first} before {then}"))
+    findings.extend(_catalog_metadata_consumers(provider))
     return tuple(findings)
+
+
+def _catalog_metadata_consumers(provider: FactsProvider) -> list[Violation]:
+    """Only the refusal-applying resolver entry may act on a catalog-metadata decision."""
+    findings: list[Violation] = []
+    for path in provider.inventory:
+        if (
+            not (path.startswith("src/apm_cli/") and path.endswith(".py"))
+            or path == _CATALOG_METADATA_OWNER
+        ):
+            continue
+        facts, failures = checked_facts(provider, path, RULE_ID, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        allowed = [
+            (definition.line, definition.end_line)
+            for definition in facts.definitions
+            if (path, definition.name) == _CATALOG_METADATA_CONSUMER
+        ]
+        findings.extend(
+            violation(
+                RULE_ID,
+                path,
+                f"{_CATALOG_METADATA_NAME} is consumed only by "
+                f"{_CATALOG_METADATA_CONSUMER[1]}, which applies catalog_metadata_refusal",
+                line=number,
+            )
+            for number, text in enumerate(facts.lines, start=1)
+            if _CATALOG_METADATA_NAME in text
+            and not any(start <= number <= end for start, end in allowed)
+        )
+    return findings
 
 
 RULES = (

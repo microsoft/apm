@@ -786,16 +786,17 @@ class TestClaudeClientAdapter:
         result = ClaudeClientAdapter._normalize_mcp_entry_for_claude_code("not-a-dict")
         assert result == "not-a-dict"
 
-    def test_rewrite_self_defined_skill_command_converged(self) -> None:
+    def test_rewrite_self_defined_skill_command_converged(self, tmp_path: Path) -> None:
         """Converged skill prefix is rewritten to Claude-specific path."""
-        result = ClaudeClientAdapter._rewrite_self_defined_skill_command(
-            ".agents/skills/my-skill/run.sh"
-        )
+        (tmp_path / ".claude" / "skills" / "my-skill").mkdir(parents=True)
+        adapter = ClaudeClientAdapter(project_root=tmp_path)
+        result = adapter._rewrite_self_defined_skill_command(".agents/skills/my-skill/run.sh")
         assert result == ".claude/skills/my-skill/run.sh"
 
-    def test_rewrite_self_defined_skill_command_other(self) -> None:
+    def test_rewrite_self_defined_skill_command_other(self, tmp_path: Path) -> None:
         """Non-converged commands pass through unchanged."""
-        result = ClaudeClientAdapter._rewrite_self_defined_skill_command("npx")
+        adapter = ClaudeClientAdapter(project_root=tmp_path)
+        result = adapter._rewrite_self_defined_skill_command("npx")
         assert result == "npx"
 
     def test_merge_mcp_server_dicts_shallow_merge(self) -> None:

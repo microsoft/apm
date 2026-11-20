@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -72,7 +73,13 @@ def test_migration_error_is_actionable_and_printable_ascii() -> None:
     assert "owner/repo: hook filename target routing was removed" in message
     assert "Target 'codex' would newly activate: hooks/hooks-claude.json" in message
     assert "target: <name>" in message
-    assert "#migrating-from-filename-routing" in message
+    docs = urlsplit(message.rsplit("See: ", 1)[1].split()[0])
+    assert (docs.scheme, docs.hostname, docs.path, docs.fragment) == (
+        "https",
+        "microsoft.github.io",
+        "/apm/producer/write-primitives/",
+        "migrating-from-filename-routing",
+    )
 
 
 def test_no_conflicts_is_silent() -> None:

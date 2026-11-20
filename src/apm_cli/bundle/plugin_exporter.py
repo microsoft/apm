@@ -937,7 +937,7 @@ def export_plugin_bundle(
     for dep_ref in package.get_apm_dependencies():
         if dep_ref.is_local:
             raise ValueError(
-                f"Cannot pack — apm.yml contains local path dependency: "
+                f"Cannot pack -- apm.yml contains local path dependency: "
                 f"{dep_ref.local_path}\n"
                 f"Local dependencies are for development only. Replace them with "
                 f"remote references (e.g., 'owner/repo') before packing."
@@ -1239,7 +1239,7 @@ def _merge_file_map(
         if output_rel in file_map:
             existing_owner = file_map[output_rel][1]
             collisions.append(
-                f"{output_rel} — collision between '{existing_owner}' and "
+                f"{output_rel} -- collision between '{existing_owner}' and "
                 f"'{owner}' ({'last writer wins' if force else 'first writer wins'})"
             )
             if force:

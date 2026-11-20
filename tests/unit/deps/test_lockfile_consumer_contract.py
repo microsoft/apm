@@ -12,6 +12,7 @@ import pytest
 from apm_cli.deps.carried_license import CarriedLicense
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.native_plugins.record import NativePluginRecord
 
 pytestmark = pytest.mark.unit
 
@@ -57,9 +58,15 @@ _LOCKED_DEPENDENCY_VALUES = {
     "resolved_at": "2026-01-01T00:00:00+00:00",
     "declared_license": "MIT",
     "carried_licenses": (CarriedLicense("LICENSE", "LICENSE", f"sha256:{'f' * 64}"),),
-    "exec_status": "deployed",
+    # Survives as the lockfile version, not as a per-row key.
+    "content_hash_framed": True,
+    "exec_status": "gated_pending_approval",
+    "exec_allowed_types": ("hooks",),
     "name": "consume-contract",
     "extensions": {"x-vendor": {"k": "v"}},
+    "native_plugin": NativePluginRecord(
+        "consume", f"sha256:{'a' * 64}", "apm-u-0a1b2c3d", "/home/u/.agents/plugins"
+    ),
     "replacement": None,
     "_unknown_fields": {"future_consumer_field": {"enabled": True}},
 }

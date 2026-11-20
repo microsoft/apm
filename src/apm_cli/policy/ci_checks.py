@@ -28,9 +28,11 @@ if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
     from ..install.audit_replay import PreparedCiAuditReplay
     from ..install.drift import DriftFinding
+    from ..integration.mcp_config_view import CurrentMcpConfigView
     from ..integration.targets import TargetProfile
     from ..models.apm_package import APMPackage
     from ..models.dependency.reference import DependencyReference
+    from ..security.trust import McpAdmission
 
 _logger = logging.getLogger(__name__)
 
@@ -517,6 +519,38 @@ def _missing_recorded_skill_subset_paths(
     return missing_requested_components(requested=subset, available=available)
 
 
+def audit_mcp_view(
+    manifest: APMPackage,
+    lock: LockFile,
+    *,
+    modules_root: Path | None = None,
+    no_policy: bool = False,
+) -> tuple[CurrentMcpConfigView, McpAdmission]:
+    """The MCP view audit judges: config consistency and MCP policy read one baseline.
+
+    Consent is re-evaluated from apm.yml and org policy, never from the
+    lockfile or personal config, so CI and laptops reach one verdict. Audit
+    accepts structural omission evidence and re-checks consent.
+    """
+    from ..constants import APM_MODULES_DIR
+    from ..integration.mcp_config_view import CurrentMcpConfigView
+    from ..security.trust import McpAdmission
+
+    project_root = manifest.package_path or Path.cwd()
+    admission = McpAdmission.for_project(
+        project_root, user_scope=False, include_user=False, no_policy=no_policy
+    )
+    view = CurrentMcpConfigView.select(
+        manifest,
+        lock,
+        modules_root if modules_root is not None else project_root / APM_MODULES_DIR,
+        admission=admission,
+        recorded=lock,
+        exact=False,
+    )
+    return view, admission
+
+
 def _check_config_consistency(
     manifest: APMPackage,
     lock: LockFile,
@@ -526,11 +560,6 @@ def _check_config_consistency(
     no_policy: bool = False,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
-    from ..constants import APM_MODULES_DIR
-    from ..integration.mcp_config_view import CurrentMcpConfigView
-    from ..security.trust import McpAdmission
-
-    project_root = manifest.package_path or Path.cwd()
     if prepared_replay_error is not None:
         return CheckResult(
             name="config-consistency",
@@ -538,21 +567,11 @@ def _check_config_consistency(
             message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
-    # Consent is re-evaluated from apm.yml and org policy, never from the
-    # lockfile or personal config, so CI and laptops reach one verdict. Audit
-    # accepts structural omission evidence and re-checks consent.
-    admission = McpAdmission.for_project(
-        project_root, user_scope=False, include_user=False, no_policy=no_policy
-    )
-    view = CurrentMcpConfigView.select(
+    view, admission = audit_mcp_view(
         manifest,
         lock,
-        prepared_replay.modules_root
-        if prepared_replay is not None
-        else project_root / APM_MODULES_DIR,
-        admission=admission,
-        recorded=lock,
-        exact=False,
+        modules_root=prepared_replay.modules_root if prepared_replay is not None else None,
+        no_policy=no_policy,
     )
     policy_note = (
         f" Org policy unavailable ({admission.policy_unavailable}); consent was "
@@ -727,7 +746,13 @@ def verify_deployed_file_hashes(
             file_path = resolved
         if not file_path.exists():
             continue  # _check_deployed_files_present owns this signal
-        if locator.kind == LocatorKind.PROJECT_RELATIVE and _has_symlink_component(file_path):
+        # A locked file replaced by a symlink is never followed: it fails the
+        # check (#3994). Only a symlinked parent directory (a shared root) skips.
+        if (
+            locator.kind == LocatorKind.PROJECT_RELATIVE
+            and not file_path.is_symlink()
+            and _has_symlink_component(file_path)
+        ):
             continue
         if file_path.is_symlink() or not file_path.is_file():
             unresolved_hash_paths.append(locator.value)
@@ -874,7 +899,11 @@ def _check_content_integrity(
         )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
-        remedies.append("'apm install' to restore drifted files")
+        from ..deps.file_provenance import LOCAL_BUNDLE_OWNER
+        from ..install.local_edits import restore_drifted_files_remedy
+
+        owners = {drift.owner == LOCAL_BUNDLE_OWNER for drift in hash_mismatches}
+        remedies.extend(restore_drifted_files_remedy(bundle=bundle) for bundle in sorted(owners))
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
         remedies.append("'apm install <bundle> --force' to restage drifted files")
@@ -975,6 +1004,7 @@ def _check_drift(
         diff_scratch_against_project,
         run_replay,
     )
+    from ..install.errors import PolicyViolationError
     from ..integration.targets import resolve_audit_targets
 
     logger = CheckLogger(verbose=verbose)
@@ -993,6 +1023,17 @@ def _check_drift(
         try:
             scratch = run_replay(config, logger)
         except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:
+            return (
+                CheckResult(
+                    name="drift",
+                    passed=False,
+                    message=f"drift replay blocked: {exc}",
+                    details=[str(exc)],
+                ),
+                [],
+            )
+        except PolicyViolationError as exc:
+            # Org policy asked to block when it cannot be resolved.
             return (
                 CheckResult(
                     name="drift",
@@ -1105,6 +1146,49 @@ def _check_drift(
 
 
 # -- Aggregate runner ----------------------------------------------
+
+
+def _check_local_bundle_hooks(
+    deployment_root: Path,
+    lock: LockFile,
+    manifest: APMPackage,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+    no_policy: bool,
+) -> CheckResult:
+    """Fail when a deployed local-bundle hook's approval no longer holds."""
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..install.errors import PolicyViolationError
+    from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
+    from ..security.executables import resolve_project_exec_allow_map
+
+    def allow_provider():
+        return resolve_project_exec_allow_map(
+            deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
+        )
+
+    bundle_paths = DeploymentLedgerCodec.local_bundle_values(
+        DeploymentLedgerCodec.from_lockfile(lock)
+    )
+    try:
+        unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
+    except PolicyViolationError as exc:
+        return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
+    if not unadmitted:
+        return CheckResult(
+            name="local-bundle-hooks", passed=True, message="Local bundle hooks are approved"
+        )
+    return CheckResult(
+        name="local-bundle-hooks",
+        passed=False,
+        message=(
+            f"{len(unadmitted)} local bundle(s) have hooks the current executables "
+            "trust does not admit; run 'apm install' to retire them, or approve the "
+            "bundle and rerun 'apm install <bundle>'"
+        ),
+        details=[f"{item.slug}: {item.reason}" for item in unadmitted],
+    )
 
 
 def run_baseline_checks(
@@ -1249,9 +1333,18 @@ def run_baseline_checks(
     ):
         return result
 
-    # Check 8: Content integrity
+    # Check 8: Content integrity; 8b: local-bundle hooks still admitted (#4027)
     if _run(
         _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+    ) or _run(
+        _check_local_bundle_hooks(
+            deployment_root,
+            lock,
+            manifest,
+            resolved_targets,
+            user_scope=user_scope,
+            no_policy=no_policy,
+        )
     ):
         return result
 

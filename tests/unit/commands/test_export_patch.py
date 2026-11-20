@@ -714,6 +714,22 @@ def test_cli_unexpected_replay_error_exits_1_with_message(tmp_path, monkeypatch)
     assert "Error exporting patches: boom" in result.output
 
 
+def test_cli_policy_blocked_replay_exits_1_with_reason(tmp_path, monkeypatch):
+    from apm_cli.install.errors import PolicyViolationError
+
+    _make_cli_project(tmp_path, monkeypatch)
+
+    def _blocked(*args, **kwargs):
+        raise PolicyViolationError("no enforceable org policy (fetch_failure_default=block)")
+
+    monkeypatch.setattr("apm_cli.install.drift.run_replay", _blocked)
+    result = CliRunner().invoke(export_patch, [], catch_exceptions=False)
+    assert result.exit_code == 1
+    text = " ".join(result.output.split())
+    assert "Drift replay failed: no enforceable org policy" in text
+    assert "Error exporting patches" not in text
+
+
 def test_cli_rejects_out_dir_inside_apm_modules(tmp_path, monkeypatch):
     _make_cli_project(tmp_path, monkeypatch)
     result = CliRunner().invoke(export_patch, ["-o", "apm_modules/evil"], catch_exceptions=False)

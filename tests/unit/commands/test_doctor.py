@@ -55,6 +55,8 @@ def test_common_workflows_footer_present():
     assert "Common workflows" in result.output
     assert "apm install --frozen" in result.output
     assert "apm doctor" in result.output
+    # Experimental 'apm run' is not a common workflow (#3994).
+    assert "apm run <script>" not in result.output
 
 
 def test_marketplace_doctor_not_available():

@@ -71,7 +71,7 @@ An org `executables.enforce` rung degrades to `recommend` (allowed but still
 overridable by a deny). Local bundle hook, MCP, LSP, and canvas approvals are bound to
 the exact SHA-256 content key printed by `apm install`.
 
-A dependency redirected by a [`replace:` rule](../../../consumer/manage-dependencies/#replace-a-source-candidate)
+A dependency redirected by a [`replace:` rule](../../../producer/test-packages/#swap-your-copy-in-across-the-graph)
 is trusted by its selected source, never by the original. `apm approve` and
 `apm deny` accept either name and write the selected source key, for example
 `../local-hooky` or `my-org/hooky-fork#patched`. `apm deny` also denies the
@@ -116,9 +116,11 @@ A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
 `apm approve <package>` to pin it. `mcp: true` never admits a transitive MCP
 server. A Copilot or Codex native plugin is loaded intact by the harness, so
-`apm approve` records ONE item for it, `plugin: sha256:<64 hex>`, over every
-file and executable bit in the plugin root (as installed in `apm_modules/`).
-Any byte or mode change parks the whole plugin: it is not registered, and
+`apm approve` records ONE item for it, `plugin: sha256:<64 hex>`, over the path
+and bytes of every file in the plugin root (as installed in `apm_modules/`).
+Executable bits are left out so an approval committed on macOS or Linux also
+holds on Windows; the installed copy is still integrity-checked including file
+modes. Any byte change parks the whole plugin: it is not registered, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
 A plugin that runs files under its root `.apm/` or `apm.yml` that are not
@@ -152,9 +154,10 @@ and exits 1. `--user` never turns the gate on.
 Naming a package lifts its deny in the store you write (`apm.yml`, or
 `$APM_HOME/config.json` with `--user`), the mirror of `apm deny` dropping the
 matching allow: approve prints `Cleared deny for <pkg>`. `--all` and
-`--recommended` skip denied packages instead. When a deny in another layer
-still blocks the package (a `--user` deny, or org policy), approve exits 1 and
-names that layer and how to lift it.
+`--recommended` skip a package that any layer denies (project, `--user` or org
+policy), say why, write no approval for it, and approve the rest. When a named
+package is still blocked by a deny in another layer, approve exits 1 and names
+that layer and how to lift it.
 
 ## Options
 

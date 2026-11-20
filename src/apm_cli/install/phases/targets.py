@@ -533,6 +533,11 @@ def run(ctx: InstallContext) -> None:
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.
     _targets = _resolve_targets_by_scope(ctx, _targets, _explicit, _is_user)
+    if _is_user and ctx.logger:
+        from apm_cli.core.scope import warn_unsupported_user_scope
+
+        if scope_warning := warn_unsupported_user_scope(t.name for t in _targets):
+            ctx.logger.warning(scope_warning)
 
     # Legacy detect_target call -- return values are not consumed by any
     # downstream code but the call is preserved for behaviour parity with

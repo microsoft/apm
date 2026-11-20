@@ -666,7 +666,7 @@ offending path.
 
 The OPTIONAL `dependencies.mcp` list declares MCP servers. Each entry
 is either a registry string or an object. Object-form fields are
-defined in [`manifest-schema.md` Section 4.2](../../reference/manifest-schema/#42-dependenciesmcp----listmcpdependency).
+defined in [`manifest-schema.md` Section 4.2](../../reference/manifest-schema/#42-dependenciesmcp--listmcpdependency).
 
 <a id="req-mf-012"></a>
 **[req-mf-012]** A conforming **consumer** implementation MUST reject
@@ -1099,13 +1099,14 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_url`            | Registry archive download URL (advisory; see [req-rs-009](#req-rs-009)).        |
 | `resolved_hash`           | Hash envelope (`sha256:<hex>`) of the registry archive bytes. Trust anchor.     |
 | `local_path`              | Original path for local deps.                                                   |
-| `content_hash`            | Hash envelope (`sha256:<hex>`) of a local package's source tree.                |
+| `content_hash`            | Hash envelope (`sha256:<hex>`) of a package's tree; its byte stream follows `lockfile_version` per [req-lk-016](#req-lk-016). |
 | `is_dev`                  | True when declared under `devDependencies`.                                     |
 | `constraint`              | git-semver discriminator: the original semver range from the manifest (verbatim). |
 | `resolved_tag`            | git-semver selected tag, or advisory tag provenance for a full-SHA git-literal update under [req-rs-017](#req-rs-017). |
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
 | `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
 | `extensions`              | Optional mapping of top-level keys matching `x-[a-z][a-z0-9-]*` from the dependency manifest, in declaration order. Omitted when empty. Values are not interpreted (see [req-ext-003](#req-ext-003)). Manifest-origin metadata, distinct from per-entry `x-<name>` keys. |
+| `native_plugin`           | Optional mapping, present only when the consumer natively activated this entry's plugin under [Section 8.5.11](#8511-native-plugin-activation-profile): `name` (declared plugin name), `root` (deployed plugin root as a POSIX path relative to the deploy root of its scope, the project root or the user home at user scope: `.agents/plugins/<name>`), `fingerprint` (the [req-na-002](#req-na-002) root digest, a `sha256:<hex-lowercase>` envelope per [req-lk-016](#req-lk-016); not the [req-na-005](#req-na-005) approval digest, and not itself an approval), and `marketplace` (`{name, path}`: the binding its activation entries were declared under, which a later run reads as the previous binding under [req-na-004](#req-na-004)). Informative: install, including a frozen install (`--frozen` or equivalent), records it only after the lockfile gates pass and then reconciles settings from it; a restore redeploys only bytes whose root digest equals `fingerprint`; audit recomputes the root digest on the materialized source and on the deployed root without writing (see [req-na-002](#req-na-002), [req-na-005](#req-na-005) and [Section 5.5](#55-drift-and-integrity-model)). (Amendments 0.1.65 and 0.1.66.) |
 | `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
 | `x-<name>`                | Vendor extension (per [req-ext-001](#req-ext-001)).                             |
 
@@ -1308,7 +1309,26 @@ backward-compat only. v0.2 will remove reader-tolerance and
 require the `sha256:` envelope unconditionally. v0.1 Writers
 SHOULD already emit the envelope on every hash field for forward
 compatibility (this deprecation horizon supersedes earlier drafts
-that left the bare-hex form open-ended).
+that left the bare-hex form open-ended). The byte stream a package
+`content_hash` digests is named by `lockfile_version`. In a version
+`"4"` lockfile it is the SHA-256 of the concatenation, over every
+regular file of the package tree that the implementation's tree
+convention selects, taken in ascending byte-wise order of the file's
+POSIX relative path encoded as UTF-8, of: that relative path, one NUL
+(0x00) byte, and the 32-byte raw SHA-256 digest of the file's bytes
+(the framing of [Section 8.5.11](#8511-native-plugin-activation-profile)
+without its executable-bit byte). In versions `"1"` to `"3"` it is the
+implementation's legacy tree stream. A consumer MUST verify every
+`content_hash` with the stream its lockfile's version names. A consumer
+that rewrites a version `"1"` to `"3"` lockfile during a writable
+install MAY promote it to `"4"`, and then MUST re-hash every package
+`content_hash` with the version `"4"` stream from bytes that verified
+against the recorded value or that it fetched and accepted in that same
+operation; when any package row cannot be so re-hashed it MUST keep the
+lockfile's version and every recorded `content_hash` unchanged. A frozen
+install ([req-lk-006](#req-lk-006)), `apm audit`, and any operation
+that does not otherwise write the lockfile MUST NOT promote it or
+rewrite any `content_hash`.
 
 <a id="req-lk-017"></a>
 **[req-lk-017]** A conforming **consumer** implementation
@@ -1391,12 +1411,19 @@ This isolation prevents the orphan-cleanup logic of one dependency
 from removing files attributed to another (see
 [Section 10.7](#107-unverified-content-cleanup-file-integrators)).
 
-### 5.4 Lockfile versions (1, 2) and bumping rules
+### 5.4 Lockfile versions (1, 2, 4) and bumping rules
 
 This specification defines two lockfile schema versions, `"1"` and
 `"2"`. Both are valid on-disk formats; `"2"` is a strict superset of
 `"1"`. Editorial reconciliation with the companion is consolidated
 in [Appendix E](#appendix-e-editorial-reconciliation-notes).
+
+Version `"4"` (amendment 0.1.68) admits every field of the earlier
+versions, including the version `"3"` replacement state below, and
+changes only the byte stream a package `content_hash` digests, as
+defined by [req-lk-016](#req-lk-016). A consumer that does not
+recognise `"4"` refuses the lockfile under [req-lk-004](#req-lk-004);
+it never verifies a version `"4"` digest with an earlier stream.
 
 The separately proposed opt-in source-replacement capability uses `"3"`
 under [req-rpl-003](#req-rpl-003). It is not an adopted expansion of
@@ -1744,7 +1771,7 @@ The `dependencies` policy block governs APM dependency declarations.
 |------------------------|-------------------------------------------------------------------------------------------|
 | `allow`                | List of patterns matched against the canonical dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded; a host-qualified pattern also requires the effective host per [req-pl-018](#req-pl-018) clause (g). Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
 | `deny`                 | Always wins over `allow`; host-qualified pattern matching per [req-pl-018](#req-pl-018) clause (g); case treatment per [req-pl-018](#req-pl-018). |
-| `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
+| `require`              | Exact packages every consumer manifest must include; host matching per [req-pl-018](#req-pl-018) clause (g); case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
 | `require_pinned_constraint` | When true, flags unbounded direct deps as violations.                                 |
@@ -1774,9 +1801,10 @@ the following dependency-policy identity rules:
 omits the host: its repository coordinate plus any virtual
 in-repository path, with any `#` reference suffix excluded. A
 host-qualified pattern additionally constrains the host under clause
-(g); a hostless pattern matches the path on every host. A registry name is never part
-of this match subject and is compared literally wherever it appears in
-policy operands. This
+(g); a hostless `allow` or `deny` pattern matches the path on every
+host, and a `require` entry is host-bound under clause (g). A registry
+name is never part of this match subject and is compared literally
+wherever it appears in policy operands. This
 statement governs glob matching for `dependencies.allow` and
 `dependencies.deny`, plus exact identity matching for
 `dependencies.require`. A `require` entry is exact: `*` characters
@@ -1847,7 +1875,10 @@ through (f). A host-qualified pattern matches a dependency only when
 the dependency's effective host equals the named host after mapping
 only U+0041 through U+005A to U+0061 through U+007A. The effective
 host is the host written in the dependency reference or, when none is
-written, the implementation-default host
+written, the host resolution selects for it: the `default_host:` of
+the manifest that declares the dependency, when declared
+([Section 4.2.4](#424-default_host)), otherwise the
+implementation-default host
 ([Section 1.4](#14-terminology-preliminaries)), with any trailing colon
 followed by one to five ASCII digits (U+0030 through U+0039) removed,
 and any single trailing U+002E removed. Ports are ignored on both
@@ -1857,11 +1888,31 @@ sharing a prefix) matches. Local-path dependencies have no host and
 never match a host-qualified pattern. Shorthand, HTTPS and SSH
 references to the same repository MUST yield the same result. This
 clause applies to direct and transitive dependencies wherever
-`dependencies.allow` and `dependencies.deny` are evaluated. This
-clause does not apply to `dependencies.require`. A `require` entry
-whose first segment resembles a host is compared literally under
-clause (a) and matches no dependency whose canonical path omits the
-host.
+`dependencies.allow` and `dependencies.deny` are evaluated. A
+`dependencies.require` entry splits its host under the same rule and
+names exactly one host, using the same effective host and the same
+ASCII mapping: a host-qualified entry identifies a dependency only when
+the dependency's effective host equals the named host, and a hostless
+entry identifies a dependency only when the dependency's effective host
+is the implementation-default host of the evaluating governance
+implementation; a consumer manifest `default_host:` never changes the
+host a hostless entry names. A local-path dependency has no host and is
+identified by a hostless entry. A dependency whose effective host
+contains no U+002E and is not the implementation-default host cannot
+be identified by a `require` entry at this revision, because no entry
+can name that host. When an entry identifies more than one evaluated
+dependency (for example the same path on one host with different
+ports), the first in the order the check evaluates dependencies, which
+for dependencies declared in one manifest is their declaration order,
+is the one identified; a later dependency the entry also identifies is
+not evaluated for that entry. Every check that evaluates a
+`require` entry MUST resolve it to that same dependency on the manifest
+and the lockfile side, reading the lock entry by that dependency's own
+lockfile identity ([Section 5.2](#52-per-entry-fields)), not by
+re-matching the entry text against lockfile fields. It MUST treat an
+entry that identifies no dependency as a violation routed through the
+active `enforcement` value ([Section 6.2](#62-enforcement-modes)), and
+MUST NOT skip such an entry.
 
 #### 6.3.2 `mcp`
 
@@ -3801,7 +3852,8 @@ applies whatever the plugin format. The consumer MUST verify, without
 following symbolic links, that each deployed path resolves inside the
 profile root. A plugin whose manifest references a path that resolves
 outside its directory has no plugin root and MUST NOT be natively
-activated. It MUST record in the lock entry
+activated. It MUST record in the lock entry (the `native_plugin` field of
+[Section 5.2](#52-per-entry-fields))
 the deployed plugin root and one root digest covering the path, bytes, and
 executable bit of every file in that root, and MUST treat a deployed root
 whose recomputed digest differs from the recorded one as drift under [Section 5.5](#55-drift-and-integrity-model); its drift
@@ -3810,9 +3862,8 @@ The root digest is a hash envelope of the form `sha256:<hex-lowercase>`
 defined by [req-lk-016](#req-lk-016). It is the SHA-256 of the
 concatenation, over every regular file in the plugin root except any file
 whose relative path has a component equal to `.git`, at any depth, and
-except the consumer's own normalization output (a root `apm.yml` and a root
-`.apm/` directory, which a consumer may generate when it materializes a
-package), taken in ascending byte-wise order of the file's POSIX relative
+except every file whose relative path has a first component equal to `apm.yml` or `.apm` (which covers a root `apm.yml` file and every file under a root `.apm/` directory),
+whether or not the consumer generated them, taken in ascending byte-wise order of the file's POSIX relative
 path encoded as UTF-8, with no Unicode normalization, of: that relative
 path, one NUL (0x00) byte, one byte `x` (0x78) when the file is
 owner-executable or `-` (0x2D) otherwise, and the 32-byte raw SHA-256 digest
@@ -3837,10 +3888,18 @@ dependency activated under this subsection, the deployed plugin root takes
 the place of the materialized package beneath the resolved dependency root
 in the in-place reference obligation of [req-tg-013](#req-tg-013).
 
-> **Editorial note.** The root digest is computed over raw bytes, so a
-> checkout filter that rewrites line endings or the executable bit of a
-> committed project-scope plugin root is reported as drift. Project-scope
-> handling is settled with the project-scope route (#3921).
+> **Editorial note.** The root digest is computed over raw bytes and the
+> executable bit, so a checkout filter that rewrites line endings or the
+> executable bit of a committed project-scope plugin root is reported as
+> drift. A file system that does not carry the executable bit can yield a
+> root digest that differs from one recorded on a file system that does;
+> that difference is likewise reported as drift and is never admitted.
+> Until the project-scope route (#3921) settles a portable integrity
+> construction, a recorded root digest is comparable only with a root on a
+> file system with the same executable-bit semantics. At user scope the
+> lock is per-machine, so the case does not arise there. The approval
+> digest of [req-na-005](#req-na-005) omits the bit and is not affected.
+> Project-scope handling is settled with the project-scope route (#3921).
 
 <a id="req-na-003"></a>
 **[req-na-003]** A conforming **consumer** implementation that natively
@@ -3875,7 +3934,8 @@ MUST report that in an actionable diagnostic, MUST NOT remove any existing
 activation entry, and MAY add what the next lockfile requires; a first
 activation with no such entry needs no diagnostic. When the binding has
 moved (the expected marketplace name or profile-root path differs from the
-binding the previous lockfile's entries were produced under), or an entry
+binding the previous lockfile's entries were produced under, recorded as
+`native_plugin.marketplace` per [Section 5.2](#52-per-entry-fields)), or an entry
 under the consumer's marketplace name points at a different source, the
 consumer MUST report the conflict in an actionable diagnostic, MUST NOT
 write, delete, or overwrite any activation entry under either name, and
@@ -3900,16 +3960,24 @@ path.
 **[req-na-005]** A conforming **consumer** implementation that natively
 activates plugins MUST write an
 enable value of `true` for a natively activated plugin only when an
-approval covers the content of its plugin root, identified by the root
-digest of [req-na-002](#req-na-002) rather than by package name, version
-label, or source location, and the lock-integrity obligations
+approval covers the content of its plugin root, identified by the approval
+digest of that root rather than by package name, version label, or source
+location, and the lock-integrity obligations
 ([req-lk-013](#req-lk-013), [req-lk-015](#req-lk-015)), the authorized
 source-plan scan ([req-sc-015](#req-sc-015)), and executable authorization
 ([req-sc-009](#req-sc-009), [req-sc-010](#req-sc-010),
 [req-sc-011](#req-sc-011), and [req-sc-014](#req-sc-014)) admit it, whether
 or not it is a schema-bearing Agent Plugins v1 dependency. The approval
-mechanism is the consumer's own; it MUST be bound to the root digest and
-disclosed in the consumer's conformance statement. When no such approval
+mechanism is the consumer's own; it MUST be bound to the approval digest and
+disclosed in the consumer's conformance statement. The approval digest is
+the [req-na-002](#req-na-002) root digest construction over the same file
+set, order and encoding, with the executable-bit byte omitted: for each file,
+its relative path, one NUL (0x00) byte, and the 32-byte raw SHA-256 digest of
+its bytes. Like the root digest, it is a `sha256:<hex-lowercase>` envelope as defined by [req-lk-016](#req-lk-016); it is distinct from the root digest recorded as `native_plugin.fingerprint` ([Section 5.2](#52-per-entry-fields)), and a recorded root digest is not an approval. Files that [req-na-002](#req-na-002) excludes from the root digest are outside the approval digest as well, so an approval never covers them. It binds paths and bytes only, so an approval recorded on one
+operating system still covers the same content on another whose file system
+does not carry the executable bit. The [req-na-002](#req-na-002) root digest,
+which includes that bit, still gates integrity between the materialized
+source, the deployed root, and the lock. When no such approval
 covers the content of a plugin the consumer would natively activate, the
 consumer MUST NOT deploy that content under the profile root,
 MUST NOT declare it to any target, MUST NOT declare it in a disabled state,
@@ -3921,8 +3989,7 @@ previous lock entry (including its recorded plugin root and root digest),
 the previously deployed root, and its activation entries unchanged, and
 emit a default-visible diagnostic that names the plugin and states that the
 update was not applied; or retire the deployed root and its activation
-entries in the same rollback unit as the lock write. The written lock MUST
-NOT record a pin or root digest for content the consumer did not deploy.
+entries in the same rollback unit as the lock write. The written lock MUST NOT record a root digest, or an approval digest if the consumer records one there, for content the consumer did not deploy.
 
 <a id="req-na-006"></a>
 **[req-na-006]** A conforming **consumer** implementation that natively
@@ -4363,7 +4430,14 @@ ambiguity byte-exact, including on a case-insensitive source. A
 hostless pattern governs the same repository path on every reachable
 host; clause (g) of [req-pl-018](#req-pl-018) lets governance authors
 bind a pattern to one exact host, including the default host used for
-references written without one.
+references written without one. A `require` entry that identifies a
+remote dependency is bound to one host, so a same-path package on
+another host cannot satisfy it. A dependency fetched through a
+consumer-configured registry proxy keeps its declared identity, so its
+provenance rests on that proxy configuration. A hostless `require`
+entry names the evaluating implementation's default host, which can
+differ between environments; authors of a policy evaluated across such
+environments write host-qualified `require` entries.
 
 ### 10.9 Archive path-traversal (zip-slip / symlink escape)
 
@@ -4637,7 +4711,8 @@ settings the consumer does not own.
 
 **Mitigation.** [Section 8.5.11](#8511-native-plugin-activation-profile)
 derives activation only from the lockfile, admits content through the gates
-of [req-na-005](#req-na-005) bound to the root digest of
+of [req-na-005](#req-na-005) bound to the approval digest of the plugin
+root, checks deployed roots against the root digest of
 [req-na-002](#req-na-002), writes only documented activation entries
 ([req-na-003](#req-na-003)), derives ownership from the previous and next
 lockfile ([req-na-004](#req-na-004)), and requires per-project marketplace
@@ -4651,7 +4726,7 @@ the target's own trust prompt is the remaining gate. A committed `true`
 enable entry is a version-control enablement path that
 [req-sc-010](#req-sc-010) does not cover (see
 [Section 10.11](#1011-summary-table), row 12); it is not an approval under
-[req-na-005](#req-na-005) for any other user.
+[req-na-005](#req-na-005) for any other user. Because the approval digest of [req-na-005](#req-na-005) omits the executable bit, a change that only sets or clears that bit on an approved plugin root stays covered by the existing approval; the lock then records the new [req-na-002](#req-na-002) root digest, and the executable-authorization gates that [req-na-005](#req-na-005) also applies ([req-sc-009](#req-sc-009), [req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011), [req-sc-014](#req-sc-014)) still decide whether that content is admitted.
 
 ---
 
@@ -5090,9 +5165,12 @@ The schemas below define this specification's normative structural contract.
 > amendment 0.1.46 selects an independent lockfile resource that adds manifest
 > extensions to the 0.1.41 lockfile contract, and amendment 0.1.60 selects a
 > further lockfile resource that adds `target_subset` and `subset_pairings`
-> ([req-rs-018](#req-rs-018)) to the 0.1.46 contract. All use distinct `$id`
-> URLs. The earlier v0.1 and 0.1.41 manifest resources and the 0.1.41 and
-> 0.1.46 lockfile resources remain available with unchanged IDs and bytes.
+> ([req-rs-018](#req-rs-018)) to the 0.1.46 contract, and amendment 0.1.68
+> selects a lockfile resource that adds version `"4"`
+> ([req-lk-016](#req-lk-016)) to the 0.1.60 contract. All use distinct `$id`
+> URLs. The earlier v0.1 and 0.1.41 manifest resources and the 0.1.41,
+> 0.1.46 and 0.1.60 lockfile resources remain available with unchanged IDs
+> and bytes.
 > Human approval and the public comment period under
 > [Section 9.3](#93-amendment-process) remain pending; listing these URLs does
 > not establish approval or publication.
@@ -5100,7 +5178,7 @@ The schemas below define this specification's normative structural contract.
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
 | Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.48.schema.json`](/apm/specs/schemas/manifest-v0.1.48.schema.json) (JSON Schema 2020-12; proposed). |
-| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.60.schema.json`](/apm/specs/schemas/lockfile-v0.1.60.schema.json) (JSON Schema 2020-12; proposed). |
+| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.68.schema.json`](/apm/specs/schemas/lockfile-v0.1.68.schema.json) (JSON Schema 2020-12; proposed). |
 | Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
 | Proposed replacement manifest | [`schemas/manifest-source-replacements-v1.schema.json`](/apm/specs/schemas/manifest-source-replacements-v1.schema.json), distinct opt-in candidate, not ratified. |
 | Proposed replacement lock version 3 | [`schemas/lockfile-source-replacements-v1.schema.json`](/apm/specs/schemas/lockfile-source-replacements-v1.schema.json), distinct candidate, not ratified. |
@@ -5402,10 +5480,13 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.63  | 2026-11-19 | Amendment for issue #3880 (shared MCP document attribution, deferred from the 0.1.61 review). Added [req-mf-027](#req-mf-027) (Section 4.5, consumer MUST): when two or more targets write project-scoped MCP servers to the same configuration file (at this revision `claude` and `copilot` share the workspace-root `.mcp.json`), each entry the consumer wrote there is attributed to the file, not only to the target that selected the server; an entry recorded for one of those targets is not foreign to another that selects the same server, subject to the same recorded-write checks; when one of those targets stops selecting the server, for example because it is deactivated, the entry is kept and owned, retaining a recorded write hash, for any other active target that writes the file and still selects it, and is removable, under the consumer's other ownership rules including [req-mf-026](#req-mf-026), only once no such target selects it. Entries the consumer did not write and distinct (including user-scoped) configuration files are outside the requirement. The non-normative Section 4.2.1 note now points to the new requirement instead of deferring it. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: the only verdict class that changes is a consumer that removes, or treats as foreign, a shared-file entry another active target sharing that file still selects, which no longer conforms. The reference implementation already behaves this way. Sections 1.3, 4.2.1, 4.5, 4.9, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Proposed 2026-11-19; adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3904, without the Section 9.3 reviewer-panel approval and public comment period. Adoption does not change the status of [req-mf-026](#req-mf-026), which amendment 0.1.57 still proposes. Adds one MUST. Statement count: 139 -> 140 (135 MUST, 5 SHOULD). |
 | 0.1.64 (proposed) | 2026-11-19 | Amendment for accepted issue #3902 (portable, content-bound approval for transitive MCP servers). Added [req-sc-016](#req-sc-016) (Section 10.13, consumer MUST): a consumer admits a transitive dependency's self-defined, registry-naming or overlaying MCP server only when the consuming manifest re-declares it, a manifest grant binds the declaring package, the server name and a matching definition fingerprint, or the operator opts in for that invocation; consent is never derived from the lockfile, a per-invocation opt-in is never persisted, a no-longer-matching fingerprint withholds the server with a diagnostic naming the package and server even under the opt-in, and an organization denial still wins over every path. The grant may live in the consuming manifest or the per-user approval location of [req-sc-010](#req-sc-010) (the manifest deciding); a dependency's own manifest never grants. The fingerprint is a full-length `sha256` digest over the declaration as installed, covering every field that determines what runs plus any resolved registry entry; an unrecognized fingerprint does not match. Revised [req-sc-011](#req-sc-011) (Section 10.14) in place so the identical-outcome clause also covers a frozen install. Under Section 9.2 both change verdicts: a consumer that keeps a server only because the lockfile lists it, persists the opt-in, deploys a server whose bound definition changed, admits such a transitive server on a package-level or type-level grant alone, or reaches a frozen-install verdict different from install, no longer conforms; such projects re-declare the server or record a fingerprint grant. The reference implementation behaves this way. Sections 1.3, 10.11 (row 26), 10.13, 10.14, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes are unchanged. Adds one MUST. Statement count: 147 -> 148 (143 MUST, 5 SHOULD), counted after the adopted 0.1.65 amendment, which landed first. |
 | 0.1.65  | 2026-11-19 | Amendment for issue #3919 (native plugin activation profile), from the #3094 design record accepted on 2026-11-19. Added Section 8.5.11 with seven consumer MUSTs. Part A (normative) defines target criteria A1 to A5: documented user and project settings files with precedence, an in-place local directory marketplace with relative paths at project scope, a declarative per-plugin enable switch that needs no install command once declared and trusted, no automatic update of directory sources, and documented precedence when a target reads another target's files. [req-na-001](#req-na-001) permits native activation only for a target, scope and client version that meets A1 to A5 by published documentation, with a conformance-statement disclosure. Part B (normative): [req-na-002](#req-na-002) the lockfile is the source of truth, only the approved plugin root is deployed to `.agents/plugins/<plugin>/` or `~/.agents/plugins/<plugin>/` with a generated `.claude-plugin/marketplace.json`, plugin names are safe path segments, and the lock records one root digest whose construction is pinned; [req-na-003](#req-na-003) only the documented activation entries are written, never private target state, and no target binary, CLI or RPC is called; [req-na-004](#req-na-004) ownership comes from the previous and next lockfile with no receipt file, preserving unrelated keys and explicit `false`; [req-na-005](#req-na-005) a plugin is enabled only when an implementation-defined approval bound to the root digest covers it and the [req-tg-013](#req-tg-013) admission gates admit it, and is otherwise neither deployed nor declared; [req-na-006](#req-na-006) a target that does not qualify gets explicit split install or refusal with a default-visible diagnostic, never silent; [req-na-007](#req-na-007) generated marketplace names are unique per project and per scope. Part C (informative) records Claude Code as native-eligible, GitHub Copilot as native-eligible at user scope with project scope unknown under A5, Codex as split (fails A3; A2 also not met; Codex 0.170.0, 2026-11-19) with schema-bearing Agent Plugins v1 dependencies opaque under [req-tg-011](#req-tg-011), and every other catalog target as unknown. [req-tg-013](#req-tg-013) is unchanged; a Section 8.5.7 editorial note identifies the two clauses, [req-na-002](#req-na-002) and [req-na-004](#req-na-004), that substitute for its placement and ledger clauses for a profile-activated dependency. Under Section 9.2 this adds an optional capability: the requirements bind only a consumer that natively activates plugins as Section 8.5.11 defines it, so no existing verdict changes and registrations made under [req-tg-013](#req-tg-013) alone are unaffected. No schema or lockfile-version change; the lock records the root and digest as additive entry data. Sections 1.3, 8.5.7, 8.7, 10.11, 10.18 (new), 11.2, 11.3.2, 12.4, Appendix C, the requirements manifest, a reconciliation oracle and conformance coverage are updated. Version 0.1.64 is reserved for the concurrent proposal for issue #3902; this amendment does not adopt proposed amendment 0.1.64. Proposed and adopted 2026-11-19 in this Working Draft by editor decision recorded in issue #3919, without the Section 9.3 reviewer-panel approval and public comment period. Adds seven MUSTs. Statement count: 140 -> 147 (142 MUST, 5 SHOULD). |
+| 0.1.66 (proposed) | 2026-11-19 | Amendment for the portable native-plugin approval pin (issue #3919 follow-up, PR #3290; implementation in PR #3989). Revised [req-na-005](#req-na-005) in place: the approval that permits native activation is bound to the plugin root's approval digest, which is the [req-na-002](#req-na-002) root digest construction over the same file set, order and encoding with the executable-bit byte omitted, so one approval covers the same paths and bytes on operating systems whose file systems do not carry that bit; the approval digest is distinct from the root digest the lock records. The [req-na-002](#req-na-002) root digest keeps the bit and still gates integrity between the materialized source, the deployed root and the lock. Revised the [req-na-002](#req-na-002) file-set exclusion clause in place: a root `apm.yml` and a root `.apm/` are excluded whether or not the consumer generated them, so they are neither digested nor deployed under the profile root, and a plugin whose manifest references them is not natively activated. Added the `native_plugin` row to Section 5.2, documenting the lock data that [req-na-002](#req-na-002) and [req-na-004](#req-na-004) already require; both now cross-reference it. Under Section 9.2 this changes verdicts: a consumer that binds the approval to the executable-bit-including root digest, or that digests or deploys an author-shipped root `apm.yml` or `.apm/`, no longer conforms. Approvals recorded against the earlier root digest no longer match, so the plugin is withheld with the [req-na-005](#req-na-005) diagnostic until it is re-approved; a lock entry whose root digest was computed under the earlier exclusion reading is reported as drift under [Section 5.5](#55-drift-and-integrity-model). The reference implementation behaves this way. The root digest is not portable across file systems with different executable-bit semantics; the [req-na-002](#req-na-002) editorial note records this limitation pending the project-scope route (#3921). Sections 5.2, 8.5.11 and 10.18 are updated; schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 148 (143 MUST, 5 SHOULD). |
+| 0.1.67 (proposed) | 2026-11-19 | Amendment for accepted issue #3993. Revised [req-pl-018](#req-pl-018) (Section 6.3.1, governance MUST) in place. Clause (g) now binds a `dependencies.require` entry to one host with the same effective host and ASCII mapping as `allow` and `deny`: a host-qualified entry identifies a dependency only on the named host, and a hostless entry only on the implementation-default host of the evaluating implementation (never rebound by a consumer manifest `default_host:`); local paths still match hostless entries, dependencies on dotless hosts other than the implementation-default host cannot be identified at this revision, and the first identified dependency in the order the check evaluates dependencies (declaration order within one manifest) is the one identified. Every check evaluating a `require` entry MUST resolve it to that dependency on the manifest and lockfile side, reading the lock entry by the dependency's own lockfile identity, and MUST treat an entry that identifies no dependency as a violation routed through `enforcement`, never skipping it. Clause (g) also states that a dependency written without a host takes the `default_host:` of its declaring manifest as its effective host when declared, matching resolution under [req-mf-019](#req-mf-019); because clause (g) defines one effective host for every pattern field, this also applies to host-qualified `allow` and `deny` patterns: for a manifest declaring a non-default `default_host:`, a host-qualified pattern naming that host newly matches the manifest's shorthand dependencies and one naming the implementation-default host no longer does (the reference implementation already behaved this way). Clause (a), the Section 6.3.1 table and the Section 10.8 note were aligned. Under Section 9.2 this changes an evaluation already defined by req-pl-018 and is not behavior-neutral errata: a host-qualified entry can newly pass on any host, including one naming the implementation-default host; a hostless entry for a dependency on any other host newly fails; and an entry naming no dependency newly fails a check that verifies the entry in the lockfile. Policy authors migrate by host-qualifying `require` entries for packages off the implementation-default host; the diagnostic names the entry to write. Source replacement under [req-rpl-002](#req-rpl-002) is unchanged. The concurrent 0.1.66 proposal is independent; this amendment does not adopt it. No new normative statement; count unchanged at 148 (143 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel and comment window. |
+| 0.1.68 (proposed) | 2026-11-19 | Amendment for accepted issue #4000 (hash framing hardening). Revised [req-lk-016](#req-lk-016) (Section 5.2, consumer MUST) in place: the byte stream a package `content_hash` digests is named by `lockfile_version`. A new version `"4"` digests, per file in ascending byte-wise POSIX path order, the UTF-8 relative path, one NUL byte and the raw SHA-256 of the file bytes (the [Section 8.5.11](#8511-native-plugin-activation-profile) root-digest framing without its executable-bit byte); versions `"1"` to `"3"` keep the implementation's legacy tree stream. Values keep the `sha256:<hex>` envelope; no new prefix is introduced. A consumer verifies each `content_hash` with the stream its version names; a writable install MAY promote a version `"1"` to `"3"` lockfile to `"4"` only by re-hashing every package row from verified or freshly accepted bytes, and otherwise keeps the version and every recorded value; a frozen install, `apm audit` and any operation that does not otherwise write the lockfile never promote or rewrite. Section 5.4 now names version `"4"`, which admits every earlier field including version `"3"` replacement state; a consumer that does not recognise it refuses the lockfile under [req-lk-004](#req-lk-004). Appendix A selects a new lockfile resource, `lockfile-v0.1.68.schema.json`, that adds `"4"` to the `lockfile_version` enum; the 0.1.60 resource keeps its ID and bytes. Under Section 9.2 this changes recorded values for promoted lockfiles: a consumer that does not recognise `"4"` now refuses them instead of verifying them. Lockfiles that stay at `"1"` to `"3"` verify unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row is unchanged; the requirements manifest notes and conformance coverage are updated. No new normative statement; count unchanged at 148 (143 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel and comment window. |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63 and 0.1.65 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63 amendment and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, and the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63 amendment and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
 working draft
 contains 148 statements (143 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), and amendment 0.1.65 on the same date by editor decision (issue #3919), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.

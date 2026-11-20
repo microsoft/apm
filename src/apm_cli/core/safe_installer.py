@@ -165,10 +165,9 @@ class SafeMCPInstaller:
 
     def _log_success(self, server_ref: str):
         """Log successful server installation."""
+        # The integrator's install tree reports success once (#3994).
         if self.logger:
-            self.logger.success(f"  + {server_ref}")
-        else:
-            _rich_success(f"  + {server_ref}")
+            self.logger.verbose_detail(f"  + {server_ref}")
 
     def _log_failure(self, server_ref: str):
         """Log failed server installation."""
