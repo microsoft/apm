@@ -814,9 +814,10 @@
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lock_drives_deployment_of_exactly_the_plugin_root",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_root_digest_matches_the_known_answer_vector"
       ]
     },
@@ -839,8 +840,9 @@
       "oracle": "tests/fixtures/spec-conformance/native-activation/req-na-004.json",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 12,
+      "test_count": 13,
       "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_cross_target_suppression_is_the_consumers_own_false",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_no_receipt_and_removal_only_of_what_the_previous_lock_produced",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[add-and-remove]",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-conflict]",
