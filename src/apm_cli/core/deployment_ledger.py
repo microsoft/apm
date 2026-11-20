@@ -553,26 +553,27 @@ def record_bundle_receipts(
     *,
     scope: InstallScope,
     targets: Sequence[TargetProfile],
-    claims: Sequence[str],
-    owner: str,
+    written: Sequence[str],
+    lockfile: LockFile,
 ) -> None:
     """Record local deployment receipts for files a local bundle install wrote (#4223).
 
     Bundle files cannot be rendered from a locked source, so the receipt is
-    their only deletion evidence (req-lk-024). *claims* are lock values,
-    project- or home-relative, or absolute; a file no target root contains is
-    not receipted and stays without evidence.
+    their only deletion evidence (req-lk-024). *written* lists only files this
+    install actually wrote, never adopted identical ones; *lockfile* already
+    holds their claims, so each receipt binds to the committed local-bundle
+    claim. A file no target root contains is not receipted.
     """
     from apm_cli.utils.content_hash import compute_file_hash
 
-    session = DeploymentMaterializationSession(project_root, scope, None)
-    for claim in claims:
+    session = DeploymentMaterializationSession(project_root, scope, lockfile)
+    for claim in written:
         path = Path(claim)
         physical = path if path.is_absolute() else project_root / path
         if physical.is_symlink() or not physical.is_file():
             continue
         try:
-            session.record({physical: compute_file_hash(physical)}, targets, owner)
+            session.record({physical: compute_file_hash(physical)}, targets, _LOCAL_BUNDLE_OWNER)
         except ValueError:
             continue
     session.flush()

@@ -26,6 +26,8 @@ class BundleHookResult:
 
     scripts: list[str] = field(default_factory=list)
     script_hashes: dict[str, str] = field(default_factory=dict)
+    # Scripts actually written this run, never adopted identical files (#4223).
+    written: list[str] = field(default_factory=list)
     hook_files: int = 0
     skipped: int = 0
 
@@ -140,6 +142,11 @@ def integrate_local_bundle_hooks(
                     continue
                 result.scripts.append(record)
                 result.script_hashes[record] = compute_file_hash(dest)
+        written = {
+            _record_path(Path(path), project_root, user_scope=user_scope)
+            for path in integrator.take_rendered_writes()
+        }
+        result.written = [record for record in result.scripts if record in written]
     if result.hook_files and logger is not None:
         logger.verbose_detail(f"Registered {result.hook_files} hook file(s) from bundle '{slug}'")
     return result

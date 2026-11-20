@@ -296,17 +296,6 @@ def install_local_bundle(
                 deployed, deployed_hashes, project_root
             )
         skipped = result.get("skipped", 0)
-        if not dry_run:
-            from ..core.deployment_ledger import record_bundle_receipts
-
-            # Receipts are a bundle file's only deletion evidence (#4223).
-            record_bundle_receipts(
-                project_root,
-                scope=scope,
-                targets=targets,
-                claims=deployed,
-                owner=_bundle_owner_key(bundle_info),
-            )
 
         # Issue #1207 D2.b: instructions staged into
         # ``apm_modules/<slug>/.apm/instructions/`` for targets without a
@@ -386,6 +375,17 @@ def install_local_bundle(
                 staged_hashes=result.get("staged_file_hashes", {}),
                 staged_fallback_hashes=staged_fallbacks,
             )
+            if not dry_run:
+                from ..core.deployment_ledger import record_bundle_receipts
+
+                # Receipts are a bundle file's only deletion evidence (#4223).
+                record_bundle_receipts(
+                    project_root,
+                    scope=scope,
+                    targets=targets,
+                    written=result.get("written_files", []),
+                    lockfile=lockfile,
+                )
 
             # Auto-migrate legacy per-client skill paths (#737).
             # After deploying new .agents/skills/ files, detect and clean up
