@@ -40,6 +40,21 @@ def outdated(offline, include_prerelease, verbose):
         upgradable = 0
         up_to_date = 0
         for entry in yml.packages:
+            # Local-path entries have no remote tags to compare (#4201).
+            if entry.is_local:
+                rows.append(
+                    _OutdatedRow(
+                        name=entry.name,
+                        current=current_versions.get(entry.name, "--"),
+                        range_spec="--",
+                        latest_in_range="--",
+                        latest_overall="--",
+                        status="[i]",
+                        note="Local path; skipped",
+                    )
+                )
+                continue
+
             # Entries with explicit ref (no range) are skipped
             if entry.ref is not None:
                 rows.append(
