@@ -28,6 +28,7 @@ def _target(name, root_dir=".claude"):
 
 def _ctx(*, package_deployed_files, existing_lockfile=None, targets=None, project_root):
     return SimpleNamespace(
+        frozen=False,
         package_deployed_files=package_deployed_files,
         existing_lockfile=existing_lockfile,
         targets=targets or [_target("claude")],

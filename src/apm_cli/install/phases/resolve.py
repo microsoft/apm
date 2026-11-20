@@ -762,6 +762,7 @@ def _resolve_dependencies(
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
     from apm_cli.install.legacy_plugin_compat import validate_cached_legacy_plugin
+    from apm_cli.install.service import InstallService
 
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
@@ -780,7 +781,7 @@ def _resolve_dependencies(
         update_keys=update_keys,
         existing_lockfile=existing_lockfile,
         reference_resolver=downloader,
-        frozen=ctx.frozen,
+        frozen=InstallService.frozen_disposition(ctx).replay,
         cache_validation_callback=partial(
             validate_cached_legacy_plugin,
             lockfile=existing_lockfile,
