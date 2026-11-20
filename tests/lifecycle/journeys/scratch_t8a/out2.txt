@@ -1,0 +1,459 @@
+
+$ git init -q --initial-branch=main
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ apm init -y --target copilot,claude
+-- rc=0
+-- stdout:
+[i] Targets set: claude, copilot (via --target flag)
+[>] Initializing APM project: project
+[*] APM project initialized successfully!
+           Created Files           
++---------------------------------+
+| File    | Description           |
+|---------+-----------------------|
+| apm.yml | Project configuration |
++---------------------------------+
+
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------  Next Steps -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| * Install a package:               apm install <owner>/<repo>                                                                                                                                                                                                                                                                                                                                                |
+| * Build a plugin? Scaffold one:    apm plugin init                                                                                                                                                                                                                                                                                                                                                           |
+| * Publishing a marketplace?:       apm marketplace init                                                                                                                                                                                                                                                                                                                                                      |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+[i] Tip: Use agentrc to generate tailored agent instructions from your codebase. https://github.com/microsoft/agentrc
+  Docs: https://microsoft.github.io/apm  |  Star: https://github.com/microsoft/apm
+
+-- stderr:
+
+
+$ apm install microsoft/apm-sample-package#v1.0.0
+-- rc=0
+-- stdout:
+[*] Validating 1 package...
+[+] microsoft/apm-sample-package#v1.0.0
+[*] Updated apm.yml with 1 new package(s)
+[>] Installing 1 new package...
+[>] Resolving microsoft/apm-sample-package...
+[>] Resolving awesome-copilot-review-and-refactor...
+[i] Targets: claude, copilot  (source: apm.yml)
+  [+] microsoft/apm-sample-package #v1.0.0 @311dbcc0
+  |-- 2 prompts integrated -> .github/prompts/
+  |-- 2 agents integrated -> .claude/agents/, .github/agents/
+  |-- 2 commands integrated -> .claude/commands/
+  |-- 2 instruction(s) integrated -> .claude/rules/, .github/instructions/
+  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
+  [+] github.com/github/awesome-copilot/skills/review-and-refactor #default @75b925e7
+  |-- Skill integrated -> .agents/skills/, .claude/skills/
+[i] Added apm_modules/ to .gitignore
+  [!] [apm-sample-package] Claude command accessibility-audit: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] [apm-sample-package] Claude command design-review: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] 1 dependency unpinned: github/awesome-copilot -- apm.lock.yaml pins the resolved commit; to track releases on update, add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)
+[*] Installed 2 APM dependencies in 1.0s.
+
+-- stderr:
+
+
+$ git add apm.yml apm.lock.yaml .gitignore
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ git commit -q -m 'Add agent dependencies'
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ git add .github .claude .agents
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ git commit -q -m 'deployed'
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ git status --porcelain
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ git clone . ../teammate
+-- rc=0
+-- stdout:
+
+-- stderr:
+Cloning into '../teammate'...
+done.
+
+
+$ apm install --frozen
+-- rc=0
+-- stdout:
+[>] Installing dependencies from apm.yml...
+[>] Resolving microsoft/apm-sample-package...
+[>] Resolving awesome-copilot-review-and-refactor...
+[i] Targets: claude, copilot  (source: apm.yml)
+  [+] microsoft/apm-sample-package #311dbcc05e07208c5a78de7d64a1af6f104aadc8 @311dbcc0
+  |-- 2 prompts adopted -> .github/prompts/
+  |-- 2 agents adopted -> .claude/agents/, .github/agents/
+  |-- 2 commands integrated -> .claude/commands/
+  |-- 2 instruction(s) adopted -> .claude/rules/, .github/instructions/
+  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
+  [+] github.com/github/awesome-copilot/skills/review-and-refactor #75b925e7de2327a23fcc2b61666932657614c7e8 @75b925e7
+  |-- (files unchanged)
+  [!] [apm-sample-package] Claude command accessibility-audit: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] [apm-sample-package] Claude command design-review: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] 1 dependency unpinned: github/awesome-copilot -- apm.lock.yaml pins the resolved commit; to track releases on update, add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)
+[*] Installed 2 APM dependencies in 0.8s.
+[i] Deployed files verified against apm.lock.yaml.
+
+-- stderr:
+
+
+$ git status --porcelain
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ apm audit
+-- rc=0
+-- stdout:
+[>] Scanning installed packages and deployed files...
+
+[*] 12 file(s) scanned -- no issues found
+
+-- stderr:
+[>] Replaying install (cache-only)...
+[+] Replayed 2 package(s)
+[>] Diffing scratch vs working tree...
+[+] No drift detected
+
+
+$ apm find --source .agents/skills/style-checker/SKILL.md
+-- rc=0
+-- stdout:
+microsoft/apm-sample-package  microsoft/apm-sample-package@v1.0.0
+
+-- stderr:
+
+
+$ apm install
+-- rc=0
+-- stdout:
+[>] Installing dependencies from apm.yml...
+[i] Targets: claude, copilot  (source: apm.yml)
+  [+] microsoft/apm-sample-package #v1.0.0 @311dbcc0 (cached)
+  |-- 2 prompts adopted -> .github/prompts/
+  |-- 2 agents adopted -> .claude/agents/, .github/agents/
+  |-- 2 commands integrated -> .claude/commands/
+  |-- 2 instruction(s) adopted -> .claude/rules/, .github/instructions/
+  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
+  [+] github.com/github/awesome-copilot/skills/review-and-refactor @75b925e7 (cached)
+  |-- (files unchanged)
+  [!] [apm-sample-package] Claude command accessibility-audit: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] [apm-sample-package] Claude command design-review: frontmatter keys not supported for claude commands and were dropped: mode. Supported keys: allowed-tools, argument-hint, description, input, model.
+  [!] 1 dependency unpinned: github/awesome-copilot -- apm.lock.yaml pins the resolved commit; to track releases on update, add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)
+[*] Installed 1 APM dependency in 0.3s.
+
+-- stderr:
+
+
+$ git status --porcelain
+-- rc=0
+-- stdout:
+
+-- stderr:
+
+
+$ apm install --help
+-- rc=0
+-- stdout:
+Usage: python -m apm_cli.cli install [OPTIONS] [PACKAGES]...
+
+  Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills
+  (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use
+  --allow-insecure for http:// packages)
+
+Options:
+  --runtime TEXT                  Target a specific runtime only. Legacy alias
+                                  for --target (single value only; prefer
+                                  --target). Values: agent-skills, agents,
+                                  agy, all, antigravity, claude, codex,
+                                  copilot, copilot-app, copilot-cowork,
+                                  cursor, gemini, grok-bot, grok-build, grok-
+                                  cloud, hermes, intellij, kiro, openclaw,
+                                  opencode, vscode, windsurf. 'vscode' is a
+                                  deprecated alias of 'copilot'.
+  --exclude TEXT                  Exclude one runtime from the resolved
+                                  MCP/LSP target set
+  --only [apm|mcp]                Install only APM packages or MCP/LSP service
+                                  dependencies
+  --update                        Update dependencies to latest Git references
+                                  (deprecated: prefer 'apm update' for an
+                                  interactive plan, or 'apm update --yes' for
+                                  CI). Unlike --refresh, --update restructures
+                                  the entire dependency graph.
+  --dry-run                       Show what would change without writing files
+  --force                         Overwrite locally-authored files on
+                                  collision and deploy despite critical
+                                  security findings (does NOT refresh refs;
+                                  use 'apm update' for that)
+  --frozen                        Refuse to install when apm.lock.yaml is
+                                  missing or out of sync with apm.yml,
+                                  including Git source, ref, host provider,
+                                  transport, and MCP config state, or when
+                                  deployed files do not match the hashes it
+                                  records (CI-safe; mutually exclusive with
+                                  --update, --mcp, and positional packages).
+  -v, --verbose                   Show detailed installation information
+  --trust-transitive-mcp          Trust MCP servers from transitive packages
+                                  that are self-defined or set their own
+                                  registry or configuration (skip re-
+                                  declaration requirement)
+  --parallel-downloads INTEGER    Max concurrent package downloads (0 to
+                                  disable parallelism)  [default: 4]
+  --dev                           Install as development dependency
+                                  (devDependencies)
+  -t, --target TARGET             Target harness(es) to deploy to. Use commas
+                                  for multiple targets; repeating the flag
+                                  keeps only the last value (use commas
+                                  instead). Values: agent-skills, agents, agy,
+                                  all, antigravity, claude, codex, copilot,
+                                  copilot-app, copilot-cowork, cursor, gemini,
+                                  grok-bot, grok-build, grok-cloud, hermes,
+                                  intellij, kiro, openclaw, opencode, vscode,
+                                  windsurf. 'vscode' is a deprecated alias of
+                                  'copilot'. 'intellij' writes JetBrains MCP
+                                  config once apm.yml exists (file primitives
+                                  use the Copilot profile) and is never
+                                  recorded in apm.yml; record 'copilot' for
+                                  JetBrains. 'all' excludes agent-skills,
+                                  antigravity, grok-bot, hermes, experimental
+                                  targets, and intellij. Combine explicit-only
+                                  targets when needed. Experimental targets
+                                  require their feature flags. Target
+                                  resolution: --runtime/--target > apm.yml
+                                  targets: > apm config set target ... > auto-
+                                  detect (only when no higher-priority
+                                  selection exists). With nothing to detect,
+                                  install exits 2 with a teaching message. For
+                                  'apm compile', use '--all'; '--target all'
+                                  is deprecated.
+  --allow-insecure                Allow HTTP (insecure) dependencies. Required
+                                  when dependencies use http:// URLs.
+  --allow-insecure-host HOSTNAME  Allow transitive HTTP (insecure)
+                                  dependencies from this hostname. Repeat for
+                                  multiple hosts.
+  -g, --global                    Install to the APM user home ($APM_HOME,
+                                  default ~/.apm) instead of the current
+                                  project. Direct MCP installs create or
+                                  update the user manifest. APM_HOME controls
+                                  metadata but not target deployment. Mixed
+                                  selections warn and skip workspace-only
+                                  runtimes; selections with no global-capable
+                                  runtime exit 2 before changing the user
+                                  manifest, lockfile, or runtime
+                                  configuration. Runtimes without user-scope
+                                  support are skipped with a warning that
+                                  lists the supported ones.
+  --ssh                           Prefer SSH transport for shorthand
+                                  (owner/repo) dependencies. Mutually
+                                  exclusive with --https.
+  --https                         Prefer HTTPS transport for shorthand
+                                  (owner/repo) dependencies. Mutually
+                                  exclusive with --ssh.
+  --allow-protocol-fallback       Restore the legacy permissive cross-protocol
+                                  fallback chain (escape hatch for migrating
+                                  users; also: APM_ALLOW_PROTOCOL_FALLBACK=1).
+                                  Caveat: fallback reuses the same port across
+                                  schemes; on servers that use different SSH
+                                  and HTTPS ports, omit this flag and pin the
+                                  dependency with an explicit ssh:// or
+                                  https:// URL.
+  --auth-first                    Skip the anonymous-first HTTPS attempt for
+                                  github.com and use your resolved credentials
+                                  immediately (also: APM_GITHUB_AUTH_FIRST=1,
+                                  apm config set github-auth-first true).
+                                  Escape hatch for TLS-inspecting proxies the
+                                  isolated anonymous attempt cannot pass.
+                                  Trade-off: forwards credentials on the first
+                                  attempt.
+  --mcp NAME                      Add an MCP server entry to apm.yml. Use with
+                                  --transport, --url, --env, --header, --mcp-
+                                  version, or a stdio command after `--`.
+                                  Resolves active targets as
+                                  --runtime/--target > apm.yml targets: > apm
+                                  config set target ... > auto-detect (only
+                                  when no higher-priority selection exists);
+                                  writes only for active targets.
+  --transport [stdio|http|sse|streamable-http]
+                                  MCP transport (stdio, http, sse, streamable-
+                                  http). Inferred from --url or post-- command
+                                  when omitted (requires --mcp).
+  --url TEXT                      MCP server URL for http/sse/streamable-http
+                                  transports (requires --mcp).
+  --env KEY=VALUE                 Environment variable for stdio MCP,
+                                  repeatable (requires --mcp).
+  --header KEY=VALUE              HTTP header for remote MCP, repeatable
+                                  (requires --mcp and --url).
+  --mcp-version TEXT              Pin MCP registry entry to a specific version
+                                  (requires --mcp).
+  --registry URL                  MCP registry URL (http:// or https://) for
+                                  resolving --mcp NAME. Precedence: this flag,
+                                  MCP_REGISTRY_URL, apm config, then the
+                                  public default. Captured in apm.yml on the
+                                  entry's 'registry:' field for auditability.
+                                  Not valid with --url or a stdio command
+                                  (self-defined entries).
+  --skill NAME                    Install only named skill(s) from a
+                                  SKILL_BUNDLE. Repeatable. Persisted in
+                                  apm.yml and apm.lock so bare 'apm install'
+                                  is deterministic. Additive across installs:
+                                  a later --skill X adds X to the existing pin
+                                  (union) rather than replacing it. Use
+                                  --skill '*' (quote the asterisk in your
+                                  shell) to reset to all skills; to drop a
+                                  single skill, edit the skills: list in
+                                  apm.yml then re-run apm install.
+  --no-policy                     Skip org policy enforcement for this
+                                  invocation. Does NOT bypass apm audit --ci.
+  --audit [off|warn|block]        Run 'apm audit' over deployed files during
+                                  install: off, warn, or block. Overrides
+                                  config/policy. Requires 'apm experimental
+                                  enable external-scanners'. An org policy
+                                  'block' cannot be relaxed below by this
+                                  flag.
+  --no-audit                      Disable the install-time audit for this
+                                  invocation (equivalent to --audit off).
+  --refresh                       Re-fetch all dependencies from upstream and
+                                  re-resolve all ref pins. Marketplaces are
+                                  revalidated; the install fails rather than
+                                  use stale marketplace data. Use 'apm update'
+                                  for interactive upgrade planning.
+  --legacy-skill-paths            Deploy skill files to per-client paths (e.g.
+                                  .cursor/skills/) instead of the shared
+                                  .agents/skills/ directory. Compatibility
+                                  flag for projects that need per-client skill
+                                  layouts.
+  --as ALIAS                      Override the log/display label when
+                                  installing a local bundle (directory, .zip,
+                                  or .tar.gz produced by 'apm pack'). Only
+                                  valid for local-bundle installs; passing
+                                  --as without a local bundle path is
+                                  rejected.
+  --trust-bin / --no-trust-bin    Allow or skip bin/ executable deployment for
+                                  this invocation. --trust-bin deploys bin/
+                                  executables (suppresses the trust warning).
+                                  --no-trust-bin skips bin/ deployment even
+                                  when policy allows it. Default: deploys bin/
+                                  but emits a warning; non-interactive
+                                  contexts skip bin/ by default. Use 'apm
+                                  approve' for persistent per-package trust.
+  --root DIR                      Install into DIR instead of $PWD:
+                                  apm_modules/, apm.lock.yaml, .claude/,
+                                  .codex/, .agents/, .opencode/ are written
+                                  under DIR while sources (apm.yml, .apm/,
+                                  local-path packages) continue resolving from
+                                  $PWD. Mirrors 'pip install --target' / 'npm
+                                  install --prefix'. Project scope only; not
+                                  valid with --global.
+  --help                          Show this message and exit.
+
+-- stderr:
+
+
+$ apm audit --ci -f sarif -o apm.sarif
+-- rc=0
+-- stdout:
+
+-- stderr:
+[!] Could not determine org from git remote; enforcement skipped (set policy.fetch_failure_default=block in apm.yml to fail closed)
+[>] Replaying install (cache-only)...
+[+] Replayed 2 package(s)
+[>] Diffing scratch vs working tree...
+[+] No drift detected
+[*] CI audit report written to apm.sarif
+
+
+$ apm install --frozen
+-- rc=1
+-- stdout:
+[>] Installing dependencies from apm.yml...
+[x] --frozen: deployed files do not match the hashes recorded in apm.lock.yaml.
+  - .agents/skills/style-checker/SKILL.md: expected sha256:2546e30d663f199b3319e4e5e0ea5be95a4fa94d77b0c1a0922d5101216094dc, observed sha256:49119ee22939c6d8b58453ea94b7cb44d0616906435108d31b538fca5d03e647
+[i] Tip: nothing was deployed. To restore the locked content, delete the listed files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings). To keep local edits, run 'apm export-patch' or move them aside first.
+[x] Install failed after 0.1s.
+
+-- stderr:
+
+
+$ apm audit --ci
+-- rc=1
+-- stdout:
+
+                                                                 [>] APM Policy Compliance                                                                 
++---------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Status   | Check                    | Message                                                                                                           |
+|----------+--------------------------+-------------------------------------------------------------------------------------------------------------------|
+| [+]      | lockfile-exists          | Lockfile present                                                                                                  |
+| [+]      | ref-consistency          | All dependency refs match lockfile                                                                                |
+| [+]      | deployment-ledger-owners | All deployment ledger owners are valid                                                                            |
+| [+]      | deployed-files-present   | All deployed files present on disk                                                                                |
+| [+]      | no-orphaned-packages     | No orphaned packages in lockfile                                                                                  |
+| [+]      | skill-subset-consistency | Skill subset selections match lockfile                                                                            |
+| [+]      | config-consistency       | No MCP configs to check                                                                                           |
+| [x]      | content-integrity        | 1 file(s) with hash drift -- run 'apm install' after deleting the drifted files (plain install keeps local edits) |
+| [x]      | drift                    | drift detected: 1 file(s): .agents/skills/style-checker/SKILL.md                                                  |
++---------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+  content-integrity details:
+    - hash-drift: .agents/skills/style-checker/SKILL.md (dep=microsoft/apm-sample-package, expected=2546e30d663f..., actual=49119ee22939...)
+
+  drift details:
+    - modified: .agents/skills/style-checker/SKILL.md
+
+[x] 2 of 9 check(s) failed
+
+[x] Drift detected: 1 file(s)
+
+  modified (1):
+    - .agents/skills/style-checker/SKILL.md  [microsoft/apm-sample-package]
+
+  [i] 1 local edit(s) to managed files; run 'apm export-patch' to export them as upstream patches before the next install overwrites them
+  [i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
+
+
+-- stderr:
+[>] Replaying install (cache-only)...
+[+] Replayed 2 package(s)
+[>] Diffing scratch vs working tree...
+[!] Drift detected: 1 file(s)
+
+
+$ git status --porcelain
+-- rc=0
+-- stdout:
+ M .agents/skills/style-checker/SKILL.md
+?? apm.sarif
+
+-- stderr:
+
+.
+1 passed in 10.42s
