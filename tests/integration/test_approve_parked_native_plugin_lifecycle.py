@@ -168,6 +168,28 @@ def test_user_scope_claude_plugin_is_approved_by_the_printed_command(
     assert_unchanged(before[0], ArtifactSnapshot.capture(world.home))
     assert_unchanged(before[1], ArtifactSnapshot.capture(world.apm_home))
 
+    # I1: the lock records the deployed native plugin, and its root is on disk.
+    def locked() -> dict:
+        lock = yaml.safe_load((world.apm_home / "apm.lock.yaml").read_text("utf-8"))
+        (row,) = [r for r in lock["dependencies"] if r.get("local_path") == str(plugin)]
+        return row
+
+    row = locked()
+    assert row["exec_status"] == "deployed", row
+    plugin_root = world.home / row["native_plugin"]["root"]
+    assert (plugin_root / ".mcp.json").is_file(), row
+
+    # I4: denying the same identity retires the plugin on the next install.
+    denied = world.apm("deny", "-g", str(plugin))
+    assert denied.returncode == 0, _evidence(denied)
+    retired = world.apm("install", "-g")
+    assert retired.returncode == 0, _evidence(retired)
+    assert not enabled(), _evidence(retired)
+    row = locked()
+    assert row["exec_status"] != "deployed", row
+    assert not row.get("native_plugin"), row
+    assert not plugin_root.exists(), "the denied plugin's files stayed on disk"
+
 
 def test_user_scope_codex_bundle_parks_and_the_printed_command_approves_it(
     tmp_path: Path, apm_binary_path: Path
