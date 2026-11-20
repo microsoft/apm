@@ -12,7 +12,7 @@
     "val": [
       "Add an integration test that apm compile does not write the lockfile twice",
       "We fixed apm prune leaving a stale lockfile entry; add the test that would have caught it",
-      "Write the replay row for T4: newer-generator lockfile refused by prune -g",
+      "Write the replay row for T4: newer-generator lockfile refused by apm prune",
       "Add a docs journey step for the CI gate with apm audit --ci"
     ]
   },
