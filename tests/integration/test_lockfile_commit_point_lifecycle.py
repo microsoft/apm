@@ -150,6 +150,34 @@ def test_sigterm_without_a_deploy_snapshot_is_reported_by_audit_and_converged(
         assert_unchanged(snapshot, world.snapshot(root))
 
 
+def test_a_failed_lockfile_write_is_reported_by_audit_and_converged(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4164: a lockfile write that fails after deploy leaves state audit reports."""
+    world = build_world(tmp_path, apm_binary_path)
+    lock = world.lockfile_bytes()
+    agent = world.project / "packages/alpha/.apm/agents/alpha.agent.md"
+    agent.write_text(agent.read_text(encoding="ascii") + "v2\n", encoding="ascii")
+    deployed = ".github/agents/alpha.agent.md"
+
+    failed = world.runner.run(
+        ("install", "--no-policy"),
+        cwd=world.project,
+        env=dict(world.env, APM_TEST_FAIL_LOCK_REPLACE="1"),
+    )
+    assert failed.returncode != 0, evidence(failed)
+    assert "apm.lock.yaml" in failed.stdout + failed.stderr, evidence(failed)
+    assert world.lockfile_bytes() == lock
+    assert (world.project / deployed).read_text(encoding="ascii").endswith("v2\n")
+
+    audit = world.apm("audit", "--ci", "--no-policy")
+    assert audit.returncode != 0, evidence(audit)
+    assert f"hash-drift: {deployed}" in audit.stdout + audit.stderr, evidence(audit)
+
+    world.assert_converges()
+    assert world.lockfile_bytes() != lock
+
+
 @pytest.mark.parametrize("audited", [False, True], ids=["plain", "audited"])
 @pytest.mark.parametrize("change", ["new-package", "changed-package"])
 def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install(
