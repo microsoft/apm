@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -62,7 +63,7 @@ from tests.lifecycle.security.gate_paths import Step, paths
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice, slices
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
 from tests.lifecycle.world import use_policy
-from tests.lifecycle.world.services import DENIED_PACKAGE, ORG
+from tests.lifecycle.world.services import DENIED_PACKAGE, ORG, policy_org
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -125,9 +126,13 @@ _DENIED: Mapping[str, frozenset[str]] = {
 class GateReplay(RowReplay):
     """``RowReplay`` with input edits, user scope and the gate-removal checks."""
 
-    def __init__(self, world, row: Row, *, scope: str = "project") -> None:
+    def __init__(
+        self, world, row: Row, *, scope: str = "project", ungoverned: bool = False
+    ) -> None:
         super().__init__(world, replace(row, scope="project"))
         self.scope = scope
+        # The org policy edits reach no command of this scope (the documented contract).
+        self.ungoverned = ungoverned
         self.ceiling: frozenset[str] | None = None
         self.witness: tuple[str, ...] = ()
         self.at_change: Observation | None = None
@@ -163,6 +168,9 @@ class GateReplay(RowReplay):
         elif edit == "policy":
             variant = str(step["variant"])
             use_policy(self.world, variant)
+            if self.ungoverned:
+                _home_remote(self.world, variant)
+                return
             names = _DENIED.get(variant, frozenset())
             denied = [k for k in self.kinds if self.world.packages[k].name in names]
             self.model = self.model.with_policy(variant, denied)
@@ -544,8 +552,12 @@ def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
     given += arrange[1:]
     apply = spec.change_steps.get(change, how.apply)
     when: list[Step] = [{"edit": "mark", "witness": witness}, *apply(key, kind)]
-    when += [step.format(key=key) if isinstance(step, str) else step for step in spec.act]
-    if how.refuses_package:
+    act = [step.format(key=key) if isinstance(step, str) else step for step in spec.act]
+    when += act
+    if gate_row.ungoverned:
+        # The local gate still governs this scope: a local deny retires the surface.
+        when += [*CHANGES["local-deny"].apply(key, kind), *act]
+    elif how.refuses_package:
         when.append(f"apm uninstall {key}")
     announce = gate_row.announce or spec.announce or how.announce
     row = Row(
@@ -587,10 +599,13 @@ def test_gate_change_removes_on_the_next_mutating_command(
     lifecycle_world, gate_slice: GateSlice, gate_row: GateRow
 ) -> None:
     row, scope, announce = build_row(gate_slice, gate_row)
-    replay = GateReplay(lifecycle_world, row, scope=scope)
+    replay = GateReplay(lifecycle_world, row, scope=scope, ungoverned=bool(gate_row.ungoverned))
     replay.replay()
     assert replay.removal is not None, "no removing step ran after the gate change"
     before, result, after = replay.removal
+    if gate_row.ungoverned:
+        _check_ungoverned(lifecycle_world, gate_row, scope, before, result, after)
+        return
     # A removing step that succeeds deletes the surface files (or edits shared
     # ones); one that refuses or only plans keeps them byte for byte.
     removed = result.returncode == 0 and "--dry-run" not in result.command
@@ -608,6 +623,53 @@ def test_gate_change_removes_on_the_next_mutating_command(
         problems += _evidence_problems(before.artifacts, after.artifacts, result, evidence)
         assert not problems, f"{gate_row.id}:\n" + "\n".join(problems)
         return
+    check_obligation(
+        gate_row.id,
+        strength=STRENGTH,
+        before=before,
+        after=after,
+        result=result,
+        evidence=evidence,
+        scope=scope,
+    )
+
+
+def _home_remote(world, variant: str) -> None:
+    """Make HOME a checkout whose remote names the policy org too.
+
+    The org policy is then reachable from every root a user-scope command could
+    derive a git remote from: the project it runs in and HOME (which holds
+    APM_HOME), so the ungoverned outcome cannot pass for want of a remote.
+    """
+    git = ("git", "-C", str(world.home))
+    if not (world.home / ".git").exists():
+        subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
+    remote = f"https://github.com/{policy_org(variant)}/dotfiles.git"
+    subprocess.run((*git, "remote", "add", "origin", remote), env=world.env, check=True)
+
+
+def _check_ungoverned(world, gate_row: GateRow, scope: str, before, result, after) -> None:
+    """The org change does not govern this scope; the local deny that follows does.
+
+    The first install after the org change keeps the surface byte for byte,
+    exits 0 and names no policy; no command sent a policy request or wrote a
+    policy cache. The replay's I4 check already proved the later local deny
+    retired the surface.
+    """
+    requests = [
+        entry
+        for entry in world.services.egress_log()
+        if "apm-policy" in str(entry["path"]) or "/policy-" in str(entry["path"])
+    ]
+    assert not requests, f"{gate_row.id}: policy requests at {scope} scope: {requests}"
+    cache_root = world.cache_root or world.root / "cache"
+    cached = sorted(str(path) for path in cache_root.rglob("*") if "policy" in path.name)
+    assert not cached, f"{gate_row.id}: policy cache written: {cached}"
+    evidence = Evidence(
+        unchanged={**gate_row.unchanged, **gate_row.surface},
+        exit=0,
+        output_forbids=(r"(?i)polic(y|ies)",),
+    )
     check_obligation(
         gate_row.id,
         strength=STRENGTH,

@@ -51,13 +51,13 @@ _SMOKE = {"G|update|local-deny|mcp"}
 _MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
 _DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
 _XFAIL["G|marketplace-install|local-deny|mcp"] = _DENY_BY_SPEC
-_USER_ORG = "S-pending (neutral issue to follow): org policy for user-scope installs"
-_XFAIL.update(
-    {
-        f"G|marketplace-install|{change}|mcp": _USER_ORG
-        for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
-    }
-)
+# User scope discovers no org policy (docs/src/content/docs/enterprise/apm-policy.mdx;
+# core/scope.policy_discovery_uses_git_remote); user-scope org policy is #3703.
+_USER_UNGOVERNED = "user scope is not governed by org policy (#3703)"
+_UNGOVERNED = {
+    f"G|marketplace-install|{change}|mcp": _USER_UNGOVERNED
+    for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
+}
 
 _PATHS = {
     "install": (_ALL, _PROJECT),
@@ -88,6 +88,7 @@ SLICE = GateSlice(
             unchanged=unchanged,
             smoke=f"G|{path}|{change}|mcp" in _SMOKE,
             xfail=_XFAIL.get(f"G|{path}|{change}|mcp", ""),
+            ungoverned=_UNGOVERNED.get(f"G|{path}|{change}|mcp", ""),
         )
         for path, (changes, (surface, unchanged)) in _PATHS.items()
         for change in changes

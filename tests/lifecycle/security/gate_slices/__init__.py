@@ -40,6 +40,10 @@ class GateRow:
     # Non-empty: the gated surface never deploys on this path, so the row checks
     # its facts without earning a receipt until the steward rules (the reason).
     definition_pending: str = ""
+    # Non-empty: the change is an org policy this path's scope does not consult
+    # (the documented contract). The next install keeps the surface, sends no
+    # policy request and writes no policy cache; a local deny still retires it.
+    ungoverned: str = ""
 
     @property
     def parts(self) -> tuple[str, str, str]:
