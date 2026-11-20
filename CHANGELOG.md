@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm update` with nothing to change applies org policy like `apm install`: a denied dependency exits 1 and nothing is written. (closes #4458, #PRNUM)
 - `apm install` blocked by org policy ends with a runnable next step: remove or replace the blocked dependencies, check `apm policy status`, then re-run. (closes #4404, #4418)
 - `apm uninstall` resolves the remaining packages' org-policy trust before changing state, so that refusal leaves `apm.yml`, the lockfile and deployed files unchanged, and uninstall refuses out-of-project paths before any change. (closes #4185, #4255)
 - `apm uninstall` keeps your own files inside a removed package's skill directory and succeeds, as `apm prune` does. (closes #4162, #4255)

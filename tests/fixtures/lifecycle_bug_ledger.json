@@ -3992,6 +3992,17 @@
         "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome",
         "tests/unit/policy/test_discovery.py::TestAutoDiscover::test_unreachable_github_private_serves_the_recorded_stale_github_cache"
       ]
+    },
+    {
+      "issue": 4458,
+      "fixed_in": "Unreleased",
+      "summary": "apm update with nothing to change applies org policy to the installed set as apm install does: a dependency denied under enforcement block exits 1, names the denial and writes nothing.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_update_policy_no_change.py::test_update_with_nothing_to_change_refuses_a_policy_denied_dependency",
+        "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome"
+      ]
     }
   ],
   "lifecycle_contracts": [
