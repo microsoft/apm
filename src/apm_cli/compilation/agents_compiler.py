@@ -10,11 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
 
-from ..core.remediation import (
-    AGENTS_FILES_DISTRIBUTED,
-    HAND_AUTHORED_OUTPUT_PROTECTED,
-    NESTED_REPOSITORY_SKIPPED,
-)
+from ..core import remediation as rem
 from ..core.target_catalog import accepted_target_values, get_target_capability
 from ..core.target_detection import (
     CompileTargetType,
@@ -1565,10 +1561,9 @@ class AgentsCompiler:
         result.stats.setdefault("copilot_root_instructions_written", 0)
         result.stats.setdefault("copilot_root_instructions_unchanged", 0)
 
-        # Inspect any existing file BEFORE the dry-run early-exit so that
-        # `--dry-run` faithfully reports what a real run would do (skip vs
-        # write vs unchanged). Reading the file here is safe in dry-run mode
-        # because we never mutate it.
+        # Inspect any existing file BEFORE the dry-run early-exit so `--dry-run`
+        # reports what a real run would do (skip vs write vs unchanged). Reading
+        # is safe in dry-run mode because we never mutate it.
         try:
             existing = output_path.read_text(encoding="utf-8") if output_path.exists() else None
         except OSError as exc:
@@ -1585,14 +1580,13 @@ class AgentsCompiler:
             rel_path = portable_relpath(output_path, self.base_dir)
             result.warnings.append(
                 f"Skipped {rel_path}: hand-authored file will not be overwritten. "
-                + HAND_AUTHORED_OUTPUT_PROTECTED.bind(
+                + rem.HAND_AUTHORED_OUTPUT_PROTECTED.bind(
                     fix="delete or rename it, or prepend the line "
                     f"'{AGENTS_MD_GENERATED_MARKER}' to the top of the file"
                 ).sentence()
             )
-            # The file was never compared to new content; record as
-            # 'skipped', not 'unchanged'. Also reset 'generated' since no
-            # output was actually emitted (or would be, on a real run).
+            # Never compared to new content: record 'skipped', not 'unchanged', and
+            # reset 'generated' since no output was (or would be) emitted.
             result.stats["copilot_root_instructions_generated"] = 0
             result.stats["copilot_root_instructions_written"] = 0
             result.stats["copilot_root_instructions_skipped"] = 1
@@ -1854,7 +1848,7 @@ class AgentsCompiler:
             self.warnings.append(
                 f"Skipping AGENTS.md at {agents_rel}: nested Git repository "
                 f"{root_rel} belongs to a separate repository. "
-                + NESTED_REPOSITORY_SKIPPED.bind(root=nested_root).sentence()
+                + rem.NESTED_REPOSITORY_SKIPPED.bind(root=nested_root).sentence()
             )
             return None
         if (
@@ -2062,7 +2056,7 @@ class AgentsCompiler:
                 f"Total instructions: {distributed_result.stats.get('total_instructions_placed', 0)}",
                 f"Total patterns: {distributed_result.stats.get('total_patterns_covered', 0)}",
                 "",
-                AGENTS_FILES_DISTRIBUTED.sentence(),
+                rem.AGENTS_FILES_DISTRIBUTED.sentence(),
             ]
         )
 
