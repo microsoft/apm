@@ -408,8 +408,11 @@ class InstallLogger(CommandLogger):
             self.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
             for path in written:
                 self.error_detail(f"  {path}")
+        # The lock is rewritten for the files written; the kept files' entries
+        # are carried over unchanged (RA-009), so say both.
+        recorded = f"records the {len(written)} written file(s) and " if written else ""
         self._failed_install_residue_note = (
-            f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
+            f"apm.lock.yaml {recorded}keeps the previous entries of the {kept} kept file(s)."
         )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
