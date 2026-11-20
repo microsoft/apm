@@ -231,6 +231,44 @@ def _audit_help_findings(provider: FactsProvider, rule_id: str) -> list[Violatio
     return findings
 
 
+_CONFIG_MODULE = "src/apm_cli/config.py"
+# config.json writers, closed world (H6): ``update_config`` (and so ``apm config
+# set`` and ``apm experimental enable|disable|reset``) is the only writer; every
+# read is pure.
+_CONFIG_WRITES = (
+    (re.compile(r"(?<![\w.])ensure_config_exists\("), frozenset({_CONFIG_MODULE})),
+    (re.compile(r"(?<![\w.])update_config\("), frozenset({_CONFIG_MODULE, _FLAG_REGISTRY})),
+    (re.compile(r"\bopen\(\s*CONFIG_FILE\s*,\s*[\x27\"]w"), frozenset({_CONFIG_MODULE})),
+)
+
+
+def _config_write_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Only update_config writes ~/.apm/config.json; reading a flag never does (H6)."""
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        for number, line in enumerate(facts.lines, start=1):
+            stripped = line.lstrip()
+            if stripped.startswith(("#", "def ")):
+                continue
+            for pattern, allowed in _CONFIG_WRITES:
+                if path not in allowed and pattern.search(line):
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            "only apm_cli.config.update_config writes config.json (via 'apm "
+                            "config set' or 'apm experimental enable|disable|reset'); reads "
+                            "must not create or write it",
+                            line=number,
+                        )
+                    )
+    return findings
+
+
 def _check_experimental_flags(provider: FactsProvider) -> Iterable[Violation]:
     """Experimental flags are read, their notices stay verbose, GA help is not experimental."""
     rule_id = "registry_delegation.experimental_flags"
@@ -238,6 +276,7 @@ def _check_experimental_flags(provider: FactsProvider) -> Iterable[Violation]:
         *_unread_flag_findings(provider, rule_id),
         *_inactive_resolver_notice_findings(provider, rule_id),
         *_audit_help_findings(provider, rule_id),
+        *_config_write_findings(provider, rule_id),
     )
 
 
@@ -258,7 +297,8 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-experimental-flags",),
         description=(
             "Every experimental flag has a reader; the inactive-resolver notice is "
-            "verbose-only; only external-scanner audit options say [experimental]."
+            "verbose-only; only external-scanner audit options say [experimental]; "
+            "only update_config writes config.json."
         ),
         check=_check_experimental_flags,
     ),

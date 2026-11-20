@@ -4823,6 +4823,13 @@ def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str,
             'help="Scan installed packages for hidden Unicode characters",',
             id="audit-help-drops-integrity-mode",
         ),
+        pytest.param(
+            "registry_delegation.experimental_flags",
+            "src/apm_cli/core/experimental.py",
+            "    del create_config\n",
+            "    from apm_cli.config import ensure_config_exists\n\n    ensure_config_exists()\n",
+            id="flag-read-creates-config",
+        ),
     ],
 )
 def test_output_owner_guards_catch_bypasses(rule_id: str, path: str, old: str, new: str) -> None:
@@ -4840,6 +4847,44 @@ def test_output_owner_guards_catch_bypasses(rule_id: str, path: str, old: str, n
     assert report.failures == ()
     assert {violation.rule_id for violation in report.violations} == {rule_id}
     assert any(violation.path == path for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "contracts-tooling-remediation-advice",
+            "src/apm_cli/commands/install.py",
+            '"config state, or when deployed files do not match the hashes it records "',
+            '"config state "',
+            id="frozen-help-drops-hash-refusal",
+        ),
+        pytest.param(
+            "contracts-tooling-remediation-advice",
+            "src/apm_cli/commands/init.py",
+            "    if write:\n        discover_flag = True\n",
+            "    if write:\n        pass\n",
+            id="init-apply-stops-implying-discover",
+        ),
+        pytest.param(
+            "contracts-tooling-remediation-drift-kinds",
+            "src/apm_cli/core/remediation.py",
+            '        "orphaned": RESYNC_DEPLOYED,\n',
+            "",
+            id="drift-kind-orphaned-loses-its-row",
+        ),
+    ],
+)
+def test_remediation_guards_catch_regressions(rule_id: str, path: str, old: str, new: str) -> None:
+    """DX5, DX6 and H7 regressions each trip only their own rule (#4090)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_ids = ("contracts-tooling-remediation-advice", "contracts-tooling-remediation-drift-kinds")
+    report = run_selected_rules(ROOT, rule_ids, source_overrides={path: mutated})
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
 
 
 # ---------------------------------------------------------------------------
