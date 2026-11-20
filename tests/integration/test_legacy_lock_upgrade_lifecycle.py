@@ -219,11 +219,14 @@ def test_c4_frozen_install_of_untouched_pre036_project_writes_nothing(
 ) -> None:
     world = _World(tmp_path / "c4", apm_binary_path, FIXTURE_035)
     before = world.snapshot()
+    lock = world.project / "apm.lock.yaml"
+    lock_before = lock.read_bytes()
 
     code, out, err = world.run("install", "--frozen")
 
     assert code == 0, f"{out}\n{err}"
     assert _kept_lines(out + err) == []
+    assert lock.read_bytes() == lock_before, "a frozen replay never rewrites the lock"
     assert world.snapshot() == before
 
 
