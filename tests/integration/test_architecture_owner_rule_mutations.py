@@ -3725,6 +3725,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The marketplace parser interprets peeled ^{} records outside tag_commit_shas.",
     ),
     MutationCase(
+        guard_id="transport-platform-marketplace-catalog-credentials",
+        rule_id="transport-platform-marketplace-catalog-credentials",
+        path="src/apm_cli/marketplace/client.py",
+        old="            ambient_credentials=False,\n",
+        new="            ambient_credentials=True,\n",
+        intent="Hosted catalog requests regain ambient .netrc credentials.",
+    ),
+    MutationCase(
         guard_id="transport-platform-marketplace-package-remote",
         rule_id="transport-platform-marketplace-package-remote",
         path="src/apm_cli/marketplace/resolver.py",
