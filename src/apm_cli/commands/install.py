@@ -1809,9 +1809,8 @@ def _install_apm_packages(ctx, outcome):
         outcome,
         logger=logger,
         install_mcp=should_install_mcp,
-        frozen=frozen_disposition.replay,
         lsp_preflight=LspPreflight.for_install(ctx),
-    )
+    ) | {"frozen": frozen_disposition.replay}
 
     if ctx.dry_run:
         preview = None

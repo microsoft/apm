@@ -117,9 +117,12 @@ def preview_declared_policy(ctx: Any, plan: Any, logger: Any) -> None:
 
 
 def install_pipeline_options(
-    ctx: Any, outcome: Any, *, logger: Any, install_mcp: bool, frozen: bool, lsp_preflight: Any
+    ctx: Any, outcome: Any, *, logger: Any, install_mcp: bool, lsp_preflight: Any
 ) -> dict[str, Any]:
-    """The keyword options an install and its ``--dry-run`` preview pass the pipeline."""
+    """The keyword options an install and its ``--dry-run`` preview pass the pipeline.
+
+    The caller adds the frozen replay decision from ``InstallService.frozen_disposition``.
+    """
     return dict(
         force=ctx.force,
         parallel_downloads=ctx.parallel_downloads,
@@ -138,7 +141,6 @@ def install_pipeline_options(
         trust_transitive_mcp=ctx.trust_transitive_mcp,
         install_mcp=install_mcp,
         mcp_runtime=ctx.runtime,
-        frozen=frozen,
         plan_callback=ctx.plan_callback,
         skill_subset=ctx.skill_subset,
         skill_subset_from_cli=ctx.skill_subset_from_cli,

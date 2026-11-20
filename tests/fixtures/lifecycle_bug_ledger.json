@@ -67,6 +67,12 @@
       "phase": 0,
       "oracle_tier": "outcome",
       "law": "Credentials remain scoped to their intended host and never enter persisted URLs or output."
+    },
+    {
+      "id": "lockfile.version_monotonic",
+      "phase": 0,
+      "oracle_tier": "semantic",
+      "law": "A written lockfile_version is never lowered by a rewrite (req-lk-002)."
     }
   ],
   "bugs": [

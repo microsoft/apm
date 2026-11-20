@@ -2000,14 +2000,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
-        guard_id="install-deployment-overwrite-evidence",
-        rule_id="install-deployment-overwrite-evidence",
-        path="src/apm_cli/integration/base_integrator.py",
-        old="(gate and gate.authorizes(target_path, rel_path))",
-        new="(gate is not None)",
-        intent="A managed file is overwritten without asking the install-bound evidence gate.",
-    ),
-    MutationCase(
         guard_id="install-deployment-bundle-admission-owner",
         rule_id="install-deployment-bundle-admission-owner",
         path="src/apm_cli/commands/pack.py",
@@ -2239,7 +2231,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-locked-source-cache",
         rule_id="install-deployment-locked-source-cache",
         path="src/apm_cli/install/drift.py",
-        old="        attach_persistent_git_cache(downloader)\n",
+        old="        attach_persistent_git_cache(downloader, read_only=True)\n",
         new="",
         intent="The audit --ci replay reads locked git sources outside install's git cache.",
     ),
@@ -2346,6 +2338,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def finalize_install_result(",
         new="def finalize_install_result_disabled(",
         intent="Install outcome owner stops defining the result finalizer.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-overwrite-evidence",
+        rule_id="install-deployment-overwrite-evidence",
+        path="src/apm_cli/integration/base_integrator.py",
+        old="(gate and gate.authorizes(target_path, rel_path))",
+        new="(gate is not None)",
+        intent="A managed file is overwritten without asking the install-bound evidence gate.",
     ),
     MutationCase(
         guard_id="install-deployment-package-content-hash",
