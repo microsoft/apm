@@ -13,7 +13,19 @@ from pathlib import Path
 import pytest
 
 from scripts.test_static_facts import module_markers
-from tests.quality.taxonomy import candidate_promises, fix_hint, load_promises, suggested_pytestmark
+from tests.quality.taxonomy import (
+    candidate_promises,
+    load_promises,
+    missing_promise_message,
+    spawning_unit_message,
+    suggested_pytestmark,
+    unclassified_message,
+    unit_under_integration_message,
+    unknown_promise_message,
+)
+from tests.quality.taxonomy import (
+    main as taxonomy_main,
+)
 from tests.quality.taxonomy_inventory_plugin import spawns_processes
 
 RATCHET_TEST_SCOPE = "repository"
@@ -435,45 +447,26 @@ def _taxonomy_ratchet_findings(
     baseline = {key: entries | set(moves[key]) for key, entries in baseline.items()}
     unclassified: set[str] = set()
     misplaced: set[str] = set()
-    catalog_name = PROMISE_CATALOG.relative_to(REPO_ROOT).as_posix()
     for module, markers in sorted(inventory.modules.items()):
         behavioral = _behavioral(markers)
         if not behavioral:
             unclassified.add(module)
             if module not in baseline["unclassified_modules"]:
-                failures.append(
-                    f"{module}: unclassified test module. Fix: add exactly one "
-                    "module-level pytestmark behavioral marker (unit, component or e2e)."
-                    + fix_hint(module, root, described)
-                )
+                failures.append(unclassified_message(module, root, described))
         if module.startswith("tests/integration/") and behavioral == ("unit",):
             misplaced.add(module)
             if module not in baseline["misplaced_modules"]:
-                failures.append(
-                    f"{module}: unit-marked module under tests/integration. Fix: move it "
-                    "to tests/unit, or mark it component or e2e if it crosses a boundary."
-                )
+                failures.append(unit_under_integration_message(module))
         if module.startswith("tests/unit/") and module in inventory.spawning:
             misplaced.add(module)
             if module not in baseline["misplaced_modules"]:
-                failures.append(
-                    f"{module}: tests/unit module spawns processes. Fix: move it to "
-                    "tests/integration (marked component or e2e), or mock the process "
-                    "boundary instead of spawning."
-                )
+                failures.append(spawning_unit_message(module))
         promises = inventory.promises.get(module, ())
         if not promises and module not in baseline["promise_exempt_modules"]:
-            failures.append(
-                f"{module}: new test module carries no pytest.mark.promise. Fix: add "
-                'pytest.mark.promise("<id>", ...) to its module-level pytestmark, naming '
-                f"ids from {catalog_name}." + fix_hint(module, root, described)
-            )
+            failures.append(missing_promise_message(module, root, described))
         unknown = sorted(set(promises) - catalog)
         if unknown:
-            failures.append(
-                f"{module}: unknown promise id(s) {unknown}. Fix: use ids listed in "
-                f"{catalog_name}, or add the promise to the catalog."
-            )
+            failures.append(unknown_promise_message(module, unknown))
     observed = {
         "misplaced_modules": misplaced,
         "promise_exempt_modules": set(inventory.modules),
@@ -875,3 +868,37 @@ def test_tm016_suggested_line_infers_the_behavioral_marker(
     assert line == (
         f'pytestmark = [pytest.mark.{behavioral}, pytest.mark.promise("P-OWN-marketplace-fetch")]'
     )
+
+
+def _changed_repo(root: Path) -> Path:
+    """A git repo with the real catalog and baseline, one commit on 'main'."""
+    quality = root / "tests" / "quality"
+    quality.mkdir(parents=True)
+    for name in ("promise-catalog.json", "test_taxonomy_baseline.json"):
+        (quality / name).write_text((REPO_ROOT / "tests" / "quality" / name).read_text())
+    git = ["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "-c", "commit.gpgsign=false", "commit", "-qm", "base"], check=True)
+    return root
+
+
+def test_tm017_changed_reports_only_changed_modules_with_the_gate_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _changed_repo(tmp_path)
+    (root / "tests" / "unit").mkdir()
+    (root / "tests" / "unit" / "test_new_promiseless.py").write_text(
+        "import pytest\n\npytestmark = pytest.mark.unit\n\ndef test_value():\n    assert True\n"
+    )
+    assert taxonomy_main(["--changed", "--base-ref", "main", "--root", str(root)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(
+        "[x] tests/unit/test_new_promiseless.py: new test module carries no pytest.mark.promise."
+    )
+    assert "Suggested: pytestmark = [pytest.mark.unit, pytest.mark.promise(" in err
+    (root / "tests" / "unit" / "test_new_promiseless.py").write_text(
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I6")]\n'
+    )
+    assert taxonomy_main(["--changed", "--base-ref", "main", "--root", str(root)]) == 0
+    assert "[+] tm006: 1 changed test module(s)" in capsys.readouterr().out
