@@ -214,6 +214,28 @@ def _is_manifestless_leaf(package_dir: Path) -> bool:
     }
 
 
+def _local_manifest_dir(ref: DependencyReference, source_dir: Path, apm_modules_dir: Path) -> Path:
+    """Return the directory whose manifest declares a local package's edges.
+
+    A local source is read in place, except a Claude plugin without
+    ``apm.yml``: install normalizes it into its ``apm_modules`` copy and
+    resolves its dependencies from the manifest written there, so the walk
+    reads that same manifest (#4321). Without one the source stays
+    unverifiable.
+    """
+    from apm_cli.models.validation import PackageType, detect_package_type
+
+    if not source_dir.is_dir() or manifest_file(source_dir).exists():
+        return source_dir
+    if detect_package_type(source_dir)[0] is not PackageType.MARKETPLACE_PLUGIN:
+        return source_dir
+    try:
+        copy_dir = installed_package_path(ref, apm_modules_dir)
+    except ValueError:
+        return source_dir
+    return copy_dir if manifest_file(copy_dir).is_file() else source_dir
+
+
 def compute_forward_reachable_keys(
     lockfile: LockFile,
     project_root: Path,
@@ -326,7 +348,7 @@ def compute_forward_reachable_keys(
                         matched_key,
                         (parent_repo_url, None if ref.replacement is not None else ref.local_path),
                     )
-            manifest_dir = real_dir
+            manifest_dir = _local_manifest_dir(ref, real_dir, apm_modules_dir)
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
             # Several edges may alias one node; it is materialized where the
