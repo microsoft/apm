@@ -643,12 +643,8 @@ def _marketplace_exec_deployed(world) -> str:
     return spec
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#4443 deny entry under a marketplace install spec is not normalized on read",
-)
 def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_world) -> None:
+    """A deny stored under the install spec applies on read and is rewritten by the next deny."""
     world = lifecycle_world
     spec = _marketplace_exec_deployed(world)
     config = world.apm_home / "config.json"
@@ -656,11 +652,22 @@ def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_wo
     deny = data.setdefault("executables", {}).setdefault("deny", {})
     deny[spec] = {"hooks": True, "mcp": True, "bin": True}
     config.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    before = config.read_bytes()
     result = driver.run(world, ("install",), scope="user")
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (world.home / _USER_HOOK).exists(), "the existing deny must retire the hook"
+    notice = "names an install spec; it applies to"
+    output = result.stdout + result.stderr
+    assert output.count(f"{notice} {ORG}/p-exec.") == 1, output
+    assert config.read_bytes() == before, "install must not write the user store"
+    denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
+    assert denied.returncode == 0, denied.stdout + denied.stderr
     stored = json.loads(config.read_text(encoding="utf-8"))["executables"]["deny"]
     assert f"{ORG}/p-exec" in stored and spec not in stored, stored
+    again = driver.run(world, ("install",), scope="user")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert notice not in again.stdout + again.stderr, again.stdout + again.stderr
+    assert not (world.home / _USER_HOOK).exists(), "the rewritten deny must keep the hook retired"
 
 
 def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> None:
