@@ -15,9 +15,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 from apm_cli.install.context import InstallContext
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -157,6 +160,7 @@ class TestResolveDownloadStrategy:
             )
 
         assert not skip_download
+        assert "org/pkg" not in ctx.content_hash_verified_deps
         logger.progress.assert_called()
 
     def test_registry_enforce_only_skips_cached(self, tmp_path: Path) -> None:
@@ -212,6 +216,283 @@ class TestResolveDownloadStrategy:
 
         assert resolved_ref is None
         ctx.downloader.resolve_git_reference.assert_not_called()
+
+    def test_unpinned_git_dep_skips_when_on_disk_hash_matches(self, tmp_path: Path) -> None:
+        """Issue #1548: when a git dep has no resolved_commit (e.g. ADO partial-clone
+        fallback couldn't pin a SHA) but the lockfile recorded a content_hash, the
+        second install must NOT re-download if the on-disk content still hashes to
+        the recorded value.  Previously the cache-skip was bypassed and the fresh
+        download could trip the supply-chain mismatch check with a false positive.
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+
+        locked_dep = MagicMock()
+        # No pinned commit -- mirrors the partial-clone-fallback path.
+        locked_dep.resolved_commit = None
+        locked_dep.content_hash = "deadbeef"
+        # Not a registry dep.
+        locked_dep.source = "git"
+        locked_dep.registry_prefix = None
+
+        lf = MagicMock()
+        lf.get_dependency.return_value = locked_dep
+        ctx.existing_lockfile = lf
+
+        dep_ref = _make_dep_ref(reference=None)
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(False, False)),
+            patch(
+                "apm_cli.utils.content_hash.verify_package_hash",
+                return_value=True,
+            ),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert skip_download, (
+            "unpinned git dep with on-disk content matching lockfile content_hash "
+            "must skip re-download (issue #1548)"
+        )
+
+    def test_unpinned_git_dep_reuses_preverified_content_hash(self, tmp_path: Path) -> None:
+        """When the download phase already verified content_hash, the sequential
+        strategy must not hash the tree again before choosing the cached path.
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+        ctx.content_hash_verified_deps.add("org/pkg")
+
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = None
+        locked_dep.content_hash = "deadbeef"
+        locked_dep.source = "git"
+        locked_dep.registry_prefix = None
+
+        lf = MagicMock()
+        lf.get_dependency.return_value = locked_dep
+        ctx.existing_lockfile = lf
+
+        dep_ref = _make_dep_ref(reference=None)
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(True, False)),
+            patch(
+                "apm_cli.utils.content_hash.verify_package_hash",
+                side_effect=AssertionError("hash tree should not be recomputed"),
+            ),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert skip_download
+
+    def test_unpinned_git_dep_redownloads_when_on_disk_hash_differs(self, tmp_path: Path) -> None:
+        """Negative gate: the unpinned-skip branch must NOT mask a real mismatch.
+        When on-disk content does not hash to the lockfile-recorded value, the
+        cache-skip must NOT fire so the normal fresh-download / supply-chain
+        verification path still runs.
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = None
+        locked_dep.content_hash = "deadbeef"
+        locked_dep.source = "git"
+        locked_dep.registry_prefix = None
+
+        lf = MagicMock()
+        lf.get_dependency.return_value = locked_dep
+        ctx.existing_lockfile = lf
+
+        dep_ref = _make_dep_ref(reference=None)
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(False, False)),
+            patch(
+                "apm_cli.utils.content_hash.verify_package_hash",
+                return_value=False,
+            ),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert not skip_download, (
+            "real on-disk hash mismatch must NOT be masked by the unpinned-skip "
+            "branch -- the normal fresh-download flow must run so the supply-chain "
+            "verification can detect tampering"
+        )
+
+    def test_unpinned_git_dep_no_skip_when_lockfile_lacks_content_hash(
+        self, tmp_path: Path
+    ) -> None:
+        """A locked dep with neither resolved_commit nor content_hash provides no
+        integrity anchor -- we have nothing to compare on-disk content against and
+        must not skip the download.
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = None
+        locked_dep.content_hash = None
+        locked_dep.source = "git"
+        locked_dep.registry_prefix = None
+
+        lf = MagicMock()
+        lf.get_dependency.return_value = locked_dep
+        ctx.existing_lockfile = lf
+
+        dep_ref = _make_dep_ref(reference=None)
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(False, False)),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert not skip_download
+
+    def test_callback_sha_matches_remote_skips_redownload(self, tmp_path: Path) -> None:
+        """Issue #551: when update_refs=True and the BFS callback already downloaded
+        the dep with a SHA that matches the current remote ref, skip_download must
+        be True -- the callback bytes are already correct, no re-download needed.
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+        ctx.update_refs = True
+
+        # Stale lockfile -- lockfile SHA differs from remote so lockfile_match=False
+        # without the fix (the legacy path would re-download).
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = "stale_sha"
+        locked_dep.content_hash = None
+        locked_dep.source = "git"
+        locked_dep.registry_prefix = None
+        lf = MagicMock()
+        lf.get_dependency.return_value = locked_dep
+        ctx.existing_lockfile = lf
+
+        dep_ref = _make_dep_ref(reference="main")
+        # Callback already downloaded this dep with the new remote SHA.
+        ctx.callback_downloaded["org/pkg"] = "new_sha"
+
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        # Remote ref resolves to same SHA the callback captured.
+        mock_resolved = MagicMock()
+        mock_resolved.resolved_commit = "new_sha"
+        mock_resolved.ref_type = None  # not a tag/commit -> is_cacheable=False
+        ctx.downloader.resolve_git_reference.return_value = mock_resolved
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(False, False)),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert skip_download, (
+            "issue #551: callback already downloaded the dep with the correct SHA -- "
+            "re-download must be skipped when callback SHA matches remote SHA"
+        )
+
+    def test_callback_sha_mismatch_does_not_skip_redownload(self, tmp_path: Path) -> None:
+        """Issue #551 negative gate: when callback SHA differs from the resolved
+        remote SHA, the dep must be re-downloaded (content may have changed between
+        BFS and sequential loop invocations).
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+        ctx.update_refs = True
+
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = "stale_sha"
+        locked_dep.content_hash = None
+        locked_dep.source = "git"
+        locked_dep.registry_prefix = None
+        lf = MagicMock()
+        lf.get_dependency.return_value = locked_dep
+        ctx.existing_lockfile = lf
+
+        dep_ref = _make_dep_ref(reference="main")
+        # Callback captured sha_A but the remote has already moved to sha_B.
+        ctx.callback_downloaded["org/pkg"] = "sha_A"
+
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        mock_resolved = MagicMock()
+        mock_resolved.resolved_commit = "sha_B"  # differs from callback SHA
+        mock_resolved.ref_type = None
+        ctx.downloader.resolve_git_reference.return_value = mock_resolved
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(False, False)),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert not skip_download, (
+            "issue #551: callback SHA differs from remote SHA -- "
+            "re-download must proceed so fresh content is materialized"
+        )
+
+    def test_callback_sha_match_no_resolved_ref_does_not_skip(self, tmp_path: Path) -> None:
+        """Issue #551 boundary: when resolve_git_reference fails or returns no commit,
+        we cannot confirm the remote SHA -- must not skip.
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+        ctx.update_refs = True
+
+        dep_ref = _make_dep_ref(reference=None)  # no reference -> no resolve call
+        ctx.callback_downloaded["org/pkg"] = "some_sha"
+
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(False, False)),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert not skip_download, (
+            "issue #551: no resolved_ref means no remote SHA to compare -- "
+            "skip must not fire on SHA alone"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -566,3 +847,78 @@ class TestRunIntegrationLoop:
 
         assert ctx.installed_count == 1
         assert ctx.total_prompts_integrated == 2
+
+    def test_pre_downloaded_dependency_is_marked_fetched_this_run(self, tmp_path: Path) -> None:
+        from apm_cli.install.phases.integrate import run
+
+        ctx = self._make_full_ctx(tmp_path)
+        dep = _make_dep_ref("org/pkg")
+        ctx.deps_to_install = [dep]
+        ctx.callback_failures = set()
+        ctx.pre_downloaded_keys = {"org/pkg"}
+        mock_source = MagicMock()
+
+        with (
+            patch(
+                "apm_cli.install.phases.integrate._resolve_download_strategy",
+                return_value=(None, True, None, False),
+            ),
+            patch(
+                "apm_cli.install.phases.integrate.make_dependency_source",
+                return_value=mock_source,
+            ) as make_source,
+            patch(
+                "apm_cli.install.phases.integrate.prepare_integration_materialization",
+                return_value=(None, {}),
+            ),
+            patch("apm_cli.install.phases.integrate._integrate_root_project", return_value=None),
+        ):
+            run(ctx)
+
+        assert make_source.call_args.kwargs["fetched_this_run"] is True
+
+
+@pytest.mark.parametrize(
+    ("hashed", "tampered", "skip"),
+    [(True, False, True), (True, True, False), (False, False, False)],
+    ids=["intact", "tampered", "unhashed-row"],
+)
+def test_marker_proven_copy_still_needs_verified_bytes(
+    tmp_path: Path, hashed: bool, tampered: bool, skip: bool
+) -> None:
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.cache_pin import write_marker
+    from apm_cli.install.phases import integrate
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    commit = "a" * 40
+    ref = DependencyReference(repo_url="acme/pkg")
+    modules = tmp_path / "apm_modules"
+    installed = ref.get_install_path(modules)
+    installed.mkdir(parents=True)
+    (installed / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n", encoding="utf-8")
+    locked = LockedDependency(
+        repo_url=ref.repo_url,
+        resolved_commit=commit,
+        content_hash=compute_package_hash(installed) if hashed else None,
+    )
+    write_marker(installed, commit)
+    if tampered:
+        (installed / "apm.yml").write_text("name: pkg\nversion: 6.6.6\n", encoding="utf-8")
+    ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path)
+    ctx.apm_modules_dir = modules
+    ctx.existing_lockfile = LockFile()
+    ctx.existing_lockfile.add_dependency(locked)
+    ctx.logger = MagicMock()
+    ctx.diagnostics = MagicMock()
+    ctx.downloader = MagicMock()
+
+    heal = MagicMock(side_effect=lambda *a, **kw: (kw["lockfile_match"], kw["ref_changed"]))
+    with patch.object(integrate, "run_heal_chain", heal):
+        _, skip_download, _, _ = integrate._resolve_download_strategy(ctx, ref, installed)
+
+    assert skip_download is skip
+    assert heal.call_args.kwargs["lockfile_match"] is skip
+    # A hash-only proof keeps the v<=0.12.2 branch-drift heal eligible.
+    assert heal.call_args.kwargs["lockfile_match_via_content_hash_only"] is skip

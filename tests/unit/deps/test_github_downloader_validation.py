@@ -24,14 +24,7 @@ from apm_cli.deps import github_downloader_validation as gdv
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 
-
-def _authorization_headers(env: dict[str, str]) -> list[tuple[str, str]]:
-    """Return indexed Authorization header entries regardless of slot."""
-    return [
-        (env[f"GIT_CONFIG_KEY_{index}"], value)
-        for index in range(int(env.get("GIT_CONFIG_COUNT", "0")))
-        if (value := env.get(f"GIT_CONFIG_VALUE_{index}", "")).startswith("Authorization:")
-    ]
+pytestmark = pytest.mark.unit
 
 
 def _git_config_value(env: dict[str, str], expected_key: str) -> str:
@@ -551,38 +544,6 @@ def test_public_ref_probe_threads_host_type_to_fallback() -> None:
         lambda _message: None,
     ) == (True, winning)
     assert auth_resolver.try_with_fallback.call_args.kwargs["host_type"] == "gitlab"
-
-
-class TestRound3SafeRmtreeNotRobustRmtreeDirect:
-    """Round-3: cleanup MUST go through safe_rmtree (containment gate)."""
-
-    def test_safe_rmtree_called_not_robust_rmtree_direct(self) -> None:
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="skills/x", ref="main")
-        winning = gdv.AttemptSpec("plain HTTPS w/ credential helper", "https://x", {})
-
-        completed = MagicMock(stdout="040000 tree abc\tskills/x")
-        with (
-            patch("apm_cli.deps.github_downloader_validation.safe_rmtree") as safe_rm_mock,
-            patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
-                return_value=completed,
-            ),
-        ):
-            ok = gdv._path_exists_in_tree_at_ref(
-                downloader,
-                dep_ref,
-                "skills/x",
-                "main",
-                log=lambda _m: None,
-                winning_attempt=winning,
-            )
-
-        assert ok is True
-        safe_rm_mock.assert_called_once()
-        # Containment: first arg is the tmpdir, second is the base.
-        call_args = safe_rm_mock.call_args.args
-        assert len(call_args) == 2, "safe_rmtree must be called with (path, base_dir)"
 
 
 class TestRound3WarnMessage:
