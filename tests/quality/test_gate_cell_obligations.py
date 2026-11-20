@@ -16,8 +16,12 @@ import os
 import re
 from pathlib import Path
 
+import pytest
+
 from tests.integration._gate_machine_kit import KINDS, KNOWN_CELLS, SCOPES, GateMachine
 from tests.utils.lifecycle_oracle import ORACLE_LAWS, ledger_property_ids
+
+pytestmark = pytest.mark.component
 
 _ROOT = Path(__file__).parents[2]
 _OBLIGATIONS = Path(__file__).with_name("gate_cell_obligations.json")
