@@ -140,6 +140,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     locked = locked_skill_sources(ctx) if session is not None else None
     if session is not None:
         session.locked_sources = locked
+        session.frozen = bool(getattr(ctx, "frozen", False))
         retire_receipts_of_missing_projects()
     try:
         with (

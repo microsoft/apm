@@ -388,6 +388,19 @@ class BaseIntegrator:
             user_scope=user_scope,
         )
 
+    def _rendered_hash(self, source_file: Path, expected_content: str | None) -> str:
+        """Content hash of the bytes this integrator would deploy for one file."""
+        from apm_cli.utils.content_hash import compute_file_hash, content_hash_of_bytes
+
+        if expected_content is None:
+            return compute_file_hash(source_file)
+        text = (
+            normalize_crlf_to_lf(expected_content)
+            if self._LF_NORMALIZED_DEPLOY
+            else expected_content
+        )
+        return content_hash_of_bytes(text.encode("utf-8"))
+
     @staticmethod
     def _member_edit(
         target_file: Path, source_file: Path, expected: str | None, *, untrusted: bool
@@ -802,7 +815,17 @@ class BaseIntegrator:
         gate = self._overwrite_gate
         if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
             return False, False
-        if gate is not None and gate.keep(target_path):
+        if gate is not None and gate.adopt_legacy(target_path, rel_path):
+            target_paths.append(target_path)
+            return True, False
+        edit = (
+            gate.legacy_edit(
+                target_path, rel_path, self._rendered_hash(source_file, expected_content)
+            )
+            if gate is not None
+            else None
+        )
+        if gate is not None and gate.keep(target_path, edit=edit):
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
             return True, False

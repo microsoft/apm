@@ -629,7 +629,9 @@ def _fail_explicit_target_without_deploy(ctx: InstallContext) -> None:
         raise DirectDependencyError(message)
 
 
-def _keep_prior_entries(ctx: InstallContext, kept: list[tuple[str, Path]]) -> None:
+def _keep_prior_entries(
+    ctx: InstallContext, kept: list[tuple[str, Path]], session_kinds: dict[str, str]
+) -> None:
     """Keep each unproven managed file's prior lock entry, as cleanup keeps its files (#4360)."""
     from apm_cli.install.deployed_paths import deployed_path_entry
 
@@ -640,6 +642,9 @@ def _keep_prior_entries(ctx: InstallContext, kept: list[tuple[str, Path]]) -> No
         prior = previous.deployed_file_hashes.get(entry) if previous is not None else None
         ctx.package_cleanup_retained.setdefault(owner, {})[entry] = prior
         ctx.kept_overwrites.append((owner, entry))
+        kind = session_kinds.get(path.resolve().as_posix())
+        if kind is not None:
+            ctx.kept_overwrite_kinds[entry] = kind
 
 
 def _kept_skill_values(ctx: InstallContext) -> frozenset[str]:
@@ -892,7 +897,7 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     _check_cowork_caps(ctx)
     if session is not None and session.kept_overwrites:
-        _keep_prior_entries(ctx, session.kept_overwrites)
+        _keep_prior_entries(ctx, session.kept_overwrites, session.kept_edit_kinds)
         ctx.kept_overwrite_written = session.written_entries()
 
     # ------------------------------------------------------------------

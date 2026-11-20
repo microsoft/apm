@@ -398,9 +398,16 @@ def _report_kept_overwrites(ctx: InstallContext) -> None:
     from apm_cli.integration.base_integrator import kept_edit_message
 
     user_scope = ctx.scope is InstallScope.USER
+    kinds = getattr(ctx, "kept_overwrite_kinds", {})
+    blocking = 0
     for owner, entry in ctx.kept_overwrites:
-        ctx.diagnostics.error(
-            kept_edit_message(entry, user_scope=user_scope, proven_edit=False), package=owner
-        )
-    if ctx.logger is not None:
-        ctx.logger.kept_overwrites(len(ctx.kept_overwrites), ctx.kept_overwrite_written)
+        kind = kinds.get(entry)
+        message = kept_edit_message(entry, user_scope=user_scope, proven_edit=kind is not None)
+        if kind == "drift":
+            # A user edit with nothing new to deploy: kept and reported, not a failure.
+            ctx.diagnostics.warn(message, package=owner)
+            continue
+        blocking += 1
+        ctx.diagnostics.error(message, package=owner)
+    if blocking and ctx.logger is not None:
+        ctx.logger.kept_overwrites(blocking, ctx.kept_overwrite_written)

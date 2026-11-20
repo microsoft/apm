@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
-- `apm install` keeps a managed file it cannot prove it deployed (no receipt, not render-equal), names it and exits 1. Files committed by APM 0.35.x or earlier (for example cursor rules, codex agents) may be refused once: move them aside and rerun `apm install`. (#4382)
+- `apm install` keeps a managed file it cannot prove it deployed (no receipt, not render-equal), names it and exits 1. (#4382)
 - After upgrading, `apm uninstall` needs deployment evidence for each file it deletes; without it, it changes nothing and names each file. If the source is unreachable, see the uninstall reference. (#3701)
 - In CI, `apm install` with a committed lockfile now verifies it like `--frozen`; pass `--no-frozen` to opt out. (#4509)
 
 ### Changed
 
+- `apm install` upgrades projects last installed by an APM before 0.37 automatically: unedited files re-render once, and edited files are kept and named. (#4398)
 - `apm install` names every kept edited file with one message and a runnable next step; an upgrade blocked by a kept edit exits 1. (#4504)
 - Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)
 - CI: merge-queue integration uses the release shard planner, and a daily alarm fails when `main` moves without a `merge_group` run. (#4149)
