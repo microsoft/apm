@@ -334,10 +334,6 @@ ROWS = (
         "install p-child",
         Writer("deny p-exec", "project"),
         then=_decision("p-exec", "deny"),
-        # Retiring the last hook removes .github; the repeat recreates it.
-        repeat_known={
-            "I2": Known("#4132", r"converged install rewrote files: \['project:\.github'\]")
-        },
     ),
     PairRow(
         "install-vs-self-update-setting",

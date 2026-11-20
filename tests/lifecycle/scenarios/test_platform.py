@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.lifecycle.scenarios._kit import Known, Scenario, Tree, assert_changes, known_defect
+from tests.lifecycle.scenarios._kit import Scenario, Tree, assert_changes
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
@@ -290,10 +290,8 @@ def test_symlink_escaping_the_package_fails_closed(lifecycle_world) -> None:
     )
     scenario = Scenario(lifecycle_world, {"p-link": str(source)}, kinds={"p-link": ["skill"]})
 
-    empty_github = Known("#4159", r"failed install changed durable files: \['project:\.github'\]")
-    refused = scenario.run(["install", str(source)], exit=1, known={"I7": empty_github})
-    with known_defect("#4159", r"unexpected: \['project:\.github'\]\n  missing: \[\]$"):
-        assert_changes(refused.changed, (), label="refused install")
+    refused = scenario.run(["install", str(source)], exit=1)
+    assert_changes(refused.changed, (), label="refused install")
     assert "escapes the package root" in refused.output, refused.output
     outside.assert_intact("refused install")
     scenario.finish()

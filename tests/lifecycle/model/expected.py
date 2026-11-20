@@ -76,6 +76,10 @@ def expected_exit(
         if any(not model.policy_allows(package) for package in model.declared):
             return frozenset({1})
         # A lock written by a newer generator refuses every resolving command (M-SCOPE-LOCK).
-        if model.lock == "newer-generator" or (frozen and model.lock in {"absent", "stale"}):
+        if model.lock == "newer-generator" or (frozen and model.lock == "stale"):
+            return frozenset({1})
+        # --frozen with no lock refuses, unless nothing is declared: then it
+        # is a converged no-op (#4050).
+        if frozen and model.lock == "absent" and model.declared:
             return frozenset({1})
     return frozenset({0})

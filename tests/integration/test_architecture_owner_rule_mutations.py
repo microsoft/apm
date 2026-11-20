@@ -2444,7 +2444,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-uninstall-preflight",
         rule_id="install-deployment-uninstall-preflight",
         path="src/apm_cli/commands/uninstall/cli.py",
-        old="    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger)\n",
+        old="    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger, kept_paths)\n",
         new="",
         intent="Uninstall stops refusing out-of-project paths before any change.",
     ),

@@ -23,10 +23,8 @@ import itertools
 import pytest
 
 from tests.lifecycle.scenarios._kit import (
-    Known,
     Scenario,
     assert_changes,
-    known_defect,
     serve_repository,
     skill_package,
 )
@@ -142,9 +140,7 @@ def test_user_scope_diamond_deploys_the_shared_child(lifecycle_world) -> None:
     )
     step = scenario.run("install p-parent p-parent2")
     assert "home:.agents/skills/p-parent/SKILL.md" in step.changed
-    # install -g drops the transitive relative-path dependency silently.
-    with known_defect("#4153", r"p-child/skill/copilot"):
-        scenario.assert_deployed()
+    scenario.assert_deployed()
     scenario.finish()
 
 
@@ -167,17 +163,9 @@ def test_constraint_compatibility(lifecycle_world, root_ref, parent_ref, exit_co
     kinds = {"p-skill": ("skill",), "g-pin": ("skill",)}
     scenario = _scenario(lifecycle_world, specs, kinds=kinds, requires=requires)
 
-    # The failed install still creates an empty .github directory.
-    empty_github = Known("#4159", r"failed install changed durable files: \['project:\.github'\]")
-    step = scenario.run(
-        f"install {' '.join(specs)}",
-        exit=exit_code,
-        known={"I7": empty_github} if exit_code else None,
-    )
+    step = scenario.run(f"install {' '.join(specs)}", exit=exit_code)
     if exit_code:
-        # The failed install still creates an empty .github directory.
-        with known_defect("#4159", r"unexpected: \['project:\.github'\]"):
-            assert_changes(step.changed, (), label="refused constraint")
+        assert_changes(step.changed, (), label="refused constraint")
         assert "^9.0.0" in step.output, "I7: the refusal names the constraint"
     else:
         assert_changes(

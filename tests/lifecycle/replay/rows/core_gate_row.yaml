@@ -17,9 +17,3 @@ then:
   exit: 0
   deployed: expected
   announce: hooks skipped (denied)
-known_cells:
-  - id: row-cell-target-root-recreated
-    law: I2
-    tracking: "#4132"
-    step: apm install --frozen
-    match: "^converged install-frozen rewrote files: \\['project:\\.github'\\]$"

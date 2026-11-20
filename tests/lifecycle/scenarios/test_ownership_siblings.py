@@ -21,16 +21,13 @@ from __future__ import annotations
 
 import json
 import shutil
-from contextlib import nullcontext
 
 import pytest
 
 from tests.lifecycle.scenarios._kit import (
-    Known,
     Scenario,
     Tree,
     assert_changes,
-    known_defect,
     serve_repository,
 )
 from tests.lifecycle.world import use_policy
@@ -54,12 +51,6 @@ pytestmark = [
 ]
 
 USER_MCP = "user-mcp"
-NOTE_BLOCKS_UNINSTALL = {
-    "R": Known("#4162", r"exited 1, expected \[0\]"),
-    "I7": Known(
-        "#4162", r"failed uninstall changed (the lockfile|deployed surfaces|durable files)"
-    ),
-}
 _USER_SKILL = "---\nname: user-own\ndescription: The user's own skill.\n---\n\nMine.\n"
 
 
@@ -109,24 +100,20 @@ def test_uninstall_keeps_unmanaged_and_sibling(lifecycle_world, note) -> None:
     if note:
         _note(scenario, tree, "p-skill")
 
-    # With a user note in the skill directory, uninstall exits 1 after it has
-    # already removed the package copy, the SKILL.md and lock rows.
-    step = scenario.run("uninstall p-skill", known=NOTE_BLOCKS_UNINSTALL if note else None)
-    with known_defect("#4162", r"missing: \['project:apm.yml'\]") if note else nullcontext():
-        assert_changes(
-            step.changed,
-            (
-                "project:apm.yml",
-                "project:apm.lock.yaml",
-                "project:apm_modules/_local/p-skill*",
-                "project:.agents/skills/p-skill/SKILL.md",
-            ),
-            label="uninstall p-skill",
-        )
+    # A user note in the skill directory is kept; the uninstall still succeeds.
+    step = scenario.run("uninstall p-skill")
+    assert_changes(
+        step.changed,
+        (
+            "project:apm.yml",
+            "project:apm.lock.yaml",
+            "project:apm_modules/_local/p-skill*",
+            "project:.agents/skills/p-skill/SKILL.md",
+        ),
+        label="uninstall p-skill",
+    )
     tree.assert_intact("uninstall")
-    # p-skill is still declared, but its SKILL.md is gone.
-    with known_defect("#4162", r"p-skill/skill/copilot") if note else nullcontext():
-        _survives(scenario, tree, "uninstall", "p-exec-mcp")
+    _survives(scenario, tree, "uninstall", "p-exec-mcp")
     scenario.finish()
 
 

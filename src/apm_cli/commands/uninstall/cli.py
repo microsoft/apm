@@ -211,6 +211,7 @@ def _preflight_uninstall_writes(
     dry_run,
     lockfile,
     removed_keys,
+    kept_paths=frozenset(),
 ):
     """Refuse before the first write; return the survivors' trust context (#4185).
 
@@ -223,7 +224,7 @@ def _preflight_uninstall_writes(
 
     if dry_run:
         return (None, False)
-    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger)
+    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger, kept_paths)
     if not surviving_deps:
         return (None, False)
     try:
@@ -241,11 +242,13 @@ def _preflight_uninstall_writes(
     return (allow_map, True)
 
 
-def _refuse_unvalidated_paths(lockfile, dependency_keys, deploy_root, scope, logger) -> None:
+def _refuse_unvalidated_paths(
+    lockfile, dependency_keys, deploy_root, scope, logger, kept_paths=frozenset()
+) -> None:
     """Refuse out-of-project paths before any change.
 
     Each path this uninstall removes goes through the deploy-path gate the
-    cleanup uses.
+    cleanup uses; rows another profile keeps on disk are not removed.
     """
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.scope import InstallScope
@@ -259,6 +262,7 @@ def _refuse_unvalidated_paths(lockfile, dependency_keys, deploy_root, scope, log
         for path in paths
         # URI rows (cowork://, copilot-app-db://) have their own owners.
         if "://" not in path
+        and path not in kept_paths
         and not BaseIntegrator.validate_deploy_path(
             path,
             deploy_root,
@@ -895,6 +899,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             dry_run=dry_run,
             lockfile=lockfile,
             removed_keys=removed_keys | builtins.set(projected_orphans) | profile_keys,
+            kept_paths=profile_survivors,
         )
         if not dry_run:
             staged_local_refreshes = _stage_shared_local_survivors(
