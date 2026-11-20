@@ -174,7 +174,9 @@ def test_claude_plugin_is_approved_by_the_printed_command(
     approved = world.run_hint(installed.stdout, rf"Approve: (apm approve {flag}\S+)")
     assert approved.returncode == 0, _evidence(approved)
 
-    deployed = world.apm("install", *world.flags)
+    # The next step approve prints names this scope's install, and running it deploys.
+    install = "apm install -g" if scope == "user" else "apm install"
+    deployed = world.run_hint(approved.stdout, rf"Run '({re.escape(install)})' to deploy")
     assert deployed.returncode == 0, _evidence(deployed)
     assert "Parked" not in deployed.stdout, _evidence(deployed)
     assert _claude_deployed(world, plugin), _evidence(deployed)
@@ -192,7 +194,9 @@ def test_claude_plugin_is_approved_by_the_printed_command(
     # I4: denying the same identity retires the plugin on the next install.
     denied = world.apm("deny", *world.flags, str(plugin))
     assert denied.returncode == 0, _evidence(denied)
-    retired = world.apm("install", *world.flags)
+    retired = world.run_hint(
+        denied.stdout, rf"Run '({re.escape(install)})' to remove executables already deployed"
+    )
     assert retired.returncode == 0, _evidence(retired)
     assert not _claude_deployed(world, plugin), _evidence(retired)
 
