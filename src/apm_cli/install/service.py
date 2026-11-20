@@ -385,6 +385,23 @@ class InstallService:
             )
 
     @staticmethod
+    def enforce_frozen_hook_pins(lockfile: LockFile, modules_dir: Path, trust_ctx: Any) -> None:
+        """Before deploying, refuse locked hooks their pin no longer admits, as audit --ci does."""
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.exec_gate import locked_hook_pin_mismatches
+
+        mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)
+        if mismatches:
+            raise FrozenInstallError(
+                "--frozen: apm.lock.yaml records hooks their approval no longer admits.",
+                reasons=[f"  - {mismatch.describe()}" for mismatch in mismatches],
+                tip=(
+                    "Tip: re-approve the package, or run 'apm install' without --frozen "
+                    "to retire the hooks, then commit apm.yml and apm.lock.yaml."
+                ),
+            )
+
+    @staticmethod
     def reject_frozen_mutation(frozen: bool, operation: str) -> None:
         """Reject an add-style install operation before it can mutate state."""
         if not frozen:
@@ -762,9 +779,7 @@ class InstallService:
           claims a narrower install would *drop* (``--target`` filter,
           ``--only``, a removed dependency) do not fail.  Equivalence ignores
           ``generated_at`` and ``apm_version`` (Section 5.5).
-        * **Deployed presence.** Every file the resolved graph (*active_keys*)
-          records must be on disk, via audit's verifier; a retired hook fails
-          here (#4043), a kept undeclared package does not (#3662).
+        * **Deployed presence** of the resolved graph (*active_keys*) (#4043).
         * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
           entry is re-verified through the verifier ``apm audit`` uses, so
           ``install --frozen`` and ``audit --ci`` give one answer, catching a
@@ -776,7 +791,7 @@ class InstallService:
         from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
-        from apm_cli.policy.ci_checks import find_missing_deployed_files, resolve_audit_scope
+        from apm_cli.install.frozen_retirement import enforce_frozen_presence
 
         # Re-read rather than reuse the copy `enforce_frozen` loaded: this
         # judges what is on disk now.  `--frozen` is a CI primitive with a
@@ -822,21 +837,7 @@ class InstallService:
                 tip=_FROZEN_REPAIR_TIP,
             )
 
-        deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
-        missing, _gitignored = find_missing_deployed_files(deploy_root, committed, targets)
-        from apm_cli.install.frozen_retirement import frozen_missing_files_error, graph_claims
-
-        if missing := graph_claims(committed, missing, active_keys):
-            # Deny wins (#3944); frozen names the retired files it cannot unrecord.
-            raise frozen_missing_files_error(
-                request,
-                committed,
-                withheld,
-                missing,
-                lockfile_dir=lockfile_path.parent,
-                deploy_root=deploy_root,
-                targets=targets,
-            )
+        enforce_frozen_presence(request, committed, withheld, lockfile_path.parent, active_keys)
         InstallService._enforce_frozen_deployed_hashes(request, committed, deployed=True)
 
     @staticmethod

@@ -74,7 +74,6 @@ _DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
 _DRIFT_DIFF = "src/apm_cli/install/drift.py"
 _DEPLOYED_HASH_FRAGMENTS = (
     (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
-    (_FROZEN_OWNER, "= find_missing_deployed_files(deploy_root, committed, targets)"),
     (_DEPLOYED_HASH_VERIFIER, "def find_missing_deployed_files("),
     (
         _DEPLOYED_HASH_VERIFIER,
@@ -99,7 +98,9 @@ _DEPLOYED_HASH_FRAGMENTS = (
 _FROZEN_RETIREMENT = "src/apm_cli/install/frozen_retirement.py"
 _GATE_ORACLE = "tests/utils/lifecycle_oracle.py"
 _RETIREMENT_FRAGMENTS = (
-    (_FROZEN_OWNER, "raise frozen_missing_files_error("),
+    (_FROZEN_OWNER, "enforce_frozen_presence(request, committed, withheld,"),
+    (_FROZEN_RETIREMENT, "= find_missing_deployed_files(deploy_root, committed, targets)"),
+    (_FROZEN_RETIREMENT, "raise frozen_missing_files_error("),
     (_FROZEN_RETIREMENT, "return withheld_executable_sources("),
     (_GATE_ORACLE, "if after.state.lockfile_bytes != before.state.lockfile_bytes:"),
     (_GATE_ORACLE, "if after.deployed - before.deployed or retired & model.allowed_surfaces():"),

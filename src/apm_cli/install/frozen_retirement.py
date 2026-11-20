@@ -64,6 +64,35 @@ def graph_claims(
     return [path for path in missing if path in graph_paths]
 
 
+def enforce_frozen_presence(
+    request: InstallRequest,
+    committed: LockFile,
+    withheld: Iterable[str],
+    lockfile_dir: Path,
+    active_keys: frozenset[str] | None,
+) -> None:
+    """Fail ``--frozen`` when a file the resolved graph records is missing (#4043).
+
+    Runs the presence verifier ``apm audit`` deployed-files-present uses. A
+    hook the gate retired under an unchanged lock fails here, named with its
+    decision (deny wins, #3944); a kept undeclared package does not (#3662).
+    """
+    from apm_cli.policy.ci_checks import find_missing_deployed_files, resolve_audit_scope
+
+    deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_dir, committed)
+    missing, _gitignored = find_missing_deployed_files(deploy_root, committed, targets)
+    if missing := graph_claims(committed, missing, active_keys):
+        raise frozen_missing_files_error(
+            request,
+            committed,
+            withheld,
+            missing,
+            lockfile_dir=lockfile_dir,
+            deploy_root=deploy_root,
+            targets=targets,
+        )
+
+
 def frozen_missing_files_error(
     request: InstallRequest,
     committed: LockFile,
