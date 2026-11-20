@@ -23,7 +23,7 @@ from ..install.orphans import (
 )
 from ..install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ..integration.base_integrator import BaseIntegrator
-from ..integration.cleanup import remove_stale_deployed_files
+from ..integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
 from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
@@ -100,11 +100,34 @@ def prune(ctx, dry_run):
 
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            from ..install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+        except Exception as e:
+            logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
+            sys.exit(1)
 
+        # Runs before the lockfile is read: retiring a revoked bundle's hooks
+        # rewrites apm.lock.yaml, and prune must not write a stale copy back.
+        # A re-check that cannot resolve targets writes nothing; package
+        # removal still proceeds, as with hook reconciliation below. Any other
+        # re-check failure (policy, lockfile, integrator) fails closed.
+        from ..install.local_bundle_hook_trust import (
+            BundleHookTargetsUnresolved,
+            reconcile_scope_bundle_hooks,
+        )
+
+        try:
             reconcile_scope_bundle_hooks(
                 InstallScope.PROJECT, apm_package, logger=logger, dry_run=dry_run
             )
+        except BundleHookTargetsUnresolved as e:
+            logger.warning(
+                f"Local bundle hooks were NOT re-checked: target resolution failed ({e}). "
+                "Run 'apm install' to re-check them."
+            )
+        except Exception as e:
+            logger.error(f"Local bundle hook re-check failed: {e}")
+            sys.exit(1)
+
+        try:
             declared_deps = apm_package.get_all_apm_dependencies()
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)
@@ -250,6 +273,23 @@ def prune(ctx, dry_run):
             logger.success("Dry run complete - no changes made")
             return
 
+        # Deletion evidence (#3701): receipts, or the locked render, which is
+        # materialized now while the orphaned package sources still exist.
+        deletion_evidence = DeploymentEvidence.collect(
+            project_root,
+            user_scope=False,
+            lockfile=lockfile,
+            lockfile_root=project_root,
+            diagnostics=logger.diagnostics,
+        )
+        if lockfile is not None:
+            deletion_evidence.prepare(
+                path
+                for key in planned_pruned_keys
+                if key in lockfile.dependencies
+                for path in lockfile.dependencies[key].deployed_files
+            )
+
         removed_count = 0
         failed_count = 0
         removed_packages: list[str] = []
@@ -310,6 +350,7 @@ def prune(ctx, dry_run):
                     dep_key=dep_key,
                     targets=None,
                     diagnostics=logger.diagnostics,
+                    evidence=deletion_evidence,
                     recorded_hashes=hashes,
                     failed_path_retained=False,
                 )

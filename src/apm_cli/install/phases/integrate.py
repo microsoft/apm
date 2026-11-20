@@ -729,9 +729,10 @@ def run(ctx: InstallContext) -> None:
             _announce_held_headers(prepared_integrations)
             return
 
-        if ctx.frozen and ctx.existing_lockfile is not None:
+        from apm_cli.install.service import InstallService
+
+        if InstallService.frozen_disposition(ctx).replay and ctx.existing_lockfile is not None:
             from apm_cli.core.scope import is_user_scope
-            from apm_cli.install.service import InstallService
             from apm_cli.install.template import effective_allow_map
             from apm_cli.security.trust import McpAdmission
 

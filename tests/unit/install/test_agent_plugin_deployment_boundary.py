@@ -42,6 +42,7 @@ from apm_cli.models.apm_package import APMPackage, PackageContentType, PackageIn
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.results import InstallResult
 from apm_cli.models.validation import PackageType, validate_apm_package
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.component
@@ -235,6 +236,7 @@ def test_services_gate_rejects_native_type_without_canonical_ir(tmp_path: Path) 
             force=True,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     assert _tree_snapshot(project) == {}

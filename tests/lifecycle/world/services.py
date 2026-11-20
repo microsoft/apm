@@ -251,6 +251,17 @@ class WorldServices:
             raise KeyError(f"{slug!r} is not unserved")
         self._repositories[slug] = self._unserved.pop(slug)
 
+    def serve(self, slug: str, origin: Path) -> None:
+        """Serve bare repository *origin* as ``owner/repo`` *slug* on every git host.
+
+        For repositories a test authors itself (``file://`` dependency specs are
+        refused by the CLI). Served until the worker's services close.
+        """
+        owner, _, repo = slug.partition("/")
+        if not owner or not repo or "/" in repo:
+            raise ValueError(f"slug must be owner/repo, got {slug!r}")
+        self._repositories[slug] = origin
+
     def start(self, directory: Path) -> WorldServices:
         """Start the proxy; ``directory`` receives its private CA material."""
         stack = contextlib.ExitStack()
