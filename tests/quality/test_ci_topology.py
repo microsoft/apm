@@ -2918,3 +2918,21 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
     assert "architecture-cache-full-matrix" in signal["needs"]
     result = workflow_step(signal, "Open, update or close the tracking issue")["env"]["RESULT"]
     assert "needs.architecture-cache-full-matrix.result" in result
+
+
+def test_dispatched_ref_lifecycle_workflow_uses_no_shared_cache() -> None:
+    """A workflow that checks out an arbitrary dispatched ref never touches a shared cache.
+
+    Code from that ref must not save a cache a default-branch run later restores.
+    """
+    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
+    assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
+    for job_id, job in workflow["jobs"].items():
+        for step in job.get("steps") or []:
+            uses = str(step.get("uses", ""))
+            assert not uses.startswith("actions/cache"), (job_id, step.get("name"))
+            with_block = step.get("with") or {}
+            if uses.startswith("astral-sh/setup-uv"):
+                assert with_block.get("enable-cache") is False, (job_id, step.get("name"))
+            if uses.startswith(("actions/setup-python", "actions/setup-node")):
+                assert "cache" not in with_block, (job_id, step.get("name"))

@@ -22,6 +22,10 @@ on:
 permissions:
   contents: read
 
+# Every job checks out the dispatched `ref`, which may be any commit, so no job
+# restores or saves a shared cache: code from that ref never writes a cache a
+# default-branch run would later restore.
+
 concurrency:
   group: lifecycle-journeys-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
@@ -55,7 +59,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Install frozen development dependencies
         run: uv sync --frozen --extra dev
@@ -88,7 +92,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Install Unix shell startup test runtimes
         run: bash scripts/ci-apt-install.sh fish zsh
@@ -99,12 +103,6 @@ jobs:
       # The one job that runs the Codex native plugin cell for real (#4154):
       # pinned to the production floor (MINIMUM_CODEX_VERSION) and required
       # through APM_REQUIRE_CODEX, so a missing Codex fails instead of skipping.
-      - name: Cache the pinned Codex CLI
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.npm
-          key: npm-openai-codex-0.163.0-${{ runner.os }}
-
       - name: Install the pinned Codex CLI
         run: npm install -g @openai/codex@0.163.0
 
@@ -139,7 +137,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Install frozen development dependencies
         run: uv sync --frozen --extra dev
