@@ -26,7 +26,6 @@ from tests.lifecycle.machines._spine_kit import (
     _PHASE_ONE_PROPERTIES,
     _TRANSITION_PROPERTIES,
     _VARIANTS,
-    FROZEN_UNDERRECORDING_CELL,
     USER_EDIT_CELL,
     _LifecycleReferenceModel,
     _ModelFixture,
@@ -105,12 +104,8 @@ def test_generated_lifecycle_mandatory_replay(
         _ModelFixture.create(tmp_path / "mandatory", lifecycle_entry_point, variant)
     )
     mandatory_replay(model)
-    # The spine tampers a managed file, so the preserved-edit cell must still occur;
-    # the project-scope spine also replays the refused under-recording frozen install.
-    strict = {USER_EDIT_CELL}
-    if not model.fixture.global_scope:
-        strict.add(FROZEN_UNDERRECORDING_CELL)
-    assert model.expected_seen == strict
+    # The spine tampers a managed file, so the preserved-edit cell must still occur.
+    assert model.expected_seen == {USER_EDIT_CELL}
 
 
 @pytest.mark.parametrize(

@@ -2,8 +2,9 @@
 
 ``apm install --frozen`` never writes the lockfile it freezes. When the
 install deploys a path that ``apm.lock.yaml`` does not record, it exits 1,
-names the path, and leaves the lockfile bytes untouched. Deployment has
-already happened by then: only the lockfile write is withheld.
+names the path, and leaves the lockfile bytes untouched. A failed command
+preserves durable state (I7, #4309): the files it deployed there are removed
+again, so the project is byte-identical to before the command.
 
 The project has no remote dependencies, so the scenario needs no network
 access to resolve them (CI also sets APM_E2E_TESTS=1, which skips the
@@ -32,6 +33,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.promise("P-INV-I7", "P-LAW-lockfile.frozen_preserves_bytes", "req-lk-006"),
 ]
 
 
@@ -57,6 +59,7 @@ def _assert_frozen_refusal_and_recovery(
     lockfile = project.root / "apm.lock.yaml"
     locked = lockfile.read_bytes()
     manifest = project.manifest_path.read_bytes()
+    before = ArtifactSnapshotSet.capture({"project": project.root})
     frozen = scenario.runner.run(
         (*_INSTALL_ARGS, "--frozen"),
         scenario_id="frozen-unrecorded-skill",
@@ -69,7 +72,9 @@ def _assert_frozen_refusal_and_recovery(
     assert f"{deployed_path} is deployed by this install but not recorded in apm.lock.yaml" in flat
     assert lockfile.read_bytes() == locked
     assert project.manifest_path.read_bytes() == manifest
-    assert (project.root / deployed_path / "SKILL.md").is_file()
+    assert "the unrecorded files were removed again" in flat
+    assert not (project.root / deployed_path).exists()
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture({"project": project.root}))
 
     _run_success(
         scenario,

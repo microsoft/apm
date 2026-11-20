@@ -2428,6 +2428,22 @@
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
+    },
+    {
+      "issue": 4309,
+      "fixed_in": "Unreleased",
+      "summary": "A refused install --frozen that deployed files apm.lock.yaml does not record left those files on disk, so the lock no longer matched the disk.",
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_frozen_no_rewrite_e2e.py::test_frozen_install_fails_on_unrecorded_skill_without_rewriting_lockfile"
+      ]
     }
   ],
   "lifecycle_contracts": [

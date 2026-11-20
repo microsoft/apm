@@ -323,7 +323,6 @@
     "tests/integration/test_frozen_host_qualified_git_e2e.py",
     "tests/integration/test_frozen_local_path_lifecycle.py",
     "tests/integration/test_frozen_native_service_lifecycle.py",
-    "tests/integration/test_frozen_no_rewrite_e2e.py",
     "tests/integration/test_frozen_remote_plugin_lifecycle.py",
     "tests/integration/test_frozen_stale_exec_status_lifecycle.py",
     "tests/integration/test_frozen_undeclared_package_retention_lifecycle.py",
