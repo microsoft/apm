@@ -645,14 +645,14 @@ def test_audit_ci_verifies_locked_content_hash_like_install(
     lock = lock_with(recorded)
     dep = lock.get_dependency("owner/pkg")
     assert not locked_content_mismatch("owner/pkg", dep, copy, lockfile=lock)
-    assert not _live_copies_stale(tmp_path / "apm_modules", lock_path)
+    assert not _live_copies_stale(tmp_path / "apm_modules", lock_path)[0]
 
     other = compute_package_hash(copy, framed=not framed)
     for content_hash in (other, "sha256:" + "0" * 64):
         lock = lock_with(content_hash)
         dep = lock.get_dependency("owner/pkg")
         assert locked_content_mismatch("owner/pkg", dep, copy, lockfile=lock)
-        assert _live_copies_stale(tmp_path / "apm_modules", lock_path)
+        assert _live_copies_stale(tmp_path / "apm_modules", lock_path)[0]
 
 
 @pytest.mark.req("req-lk-017")
