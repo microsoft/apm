@@ -110,7 +110,8 @@ def make_skill_result(
         skill_created=skill_created,
         skill_updated=False,
         skill_skipped=False,
-        skill_path=None,
+        # A created skill without promoted sub-skills is a root skill.
+        skill_path=Path("SKILL.md") if skill_created and not sub_skills_promoted else None,
         references_copied=0,
         sub_skills_promoted=sub_skills_promoted,
         bin_deployed=bin_deployed,
@@ -661,7 +662,7 @@ class TestIntegratePackagePrimitives:
         assert result["prompts"] == 2
         assert tree_messages(logger) == ["  |-- 2 prompts integrated -> .claude/, .cursor/"]
 
-    def test_three_target_paths_collapse_to_count(self, tmp_path: Path) -> None:
+    def test_three_target_paths_are_all_named(self, tmp_path: Path) -> None:
         targets = [
             make_target(name="claude", root_dir=".claude", primitives={"prompts": make_mapping()}),
             make_target(name="cursor", root_dir=".cursor", primitives={"prompts": make_mapping()}),
@@ -677,7 +678,9 @@ class TestIntegratePackagePrimitives:
             logger=MagicMock(),
         )
 
-        assert tree_messages(logger) == ["  |-- 3 prompts integrated -> 3 targets"]
+        assert tree_messages(logger) == [
+            "  |-- 3 prompts integrated -> .claude/, .cursor/, .codex/"
+        ]
 
     def test_verbose_mode_expands_multiple_paths(self, tmp_path: Path) -> None:
         targets = [

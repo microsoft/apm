@@ -15,7 +15,7 @@ apm install [PACKAGE_REF...] [OPTIONS]
 
 `apm install` resolves the dependencies declared in `apm.yml`, downloads them (with transitive resolution and a content-addressed cache), runs the built-in security scan, and deploys the resulting primitives plus the project's own `.apm/` content into every harness target it detects. It writes `apm.lock.yaml` so the next install on any machine reproduces the same files.
 
-With no arguments it installs everything from `apm.yml`. With one or more `PACKAGE_REF` arguments it adds those packages to `apm.yml` (creating one if needed) and installs only what was added. `apm install --mcp NAME` is the dedicated path for adding an MCP server entry.
+With no arguments it installs everything from `apm.yml`. With one or more `PACKAGE_REF` arguments it adds those packages to `apm.yml` (creating one if needed) and installs only what was added, plus any declared local-path dependency that `apm.lock.yaml` does not record yet. `apm install --mcp NAME` is the dedicated path for adding an MCP server entry.
 
 Repeating an existing positional package without requesting a change reports
 `already in apm.yml`, not `updated ref in apm.yml`. It preserves the existing
@@ -182,9 +182,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   `--force` remains explicitly destructive and also bypasses the critical
   security-scan block; it is not the routine remedy.
 
-- **Stale-file cleanup.** `Cleaned N stale deployed files for DEPENDENCY` names
-  the affected dependency, not a deletion location. Cleanup removes deployed
-  files; a local dependency's source directory is not cleaned.
+- **Stale-file cleanup.** `Cleaned N stale deployed files for DEPENDENCY:` names
+  the affected dependency, then lists each removed path (a skill directory once,
+  with a trailing `/`). Cleanup removes deployed files; a local dependency's
+  source directory is not cleaned.
 
 - **Historical missing-file claims.** Normal `apm install` retires an obsolete
   dependency file claim and its hash when the file is already absent and

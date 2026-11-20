@@ -7,7 +7,8 @@ sidebar:
 
 Remove installed packages from `apm_modules/` that are neither declared in
 `apm.yml` nor retained as transitive nodes in `apm.lock.yaml`. The command also
-removes their deployed integration files and updates the lockfile.
+removes their deployed integration files, listing each removed path, and
+updates the lockfile.
 
 ## Synopsis
 
