@@ -15,13 +15,9 @@ must:
 
 from __future__ import annotations
 
-import hashlib
-import io
-import json
 import os
 import shutil
 import sys
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -37,6 +33,7 @@ from tests.integration._ado_auth_kit import (
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_github_https_fixture import openssl_executable
+from tests.utils.local_package_registry import LocalPackageRegistry, flat_registry_archive
 from tests.utils.local_scripted_https_proxy import (
     ScriptedHttpsProxy,
     ScriptedRequest,
@@ -63,16 +60,12 @@ _GUIDE = "---\napplyTo: '**'\ndescription: registry fixture\n---\n# Registry pac
 
 
 def _deterministic_archive() -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as package:
-        for name, text in (
+    return flat_registry_archive(
+        (
             ("apm.yml", "name: widget\nversion: 1.0.0\ndescription: fixture\n"),
             (".apm/instructions/guide.instructions.md", _GUIDE),
-        ):
-            info = zipfile.ZipInfo(name, date_time=(2000, 1, 1, 0, 0, 0))
-            info.external_attr = 0o644 << 16
-            package.writestr(info, text)
-    return buffer.getvalue()
+        )
+    )
 
 
 class RegistryUpgradeScenario:
@@ -81,7 +74,8 @@ class RegistryUpgradeScenario:
     def __init__(self, root: Path, binary: Path) -> None:
         self.isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
         self.runner = ApmLifecycleRunner((str(binary),), timeout_seconds=120)
-        self.archive = _deterministic_archive()
+        self.registry = LocalPackageRegistry(BASE)
+        self.archive = self.registry.seed("acme/widget", "1.0.0", _deterministic_archive()).data
         self.redirect = False
         self.project = self.isolated.work_root / "consumer"
         self.project.mkdir()
@@ -99,23 +93,7 @@ class RegistryUpgradeScenario:
         path = request.path
         if self.redirect and not path.endswith("/"):
             return ScriptedResponse(307, {"Location": f"https://{REGISTRY_HOST}{path}/"})
-        tail = path.rstrip("/").split("/v1/packages/", 1)[-1]
-        if tail == "acme/widget/versions":
-            body = {
-                "versions": [
-                    {
-                        "version": "1.0.0",
-                        "digest": hashlib.sha256(self.archive).hexdigest(),
-                        "published_at": "2026-01-01T00:00:00Z",
-                    }
-                ]
-            }
-            return ScriptedResponse(
-                200, {"Content-Type": "application/json"}, json.dumps(body).encode()
-            )
-        if tail == "acme/widget/versions/1.0.0/download":
-            return ScriptedResponse(200, {"Content-Type": "application/zip"}, self.archive)
-        return ScriptedResponse(404)
+        return self.registry.handle(request)
 
     def serve(self):
         return local_scripted_https_proxy(self.isolated.root / "tls", {REGISTRY_HOST: self.handle})
