@@ -515,6 +515,7 @@ class InstallService:
         # Same admission inputs as install, so a gate-parked or approved server
         # reaches the same verdict frozen or not (#3893, #3902).
         from apm_cli.core.scope import is_user_scope
+        from apm_cli.integration.mcp_config_view import without_parked_notices
         from apm_cli.security.trust import McpAdmission
 
         admission = McpAdmission.for_project(
@@ -530,7 +531,7 @@ class InstallService:
                 modules_dir,
                 admission=admission,
                 # The hydrated check and the MCP phase report parked servers.
-                logger=None,
+                logger=without_parked_notices(request.logger),
                 allow_pending=allow_pending_mcp,
             )
         )
