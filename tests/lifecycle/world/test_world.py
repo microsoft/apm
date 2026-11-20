@@ -24,6 +24,7 @@ from tests.lifecycle.world.services import (
     API_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
+    ORG,
     POLICY_VARIANTS,
     REGISTRY_HOST,
     REGISTRY_SERVER,
@@ -122,11 +123,17 @@ def _assert_surfaces(world: World, package: str, scope: str) -> None:
         assert marker in path.read_text(encoding="utf-8"), f"{relative} lacks {marker!r}"
 
 
+def _identity(key: str, world: World) -> str:
+    """What ``apm approve`` names: the install spec, or ``owner/repo`` for remote sources."""
+    ref = world.packages[key]
+    return f"{ORG}/{ref.name}" if ref.source in ("git", "marketplace") else ref.spec
+
+
 def _install_and_approve(world: World, key: str, scope: str) -> None:
     ref = world.packages[key]
     _ok(world, ["install", ref.spec], scope)
     if ref.kinds & _GATED:
-        _ok(world, ["approve", ref.spec], scope)
+        _ok(world, ["approve", _identity(key, world)], scope)
         _ok(world, ["install"], scope)
 
 
@@ -295,7 +302,7 @@ _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
     "unreachable": "HTTP 503",
     "hash-mismatch": "Policy hash mismatch",
-    "chain-cycle": "inheritance chain",
+    "chain-cycle": "Cycle detected in policy extends chain",
 }
 
 
