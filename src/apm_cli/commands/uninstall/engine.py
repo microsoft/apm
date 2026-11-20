@@ -1787,6 +1787,108 @@ def _sync_integrations_after_uninstall(
     )
 
 
+def _restage_changed_local_survivors(
+    lockfile: LockFile,
+    modules_dir: Path,
+    source_root: Path,
+    skip_keys: set[str],
+    logger: CommandLogger,
+) -> set[str]:
+    """Re-copy each direct local survivor whose source changed since the lock (#4446).
+
+    Install re-copies local packages on every run; without this, uninstall
+    judges and rebuilds a survivor from its stale ``apm_modules`` copy, so a
+    hook whose local definition changed since approval is never re-judged.
+    Returns the restaged lock keys; their lock rows record the new content hash.
+    """
+    from ...install.phases.local_content import _copy_local_package, compute_local_package_hash
+
+    restaged: set[str] = set()
+    for key, dep in sorted(lockfile.dependencies.items()):
+        if key == "." or key in skip_keys or dep.source != "local" or dep.depth != 1:
+            continue
+        try:
+            dep_ref = dep.to_dependency_ref()
+            source = (source_root / dep_ref.local_path).resolve()
+            install_path = dep_ref.get_install_path(modules_dir)
+            current = compute_local_package_hash(source, framed=dep.content_hash_framed)
+        except (OSError, ValueError, TypeError, PathTraversalError):
+            continue
+        if not install_path.is_dir() or current == dep.content_hash:
+            continue
+        staged_path = modules_dir / "_local" / f".apm-uninstall-refresh-{uuid4().hex}"
+        refresh_logger = _LocalRefreshLogger(logger, _dependency_public_label(dep_ref))
+        staged = _copy_local_package(
+            dep_ref, staged_path, source_root, project_root=source_root, logger=refresh_logger
+        )
+        if staged is None:
+            if staged_path.exists():
+                safe_rmtree(staged_path, modules_dir)
+            continue
+        _activate_staged_local_refresh(
+            LocalSlotRefresh(
+                install_path=install_path, staged_path=staged_path, survivor_keys=(key,)
+            ),
+            modules_dir,
+        )
+        dep.content_hash = current
+        restaged.add(key)
+        logger.progress(
+            f"Refreshed local package {_dependency_public_label(dep_ref)} from its source"
+        )
+    return restaged
+
+
+def gate_retired_hook_survivors(
+    lockfile: "LockFile | None",
+    modules_dir: Path,
+    manifest_path: Path,
+    deploy_root: Path,
+    removed_keys: set[str],
+    refreshed: set[str],
+    *,
+    user_scope: bool,
+    logger: CommandLogger,
+) -> tuple[set[str], set[str]]:
+    """Add survivors whose deployed hooks the current gates no longer allow (#4446).
+
+    Returns ``(refresh, exclude)``: *refreshed* plus the survivors to redeploy
+    in full, so the rebuild under install's executables gate leaves their
+    retired hooks out, and the subset the org policy denies outright, which
+    keeps nothing, as the MCP cleanup does for its servers. The verdict is
+    the gate retirement owner's
+    (:func:`~apm_cli.install.exec_gate.gate_retirements`).
+    """
+    from ...install.exec_gate import gate_retirements
+    from ...models.apm_package import APMPackage
+
+    if lockfile is None:
+        return refreshed, set()
+    refreshed = refreshed | _restage_changed_local_survivors(
+        lockfile, modules_dir, manifest_path.parent, removed_keys, logger
+    )
+    try:
+        apm_package = APMPackage.from_apm_yml(manifest_path)
+        retirements = gate_retirements(
+            lockfile, modules_dir, apm_package, deploy_root, user_scope=user_scope
+        )
+    except Exception as exc:
+        # Integration cleanup reports an unreadable manifest; nothing to judge here.
+        logger.verbose_detail(f"Gate retirement skipped: {type(exc).__name__}: {exc}")
+        return refreshed, set()
+    if retirements is None:
+        return refreshed, set()
+    # Only survivors: the removed packages' files are already being cleaned.
+    denied = {k: why for k, why in retirements.denied_packages.items() if k not in removed_keys}
+    hooks = {k: why for k, why in retirements.hook_packages.items() if k not in removed_keys}
+    for key, why in sorted(denied.items()):
+        logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
+    for key, why in sorted(hooks.items()):
+        if key not in denied:
+            logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
+    return refreshed | set(denied) | set(hooks), set(denied)
+
+
 def _remove_stale_mcp_from_recorded_targets(
     stale_servers: set[str],
     lockfile: LockFile,
@@ -1863,15 +1965,31 @@ def _cleanup_stale_mcp(
             target_ownership = {}
     if not managed_servers:
         return
+    from apm_cli.install.exec_gate import gate_retirements
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.trust import McpAdmission
 
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
+    deploy_root = Path(project_root) if project_root is not None else Path.cwd()
+    # A survivor the current gates no longer allow loses its servers, as on
+    # install (#4446): install's own MCP admission parks a denied, revoked or
+    # changed server, and a dependency the org policy denies keeps none.
+    retirements = gate_retirements(
+        lockfile, apm_modules_path, apm_package, deploy_root, user_scope=user_scope
+    )
+    denied = retirements.denied_packages if retirements is not None else {}
+    for key, why in sorted(denied.items()):
+        if logger is not None:
+            logger.warning(f"{key} is no longer allowed ({why}); removing its MCP servers")
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
-        admission=McpAdmission.admit_all(),
+        admission=McpAdmission.for_project(deploy_root, user_scope=user_scope),
+        logger=logger,
+        active_package_keys=(
+            frozenset(key for key in lockfile.dependencies if key not in denied) if denied else None
+        ),
     )
     # Uninstall never admits a server: only previously managed servers survive.
     # Local-bundle servers stay with their bundle, not the uninstalled package.

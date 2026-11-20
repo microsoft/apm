@@ -4266,6 +4266,39 @@
       ]
     },
     {
+      "issue": 4444,
+      "fixed_in": "Unreleased",
+      "summary": "apm update retires a deployed native Claude plugin MCP server whose definition changed since approval, through the gate retirement owner install uses (install/exec_gate.py gate_retirements), instead of reporting every dependency up to date and keeping it.",
+      "failure_modes": ["cleanup", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_native_plugin_retirement_lifecycle.py::test_update_retires_a_native_plugin_whose_definition_changed",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
+      "issue": 4445,
+      "fixed_in": "Unreleased",
+      "summary": "apm update and apm update --yes exit 1 and name the denied dependency and the policy reason when org policy denies an installed native Claude plugin, matching apm install, instead of exiting 0.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_native_plugin_retirement_lifecycle.py::test_update_refuses_a_native_plugin_the_org_policy_denies",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
+      "issue": 4446,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall of another package re-evaluates the remaining gated MCP servers and hooks through the gate retirement owner and removes any the current gates no longer allow (deny, revoke, org deny, org gate on, changed definition, policy dependency deny), instead of admitting every recorded server and keeping every deployed hook; a direct local survivor whose source changed since the lock is re-copied first, as install does.",
+      "failure_modes": ["cleanup", "routing"],
+      "properties": ["routing.authorized_targets_only"],
+      "regression_tests": [
+        "tests/integration/test_native_plugin_retirement_lifecycle.py::test_uninstalling_another_package_retires_a_disallowed_native_plugin",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
       "issue": 4447,
       "fixed_in": "Unreleased",
       "summary": "audit --ci names a local dependency whose content differs from its locked snapshot, through the same verdict install --frozen applies.",

@@ -22,10 +22,7 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_UNINSTALL_SIBLING = "#4446 uninstall rebuild agreement on gated surfaces"
-_XFAIL = {
-    **{f"G|uninstall-prune-rebuild|{change}|mcp": _UNINSTALL_SIBLING for change in _ALL},
-}
+_XFAIL: dict[str, str] = {}
 # A bundle approval pins the whole bundle digest: a changed definition reads as
 # a bundle that is not approved yet.
 _ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this exact bundle"}

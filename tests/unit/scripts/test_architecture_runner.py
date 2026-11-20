@@ -650,6 +650,7 @@ install-deployment-cleanup-ownership-release
 install-deployment-cleanup-target-roots
 install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
+install-deployment-gate-retirement
 install-deployment-codex-agent-link-resolution
 install-deployment-agent-render-then-adopt
 install-deployment-command-render-then-adopt
