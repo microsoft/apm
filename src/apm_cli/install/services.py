@@ -570,21 +570,21 @@ def integrate_package_primitives(  # noqa: PLR0913
         if _prim_name not in _per_kind:
             continue
         _info = _per_kind[_prim_name]
-        # Build the verb + count phrase. When at least one file was
-        # freshly integrated we lead with "N X integrated"; pure-adopt
-        # runs (no fresh writes) lead with "N X adopted" so the line
-        # still appears and the count is truthful.
+        # Build the verb + count phrase. Adoption (a file already holding the
+        # render) changes nothing, so it is silent unless --verbose: a repeat
+        # install is a quiet no-op (#4382/#4360, I2).
         _files = _info["files"]
-        _adopted = _info["adopted"]
+        _adopted = _info["adopted"] if _verbose else 0
         _noun = _info["label"].removesuffix("s") if (_files or _adopted) == 1 else _info["label"]
         if _files > 0:
             _verb_phrase = f"{_files} {_noun} integrated"
             if _adopted > 0:
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
-            _verb_phrase = f"{_adopted} {_noun} adopted"
-        for line in _destination_tree_lines(_verb_phrase, _info["paths"], _verbose):
-            _log_integration(line)
+            _verb_phrase = f"{_adopted} {_noun} adopted" if _adopted else ""
+        if _verb_phrase:
+            for line in _destination_tree_lines(_verb_phrase, _info["paths"], _verbose):
+                _log_integration(line)
         # Emit per-hook-file action summaries for the hooks primitive.
         # display_payloads reflects post-path-rewrite data (what is
         # actually written to disk and executed), so this is faithful.

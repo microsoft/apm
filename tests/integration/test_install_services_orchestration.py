@@ -550,7 +550,7 @@ class TestIntegratePackagePrimitives:
         integrators["prompt_integrator"].integrate_prompts_for_target.assert_not_called()
         assert result["prompts"] == 0
 
-    def test_adopted_only_logs_adopted_without_incrementing_counter(self, tmp_path: Path) -> None:
+    def test_adopted_only_is_silent_without_incrementing_counter(self, tmp_path: Path) -> None:
         target = make_target(primitives={"prompts": make_mapping(subdir="prompts")})
         entry = make_dispatch_entry(counter_key="prompts")
 
@@ -565,10 +565,8 @@ class TestIntegratePackagePrimitives:
         )
 
         assert result["prompts"] == 0
-        assert tree_messages(logger) == [
-            "  |-- 2 prompts adopted -> .claude/prompts/",
-            "  |-- (files unchanged)",
-        ]
+        # Adoption changes nothing: silent unless --verbose (#4382/#4360, I2).
+        assert tree_messages(logger) == ["  |-- (files unchanged)"]
 
     def test_non_int_adopted_value_is_treated_as_zero(self, tmp_path: Path) -> None:
         target = make_target(primitives={"prompts": make_mapping(subdir="prompts")})
@@ -863,10 +861,8 @@ class TestIntegratePackagePrimitives:
             logger=MagicMock(),
         )
 
-        assert tree_messages(logger) == [
-            "  |-- 1 command adopted -> copilot-app/workflows/",
-            "  |-- (files unchanged)",
-        ]
+        # Adoption changes nothing: silent unless --verbose (#4382/#4360, I2).
+        assert tree_messages(logger) == ["  |-- (files unchanged)"]
 
     def test_skill_integrator_receives_targets_and_subset(self, tmp_path: Path) -> None:
         targets = [make_target(primitives={})]

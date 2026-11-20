@@ -127,7 +127,8 @@ def test_widened_install_names_every_destination_folder(
 
     destinations = (".claude/rules/", ".github/instructions/", ".cursor/rules/")
     assert _integration_lines(widened) == [
-        f"  |-- 1 rule(s) integrated (2 adopted) -> {', '.join(destinations)}"
+        # The two unchanged folders are adopted silently (#4382/#4360, I2).
+        f"  |-- 1 rule(s) integrated -> {', '.join(destinations)}"
     ], _evidence(widened)
     for folder in destinations:
         assert any((world.project.root / folder).iterdir()), folder

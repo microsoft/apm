@@ -253,6 +253,7 @@ class TestAdoptedFileVisibility:
         tmp_path: Path,
         files_per_target: list[int],
         adopted_per_target: list[int],
+        verbose: bool = True,
     ) -> list[str]:
         from apm_cli.install.services import integrate_package_primitives
 
@@ -275,7 +276,7 @@ class TestAdoptedFileVisibility:
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
                 logger=logger,
-                ctx=_ctx(),
+                ctx=_ctx(verbose=verbose),
                 force=False,
                 managed_files=None,
                 integrators=_to_bundle(kwargs),
@@ -283,23 +284,27 @@ class TestAdoptedFileVisibility:
             )
         return _logger_lines(logger)
 
+    def test_adoption_is_silent_without_verbose(self, tmp_path: Path) -> None:
+        """Adoption changes nothing, so default output names none (#4382/#4360, I2)."""
+        adopt_only = self._run(tmp_path, [0], [3], verbose=False)
+        mixed = self._run(tmp_path, [2], [3], verbose=False)
+        assert not [ln for ln in adopt_only + mixed if "adopted" in ln], adopt_only + mixed
+        assert [ln for ln in mixed if ln.startswith("  |-- 2 agents integrated -> ")], mixed
+
     def test_adopt_only_run_emits_summary_line(self, tmp_path: Path) -> None:
-        """The catch-22 reproducer: lockfile wiped, files still on disk
-        byte-identical to source. Pre-fix: zero summary lines for the
-        kind. Post-fix: ``N agents adopted -> <path>``.
+        """--verbose: lockfile wiped, files still on disk byte-identical to
+        source. The adoption is named: ``N agents adopted -> <path>``.
         """
         lines = self._run(tmp_path, files_per_target=[0], adopted_per_target=[3])
         prompt_lines = [ln for ln in lines if "agents adopted" in ln]
         assert len(prompt_lines) == 1, (
-            "Adopt-only run must still emit a per-kind summary line; "
-            "previously the line was suppressed and the install looked like a no-op."
+            "A --verbose adopt-only run must name the adoption in a per-kind summary line."
         )
         assert prompt_lines[0].startswith("  |-- 3 agents adopted -> ")
 
     def test_mixed_integrate_and_adopt_emits_combined_line(self, tmp_path: Path) -> None:
-        """Half the files freshly written, half adopted. The line must
-        lead with the integrated count and append the adopt count in
-        parens so the two phases are individually visible.
+        """--verbose: half the files freshly written, half adopted. The line
+        leads with the integrated count and appends the adopt count in parens.
         """
         lines = self._run(tmp_path, files_per_target=[2], adopted_per_target=[3])
         prompt_lines = [ln for ln in lines if "agents integrated" in ln]
