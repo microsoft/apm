@@ -218,6 +218,8 @@
     "G|install|revoke-approval|mcp": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|install|revoke-approval|mcp]",
     "G|lifecycle-scripts|org-deny|script": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|lifecycle-scripts|org-deny|script]",
     "G|lifecycle-scripts|revoke-approval|script": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|lifecycle-scripts|revoke-approval|script]",
+    "G|marketplace-install|revoke-approval|hook": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|marketplace-install|revoke-approval|hook]",
+    "G|marketplace-install|revoke-approval|mcp": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|marketplace-install|revoke-approval|mcp]",
     "G|update|definition-changed|mcp": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|update|definition-changed|mcp]",
     "G|update|local-deny|hook": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|update|local-deny|hook]",
     "G|update|local-deny|lsp": "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command[G|update|local-deny|lsp]",
