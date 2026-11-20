@@ -85,6 +85,8 @@ def add(ledger: dict, new: list[dict]) -> dict:
         ledger["findings"].append(finding)
         index[finding["fingerprint"]] = finding
         added.append(finding["id"])
+        if ledger.get("sha") is None:
+            ledger["sha"] = finding["sha"]
     return {"added": added, "duplicates": duplicates}
 
 
@@ -114,6 +116,8 @@ def gate_row(ledger: dict, sha: str) -> dict:
     NO-GO: a blocker that a verifier confirmed is still open (verified,
     still-open or changed). PENDING-VERIFICATION: no confirmed open blocker,
     but at least one blocker still awaits P4. Known issues never count.
+    A ledger bound to another SHA cannot vouch for this one: the verdict is
+    PENDING-VERIFICATION until a recheck moves the ledger to the SHA.
     """
     confirmed_open = {"verified", "still-open", "changed"}
     blockers = [
@@ -133,13 +137,14 @@ def gate_row(ledger: dict, sha: str) -> dict:
     for finding in ledger["findings"]:
         if finding["status"] in confirmed_open | {"open"}:
             counts[finding["severity"]] += 1
-    if blockers:
+    stale = ledger.get("sha") not in (None, sha)
+    if blockers and not stale:
         verdict = "NO-GO"
-    elif unverified:
+    elif unverified or stale:
         verdict = "PENDING-VERIFICATION"
     else:
         verdict = "GO"
-    return {
+    row = {
         "gate": "exploratory acceptance: no open verified blocker on the exact SHA",
         "sha": sha,
         "verdict": verdict,
@@ -149,6 +154,9 @@ def gate_row(ledger: dict, sha: str) -> dict:
         "known_issues": [f["id"] for f in ledger["findings"] if f["status"] == "known-issue"],
         "findings_without_lifecycle_test": without_test,
     }
+    if stale:
+        row["stale_sha"] = {"ledger": ledger["sha"], "requested": sha}
+    return row
 
 
 def verify(ledger: dict, verdicts: list[dict]) -> dict:
@@ -172,12 +180,18 @@ def verify(ledger: dict, verdicts: list[dict]) -> dict:
             if severity not in SEVERITIES:
                 raise LedgerError(f"severity must be one of {SEVERITIES}")
             finding["severity"] = severity
+        entry = {"phase": "P4", "verdict": verdict, "rationale": item.get("rationale", "")}
+        for key in ("observed", "repro"):
+            value = item.get(key)
+            if value and value != finding.get(key):
+                if not str(value).isascii():
+                    raise LedgerError(f"verifier field {key!r} is not ASCII")
+                entry[f"walker_{key}"] = finding.get(key)
+                finding[key] = value
         for key in ("pre_existing", "owner_file", "promise"):
             if key in item:
                 finding[key] = item[key]
-        finding.setdefault("history", []).append(
-            {"phase": "P4", "verdict": verdict, "rationale": item.get("rationale", "")}
-        )
+        finding.setdefault("history", []).append(entry)
         applied.append(
             {
                 "id": fid,
@@ -207,15 +221,33 @@ def set_field(ledger: dict, fid: str, assignments: list[str]) -> dict:
     return {"id": fid, "finding": finding}
 
 
+RECHECK_REQUIRED = ("open", "verified", "still-open", "changed")
+
+
 def recheck(ledger: dict, verdicts: list[dict], sha: str) -> dict:
+    """Re-verify every unresolved finding at ``sha`` and move the ledger to it.
+
+    All verdicts are validated first; a missing verdict for any open,
+    verified, still-open or changed finding refuses the whole recheck and
+    leaves the ledger (including its SHA) untouched.
+    """
     by_id = {f["id"]: f for f in ledger["findings"]}
+    for item in verdicts:
+        if item.get("id") not in by_id:
+            raise LedgerError(f"unknown finding id {item.get('id')!r}")
+        if item.get("verdict") not in VERDICTS:
+            raise LedgerError(f"verdict must be one of {VERDICTS}")
+    covered = {item["id"] for item in verdicts}
+    missing = [
+        f["id"]
+        for f in ledger["findings"]
+        if f["status"] in RECHECK_REQUIRED and f["id"] not in covered
+    ]
+    if missing:
+        raise LedgerError(f"recheck at {sha} has no verdict for {missing}")
     table = []
     for item in verdicts:
-        fid, verdict = item.get("id"), item.get("verdict")
-        if fid not in by_id:
-            raise LedgerError(f"unknown finding id {fid!r}")
-        if verdict not in VERDICTS:
-            raise LedgerError(f"verdict must be one of {VERDICTS}")
+        fid, verdict = item["id"], item["verdict"]
         finding = by_id[fid]
         finding["status"] = {
             "VERIFIED-FIXED": "fixed",
@@ -273,6 +305,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(coverage(list(csv.DictReader(handle))), indent=2))
             return 0
         ledger_path = Path(args.ledger)
+        if args.command != "add" and not ledger_path.is_file():
+            print(f"findings: ledger not found: {ledger_path}", file=sys.stderr)
+            return 2
         ledger = load_ledger(ledger_path)
         if args.command == "add":
             result = add(ledger, _read_jsonl(Path(args.findings)))

@@ -151,9 +151,9 @@ false positive. Apply verdicts with
 Read `references/rubric.md` now.
 
 1. Severity and routing per the rubric. Record them with
-   `scripts/findings.py set --id RA-NNN route=<lane> pre_existing=<true|false>`.
-   A pre-existing non-security finding becomes `status=known-issue`;
-   a security finding never does.
+   `python3 scripts/findings.py set --ledger findings.json --id RA-NNN route=<lane> pre_existing=<true|false>`.
+   A pre-existing non-security finding becomes `status=known-issue`
+   unless the release claims to fix it; a security finding never does.
 2. For every verified finding, write a failing-before test brief for
    `apm-lifecycle-tests` (template below). The finding keeps status
    `verified` and `lifecycle_test: null` until a test node exists that
