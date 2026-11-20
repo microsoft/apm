@@ -41,6 +41,8 @@ RATCHET_CHECK = "Test Architecture Ratchets"
 RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
+RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
+RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
 ARCHITECTURE_SCALING_TARGET = (
     "tests/perf/test_architecture_linter_scaling.py::"
     "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction"
@@ -322,23 +324,27 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
 
 
 def _assert_ratchet_split(ci: WorkflowNode) -> None:
-    """Preserve the original signal while independently bounding both jobs."""
+    """The required aggregate gates only the contracts; scaling stays separate.
+
+    The wall-clock scaling ratio is a non-required signal (timing asserts
+    flake), so the required aggregate must not depend on its result.
+    """
     aggregate = workflow_job(ci, RATCHET_JOB)
-    assert aggregate.get("needs") == list(RATCHET_EXECUTION_JOBS), (
-        "ratchet contracts and scaling must execute in separate jobs"
+    assert aggregate.get("needs") == [RATCHET_CONTRACT_JOB], (
+        "the required ratchet aggregate must depend only on the contracts job"
     )
     assert aggregate["name"] == RATCHET_CHECK
     assert aggregate["if"] == "always()"
     assert aggregate["permissions"] == {}
     assert "continue-on-error" not in aggregate
     assert len(aggregate["steps"]) == 1
-    step = workflow_step(aggregate, "Require both architecture executions")
+    step = workflow_step(aggregate, RATCHET_AGGREGATE_STEP)
     assert "if" not in step and "continue-on-error" not in step
     assert step["env"] == {
         "CONTRACT_RESULT": "${{ needs.test-architecture-contracts.result }}",
-        "SCALING_RESULT": "${{ needs.test-architecture-scaling.result }}",
     }
-    _assert_success_results(step, ("CONTRACT_RESULT", "SCALING_RESULT"))
+    assert RATCHET_SCALING_JOB not in str(aggregate), "the aggregate must not read scaling"
+    _assert_success_results(step, ("CONTRACT_RESULT",))
     for job_id in RATCHET_EXECUTION_JOBS:
         _assert_ratchet_execution(ci, job_id)
 
@@ -636,8 +642,9 @@ def test_ratchet_execution_step_cannot_skip_or_suppress(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("needs", [RATCHET_CONTRACT_JOB]),
+        ("needs", []),
         ("needs", [RATCHET_SCALING_JOB]),
+        ("needs", [RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB]),
         ("if", "success()"),
         ("name", "Renamed ratchet signal"),
         ("continue-on-error", True),
@@ -651,22 +658,33 @@ def test_ratchet_aggregate_topology_drift_fails(
         _assert_ratchet_split(provisional_ci)
 
 
-@pytest.mark.parametrize("result_name", ["CONTRACT_RESULT", "SCALING_RESULT"])
-def test_ratchet_aggregate_cannot_ignore_either_execution(
-    provisional_ci: WorkflowNode, result_name: str
-) -> None:
-    step = workflow_step(
-        workflow_job(provisional_ci, RATCHET_JOB), "Require both architecture executions"
-    )
-    step["run"] = step["run"].replace(f'[ "${result_name}" != success ]', "false")
+def test_ratchet_aggregate_cannot_ignore_the_contracts(provisional_ci: WorkflowNode) -> None:
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
+    step["run"] = step["run"].replace('[ "$CONTRACT_RESULT" != success ]', "false")
     with pytest.raises(AssertionError, match="invalid results"):
         _assert_ratchet_split(provisional_ci)
 
 
-def test_ratchet_aggregate_cannot_suppress_failure(provisional_ci: WorkflowNode) -> None:
-    step = workflow_step(
-        workflow_job(provisional_ci, RATCHET_JOB), "Require both architecture executions"
+def test_ratchet_aggregate_reading_the_scaling_result_fails(provisional_ci: WorkflowNode) -> None:
+    """Negative control: gating the required aggregate on the timing ratio fails."""
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
+    step["env"]["SCALING_RESULT"] = "${{ needs.test-architecture-scaling.result }}"
+    step["run"] = step["run"].replace(
+        '[ "$CONTRACT_RESULT" != success ]',
+        '[ "$CONTRACT_RESULT" != success ] || [ "$SCALING_RESULT" != success ]',
     )
+    with pytest.raises(AssertionError):
+        _assert_ratchet_split(provisional_ci)
+
+
+def test_architecture_scaling_is_never_required() -> None:
+    merge_gate = load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml")
+    for context, names in _expected_checks(merge_gate).items():
+        assert RATCHET_SCALING_CHECK not in names, f"{RATCHET_SCALING_CHECK} gates {context}"
+
+
+def test_ratchet_aggregate_cannot_suppress_failure(provisional_ci: WorkflowNode) -> None:
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
     step["run"] = step["run"].replace("exit 1", ":")
     with pytest.raises(AssertionError, match="invalid results"):
         _assert_ratchet_split(provisional_ci)

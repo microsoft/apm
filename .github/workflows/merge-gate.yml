@@ -124,9 +124,11 @@ jobs:
           #                   four ci-integration.yml checks
           # tests/quality/test_ci_topology.py keeps this in sync with the
           # jobs that actually run on merge_group.
-          # "Test Architecture Ratchets" is required in every context: it runs
-          # tests/quality (including the merge-time topology guards in
-          # test_ci_topology.py), so a red ratchet must block the merge.
+          # "Test Architecture Ratchets" is required in every context: it gates
+          # the deterministic tests/quality contracts (including the
+          # merge-time topology guards in test_ci_topology.py). It does not
+          # depend on "Architecture Scaling (Linux)", a wall-clock ratio that
+          # stays non-required because timing asserts flake.
           # A PR labeled `full-integration` also runs ci-integration.yml at
           # PR time, so its four checks are required then too; unlabeled
           # PRs never wait for them.

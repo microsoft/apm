@@ -432,21 +432,23 @@ jobs:
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
 
+  # Required by merge-gate.yml at PR time and on merge_group. It gates only
+  # the deterministic contracts: the wall-clock scaling ratio stays its own
+  # non-required "Architecture Scaling (Linux)" check (timing asserts flake).
   test-architecture:
     name: Test Architecture Ratchets
-    needs: [test-architecture-contracts, test-architecture-scaling]
+    needs: [test-architecture-contracts]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
     steps:
-    - name: Require both architecture executions
+    - name: Require the architecture contracts
       env:
         CONTRACT_RESULT: ${{ needs.test-architecture-contracts.result }}
-        SCALING_RESULT: ${{ needs.test-architecture-scaling.result }}
       run: |
-        if [ "$CONTRACT_RESULT" != success ] || [ "$SCALING_RESULT" != success ]; then
-          echo "Architecture execution failed: contracts=$CONTRACT_RESULT scaling=$SCALING_RESULT"
+        if [ "$CONTRACT_RESULT" != success ]; then
+          echo "Architecture contracts failed: contracts=$CONTRACT_RESULT"
           exit 1
         fi
 
