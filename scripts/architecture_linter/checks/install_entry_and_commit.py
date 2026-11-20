@@ -302,6 +302,8 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
             "def check_before_deploy(",
             "def check_before_lockfile(",
             "enforce_installed_hash_policy(ctx, prospective)",
+            # Acquired package types decide which MCP declarations are checked.
+            "dependency.package_type = ctx.package_types[key]",
             "enforce_mcp_policy(",
             "def refuse_blocked_mcp(",
         )

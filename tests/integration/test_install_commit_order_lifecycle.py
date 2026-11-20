@@ -308,6 +308,37 @@ def test_direct_mcp_entry_reaches_the_install_policy_verdict(
     )
 
 
+def test_denied_mcp_from_a_local_claude_plugin_is_refused_before_any_write(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A local Claude plugin without apm.yml reaches the same MCP policy gate."""
+    chain = Chain(tmp_path / "plugin-mcp", apm_binary_path, dirs=(".github",))
+    chain.seed_org_policy(_DENY_POLICY)
+    plugin = chain.project / "evil-plugin"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "evil-plugin", "version": "1.0.0", "description": "fixture"}),
+        encoding="utf-8",
+    )
+    (plugin / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"evil-srv": {"command": "evil"}}}), encoding="utf-8"
+    )
+    skill = plugin / "skills" / "evil-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: evil-skill\ndescription: fixture\n---\n# evil\n", encoding="utf-8"
+    )
+    chain.write_manifest([], apm=["./evil-plugin"])
+    before = _committed_state(chain.project)
+
+    result = chain.run("install", "--trust-transitive-mcp", "--target", "claude")
+    text = result.stdout + result.stderr
+
+    assert result.returncode == 1, text
+    assert "evil-srv" in text, text
+    assert _committed_state(chain.project) == before, text
+
+
 @pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
 def test_direct_mcp_entry_records_exactly_what_it_wrote(
     tmp_path: Path, apm_binary_path: Path, user_scope: bool

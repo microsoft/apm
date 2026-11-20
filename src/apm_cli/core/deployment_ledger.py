@@ -74,7 +74,8 @@ def _next_receipt_batch(directory: Path, limit: int) -> list[Path]:
     """The next *limit* receipts after the cursor, wrapping, then advance it.
 
     Each command resumes where the previous one stopped, so retained receipts
-    never hide one behind them.
+    never hide one behind them. The cursor exists only while there are more
+    receipts than one batch examines.
     """
     receipts = sorted(directory.glob("*.json"))
     cursor = directory / ".collection-cursor"
@@ -84,7 +85,7 @@ def _next_receipt_batch(directory: Path, limit: int) -> list[Path]:
             last = cursor.read_text(encoding="ascii").strip()
     start = next((i for i, path in enumerate(receipts) if path.name > last), 0)
     batch = (receipts[start:] + receipts[:start])[:limit]
-    if batch and not cursor.is_symlink():
+    if len(receipts) > limit and not cursor.is_symlink():
         with contextlib.suppress(OSError):
             cursor.write_text(batch[-1].name + "\n", encoding="ascii")
     return batch

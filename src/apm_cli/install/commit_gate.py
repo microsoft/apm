@@ -143,6 +143,10 @@ def prospective_lockfile(ctx: InstallContext) -> LockFile:
     for key, dependency in acquired.dependencies.items():
         if key in ctx.package_hashes:
             dependency.content_hash = ctx.package_hashes[key]
+        # The acquired type (e.g. a Claude plugin without apm.yml) decides
+        # which MCP declarations the policy check collects.
+        if key in ctx.package_types:
+            dependency.package_type = ctx.package_types[key]
     prospective = LockFile(apm_version=acquired.apm_version)
     active = ctx.update_plan_complete_dep_keys
     existing = ctx.existing_lockfile
