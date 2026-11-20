@@ -599,16 +599,14 @@
       "tests/unit/utils/test_paths.py": 1,
       "tests/unit/utils/test_real_git_tls_config.py": 19
     },
-    "AQ005_e2e_not_driving_installed_cli": {
+    "AQ006_e2e_not_driving_installed_cli": {
       "tests/integration/test_copilot_native_plugin_binary_lifecycle.py": 2,
       "tests/integration/test_deployed_files_e2e.py": 1,
       "tests/integration/test_http_cache_recency_lifecycle.py": 1,
       "tests/integration/test_native_plugin_cache_audit.py": 1,
       "tests/integration/test_silent_adopt_existing_files_e2e.py": 1,
-      "tests/integration/test_tls_input_startup.py": 1,
       "tests/integration/test_version_provenance.py": 1,
-      "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py": 1,
-      "tests/spec_conformance/test_marketplace_directory_reqs.py": 1
+      "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py": 1
     }
   },
   "schema_version": 1

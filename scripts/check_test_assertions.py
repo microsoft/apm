@@ -3,7 +3,7 @@
 
 AQ001 constant assertions, AQ002 broad pytest.raises, AQ003 component/e2e
 tests with no assertion on output, exit code or durable state, AQ004 tests
-that patch a symbol defined in an owner module they import, and AQ005 e2e
+that patch a symbol defined in an owner module they import, and AQ006 e2e
 modules that do not drive the installed CLI (or use CliRunner, or patch an
 owner module). Counts per file may only shrink; a reduction is reported as
 stale (info) and never fails.
@@ -38,8 +38,8 @@ RULE_AQ001 = "AQ001_constant_assertion"
 RULE_AQ002 = "AQ002_broad_pytest_raises"
 RULE_AQ003 = "AQ003_unobserved_outcome"
 RULE_AQ004 = "AQ004_patches_owner_it_imports"
-RULE_AQ005 = "AQ005_e2e_not_driving_installed_cli"
-RULES = (RULE_AQ001, RULE_AQ002, RULE_AQ003, RULE_AQ004, RULE_AQ005)
+RULE_AQ006 = "AQ006_e2e_not_driving_installed_cli"
+RULES = (RULE_AQ001, RULE_AQ002, RULE_AQ003, RULE_AQ004, RULE_AQ006)
 RULE_TEXT = {
     RULE_AQ001: (
         "constant assertion does not test behavior",
@@ -58,7 +58,7 @@ RULE_TEXT = {
         "test patches a symbol defined in an owner module it imports",
         "exercise the real owner and replace only its collaborators or I/O boundary",
     ),
-    RULE_AQ005: (
+    RULE_AQ006: (
         "e2e module does not drive the installed CLI only",
         "run the installed apm (ApmLifecycleRunner or the apm_binary fixture), drop "
         "CliRunner and in-process owner patches, or reclassify the module as component",
@@ -102,11 +102,11 @@ def _scan_module(
         observed[RULE_AQ004][relative].append(line)
     if "e2e" in markers:
         if not drives_installed_cli(tree):
-            observed[RULE_AQ005][relative].append(1)
+            observed[RULE_AQ006][relative].append(1)
         if uses_cli_runner(tree):
-            observed[RULE_AQ005][relative].append(1)
+            observed[RULE_AQ006][relative].append(1)
         for line, _target in owner_patches(root, tree, owner_cache, defined_only=False):
-            observed[RULE_AQ005][relative].append(line)
+            observed[RULE_AQ006][relative].append(line)
 
 
 def scan(root: Path) -> dict[str, dict[str, list[int]]]:
@@ -154,7 +154,7 @@ def compare(
 def main(argv: list[str] | None = None) -> int:
     """Check the baseline, or tighten it when only reductions are observed."""
     parser = argparse.ArgumentParser(
-        description="Check AQ001-AQ005 assertion-quality no-growth ceilings."
+        description="Check AQ001-AQ006 assertion-quality no-growth ceilings."
     )
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--baseline", type=Path)

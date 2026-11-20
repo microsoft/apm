@@ -251,9 +251,9 @@ pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocab
 same way: AQ001 constant assertions, AQ002 `pytest.raises(Exception)`, AQ003
 component or e2e tests that assert no user-visible output, exit code or durable
 state, AQ004 tests that patch a symbol defined in an owner module they import,
-and AQ005 e2e modules that do not drive the installed CLI (they use `CliRunner`,
-patch an owner module, or never run `apm` through `ApmLifecycleRunner` or the
-`apm_binary` fixture).
+and AQ006 e2e modules that do not drive the real CLI (they use `CliRunner`,
+patch an owner module, or never run `apm` through `ApmLifecycleRunner`, the
+`apm_binary_path` or `apm_engine_command` fixtures, or the lifecycle `driver`).
 
 For consolidation, `uv run --frozen python scripts/check_exact_test_duplicates.py
 --report-equal-copies` lists equal copies that are safe to delete. A copy

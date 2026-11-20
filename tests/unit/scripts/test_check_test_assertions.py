@@ -15,8 +15,8 @@ RULE_AQ001 = "AQ001_constant_assertion"
 RULE_AQ002 = "AQ002_broad_pytest_raises"
 RULE_AQ003 = "AQ003_unobserved_outcome"
 RULE_AQ004 = "AQ004_patches_owner_it_imports"
-RULE_AQ005 = "AQ005_e2e_not_driving_installed_cli"
-EMPTY_RULES = {RULE_AQ001: {}, RULE_AQ002: {}, RULE_AQ003: {}, RULE_AQ004: {}, RULE_AQ005: {}}
+RULE_AQ006 = "AQ006_e2e_not_driving_installed_cli"
+EMPTY_RULES = {RULE_AQ001: {}, RULE_AQ002: {}, RULE_AQ003: {}, RULE_AQ004: {}, RULE_AQ006: {}}
 
 
 def _run(root: Path, baseline: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -223,7 +223,7 @@ def test_aq004_patching_a_symbol_defined_in_the_imported_owner_fails(tmp_path: P
     ) in result.stderr
 
 
-def test_aq005_e2e_module_using_cli_runner_fails(tmp_path: Path) -> None:
+def test_aq006_e2e_module_using_cli_runner_fails(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     _write_test(
         root,
@@ -247,7 +247,7 @@ def test_aq005_e2e_module_using_cli_runner_fails(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert (
-        f"[x] tests/test_sample.py:1, tests/test_sample.py:1: {RULE_AQ005}: e2e module does "
+        f"[x] tests/test_sample.py:1, tests/test_sample.py:1: {RULE_AQ006}: e2e module does "
         "not drive the installed CLI only (observed 2, allowed 0). Fix: run the installed apm"
     ) in result.stderr
     assert "test_driving.py" not in result.stderr

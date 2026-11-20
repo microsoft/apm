@@ -52,8 +52,10 @@ OBSERVABLE_FIXTURES = frozenset(
 )
 MOCK_ASSERTIONS = re.compile(r"^assert_(not_)?(any_)?(called|awaited|has_calls|has_awaits)")
 HELPER_ASSERTION = re.compile(r"^_?(assert|expect|verify|check)")
-DRIVER_NAMES = frozenset({"apm_binary", "apm_binary_path", "ApmLifecycleRunner"})
-DRIVER_STRINGS = frozenset({"APM_BINARY_PATH"})
+DRIVER_NAMES = frozenset(
+    {"apm_binary", "apm_binary_path", "apm_engine_command", "ApmLifecycleRunner", "driver"}
+)
+DRIVER_STRINGS = frozenset({"APM_BINARY_PATH", "APM_LIFECYCLE_DRIVER"})
 
 
 def module_markers(tree: ast.Module) -> frozenset[str]:

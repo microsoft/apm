@@ -24,7 +24,7 @@ CHECKERS = (
         (
             r"(?:\[i\] [^\n]*\n)*"
             r"\[\+\] assertion-quality ratchet clean: "
-            r"AQ001=\d+, AQ002=\d+, AQ003=\d+, AQ004=\d+, AQ005=\d+\n"
+            r"AQ001=\d+, AQ002=\d+, AQ003=\d+, AQ004=\d+, AQ006=\d+\n"
         ),
     ),
     (
