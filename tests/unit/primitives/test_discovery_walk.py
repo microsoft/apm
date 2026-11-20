@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from apm_cli.constants import DEFAULT_SKIP_DIRS
 from apm_cli.primitives.discovery import (
     _exclude_matches_dir,
@@ -17,6 +19,8 @@ from apm_cli.primitives.discovery import (
     scan_directory_with_source,
 )
 from apm_cli.primitives.models import PrimitiveCollection
+
+pytestmark = pytest.mark.component
 
 
 def _write(path: Path, content: str = "---\ndescription: stub\n---\n\n# Stub\n") -> None:

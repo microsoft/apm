@@ -12,6 +12,8 @@ from apm_cli.utils.guards import (
     _ReadOnlyProjectGuard,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _bump_mtime(p):
     now_ns = time.time_ns()

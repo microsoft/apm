@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.compilation.inventory import CompileInventory
 from apm_cli.primitives.discovery import (
     _discover_local_skill,
@@ -28,6 +30,8 @@ from apm_cli.primitives.parser import (
     parse_skill_file,
     validate_primitive,
 )
+
+pytestmark = pytest.mark.component
 
 
 def _write(path: Path, content: str) -> None:

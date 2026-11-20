@@ -20,6 +20,8 @@ from apm_cli.security.trust_fingerprint import (
     short_fingerprint,
 )
 
+pytestmark = pytest.mark.component
+
 _SERVER = {
     "name": "search-index",
     "registry": False,

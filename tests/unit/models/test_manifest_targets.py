@@ -35,6 +35,8 @@ from apm_cli.models.manifest_targets import (
 )
 from apm_cli.utils.yaml_io import dump_yaml
 
+pytestmark = pytest.mark.component
+
 
 def _declaration(**fields) -> ManifestTargetDeclaration:
     return ManifestTargetDeclaration.from_mapping(fields)

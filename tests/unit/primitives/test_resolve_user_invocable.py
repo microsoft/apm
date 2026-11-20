@@ -24,6 +24,8 @@ from apm_cli.utils.diagnostics import (
     DiagnosticCollector,
 )
 
+pytestmark = pytest.mark.component
+
 
 def test_absent_defaults_to_user_invocable() -> None:
     """A missing field, including an explicit null, stays user-invocable."""

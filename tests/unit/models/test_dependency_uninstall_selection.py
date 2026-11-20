@@ -12,6 +12,8 @@ from apm_cli.models.dependency.selection import (
     select_manifest_dependency,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _local_lock(*paths: str, alias: str) -> LockFile:
     dependencies = {}

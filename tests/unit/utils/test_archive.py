@@ -19,6 +19,8 @@ from apm_cli.utils.archive import (
     write_zip_archive,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _zip_bytes(entries: dict[str, bytes]) -> bytes:
     buf = io.BytesIO()

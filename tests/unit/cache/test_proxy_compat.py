@@ -15,6 +15,8 @@ import pytest
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.utils.git_env import git_subprocess_env
 
+pytestmark = pytest.mark.component
+
 
 class TestProxyEnvPreserved:
     """Verify proxy environment variables pass through to git subprocess."""

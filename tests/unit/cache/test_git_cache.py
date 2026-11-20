@@ -14,6 +14,8 @@ from apm_cli.cache.url_normalize import cache_shard_key
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _mock_git_object_links():

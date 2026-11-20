@@ -16,6 +16,8 @@ from apm_cli.models.manifest_io import (
     reject_manifest_anchors,
 )
 
+pytestmark = pytest.mark.component
+
 _DUPLICATE = (
     "name: demo\nversion: 1.0.0\n"
     "dependencies:\n  apm:\n    - owner/one\n"

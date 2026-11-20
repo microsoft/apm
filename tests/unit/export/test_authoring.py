@@ -8,7 +8,11 @@ transitive deps. The warning must be actionable and ASCII-only.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.export.authoring import warn_if_license_undeclared
+
+pytestmark = pytest.mark.component
 
 
 def _capture():

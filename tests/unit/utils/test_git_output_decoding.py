@@ -32,7 +32,7 @@ from apm_cli.utils.git_sparse import (
     sparse_checkout_active,
 )
 
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 _UTF8_NAME = "release\u2014\u201dnext"
 

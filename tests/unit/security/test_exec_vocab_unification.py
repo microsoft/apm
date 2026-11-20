@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
 import apm_cli.security.executables as ex
 from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy, ExecutablesPolicy
 from apm_cli.security.executables import (
@@ -21,6 +23,8 @@ from apm_cli.security.executables import (
     parse_project_executables,
     save_user_executables,
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestParseProjectExecutables:

@@ -3,12 +3,16 @@
 import threading
 from pathlib import Path
 
+import pytest
+
 from apm_cli.cache.locking import (
     atomic_land,
     cleanup_incomplete,
     shard_lock,
     stage_path,
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestShardLock:

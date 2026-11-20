@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -12,6 +13,8 @@ from apm_cli.commands.install import (
 from apm_cli.core.command_logger import _ValidationOutcome
 from apm_cli.install.registry_wiring import get_effective_default_registry
 from apm_cli.models.apm_package import APMPackage
+
+pytestmark = pytest.mark.component
 
 
 def test_global_dry_run_command_leaves_absent_home_state_uncreated(tmp_path: Path) -> None:

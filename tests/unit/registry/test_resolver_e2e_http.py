@@ -35,6 +35,8 @@ from apm_cli.deps.registry.resolver import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 # ───────────────────────────────────────────────────────────────────────────
 # Test HTTP server scaffolding
 # ───────────────────────────────────────────────────────────────────────────

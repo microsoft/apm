@@ -14,6 +14,8 @@ from apm_cli.cache.http_cache import (
     HttpCache,
 )
 
+pytestmark = pytest.mark.component
+
 
 class TestHttpCacheHitMiss:
     """Test basic cache hit/miss behavior."""

@@ -38,7 +38,7 @@ from apm_cli.utils.git_env import (
 # ["git", ...] argv WinError 2 class). Selected by the PR-time Windows
 # Compatibility Gate via `pytest -m windows_compat`; also runs on
 # every other OS.
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 _REAL_SUBPROCESS_RUN = subprocess.run
 
 

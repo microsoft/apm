@@ -13,8 +13,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.export.sbom import export_sbom
+
+pytestmark = pytest.mark.unit
 
 _TS = "2024-01-01T00:00:00+00:00"
 

@@ -39,6 +39,8 @@ from apm_cli.security.trust import (
 )
 from apm_cli.security.trust_fingerprint import hook_file_fingerprint, mcp_definition_fingerprint
 
+pytestmark = pytest.mark.component
+
 PKG = "acme/search-core"
 SERVER = {
     "name": "search-index",

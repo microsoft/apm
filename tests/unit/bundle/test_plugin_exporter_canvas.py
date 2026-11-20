@@ -11,10 +11,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.bundle.plugin_exporter import (
     _collect_apm_components,
     _collect_root_plugin_components,
 )
+
+pytestmark = pytest.mark.component
 
 
 def test_collect_apm_components_includes_canvas(tmp_path: Path):

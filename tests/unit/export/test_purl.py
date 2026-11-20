@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.export.purl import build_purl, scrub_url
+
+pytestmark = pytest.mark.unit
 
 
 def test_git_dep_uses_github_purl_with_commit():

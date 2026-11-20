@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from apm_cli.primitives.discovery import discover_primitives, find_primitive_files
 from apm_cli.primitives.models import (
     Chatmode,
@@ -19,6 +21,8 @@ from apm_cli.primitives.parser import (
     parse_primitive_file,
     validate_primitive,  # noqa: F401
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestPrimitiveModels(unittest.TestCase):

@@ -13,6 +13,8 @@ import pytest
 
 from apm_cli.utils.github_host import is_ado_auth_failure_signal
 
+pytestmark = pytest.mark.unit
+
 
 class TestAdoAuthFailureSignal:
     @pytest.mark.parametrize(

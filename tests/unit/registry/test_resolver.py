@@ -23,6 +23,8 @@ from apm_cli.deps.registry.resolver import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _make_apm_tarball(name: str = "acme-web-skills", version: str = "1.2.0"):
     """Build a minimal valid APM package tarball + return (bytes, sha256_hex)."""

@@ -12,6 +12,8 @@ from unittest.mock import Mock
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_mutation_pilot.py"
 

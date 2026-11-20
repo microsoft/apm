@@ -2,7 +2,8 @@
  "partition": "unit remaining subpackages",
  "steps_done": [
   1,
-  2
+  2,
+  3
  ],
  "folds": {
   "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_case_insensitive": "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_canonical_signals_match",
@@ -18,12 +19,15 @@
   "step2: folded proxy env passthrough (HTTPS/HTTP/NO_PROXY) into one parametrized test in cache/test_proxy_compat.py; removed the HTTPS twin from cache/test_git_env.py",
   "step2: cross-partition groups kept: utils/test_paths.py (3 portable_relpath groups) and registry/test_compat_matrix.py identity test have twins in tests/unit root (unit-root-small partition); in-scope copy is kept as the surviving owner so the root partition can delete its copy without a double deletion",
   "step2: 2 groups among tests/unit/scripts/test_architecture_*.py (test_allowlist_is_not_stale, test_real_tree_is_clean / test_head_is_clean) kept: test_architecture_* files are protected by hard rule",
-  "pre-existing failures on base in cache/test_git_env.py (test_modern_windows_missing_lookup_scales_linearly[git|gh], TestUncachedFallbackLineEndings::test_locked_sha_checks_out_from_a_crlf_host) are unchanged by this branch"
+  "pre-existing failures on base in cache/test_git_env.py (test_modern_windows_missing_lookup_scales_linearly[git|gh], TestUncachedFallbackLineEndings::test_locked_sha_checks_out_from_a_crlf_host) are unchanged by this branch",
+  "step3: 68 modules marked (17 unit, 51 component); component when the module or its fixtures touch the filesystem (tmp_path, tempfile, golden files on disk), uses CliRunner, or spawns processes",
+  "step3: 7 modules left unclassified because they are protected: tests/unit/scripts/test_architecture_{inventory,registry,registry_conflicts,runner}.py (test_architecture_*), and open-PR files bundle/test_tar_windows_absolute_path.py, scripts/test_check_exact_test_duplicates.py, security/test_resolve_exec_decision.py",
+  "step3: pre-existing sandbox failures (git commit gpg signing / locale) in cache/test_git_env.py, scripts/test_check_complexity_ratchet.py, utils/test_git_output_decoding.py fail identically on base"
  ],
  "counts_left": {
   "same_body_groups": 6,
-  "unclassified_modules": 75,
+  "unclassified_modules": 7,
   "placement_offenders": 24,
-  "weak_tests": 53
+  "weak_tests": 682
  }
 }

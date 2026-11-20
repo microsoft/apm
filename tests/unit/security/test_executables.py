@@ -46,6 +46,8 @@ from apm_cli.security.executables import (
     write_allow_executables,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # ExecutableDeclaration
 # ---------------------------------------------------------------------------
