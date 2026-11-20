@@ -214,7 +214,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 912, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 741, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 493, "No APM dependencies to update"),
-            Ev("src/apm_cli/core/command_logger.py", 525, "Nothing to prune"),
+            Ev("src/apm_cli/core/command_logger.py", 289, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
     ),

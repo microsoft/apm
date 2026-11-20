@@ -284,6 +284,10 @@ class CommandLogger:
         if self._diagnostics and self._diagnostics.has_diagnostics:
             self._diagnostics.render_summary()
 
+    def nothing_to_prune(self) -> None:
+        """Log the single no-op line of ``apm prune``, whatever apm_modules/ holds (#4460)."""
+        _rich_success("No orphaned packages found. Nothing to prune.", symbol="check")
+
 
 # --- Library output -----------------------------------------------------------
 # Library code below the command layer (MCP client adapters, the safe MCP
@@ -519,10 +523,6 @@ class InstallLogger(CommandLogger):
     def record_mcp_removed(self, names) -> None:
         """Record MCP servers this install removed, so the summary counts them."""
         self._mcp_removed.update(str(name) for name in names)
-
-    def nothing_to_prune(self) -> None:
-        """Log the single no-op line of ``apm prune``, whatever apm_modules/ holds (#4460)."""
-        _rich_success("No orphaned packages found. Nothing to prune.", symbol="check")
 
     def nothing_to_install(
         self,
