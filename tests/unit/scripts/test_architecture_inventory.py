@@ -66,6 +66,7 @@ def test_excluded_roots_constant_is_exact_and_stable() -> None:
         "mutants",
         ".idea",
         ".vscode",
+        "apm_modules",
     )
     assert len(set(EXCLUDED_ROOTS)) == len(EXCLUDED_ROOTS)
 
@@ -242,3 +243,22 @@ def test_root_must_exist(tmp_path: Path) -> None:
 
     with pytest.raises(InventoryError, match="root is not a directory"):
         build_inventory(missing)
+
+
+def test_a_directory_vanishing_mid_walk_is_skipped_not_fatal(tmp_path, monkeypatch) -> None:
+    """A concurrently removed scratch directory does not crash the inventory."""
+    from scripts.architecture_linter import inventory as inventory_module
+
+    error = FileNotFoundError(2, "No such file or directory", str(tmp_path / "gone"))
+    inventory_module._raise_walk_error(error)
+    with pytest.raises(inventory_module.InventoryError):
+        inventory_module._raise_walk_error(PermissionError(13, "denied", str(tmp_path)))
+
+
+def test_root_apm_modules_is_never_walked(tmp_path) -> None:
+    """Install output at the repository root is excluded like other generated roots."""
+    from scripts.architecture_linter.inventory import _is_excluded
+
+    assert _is_excluded(("apm_modules",))
+    assert _is_excluded(("apm_modules", "acme", "pkg", "x.py"))
+    assert not _is_excluded(("src", "apm_cli", "apm_modules.py"))

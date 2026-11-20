@@ -34,6 +34,8 @@ EXCLUDED_ROOTS: tuple[str, ...] = (
     "mutants",
     ".idea",
     ".vscode",
+    # Gitignored install output a test may create and remove mid-walk.
+    "apm_modules",
 )
 
 # These names are generated wherever they occur.  The remaining names in
@@ -125,6 +127,10 @@ def _relative_path(root: Path, dirpath: str, filename: str) -> str:
 
 
 def _raise_walk_error(error: OSError) -> None:
+    # A directory removed between listing and descent (a concurrent test's
+    # scratch output) holds nothing to lint; any other walk error fails closed.
+    if isinstance(error, FileNotFoundError):
+        return
     raise InventoryError(f"cannot inventory repository: {error}") from error
 
 

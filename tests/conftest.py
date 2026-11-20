@@ -123,6 +123,19 @@ def _validate_primitive_coverage():
 
 
 @pytest.fixture(autouse=True)
+def _reset_executable_caches():
+    """Drop the process-wide git/gh executable caches after each test.
+
+    A test that patches ``shutil.which`` while git resolves would otherwise
+    cache a wrong path for every later test on the same worker.
+    """
+    yield
+    from apm_cli.utils.git_env import reset_git_cache
+
+    reset_git_cache()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_discovery_state():
     """Clear process-scoped discovery cache + perf counters between tests.
 
