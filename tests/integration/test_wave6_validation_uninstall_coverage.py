@@ -285,7 +285,7 @@ class TestUninstallEngineHelpers:
         assert _is_marketplace_ref("just-a-name") is False
 
     def test_build_children_index_empty(self) -> None:
-        from apm_cli.commands.uninstall.engine import _build_children_index
+        from apm_cli.install.orphans import _build_children_index
 
         lockfile = MagicMock()
         lockfile.get_package_dependencies.return_value = []
@@ -293,7 +293,7 @@ class TestUninstallEngineHelpers:
         assert result == {}
 
     def test_build_children_index_with_deps(self) -> None:
-        from apm_cli.commands.uninstall.engine import _build_children_index
+        from apm_cli.install.orphans import _build_children_index
 
         dep1 = LockedDependency(resolved_by="org/parent", repo_url="owner/dep1")
         dep2 = LockedDependency(resolved_by="org/parent", repo_url="owner/dep2")

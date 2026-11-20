@@ -255,8 +255,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_cowork_deployed_hash_reqs.py::test_cowork_deployed_file_hash_is_canonical_sha256_envelope",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_canonical_tree_sha256_field_present"
       ]
     },
@@ -368,12 +369,13 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::TestFinalLockfileTargetContraction::test_removes_dropped_target_instruction_file",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_keeps_shared_root_paths_another_declared_target_governs",
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_orphan_cleanup_preserves_paths_an_active_dependency_deploys"
       ]
     },
     {
