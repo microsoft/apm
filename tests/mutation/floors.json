@@ -482,7 +482,8 @@
         }
       ],
       "test_seams": [
-        "tests/unit/deps/test_lockfile_field_properties.py"
+        "tests/unit/deps/test_lockfile_field_properties.py",
+        "tests/unit/deps/test_lockfile_read_path.py"
       ]
     },
     "target-scoped-deployed-file-contraction": {

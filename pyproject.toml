@@ -224,6 +224,7 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/integration/test_hook_native_metadata.py",
     "tests/unit/integration/test_cursor_hook_native_contract.py",
     "tests/unit/deps/test_lockfile_field_properties.py",
+    "tests/unit/deps/test_lockfile_read_path.py",
     "tests/unit/core/test_deployment_state.py",
     "tests/unit/policy/test_outcome_routing.py",
     "tests/unit/policy/test_trust_policy_outcome.py",
