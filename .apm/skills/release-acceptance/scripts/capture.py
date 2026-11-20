@@ -157,7 +157,7 @@ def extract_hints(text: str, docs_root: Path | None) -> list[dict]:
             # help tables ("| apm cmd | description |") do not. Keep the
             # text after a label colon, drop everything else on such rows.
             inner = stripped.strip("|").strip()
-            label, sep, rest = inner.partition(":")
+            _label, sep, rest = inner.partition(":")
             if not sep:
                 continue
             stripped = re.sub(r"\s{2,}.*$", "", rest.strip())
