@@ -10,11 +10,12 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.legacy_plugin_compat import (
     matches_fresh_legacy_plugin_hash,
+    matches_retired_codex_route_hash,
     preserve_normalized_marketplace_plugin_type,
     upgrade_cached_legacy_plugin,
 )
 from apm_cli.models.apm_package import APMPackage, PackageType
-from apm_cli.models.validation import validate_legacy_marketplace_plugin
+from apm_cli.models.validation import validate_apm_package, validate_legacy_marketplace_plugin
 from apm_cli.utils.content_hash import compute_package_hash
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
@@ -474,3 +475,69 @@ def test_verified_legacy_cache_routes_through_canonical_validator(tmp_path: Path
     assert validate.call_count == 2
     assert validate.call_args_list[-1].args == (package, package / "plugin.json")
     assert validate.call_args_list[-1].kwargs == {"source_path": package}
+
+
+def _retired_codex_route_copy(root: Path) -> tuple[Path, LockFile]:
+    """A ``.codex-plugin`` bundle locked raw by the retired route, then converted fresh."""
+    package = root / "codex-plugin"
+    (package / ".codex-plugin").mkdir(parents=True)
+    (package / ".codex-plugin" / "plugin.json").write_text(
+        '{"name": "example", "version": "1.0.0", "skills": "./skills"}', encoding="ascii"
+    )
+    (package / "skills" / "example").mkdir(parents=True)
+    (package / "skills" / "example" / "SKILL.md").write_text(
+        "---\nname: example\ndescription: example\n---\n", encoding="ascii"
+    )
+    lockfile = LockFile(apm_version="0.37.0")
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="owner/codex-plugin",
+            package_type="marketplace_plugin",
+            content_hash=compute_package_hash(package),
+        )
+    )
+    converted = validate_apm_package(package, source_path=package)
+    assert converted.is_valid and (package / "apm.yml").is_file()
+    return package, lockfile
+
+
+def _accepts_retired_codex_delta(package: Path, lockfile: LockFile) -> bool:
+    return matches_retired_codex_route_hash(
+        package,
+        "owner/codex-plugin",
+        lockfile=lockfile,
+        package_type=PackageType.MARKETPLACE_PLUGIN,
+    )
+
+
+def test_retired_codex_route_accepts_only_the_conversion_delta(tmp_path: Path) -> None:
+    package, lockfile = _retired_codex_route_copy(tmp_path)
+    before = ArtifactSnapshot.capture(package)
+
+    assert _accepts_retired_codex_delta(package, lockfile)
+    assert_unchanged(before, ArtifactSnapshot.capture(package))
+    assert not matches_retired_codex_route_hash(
+        package,
+        "owner/codex-plugin",
+        lockfile=lockfile,
+        package_type=PackageType.APM_PACKAGE,
+    )
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    ["upstream-file", "generated-manifest", "extra-generated-file"],
+)
+def test_retired_codex_route_rejects_bytes_beyond_the_conversion(
+    tmp_path: Path, tamper: str
+) -> None:
+    package, lockfile = _retired_codex_route_copy(tmp_path)
+    if tamper == "upstream-file":
+        (package / "skills" / "example" / "SKILL.md").write_text("tampered\n", encoding="ascii")
+    elif tamper == "generated-manifest":
+        (package / "apm.yml").write_text("name: tampered\nversion: 9.9.9\n", encoding="ascii")
+    else:
+        (package / ".apm" / "hooks").mkdir(parents=True)
+        (package / ".apm" / "hooks" / "evil.json").write_text("{}", encoding="ascii")
+
+    assert not _accepts_retired_codex_delta(package, lockfile)

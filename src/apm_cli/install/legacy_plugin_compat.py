@@ -14,6 +14,7 @@ from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.apm_package import APMPackage, PackageType
 from apm_cli.models.validation import (
     gather_detection_evidence,
+    validate_apm_package,
     validate_legacy_marketplace_plugin,
 )
 from apm_cli.utils.content_hash import compute_package_hash
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
 _LEGACY_PLUGIN_APM_VERSION = "0.28.0"
 _PLUGIN_SKILL_SOURCES_RECEIPT = Path(APM_DIR) / ".plugin-skill-sources.json"
+_CODEX_PLUGIN_MANIFEST = Path(".codex-plugin") / "plugin.json"
 
 
 def preserve_normalized_marketplace_plugin_type(
@@ -83,6 +85,64 @@ def matches_fresh_legacy_plugin_hash(
     if cleanup_issues:
         raise _staging_cleanup_error(dep_key, cleanup_issues)
     return legacy_hash == locked_dependency.content_hash
+
+
+def matches_retired_codex_route_hash(
+    package_path: Path,
+    dep_key: str,
+    *,
+    lockfile: LockFile | None,
+    package_type: PackageType | None,
+    exclude: Collection[str] = (),
+) -> bool:
+    """Accept the conversion-only hash delta of a bundle the retired Codex route locked (#3920).
+
+    The removed app-server route locked a ``.codex-plugin`` bundle's raw bytes
+    and never converted it. The split install converts it by adding only
+    ``apm.yml`` and ``.apm/``. Accept the fresh hash only when the tree minus
+    those additions hashes to the locked value AND converting exactly those
+    locked bytes again reproduces the fresh tree, so nothing else can ride
+    along with the conversion.
+    """
+    locked_dependency = lockfile.get_dependency(dep_key) if lockfile is not None else None
+    manifest = package_path / _CODEX_PLUGIN_MANIFEST
+    if (
+        locked_dependency is None
+        or not locked_dependency.content_hash
+        or locked_dependency.package_type != PackageType.MARKETPLACE_PLUGIN.value
+        or package_type != PackageType.MARKETPLACE_PLUGIN
+        or not manifest.is_file()
+    ):
+        return False
+    _reject_unsafe_cache_paths(
+        package_path, dep_key, (manifest, package_path / APM_YML_FILENAME, package_path / APM_DIR)
+    )
+    fresh_hash = compute_package_hash(package_path, exclude=exclude)
+
+    staging = ResolutionStagingSession(package_path.parent)
+    replacement = staging.prepare_replacement(package_path)
+    try:
+        shutil.copytree(package_path, replacement, symlinks=True)
+        (replacement / APM_YML_FILENAME).unlink(missing_ok=True)
+        if (replacement / APM_DIR).is_dir():
+            shutil.rmtree(replacement / APM_DIR)
+        matches = compute_package_hash(replacement, exclude=exclude) == (
+            locked_dependency.content_hash
+        )
+        if matches:
+            converted = validate_apm_package(replacement, source_path=replacement)
+            matches = (
+                converted.is_valid
+                and converted.package_type == PackageType.MARKETPLACE_PLUGIN
+                and compute_package_hash(replacement, exclude=exclude) == fresh_hash
+            )
+    except BaseException:
+        staging.rollback()
+        raise
+    cleanup_issues = staging.rollback()
+    if cleanup_issues:
+        raise _staging_cleanup_error(dep_key, cleanup_issues)
+    return matches
 
 
 def upgrade_cached_legacy_plugin(

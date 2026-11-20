@@ -877,14 +877,17 @@ class FreshDependencySource(DependencySource):
                 if _fresh_hash != dep_locked_chk.content_hash:
                     from apm_cli.install.legacy_plugin_compat import (
                         matches_fresh_legacy_plugin_hash,
+                        matches_retired_codex_route_hash,
                     )
 
-                    if not matches_fresh_legacy_plugin_hash(
-                        install_path,
-                        dep_key,
-                        lockfile=ctx.existing_lockfile,
-                        package_type=getattr(package_info, "package_type", None),
-                        exclude=_carried_paths,
+                    _known_delta = {
+                        "lockfile": ctx.existing_lockfile,
+                        "package_type": getattr(package_info, "package_type", None),
+                        "exclude": _carried_paths,
+                    }
+                    if not (
+                        matches_fresh_legacy_plugin_hash(install_path, dep_key, **_known_delta)
+                        or matches_retired_codex_route_hash(install_path, dep_key, **_known_delta)
                     ):
                         safe_rmtree(install_path, ctx.apm_modules_dir)
                         raise DirectDependencyError(
