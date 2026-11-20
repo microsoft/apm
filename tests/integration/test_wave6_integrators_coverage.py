@@ -328,9 +328,6 @@ class TestMCPIntegratorGetServerNames:
         names = MCPIntegrator.get_server_names(deps)
         assert names == {"alpha", "beta", "gamma"}
 
-    def test_empty_list(self):
-        assert MCPIntegrator.get_server_names([]) == set()
-
 
 class TestMCPIntegratorGetServerConfigs:
     def test_extracts_configs(self):
@@ -672,10 +669,6 @@ class TestHookIntegratorFindHookFiles:
         integrator = HookIntegrator()
         found = integrator.find_hook_files(tmp_path)
         assert all(not f.is_symlink() for f in found)
-
-    def test_returns_empty_when_no_hooks(self, tmp_path):
-        integrator = HookIntegrator()
-        assert integrator.find_hook_files(tmp_path) == []
 
 
 class TestParseHookJson:

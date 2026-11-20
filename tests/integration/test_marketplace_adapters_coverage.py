@@ -496,20 +496,17 @@ class TestRunAudit:
 class TestBaseAdapterHelpers:
     """Tests for pure helper functions in ``adapters/client/base.py``."""
 
-    def test_translate_env_placeholder_dollar_brace(self) -> None:
-        result = _translate_env_placeholder("${MY_VAR}")
-        assert result == "${MY_VAR}"
-
-    def test_translate_env_placeholder_env_prefix(self) -> None:
-        result = _translate_env_placeholder("${env:MY_VAR}")
-        assert result == "${MY_VAR}"
-
-    def test_translate_env_placeholder_legacy_angle(self) -> None:
-        result = _translate_env_placeholder("<MY_VAR>")
-        assert result == "${MY_VAR}"
-
-    def test_translate_env_placeholder_non_string_passthrough(self) -> None:
-        assert _translate_env_placeholder(42) == 42  # type: ignore[arg-type]
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param("${MY_VAR}", "${MY_VAR}", id="dollar_brace"),
+            pytest.param("${env:MY_VAR}", "${MY_VAR}", id="env_prefix"),
+            pytest.param("<MY_VAR>", "${MY_VAR}", id="legacy_angle"),
+            pytest.param(42, 42, id="non_string_passthrough"),
+        ],
+    )
+    def test_translate_env_placeholder(self, value, expected) -> None:
+        assert _translate_env_placeholder(value) == expected
 
     def test_extract_legacy_angle_vars_returns_names(self) -> None:
         result = _extract_legacy_angle_vars("token=<API_TOKEN> key=<SECRET_KEY>")
@@ -527,20 +524,26 @@ class TestBaseAdapterHelpers:
     def test_has_env_placeholder_false_for_plain_string(self) -> None:
         assert _has_env_placeholder("plain-value") is False
 
-    def test_stringify_env_literal_bool_false(self) -> None:
-        assert _stringify_env_literal(False) == "false"
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param(False, "false", id="bool_false"),
+            pytest.param(True, "true", id="bool_true"),
+            pytest.param(42, "42", id="int"),
+        ],
+    )
+    def test_stringify_env_literal(self, value, expected) -> None:
+        assert _stringify_env_literal(value) == expected
 
-    def test_stringify_env_literal_bool_true(self) -> None:
-        assert _stringify_env_literal(True) == "true"
-
-    def test_stringify_env_literal_int(self) -> None:
-        assert _stringify_env_literal(42) == "42"
-
-    def test_registry_field_required_default(self) -> None:
-        assert registry_field_is_required({}) is True
-
-    def test_registry_field_required_explicit_false(self) -> None:
-        assert registry_field_is_required({"required": False}) is False
+    @pytest.mark.parametrize(
+        ("field", "expected"),
+        [
+            pytest.param({}, True, id="default"),
+            pytest.param({"required": False}, False, id="explicit_false"),
+        ],
+    )
+    def test_registry_field_required(self, field, expected) -> None:
+        assert registry_field_is_required(field) is expected
 
 
 # ===========================================================================

@@ -27,13 +27,25 @@
     "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_cursor_instructions_alias": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
     "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_claude_instructions_alias": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
     "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_unaliased_key_passthrough": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
-    "tests/unit/install/test_skill_path_migration.py::TestPathTraversalRejection::test_regex_near_miss_rejects": "tests/unit/install/test_skill_path_migration.py::TestLegacySkillPattern::test_rejects_non_legacy"
+    "tests/unit/install/test_skill_path_migration.py::TestPathTraversalRejection::test_regex_near_miss_rejects": "tests/unit/install/test_skill_path_migration.py::TestLegacySkillPattern::test_rejects_non_legacy",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder_dollar_brace": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder_legacy_angle": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder_non_string_passthrough": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_translate_env_placeholder",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_stringify_env_literal_bool_false": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_stringify_env_literal",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_stringify_env_literal_bool_true": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_stringify_env_literal",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_stringify_env_literal_int": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_stringify_env_literal",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_registry_field_required_default": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_registry_field_required",
+    "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_registry_field_required_explicit_false": "tests/integration/test_marketplace_adapters_coverage.py::TestBaseAdapterHelpers::test_registry_field_required",
+    "tests/integration/test_commands_auth_flow.py::TestDetectTokenType::test_token_type_detection": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes"
   },
   "decisions": [
     "Step 1: deleted 216 D5 equal copies in scope; test_install_sources_phase3w4.py left with no tests and was removed.",
     "Step 1: for test_github_downloader_validation_flow.py vs test_github_downloader_phase3w4.py the copies were deleted from the phase3w4 file so the behavior-named module keeps the tests (D5 equality is symmetric).",
     "Step 2: near-twin modules test_integrators_hooks_phase3c.py, test_*_phase3w4.py (marketplace_builder, pack_install, mcp_install, github_downloader) and tests/unit/install/test_services_phase3.py deleted; owner modules kept. Unique coverage moved in: source-prefixed skill_subset parametrization (hooks_execution), invalid scratch_root test (services_branches), --marketplace-output rejection assert (pack_install_flow), sparse_paths/locked_sha propagation asserts (github_downloader_validation_flow). Remaining twin tests were weaker versions of owner tests (folds).",
-    "Pre-existing failure on base, not caused by this branch: tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_removes_managed_hook_json (also failed in the deleted phase3c twin)."
+    "Pre-existing failure on base, not caused by this branch: tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_removes_managed_hook_json (also failed in the deleted phase3c twin).",
+    "Deleted placeholder tests/integration/test_ado_bearer_e2e.py::TestWrongTenant::test_wrong_tenant_renders_case_2_error (body was only pass; no behavior). test_marketplace_e2e.py placeholder kept as an explicit pytest.skip in the body so it no longer clones that empty body.",
+    "Pre-existing base failures (unchanged by this branch): test_wave6_integrators_coverage.py::TestSyncIntegrationHooks::test_removes_tracked_hook_files and ::TestSkillIntegratorSyncIntegration::test_removes_tracked_skill_directories."
   ],
   "counts_left": {
     "same_body_groups": null,

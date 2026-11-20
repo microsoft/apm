@@ -118,11 +118,10 @@ def test_marketplace_remove_clears_entry(apm_binary_path, fake_home):
     assert data.get("marketplaces", []) == []
 
 
-@pytest.mark.skip(
-    reason="Full add->install->deploy flow needs a public marketplace.json "
-    "fixture on GitHub; no canonical public marketplace is maintained "
-    "alongside this repo. See gap G3.5 follow-up."
-)
 def test_marketplace_install_resolves_and_deploys():
     """Placeholder for the full end-to-end install path."""
-    pass
+    pytest.skip(
+        "Full add->install->deploy flow needs a public marketplace.json "
+        "fixture on GitHub; no canonical public marketplace is maintained "
+        "alongside this repo. See gap G3.5 follow-up."
+    )
