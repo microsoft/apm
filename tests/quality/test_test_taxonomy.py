@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from scripts.test_static_facts import module_markers
+from tests.quality.taxonomy import candidate_promises, fix_hint, load_promises, suggested_pytestmark
 from tests.quality.taxonomy_inventory_plugin import spawns_processes
 
 RATCHET_TEST_SCOPE = "repository"
@@ -413,12 +414,16 @@ def _taxonomy_ratchet_findings(
     inventory: TaxonomyInventory,
     baseline: dict[str, frozenset[str]],
     catalog: frozenset[str],
+    root: Path = REPO_ROOT,
+    promises: dict[str, str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Return (new violations, stale baseline entries) for the no-growth ratchets.
 
     A module moved to another directory under the same file name keeps the
-    allowances of its now-missing baseline entry.
+    allowances of its now-missing baseline entry. A missing marker or promise
+    names the exact ``pytestmark`` line to add (tests/quality/taxonomy.py).
     """
+    described = promises if promises is not None else dict.fromkeys(catalog, "")
     failures: list[str] = []
     moves = {key: _moves(entries, inventory.modules) for key, entries in baseline.items()}
     stale = [
@@ -439,6 +444,7 @@ def _taxonomy_ratchet_findings(
                 failures.append(
                     f"{module}: unclassified test module. Fix: add exactly one "
                     "module-level pytestmark behavioral marker (unit, component or e2e)."
+                    + fix_hint(module, root, described)
                 )
         if module.startswith("tests/integration/") and behavioral == ("unit",):
             misplaced.add(module)
@@ -460,7 +466,7 @@ def _taxonomy_ratchet_findings(
             failures.append(
                 f"{module}: new test module carries no pytest.mark.promise. Fix: add "
                 'pytest.mark.promise("<id>", ...) to its module-level pytestmark, naming '
-                f"ids from {catalog_name}."
+                f"ids from {catalog_name}." + fix_hint(module, root, described)
             )
         unknown = sorted(set(promises) - catalog)
         if unknown:
@@ -485,9 +491,10 @@ def _assert_taxonomy_ratchets(
     inventory: TaxonomyInventory,
     baseline: dict[str, frozenset[str]],
     catalog: frozenset[str],
+    promises: dict[str, str] | None = None,
 ) -> list[str]:
     """Fail on new violations; return stale baseline entries for info output."""
-    failures, stale = _taxonomy_ratchet_findings(inventory, baseline, catalog)
+    failures, stale = _taxonomy_ratchet_findings(inventory, baseline, catalog, promises=promises)
     assert not failures, "\n".join(f"[x] {failure}" for failure in failures)
     return stale
 
@@ -499,6 +506,7 @@ def test_tm006_taxonomy_ratchets_do_not_grow(
         marker_inventory,
         _load_taxonomy_baseline(TAXONOMY_BASELINE),
         _load_promise_catalog(PROMISE_CATALOG),
+        load_promises(PROMISE_CATALOG),
     )
     for entry in stale:
         print(f"[i] stale taxonomy baseline entry (may be pruned): {entry}")
@@ -636,7 +644,9 @@ def seeded_findings(
             {"tests/unit/test_legacy.py", "tests/unit/test_moved.py", "tests/unit/test_removed.py"}
         ),
     }
-    return _taxonomy_ratchet_findings(inventory, baseline, frozenset({"P-OWN-seed"}))
+    return _taxonomy_ratchet_findings(
+        inventory, baseline, frozenset({"P-OWN-seed"}), root, {"P-OWN-seed": "new seed promise"}
+    )
 
 
 def _failures_for(findings: tuple[list[str], list[str]], module: str) -> list[str]:
@@ -648,7 +658,8 @@ def test_tm007_new_unclassified_module_fails(
 ) -> None:
     assert _failures_for(seeded_findings, "tests/unit/test_new_unclassified.py") == [
         "tests/unit/test_new_unclassified.py: unclassified test module. Fix: add exactly one "
-        "module-level pytestmark behavioral marker (unit, component or e2e)."
+        "module-level pytestmark behavioral marker (unit, component or e2e). Suggested: "
+        'pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]'
     ]
 
 
@@ -828,3 +839,39 @@ def test_tm015_validated_move_rekey_passes(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "[+] taxonomy allowances did not grow" in result.stdout
+
+
+_SUGGESTION_CATALOG = {
+    "P-OWN-lockfile-write": "who writes apm.lock.yaml",
+    "P-OWN-marketplace-fetch": "how a marketplace catalog is fetched",
+    "P-DOC-cli-surface": "the docs describe the shipped CLI",
+    "req-lk-002": "the lockfile records the resolved source",
+}
+
+
+def test_tm016_suggestion_ranks_mentioned_requirements_then_name_tokens() -> None:
+    source = '"""Covers req-lk-002."""\n\ndef test_value():\n    assert True\n'
+    assert candidate_promises("tests/unit/test_lockfile_write.py", source, _SUGGESTION_CATALOG) == [
+        "req-lk-002",
+        "P-OWN-lockfile-write",
+    ]
+    assert candidate_promises("tests/unit/test_unrelated.py", "", _SUGGESTION_CATALOG) == []
+
+
+@pytest.mark.parametrize(
+    ("module", "source", "behavioral"),
+    [
+        ("tests/unit/test_marketplace_fetch.py", "", "unit"),
+        ("tests/lifecycle/test_marketplace_fetch.py", "", "e2e"),
+        ("tests/integration/test_marketplace_fetch.py", "", "component"),
+        ("tests/integration/test_marketplace_fetch.py", "def test(apm_binary_path): pass\n", "e2e"),
+    ],
+)
+def test_tm016_suggested_line_infers_the_behavioral_marker(
+    module: str, source: str, behavioral: str
+) -> None:
+    line, ids = suggested_pytestmark(module, source, _SUGGESTION_CATALOG)
+    assert ids == ["P-OWN-marketplace-fetch"]
+    assert line == (
+        f'pytestmark = [pytest.mark.{behavioral}, pytest.mark.promise("P-OWN-marketplace-fetch")]'
+    )
