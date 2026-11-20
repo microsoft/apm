@@ -2887,3 +2887,34 @@ def test_every_quality_module_runs_in_some_workflow_job() -> None:
         if not any(module == target or module.startswith(f"{target}/") for target in targets)
     ]
     assert orphans == [], f"no workflow job runs these modules: {orphans}"
+
+
+CACHE_FULL_MATRIX_NODE = (
+    "tests/integration/test_architecture_linter_session_cache.py::"
+    "test_session_cache_findings_match_uncached_runs_full_matrix"
+)
+
+
+def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
+    """The env-gated full-matrix cache replay has a schedule, not only "on demand".
+
+    PR shards keep the per-group sample; the nightly lifecycle workflow (also
+    dispatched on each release-candidate ref) replays the full matrix with
+    PYTEST_PERF=1, and its tracking-issue signal waits for that job.
+    """
+    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
+    assert "schedule" in workflow["on"]
+    assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
+    job = workflow_job(workflow, "architecture-cache-full-matrix")
+    assert job["steps"][0]["with"]["ref"] == "${{ inputs.ref }}"
+    assert all(key not in job for key in ("if", "continue-on-error"))
+    step = workflow_step(job, "Replay the full owner mutation matrix through the session cache")
+    assert "if" not in step and "continue-on-error" not in step
+    assert effective_env(workflow, job, step)["PYTEST_PERF"] == "1"
+    tokens = step["run"].replace("\\\n", " ").split()
+    assert CACHE_FULL_MATRIX_NODE in tokens
+    assert ("-m", "benchmark") in set(pairwise(tokens))
+    signal = workflow_job(workflow, "signal")
+    assert "architecture-cache-full-matrix" in signal["needs"]
+    result = workflow_step(signal, "Open, update or close the tracking issue")["env"]["RESULT"]
+    assert "needs.architecture-cache-full-matrix.result" in result
