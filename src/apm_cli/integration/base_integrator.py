@@ -158,11 +158,20 @@ def _read_bytes_no_follow(path: Path) -> bytes:
         os.close(fd)
 
 
-def untrusted_baseline_message(entry: str, directory: str | None = None) -> str:
+def recovery_directory(entry: str, destination: Path, *, user_scope: bool) -> str:
+    """Name a deployed skill directory so a user can move it: project-relative or absolute."""
+    if user_scope or "://" in entry or Path(entry).is_absolute():
+        return destination.resolve().as_posix()
+    return entry
+
+
+def untrusted_baseline_message(
+    entry: str, directory: str | None = None, *, user_scope: bool = False
+) -> str:
     """Refuse to replace an existing file that has no trustworthy deployment baseline.
 
     *directory* names the deployed skill directory whose removal lets the next
-    install redeploy it from source.
+    install, in the same scope, redeploy it from source.
     """
     message = (
         f"Skipped {entry}: no trustworthy local deployment baseline. Move the conflicting "
@@ -172,7 +181,8 @@ def untrusted_baseline_message(entry: str, directory: str | None = None) -> str:
         return message
     return (
         f"{message} To redeploy the skill, move {directory.rstrip('/')}/ aside "
-        "(or delete it if it holds no edits), then run 'apm install'."
+        f"(or delete it if it holds no edits), then run "
+        f"'{'apm install -g' if user_scope else 'apm install'}'."
     )
 
 
@@ -322,6 +332,19 @@ class BaseIntegrator:
             fail(error)
         yield from os.walk(source, followlinks=False, onerror=fail)
 
+    def install_user_scope(self) -> bool:
+        """Return whether this integrator deploys at user scope; recovery advice uses -g."""
+        return False
+
+    def untrusted_member_message(self, entry: str, directory: str, destination: Path) -> str:
+        """Refuse an unprovable member and name the skill directory and scoped retry."""
+        user_scope = self.install_user_scope()
+        return untrusted_baseline_message(
+            entry,
+            recovery_directory(directory, destination, user_scope=user_scope),
+            user_scope=user_scope,
+        )
+
     def copy_directory_files(
         self,
         source: Path,
@@ -404,7 +427,9 @@ class BaseIntegrator:
                     )
                 ):
                     if expected is None:
-                        message = untrusted_baseline_message(entry, path_entry(destination))
+                        message = self.untrusted_member_message(
+                            entry, path_entry(destination), destination
+                        )
                     else:
                         message = (
                             f"Skipped {entry}: modified since deployment. "

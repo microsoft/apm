@@ -349,7 +349,7 @@ class DeploymentMaterializationSession:
         ):
             return None
         claimed = {claim.content_hash for claim in self._claims[value]} - {None}
-        if claimed and record.content_hash not in claimed and not self._holds(path, record):
+        if record.content_hash not in claimed and not self._holds(path, record):
             return None
         return record.content_hash
 

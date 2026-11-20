@@ -85,6 +85,12 @@ class DeploymentEvidence:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
         self._kept = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
+        # Every ancestor directory of a kept member, so each lookup stays O(1).
+        self._kept_parents = frozenset(
+            "/".join(parts[:index])
+            for parts in (value.split("/") for value in self._kept)
+            for index in range(1, len(parts))
+        )
         self._receipts = dict(receipts)
         self._render = render
         self._owners = dict(owners or {})
@@ -152,8 +158,7 @@ class DeploymentEvidence:
     def kept(self, value: str) -> bool:
         """Return whether this install kept *value*, or a member under that directory."""
         value = value.replace("\\", "/").rstrip("/")
-        prefix = f"{value}/"
-        return value in self._kept or any(path.startswith(prefix) for path in self._kept)
+        return value in self._kept or value in self._kept_parents
 
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.

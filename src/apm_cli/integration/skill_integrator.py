@@ -439,6 +439,11 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
+    def install_user_scope(self) -> bool:
+        """Return whether the active materialization session deploys at user scope."""
+        scope = getattr(self._materialization_session, "scope", None)
+        return getattr(scope, "value", None) == "user"
+
     def kept_values(self) -> frozenset[str]:
         """Return lock values of declared skill members this batch left unwritten."""
         session = self._materialization_session

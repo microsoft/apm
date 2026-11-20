@@ -89,6 +89,26 @@ def test_receipt_outlives_checked_out_hash_only_while_disk_holds_it(
     assert compute_file_hash(path) != old_hash
 
 
+def test_hashless_claim_trusts_a_receipt_only_while_disk_holds_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legacy claim without a hash never lets a receipt vouch for different bytes."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_hash = compute_file_hash(path)
+    session = _session(root, lock)
+    session.record({path: old_hash}, [TARGET], "pkg")
+    session.flush()
+    row = next(iter(lock.deployment_ledger.records.values()))
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger({row.locator.key: DeploymentRecord(row.locator, row.owners, "pkg", None)}),
+        lock,
+        write_legacy_views=False,
+    )
+    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    path.write_text("user edit\n", encoding="utf-8")
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
 @pytest.mark.parametrize("target_name", ["claude", "hermes", "copilot-cowork"])
 @pytest.mark.parametrize("prior_claims", [False, True])
 def test_external_user_receipt_uses_the_deployed_compatibility_claim(

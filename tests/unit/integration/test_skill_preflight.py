@@ -380,3 +380,28 @@ def test_claimed_member_of_an_unclaimed_skill_directory_is_not_refused(
     )
     assert [conflict.path for conflict in refused if conflict.untrusted] == [entry]
     assert (skill / "SKILL.md").read_bytes() == b"bundled"
+
+
+@pytest.mark.parametrize(
+    ("entry", "user_scope", "directory", "command"),
+    [
+        (".agents/skills/x", False, ".agents/skills/x", "'apm install'"),
+        (".copilot/skills/x", True, "ABS", "'apm install -g'"),
+        ("cowork://skills/x", False, "ABS", "'apm install'"),
+    ],
+)
+def test_untrusted_refusal_names_a_movable_directory_and_its_scope(
+    tmp_path: Path, entry: str, user_scope: bool, directory: str, command: str
+) -> None:
+    from apm_cli.integration.base_integrator import (
+        recovery_directory,
+        untrusted_baseline_message,
+    )
+
+    destination = tmp_path / "skills" / "x"
+    shown = recovery_directory(entry, destination, user_scope=user_scope)
+    expected = destination.resolve().as_posix() if directory == "ABS" else directory
+    assert shown == expected
+    message = untrusted_baseline_message(f"{entry}/SKILL.md", shown, user_scope=user_scope)
+    assert f"move {expected}/ aside" in message
+    assert message.endswith(f"then run {command}.")
