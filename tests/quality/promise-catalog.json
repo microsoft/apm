@@ -9,6 +9,7 @@
   },
   "promises": {
     "P-DOC-cli-surface": "documented CLI surface: every visible command, subcommand and long option in the Click tree is in the reference CLI docs and the apm-usage commands guide, and every command and flag those docs name exists",
+    "P-DOC-journey-index": "journey index: tests/lifecycle/journeys/index.yaml names every consumer, producer and enterprise journey, its steps and the output oracles and normalizers it uses, as the release-acceptance skill and the journey runner read them",
     "P-INV-I1": "cross-cutting lifecycle invariant I1: lock-deployed consistency",
     "P-INV-I2": "cross-cutting lifecycle invariant I2: idempotence",
     "P-INV-I3": "cross-cutting lifecycle invariant I3: frozen/audit agreement",
@@ -36,6 +37,7 @@
     "P-OWN-apm-home-resolution": "architecture owner (core-runtime.json): APM-owned user metadata root",
     "P-OWN-apm-package-manifest-construction": "architecture owner (marketplace-plugins.json): APMPackage interpreted-manifest construction",
     "P-OWN-apply-to-hidden-tool-placement": "architecture owner (contracts-tooling.json): applyTo normalization and hidden-tool placement",
+    "P-OWN-archive-extraction-limits": "architecture owner (transport-auth-platform.json): which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries (#4235)",
     "P-OWN-artifactory-full-commit-sha-classification": "architecture owner (transport-auth-platform.json): Full commit SHA classification for Artifactory replay",
     "P-OWN-artifactory-netrc-isolation": "architecture owner (transport-auth-platform.json): Artifactory HTTP requests exclude ambient netrc credentials",
     "P-OWN-audit-finding-serialization": "architecture owner (hooks-integrations.json): Ordinary and CI finding artifact, pointer and coordinate serialization",
