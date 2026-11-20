@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
-import textwrap as _tw
+import json as _json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
-from click.testing import CliRunner
 
+from apm_cli.bundle.formats import BundleFormat
 from apm_cli.commands.pack import (
+    _emit_json_error_or_raise,
+    _log_bundle_meta,
+    _log_unpack_file_list,
+    _mapping_summary,
     _parse_marketplace_filter,
     _parse_path_overrides,
+    _render_bundle_result,
+    _render_marketplace_catalog,
     _render_marketplace_result,
-    pack_cmd,
+    _warn_empty,
 )
 from apm_cli.marketplace.builder import BuildReport, MarketplaceOutputReport
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 
 class _RecordingLogger:
@@ -27,6 +34,10 @@ class _RecordingLogger:
         self.successes: list[str] = []
         self.dry_runs: list[str] = []
         self.infos: list[str] = []
+        self.progresses: list[str] = []
+        self.errors: list[str] = []
+        self.verbose_details: list[str] = []
+        self.tree_items: list[str] = []
 
     def warning(self, message: str) -> None:
         self.warnings.append(message)
@@ -40,16 +51,32 @@ class _RecordingLogger:
     def info(self, message: str) -> None:
         self.infos.append(message)
 
+    def progress(self, message: str, **_: Any) -> None:
+        self.progresses.append(message)
 
-def test_pack_help_recommends_manifest_marketplace_output_config() -> None:
-    result = CliRunner().invoke(pack_cmd, ["--help"])
+    def error(self, message: str) -> None:
+        self.errors.append(message)
 
-    assert result.exit_code == 0
-    # The --marketplace-path flag is shown in help
-    assert "--marketplace-path" in result.output
-    # The removed --marketplace-output flag is gone entirely
-    assert "--marketplace-output" not in result.output
-    assert "--claude-output" not in result.output
+    def verbose_detail(self, message: str) -> None:
+        self.verbose_details.append(message)
+
+    def tree_item(self, message: str) -> None:
+        self.tree_items.append(message)
+
+
+def _pack_result(
+    *,
+    files: list[str] | None = None,
+    bundle_path: str | None = "build/bundle",
+    mapped_count: int = 0,
+    path_mappings: dict[str, str] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        files=files or [],
+        bundle_path=bundle_path,
+        mapped_count=mapped_count,
+        path_mappings=path_mappings or {},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -354,129 +381,344 @@ def test_post_pack_catalog_aligns_profiles_in_columns() -> None:
 # ---------------------------------------------------------------------------
 
 
-_APM_GATE = """\
-name: my-project
-description: A project.
-version: 1.0.0
-marketplace:
-  owner:
-    name: ACME
-  packages:
-    - name: local-tool
-      source: ./packages/local-tool
-      description: Tool.
-      version: 1.0.0
-"""
+class TestMappingSummary:
+    def test_empty_returns_empty_string(self) -> None:
+        assert _mapping_summary({}) == ""
+
+    def test_single_entry_returns_suffix(self) -> None:
+        result = _mapping_summary({"dst/file.md": "src/file.md"})
+        assert "src/" in result
+        assert "dst/" in result
+        assert "->" in result
+
+    def test_multiple_entries_uses_first(self) -> None:
+        """Prefix is derived from the first inserted key."""
+        mappings = {
+            "apm/agents/bot.md": ".apm/agents/bot.md",
+            "apm/skills/x.md": ".apm/skills/x.md",
+        }
+        result = _mapping_summary(mappings)
+        assert result  # non-empty
 
 
-def _scaffold(tmp_path: Path, *, pkg_version: str = "1.0.0") -> Path:
-    (tmp_path / "apm.yml").write_text(_tw.dedent(_APM_GATE), encoding="utf-8")
-    pkg = tmp_path / "packages" / "local-tool"
-    pkg.mkdir(parents=True)
-    pkg.joinpath("apm.yml").write_text(
-        f"name: local-tool\ndescription: Tool.\nversion: {pkg_version}\n",
-        encoding="utf-8",
-    )
-    return tmp_path
+class TestWarnEmpty:
+    def test_no_target_emits_generic_warning(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result()
+        _warn_empty(logger, None, result)
+        assert any("empty bundle" in w for w in logger.warnings)
+
+    def test_with_target_emits_target_warning(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result()
+        _warn_empty(logger, "claude", result)
+        assert any("claude" in w for w in logger.warnings)
+
+    def test_with_target_and_no_mappings_hint(self) -> None:
+        """No path_mappings → hint logged via verbose_detail."""
+        logger = _RecordingLogger()
+        result = _pack_result(mapped_count=0, path_mappings={})
+        _warn_empty(logger, "cursor", result)
+        # hint about apm install is in verbose_details
+        assert any("cursor" in w for w in logger.warnings)
+
+    def test_with_target_and_path_mappings(self) -> None:
+        """Has path_mappings → still warns about target."""
+        logger = _RecordingLogger()
+        result = _pack_result(mapped_count=2, path_mappings={"a": "b"})
+        _warn_empty(logger, "gemini", result)
+        assert any("gemini" in w for w in logger.warnings)
 
 
-class TestPackReleaseGatesIntegration:
-    """End-to-end gate behaviour: BuildOrchestrator + gates compose cleanly."""
+class TestRenderBundleResult:
+    def test_none_pack_result_returns_early(self) -> None:
+        """When pack_result is None, nothing is logged."""
+        logger = _RecordingLogger()
+        _render_bundle_result(logger, None, "plugin", None, False)
+        assert not logger.successes
+        assert not logger.warnings
+        assert not logger.dry_runs
 
-    @pytest.fixture(autouse=True)
-    def _reset_console_state(self):
-        """Reset global console singleton to avoid --json polluting later tests."""
-        from apm_cli.utils.console import _reset_console
+    def test_dry_run_no_files_warns_empty(self) -> None:
+        """dry_run=True with no files calls _warn_empty."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=[])
+        _render_bundle_result(logger, result, "plugin", None, True)
+        # _warn_empty is called → generic warning
+        assert any("empty" in w.lower() for w in logger.warnings)
 
-        yield
-        _reset_console()
+    def test_dry_run_with_files_emits_dry_run_notice(self) -> None:
+        """dry_run=True with files emits a dry_run_notice."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file1.md", "file2.md"])
+        _render_bundle_result(logger, result, "plugin", None, True)
+        assert any("Would pack" in d for d in logger.dry_runs)
 
-    def test_no_gate_flags_returns_no_gate_keys_in_json(self, tmp_path: Path, monkeypatch) -> None:
-        import json as _json
-
-        _scaffold(tmp_path)
-        monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(pack_cmd, ["--dry-run", "--offline", "--json"])
-        data = _json.loads(result.output)
-        # Envelope always carries the keys; both should be null when not requested.
-        assert data["version_alignment"] is None
-        assert data["drift"] is None
-
-    def test_json_envelope_reports_the_bundle(self, tmp_path: Path, monkeypatch) -> None:
-        """A successful bundle build is not reported as "bundle": null (#3994)."""
-        import json as _json
-
-        from apm_cli.bundle.packer import PackResult
-        from apm_cli.core.build_orchestrator import BuildResult, OutputKind, ProducerResult
-
-        _scaffold(tmp_path)
-        monkeypatch.chdir(tmp_path)
-        bundle = PackResult(bundle_path=tmp_path / "build" / "pkg-1.0.0", files=["a.md"])
-        built = BuildResult(producer_results=[ProducerResult(OutputKind.BUNDLE, payload=bundle)])
-        monkeypatch.setattr("apm_cli.commands.pack.BuildOrchestrator.run", lambda *_a, **_k: built)
-        result = CliRunner().invoke(pack_cmd, ["--offline", "--json"])
-        data = _json.loads(result.output)
-        assert data["bundle"] == {"path": bundle.bundle_path.as_posix(), "files": ["a.md"]}
-
-    def test_check_versions_only_payload_shape(self, tmp_path: Path, monkeypatch) -> None:
-        import json as _json
-
-        _scaffold(tmp_path)
-        monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(
-            pack_cmd, ["--check-versions", "--dry-run", "--offline", "--json"]
+    def test_dry_run_with_mapped_files_emits_remap_notice(self) -> None:
+        """dry_run=True + mapped_count emits a remap dry_run_notice."""
+        logger = _RecordingLogger()
+        result = _pack_result(
+            files=["a.md"],
+            mapped_count=1,
+            path_mappings={"dst/a.md": "src/a.md"},
         )
-        data = _json.loads(result.output)
-        assert data["version_alignment"] is not None
-        assert data["version_alignment"]["strategy"] == "lockstep"
-        assert isinstance(data["version_alignment"]["packages"], list)
+        _render_bundle_result(logger, result, "plugin", None, True)
+        assert any("remap" in d for d in logger.dry_runs)
 
-    def test_check_clean_only_payload_shape(self, tmp_path: Path, monkeypatch) -> None:
-        import json as _json
+    def test_live_no_files_warns_empty(self) -> None:
+        """Live mode with no files calls _warn_empty."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=[])
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
+        assert any("empty" in w.lower() for w in logger.warnings)
 
-        _scaffold(tmp_path)
-        monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline", "--json"])
-        data = _json.loads(result.output)
-        assert data["drift"] is not None
-        assert isinstance(data["drift"]["outputs"], list)
+    def test_live_with_files_emits_success(self) -> None:
+        """Live mode with files emits a success line with count."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["a.md", "b.md", "c.md"])
+        _render_bundle_result(logger, result, "plugin", None, False)
+        assert any("3 file(s)" in s for s in logger.successes)
 
-    def test_version_gate_passes_drift_gate_fails_exit_4(self, tmp_path: Path, monkeypatch) -> None:
-        _scaffold(tmp_path)
-        monkeypatch.chdir(tmp_path)
-        # No marketplace.json on disk -> drift "missing" -> exit 4.
-        result = CliRunner().invoke(
-            pack_cmd,
-            ["--check-versions", "--check-clean", "--dry-run", "--offline"],
+    def test_live_plugin_format_progress_message(self) -> None:
+        """Plugin format emits the Agent Plugin ready progress message."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["plugin.json"])
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
+        assert any("Agent Plugin bundle ready" in p for p in logger.progresses)
+
+    def test_live_apm_format_no_plugin_message(self) -> None:
+        """'apm' format does NOT emit the plugin-ready progress message."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["bundle.zip"])
+        _render_bundle_result(logger, result, "apm", None, False)
+        assert not any("Plugin bundle ready" in p for p in logger.progresses)
+
+    def test_live_share_line_emitted(self) -> None:
+        """The share line names the consumer that accepts the format (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle")
+        _render_bundle_result(logger, result, BundleFormat.CLAUDE_PLUGIN, None, False)
+        # A bare 'build/x' parses as owner/repo, so the line spells a path (#3994).
+        assert "Share with: apm install ./build/my-bundle" in logger.infos
+
+    def test_live_count_names_the_embedded_lockfile(self) -> None:
+        """Counts say the bundle also embeds apm.lock.yaml (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["a.md", "b.md"], bundle_path="build/x")
+        _render_bundle_result(logger, result, BundleFormat.CLAUDE_PLUGIN, None, False)
+        assert any("Packed 2 file(s) plus apm.lock.yaml -> build/x" in m for m in logger.successes)
+
+    def test_live_legacy_format_shares_with_unpack(self) -> None:
+        """'apm install' rejects the legacy APM layout; unpack reads it (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(logger, result, BundleFormat.APM, None, False)
+        share = next(i for i in logger.infos if i.startswith("Share with:"))
+        assert share.startswith("Share with: apm unpack ./build/my-bundle.zip (deprecated")
+        assert not share.startswith("Share with: apm install")
+
+    def test_live_agent_plugin_shares_by_declaration(self) -> None:
+        """Agent plugins install declaratively, never via 'apm install <path>' (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["plugin.json"], bundle_path="build/x")
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
+        share = next(i for i in logger.infos if i.startswith("Share"))
+        assert "under dependencies.apm" in share
+        assert "'apm install --target copilot'" in share
+        assert not share.startswith("Share with: apm install")
+
+    def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(logger, result, "plugin", None, False, show_zip_migration_notice=True)
+        assert any("--archive now produces .zip" in i for i in logger.infos)
+        assert any("--archive-format tar.gz" in i for i in logger.infos)
+
+    def test_live_zip_archive_suppresses_migration_tip_when_not_requested(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(
+            logger, result, "plugin", None, False, show_zip_migration_notice=False
         )
-        assert result.exit_code == 4
+        assert not any("--archive now produces .zip" in i for i in logger.infos)
 
-    def test_version_gate_fails_drift_gate_passes_exit_3(self, tmp_path: Path, monkeypatch) -> None:
-        _scaffold(tmp_path, pkg_version="0.5.0")
-        monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(pack_cmd, ["--check-versions", "--dry-run", "--offline"])
-        assert result.exit_code == 3
+    def test_live_no_bundle_path_skips_share_line(self) -> None:
+        """When bundle_path is falsy, the share line is suppressed."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path=None)
+        _render_bundle_result(logger, result, "apm", None, False)
+        assert not any("apm install" in i for i in logger.infos)
 
-    def test_gate_errors_appear_in_json_envelope(self, tmp_path: Path, monkeypatch) -> None:
-        import json as _json
-
-        _scaffold(tmp_path, pkg_version="0.5.0")
-        monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(
-            pack_cmd, ["--check-versions", "--dry-run", "--offline", "--json"]
+    def test_live_with_mapped_count_emits_progress(self) -> None:
+        """Mapped files in live mode emit a progress 'Mapped N file(s)' line."""
+        logger = _RecordingLogger()
+        result = _pack_result(
+            files=["dst/a.md"],
+            mapped_count=1,
+            path_mappings={"dst/a.md": "src/a.md"},
         )
-        data = _json.loads(result.output)
-        codes = {e["code"] for e in data.get("errors", [])}
-        assert "version_misaligned" in codes
+        _render_bundle_result(logger, result, "plugin", None, False)
+        assert any("Mapped" in p for p in logger.progresses)
+
+
+class TestRenderMarketplaceCatalog:
+    def test_with_profiles(self) -> None:
+        """With named profiles, renders two-column aligned rows."""
+        logger = _RecordingLogger()
+        written = [("claude", Path("a.json")), ("codex", Path("b.json"))]
+        _render_marketplace_catalog(logger, written)
+        assert any("Marketplace artifacts ready:" in i for i in logger.infos)
+        assert sum(1 for i in logger.infos if i.startswith("  [")) == 2
+
+    def test_without_profiles(self) -> None:
+        """Without named profiles, renders simple path rows."""
+        logger = _RecordingLogger()
+        written = [(None, Path("out.json"))]
+        _render_marketplace_catalog(logger, written)
+        assert any("out.json" in i for i in logger.infos)
+
+    def test_docs_url_emitted(self) -> None:
+        """A MARKETPLACE_DOCS_URL pointer is always emitted as an info line."""
+        from urllib.parse import urlparse
+
+        logger = _RecordingLogger()
+        written = [("claude", Path("a.json"))]
+        _render_marketplace_catalog(logger, written)
+        urls = []
+        for line in logger.infos:
+            for token in line.split():
+                cleaned = token.strip("(),.;'\"")
+                if "://" in cleaned:
+                    parsed = urlparse(cleaned)
+                    if parsed.scheme == "https":
+                        urls.append(cleaned)
+        assert urls, "Expected at least one https URL in catalog info lines"
+
+    def test_no_info_method_returns_early(self) -> None:
+        """If logger has no 'info' method, returns without error."""
+
+        class NoInfoLogger:
+            pass  # no info method
+
+        # Should not raise
+        _render_marketplace_catalog(NoInfoLogger(), [("claude", Path("a.json"))])
+
+
+class TestLogBundleMeta:
+    def test_no_meta_returns_early(self) -> None:
+        """result.pack_meta is None → nothing logged."""
+        logger = _RecordingLogger()
+        result = SimpleNamespace(
+            pack_meta=None,
+            dependency_files={},
+            files=[],
+        )
+        _log_bundle_meta(result, Path("."), logger)
+        assert not logger.progresses
+        assert not logger.warnings
+
+    def test_meta_emits_progress_line(self) -> None:
+        """Non-empty meta emits a bundle target progress line."""
+        logger = _RecordingLogger()
+        result = SimpleNamespace(
+            pack_meta={"target": "claude"},
+            dependency_files={"dep1": ["f1.md"]},
+            files=["f1.md"],
+        )
+        with patch(
+            "apm_cli.core.target_detection.detect_target",
+            return_value=("claude", "reason"),
+        ):
+            _log_bundle_meta(result, Path("/tmp"), logger)
+        assert any("Bundle target:" in p for p in logger.progresses)
+
+    def test_target_mismatch_emits_warning(self) -> None:
+        """Bundle target differs from project target → warning."""
+        logger = _RecordingLogger()
+        result = SimpleNamespace(
+            pack_meta={"target": "cursor"},
+            dependency_files={},
+            files=[],
+        )
+        with patch(
+            "apm_cli.core.target_detection.detect_target",
+            return_value=("claude", "reason"),
+        ):
+            _log_bundle_meta(result, Path("/tmp"), logger)
+        assert any("differs" in w for w in logger.warnings)
+
+    def test_detect_target_exception_is_swallowed(self) -> None:
+        """Exception from detect_target is caught silently."""
+        logger = _RecordingLogger()
+        result = SimpleNamespace(
+            pack_meta={"target": "claude"},
+            dependency_files={},
+            files=[],
+        )
+        with patch(
+            "apm_cli.core.target_detection.detect_target",
+            side_effect=RuntimeError("detect error"),
+        ):
+            # Should not raise
+            _log_bundle_meta(result, Path("/tmp"), logger)
+
+    def test_universal_bundle_no_warning(self) -> None:
+        """Bundle target 'all' → no mismatch warning."""
+        logger = _RecordingLogger()
+        result = SimpleNamespace(
+            pack_meta={"target": "all"},
+            dependency_files={},
+            files=[],
+        )
+        with patch(
+            "apm_cli.core.target_detection.detect_target",
+            return_value=("claude", "reason"),
+        ):
+            _log_bundle_meta(result, Path("/tmp"), logger)
+        assert not logger.warnings
+
+
+class TestLogUnpackFileList:
+    def test_with_dependency_files(self) -> None:
+        """dep_name headers and tree items are rendered."""
+        logger = _RecordingLogger()
+        result = SimpleNamespace(
+            dependency_files={"my-dep": ["a.md", "b.md"]},
+            files=["a.md", "b.md"],
+        )
+        _log_unpack_file_list(result, logger)
+        assert any("my-dep" in p for p in logger.progresses)
+        assert len(logger.tree_items) == 2
+
+    def test_without_dependency_files(self) -> None:
+        """Flat file list renders one tree item per file."""
+        logger = _RecordingLogger()
+        result = SimpleNamespace(
+            dependency_files={},
+            files=["x.md", "y.md", "z.md"],
+        )
+        _log_unpack_file_list(result, logger)
+        assert len(logger.tree_items) == 3
+
+
+class TestEmitJsonErrorOrRaise:
+    def test_json_output_false_raises_click_exception(self) -> None:
+        import click
+
+        ctx = MagicMock()
+        with pytest.raises(click.ClickException) as exc_info:
+            _emit_json_error_or_raise(ctx, False, "err_code", "Something went wrong")
+        assert "Something went wrong" in str(exc_info.value)
+
+    def test_json_output_true_calls_ctx_exit(self) -> None:
+        """In json_output mode, the error is printed as JSON and ctx.exit is called."""
+        ctx = MagicMock()
+        output_lines: list[str] = []
+        with patch("click.echo", side_effect=lambda s, **kw: output_lines.append(s)):
+            _emit_json_error_or_raise(ctx, True, "test_code", "Test message")
+
+        ctx.exit.assert_called_once_with(1)
+        assert output_lines, "Expected at least one click.echo call"
+        data = _json.loads(output_lines[0])
         assert data["ok"] is False
-
-    def test_gate_with_no_marketplace_block_does_not_fail(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        # apm.yml without a marketplace block -> both gates skip cleanly.
-        (tmp_path / "apm.yml").write_text(
-            "name: x\ndescription: y\nversion: 1.0.0\n", encoding="utf-8"
-        )
-        monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(pack_cmd, ["--check-versions", "--check-clean", "--dry-run"])
-        assert result.exit_code not in (3, 4)
+        assert any(e["code"] == "test_code" for e in data["errors"])

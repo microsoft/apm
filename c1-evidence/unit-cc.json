@@ -43,12 +43,14 @@
   "step3: tests/unit/commands/test_approve_deny.py, test_experimental_command.py and test_install_context.py stay unclassified because open pull requests own them",
   "step4: taxonomy_inventory_plugin.spawns_processes finds no process-spawning module in scope and no scope module lives under tests/integration; no moves needed",
   "step3 side effect: AQ003 only judges component/e2e modules, so lane-marking 76 modules component surfaced about 1190 AQ003 findings (baseline allowed 72 in scope); most are pure-logic or mock-only tests sharing a module with tmp_path/CliRunner tests. assertion_quality_baseline.json is not edited here (protected); it needs a remeasure at integration",
-  "step5: fix only where an honest observable exists: exit codes of CliRunner invocations, files kept/removed on disk, captured stdout; pure return-value and mock-only tests are left (they need a module split into a unit module, which would add new modules needing promise ids)"
+  "step5: fix only where an honest observable exists: exit codes of CliRunner invocations, files kept/removed on disk, captured stdout; pure return-value and mock-only tests are left (they need a module split into a unit module, which would add new modules needing promise ids)",
+  "nodeset base: origin/danielmeppiel-refactored-happiness moved forward during the run (shared refs); mapping is checked against this branch's merge-base 49bcb1c50, which has no differences in scope",
+  "step5 lane split: pure-logic classes moved into the module that becomes unit-marked and filesystem/CliRunner classes into the component sibling, verbatim (nodes map as moved): watcher TestWatchMode -> commands/compile/test_watch_mode_coverage.py (test_watcher_events now unit); pack helper-render classes -> test_pack.py (now unit), pack CLI/gate tests -> test_pack_cli_surface.py"
  ],
  "counts_left": {
   "same_body_groups": 0,
   "unclassified_modules": 3,
   "placement_offenders": 0,
-  "weak_tests": 1167
+  "weak_tests": 1086
  }
 }
