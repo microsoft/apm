@@ -435,6 +435,10 @@ class DeploymentMaterializationSession:
             and evidence.render_verdict(claim, path, rendered_as=None) == AUTHORIZED
         )
 
+    def receipted_hash(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
+        """The hash this checkout's receipt binds for *path*, else ``None`` (#4360)."""
+        return self._trusted_hash(path, targets, self._write_locator)
+
     def legacy_recorded_hash(self, claim: str) -> str | None:
         """The hash a pre-0.37 lock recorded for *claim*, else ``None`` (#4398)."""
         return self._legacy_hashes.get(claim.replace("\\", "/"))

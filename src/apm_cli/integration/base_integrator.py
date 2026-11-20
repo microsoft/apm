@@ -388,6 +388,39 @@ class BaseIntegrator:
             user_scope=user_scope,
         )
 
+    def _receipted_hash(self, path: Path) -> str | None:
+        """The hash this checkout's deployment receipt binds for *path*, if any."""
+        gate = self._overwrite_gate
+        if gate is None or gate.session is None:
+            return None
+        return gate.session.receipted_hash(path, gate.targets)
+
+    def receipted_unchanged(self, path: Path) -> bool:
+        """Whether this checkout's receipt already binds *path*'s current bytes (RA-007)."""
+        receipted = self._receipted_hash(path)
+        return receipted is not None and receipted == self._file_hash(path)
+
+    @staticmethod
+    def _file_hash(path: Path) -> str | None:
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            return compute_file_hash(path)
+        except OSError:
+            return None
+
+    def _receipted_edit(self, path: Path, rendered_hash: str) -> str | None:
+        """Classify a managed file a receipt proves the user edited (RA-012).
+
+        ``"drift"`` when the package renders the receipted bytes (nothing new
+        to deploy: kept, reported, exit 0); ``"blocked"`` when it renders new
+        bytes the edit holds back. ``None`` without a receipt.
+        """
+        receipted = self._receipted_hash(path)
+        if receipted is None or self._file_hash(path) in (None, receipted):
+            return None
+        return "drift" if rendered_hash == receipted else "blocked"
+
     def _rendered_hash(self, source_file: Path, expected_content: str | None) -> str:
         """Content hash of the bytes this integrator would deploy for one file."""
         from apm_cli.utils.content_hash import compute_file_hash, content_hash_of_bytes
@@ -801,6 +834,9 @@ class BaseIntegrator:
         )
         if identical:
             target_paths.append(target_path)
+            # Already receipted with these bytes: unchanged, not an adoption (RA-007).
+            if self.receipted_unchanged(target_path):
+                return True, False
             # A managed file already holding the final render is APM's bytes:
             # record the receipt the skipped rewrite would have (#4184, #3701).
             if managed_files and rel_path.replace("\\", "/") in managed_files:
@@ -818,10 +854,10 @@ class BaseIntegrator:
         if gate is not None and gate.adopt_legacy(target_path, rel_path):
             target_paths.append(target_path)
             return True, False
+        rendered = self._rendered_hash(source_file, expected_content)
         edit = (
-            gate.legacy_edit(
-                target_path, rel_path, self._rendered_hash(source_file, expected_content)
-            )
+            gate.legacy_edit(target_path, rel_path, rendered)
+            or self._receipted_edit(target_path, rendered)
             if gate is not None
             else None
         )
