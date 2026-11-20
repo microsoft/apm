@@ -48,6 +48,7 @@ from apm_cli.utils.path_security import (
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.cleanup import DeploymentEvidence
 
 _log = logging.getLogger(__name__)
 
@@ -191,12 +192,16 @@ def execute_migration(
     plans: list[MigrationPlan],
     lockfile: LockFile,
     project_root: Path,
+    *,
+    evidence: DeploymentEvidence,
 ) -> MigrationResult:
     """Delete legacy files and update lockfile ``deployed_files`` in place.
 
     For each plan entry:
 
-    1. Delete the legacy file from disk via :func:`safe_rmtree`.
+    1. Delete the legacy file from disk via :func:`safe_rmtree`, only when
+       *evidence* proves APM deployed every byte of it (#3701); otherwise the
+       path is kept, reported in ``failed`` and its lockfile row retained.
     2. Remove the old path from ``deployed_files`` on the owning dependency.
     3. Add the new ``.agents/skills/`` path if not already present.
     4. Mirror changes in ``local_deployed_files`` / ``local_deployed_file_hashes``
@@ -222,6 +227,17 @@ def execute_migration(
         try:
             # B1: containment guard before any disk mutation.
             ensure_path_within(abs_path, project_root)
+            if not evidence.authorizes(plan.src_path, abs_path, rendered_as=plan.dst_path):
+                from apm_cli.utils.console import _rich_warning
+
+                _rich_warning(
+                    f"Kept {plan.src_path}: no local deployment receipt or render of the "
+                    "locked package version proves APM deployed it. Delete it manually "
+                    "if you no longer need it.",
+                    symbol="warning",
+                )
+                result.failed.append(plan.src_path)
+                continue
             if abs_path.is_file():
                 abs_path.unlink()
             else:

@@ -13,8 +13,10 @@ import yaml
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.yaml_io import loads_frontmatter
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -439,8 +441,12 @@ class TestInstructionSyncIntegration:
             ".github/instructions/testing.instructions.md",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 2
@@ -456,8 +462,12 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/python.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 1
@@ -527,8 +537,12 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/nonexistent.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 0
@@ -991,8 +1005,12 @@ class TestCursorRulesSyncIntegration:
             ".cursor/rules/testing.mdc",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["cursor"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 2
@@ -1007,8 +1025,12 @@ class TestCursorRulesSyncIntegration:
 
         managed = {".cursor/rules/python.mdc"}
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["cursor"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 1
@@ -1395,8 +1417,12 @@ class TestClaudeRulesSyncIntegration:
             ".claude/rules/testing.md",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration_claude(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["claude"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 2
@@ -1411,8 +1437,12 @@ class TestClaudeRulesSyncIntegration:
 
         managed = {".claude/rules/python.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration_claude(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["claude"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 1

@@ -199,6 +199,7 @@ def test_late_service_boundary_requires_actual_selected_source_evidence(
         "explicit_target": None,
         "target_decision": None,
         "active_package_keys": frozenset({dependency.get_unique_key()}),
+        "frozen_disposition": InstallService.frozen_disposition(context),
     }
     if mode is InstallMode.ALL:
         with pytest.raises(FrozenInstallError, match="cannot replay") as failure:
