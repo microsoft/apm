@@ -3166,7 +3166,7 @@
     {
       "issue": 4216,
       "fixed_in": "Unreleased",
-      "summary": "Reinstalling a local bundle whose hooks current trust does not admit (revoked approval, bundle deny, org deny_all) retires the hook entries, hook files, copied scripts and lock rows it deployed earlier through the local-bundle hook trust owner, and announces it.",
+      "summary": "Reinstalling a local bundle whose hooks current trust does not admit (revoked approval, approval for earlier bundle content, bundle deny, org deny_all) retires the hook entries, hook files, copied scripts and lock rows it deployed earlier through the local-bundle hook trust owner, and announces it.",
       "failure_modes": [
         "cleanup",
         "outcome"
@@ -3177,7 +3177,9 @@
       ],
       "regression_tests": [
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_bundle_reinstall_retires_hooks_trust_no_longer_admits",
-        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hooks_park_then_register_like_a_source_install"
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_hooks_park_then_register_like_a_source_install",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_changed_bundle_content_retires_its_approved_hooks",
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row"
       ]
     },
     {

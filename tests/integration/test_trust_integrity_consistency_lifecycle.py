@@ -669,6 +669,34 @@ def test_revoked_bundle_grant_retires_its_hooks(
         run_step(runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit")
 
 
+def test_changed_bundle_content_retires_its_approved_hooks(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    _world, runner, env, bundle, project = _bundle_hook_world(tmp_path, apm_binary_path)
+    before = load_yaml(project / "apm.lock.yaml").get("local_deployed_files") or []
+    assert any(path.endswith("/x.sh") for path in before), before
+    producer = bundle.parent.parent / "producer-changed"
+    shutil.copytree(_world.isolated.work_root / "hookpkg", producer)
+    write(producer / ".apm" / "hooks" / "scripts" / "x.sh", "#!/bin/sh\necho changed\n")
+    changed_out = tmp_path / "changed"
+    run_step(runner, ("pack", "-o", str(changed_out)), cwd=producer, env=env, step="repack")
+    changed = changed_out / "hookpkg-1.0.0"
+    assert _bundle_key(changed) != _bundle_key(bundle)
+
+    result = run_step(
+        runner, ("install", str(changed), "--no-policy"), cwd=project, env=env, step="changed"
+    )
+
+    assert not _hooks_deployed(project), output(result)
+    lock = load_yaml(project / "apm.lock.yaml")
+    deployed = lock.get("local_deployed_files") or []
+    assert not any(path.endswith("/x.sh") for path in deployed), lock
+    assert not any((project / path).exists() for path in before if path.endswith("/x.sh"))
+    assert "Retired hooks from local bundle 'hookpkg'" in output(result), output(result)
+    assert _bundle_key(changed) in output(result), output(result)
+    run_step(runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit")
+
+
 def test_copilot_bundle_hook_without_a_record_fails_closed(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
