@@ -573,7 +573,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_repository_not_found_lifecycle.py::test_inaccessible_repository_names_host_and_credential_source",
-        "tests/unit/core/test_auth_phase3.py::TestDescribeCredentialTried"
+        "tests/unit/core/test_auth_phase3.py::TestDescribeCredentialTried::test_names_the_resolved_source_not_the_value"
       ]
     },
     {
