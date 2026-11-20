@@ -219,7 +219,8 @@
       "guards": [
         "install-deployment-executable-item-admission",
         "install-deployment-hook-pin-frozen-audit-parity",
-        "install-deployment-mcp-admission"
+        "install-deployment-mcp-admission",
+        "install-deployment-gate-retirement"
       ]
     },
     {

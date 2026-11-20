@@ -1961,6 +1961,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="InstallService stops owning the frozen-install mutation preflight.",
     ),
     MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        admission=McpAdmission.for_project(deploy_root, user_scope=user_scope),\n",
+        new="        admission=McpAdmission.admit_all(),\n",
+        intent="Uninstall keeps servers the gates no longer allow by admitting every recorded one.",
+    ),
+    MutationCase(
         guard_id="install-deployment-hook-pin-frozen-audit-parity",
         rule_id="install-deployment-hook-pin-frozen-audit-parity",
         path="src/apm_cli/install/service.py",

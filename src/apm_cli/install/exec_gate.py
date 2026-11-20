@@ -374,6 +374,59 @@ def recorded_exec_status_is_stale(
     return recorded != current or tuple(recorded_allowed) != tuple(current_allowed)
 
 
+def policy_denied_locked_packages(lockfile: Any, policy: Any) -> dict[str, str]:
+    """Return lock key -> reason for each locked dependency the org policy now denies.
+
+    The same dependency check the install policy gate applies
+    (:func:`~apm_cli.policy.matcher.check_dependency_allowed`).
+    """
+    from apm_cli.policy.matcher import check_dependency_allowed
+
+    dependency_policy = getattr(policy, "dependencies", None)
+    if dependency_policy is None:
+        return {}
+    denied: dict[str, str] = {}
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == ".":
+            continue
+        allowed, reason = check_dependency_allowed(dep.to_dependency_ref(), dependency_policy)
+        if not allowed:
+            denied[key] = f"org policy: {reason}"
+    return denied
+
+
+def gate_retirements(
+    lockfile: Any, modules_dir: Path, apm_package: Any, project_root: Path, *, user_scope: bool
+) -> tuple[dict[str, str], dict[str, str]] | None:
+    """What the current gates no longer allow on a path that skips install's gate.
+
+    Returns ``(denied packages, parked servers)``: locked dependencies the org
+    policy denies, and recorded MCP servers that install's own MCP admission
+    (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
+    revoked approval or a changed definition (#4444, #4445, #4446). ``None``
+    when the org policy is unresolved, so the caller defers to install.
+    """
+    from apm_cli.core.scope import manifest_root
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.policy.outcome_routing import classify_project_policy
+    from apm_cli.security.trust import McpAdmission
+
+    if lockfile is None:
+        return {}, {}
+    route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
+    if route.blocks or route.unresolved:
+        return None
+    denied = policy_denied_locked_packages(lockfile, route.policy)
+    view = CurrentMcpConfigView.select(
+        apm_package,
+        lockfile,
+        modules_dir,
+        admission=McpAdmission.for_project(project_root, user_scope=user_scope),
+        recorded=lockfile,
+    )
+    return denied, view.consent_problems(lockfile)
+
+
 def lock_exec_decisions_stale(
     lockfile: Any,
     modules_dir: Path,

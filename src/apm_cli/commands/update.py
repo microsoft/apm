@@ -112,6 +112,7 @@ class _UpdateRunState:
     proceeded: bool = False
     revision_pins_applied: bool = False
     cache_rehydration_requested: bool = False
+    gate_retirement: bool = False
 
 
 def _stdin_is_tty() -> bool:
@@ -186,6 +187,34 @@ def _executables_need_reconcile(
         ),
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
     )
+
+
+def _gate_retirements_pending(
+    lockfile: LockFile | None, modules_dir: Path, scope: InstallScope, apm_package: Any
+) -> bool:
+    """Whether the current gates no longer allow something deployed (#4444, #4445).
+
+    Asked once the resolver restaged local packages, so a changed local
+    definition is judged as install judges it: a policy-denied dependency or
+    a server install's MCP admission now parks also runs the install gate,
+    which refuses or retires it.
+    """
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root
+    from apm_cli.install.exec_gate import gate_retirements
+
+    try:
+        retirements = gate_retirements(
+            lockfile,
+            modules_dir,
+            apm_package,
+            get_deploy_root(scope),
+            user_scope=scope is _Scope.USER,
+        )
+    except (OSError, ValueError):
+        return False
+    # An unresolved org policy is the policy gate's own outcome, not a retirement.
+    return retirements is not None and any(retirements)
 
 
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
@@ -845,7 +874,11 @@ def _run_dep_update_locked(
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            if _exec_reconcile_required:
+            if not _exec_reconcile_required and _gate_retirements_pending(
+                _existing_lock, _modules_dir, scope, staged_apm_package
+            ):
+                plan_state.gate_retirement = True
+            if _exec_reconcile_required or plan_state.gate_retirement:
                 logger.info(
                     "Executables approvals changed since the last install; "
                     "reconciling deployed executables."
@@ -1047,7 +1080,7 @@ def _run_dep_update_locked(
         elif plan_state.cache_rehydration_requested and installed:
             logger.success(
                 "Reconciled executables without changing refs."
-                if _exec_reconcile_required
+                if _exec_reconcile_required or plan_state.gate_retirement
                 else "Restored dependency cache without changing refs.",
                 symbol="check",
             )

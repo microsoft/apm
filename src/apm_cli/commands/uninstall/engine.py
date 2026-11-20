@@ -1778,15 +1778,31 @@ def _cleanup_stale_mcp(
             target_ownership = {}
     if not managed_servers:
         return
+    from apm_cli.core.scope import manifest_root
+    from apm_cli.install.exec_gate import policy_denied_locked_packages
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.policy.outcome_routing import classify_project_policy
     from apm_cli.security.trust import McpAdmission
 
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
+    deploy_root = Path(project_root) if project_root is not None else Path.cwd()
+    # A survivor the current gates no longer allow loses its servers, as on
+    # install (#4446): install's own MCP admission parks a denied, revoked or
+    # changed server, and a dependency the org policy denies keeps none.
+    route = classify_project_policy(manifest_root(deploy_root, user_scope=user_scope))
+    denied = {} if route.unresolved else policy_denied_locked_packages(lockfile, route.policy)
+    for key, why in sorted(denied.items()):
+        if logger is not None:
+            logger.warning(f"{key} is no longer allowed ({why}); removing its MCP servers")
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
-        admission=McpAdmission.admit_all(),
+        admission=McpAdmission.for_project(deploy_root, user_scope=user_scope),
+        logger=logger,
+        active_package_keys=(
+            frozenset(key for key in lockfile.dependencies if key not in denied) if denied else None
+        ),
     )
     # Uninstall never admits a server: only previously managed servers survive.
     # Local-bundle servers stay with their bundle, not the uninstalled package.
