@@ -433,25 +433,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
     ),
     KnownOutputCell(
-        "install-registry-lookup-per-registry",
-        "I9",
-        "#4244",
-        _runs_any("install", "update"),
-        r"Looking up 1 MCP server in registry",
-        output=r"^\[i\] Using MCP registry: .*^\[i\] Using MCP registry: ",
-    ),
-    KnownOutputCell(
-        "install-mcp-passthrough-warning-per-parse",
-        "I9",
-        "#4242",
-        _runs("install", "hermes"),
-        r"'hermes-stdio': unknown key\(s\) preserved in extra",
-        output=(
-            r"^\+- MCP Servers.*'hermes-stdio': unknown key"
-            r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
-        ),
-    ),
-    KnownOutputCell(
         "self-update-installer-color-codes",
         "I6",
         "#4308",
@@ -486,15 +467,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-frozen-trust-notice-repeats",
-        "I9",
-        "#4256",
-        _runs("install", "--frozen"),
-        r"Trusting direct dependency MCP",
-        # Only runs that print the same trust notice twice (one notice is correct).
-        output=r"^(\[i\] Trusting direct dependency MCP[^\n]*)$.*^\1$",
     ),
 )
 
