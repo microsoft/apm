@@ -6,15 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# The downloader stack imports these modules lazily, on first use. Load them
-# now: first imported inside a test below, each would bind the patched
-# ``is_github_hostname`` (returns False) for the rest of the worker.
-import apm_cli.deps.artifactory_orchestrator
-import apm_cli.deps.clone_engine
-import apm_cli.deps.download_strategies
-import apm_cli.deps.git_reference_resolver
-import apm_cli.deps.github_downloader  # noqa: F401
-
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-deployment-provenance-state")]
 
 # ---------------------------------------------------------------------------
