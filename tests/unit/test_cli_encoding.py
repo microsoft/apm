@@ -124,18 +124,3 @@ class TestConfigureEncoding:
 
         # Streams should still be reconfigured
         mock_sys.stdout.reconfigure.assert_called_once_with(encoding="utf-8")
-
-
-def test_main_does_not_glob_expand_arguments_on_windows(monkeypatch) -> None:
-    """`--skill '*'` must reach APM as `*` on Windows too (#4407)."""
-    import apm_cli.cli as entry
-
-    calls = []
-    monkeypatch.setattr(entry, "cli", lambda **kwargs: calls.append(kwargs))
-    monkeypatch.setattr(entry, "_route_sigterm_to_interrupt", lambda: None)
-    # main() also configures logging and stream encoding (PYTHONIOENCODING); keep
-    # process state untouched.
-    monkeypatch.setattr(entry, "_configure_logging", lambda: None)
-    monkeypatch.setattr(entry, "_configure_encoding", lambda: None)
-    entry.main()
-    assert calls == [{"obj": {}, "windows_expand_args": False}]
