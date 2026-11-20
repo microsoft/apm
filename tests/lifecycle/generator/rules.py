@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 815, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 949, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -180,7 +180,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         (
             Ev(
                 "src/apm_cli/install/manifest_reconcile.py",
-                696,
+                749,
                 "canonical target-contraction owner",
             ),
         ),

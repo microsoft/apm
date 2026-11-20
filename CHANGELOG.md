@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
-- `apm install` keeps a managed file it cannot prove it deployed (no receipt, not render-equal), names it and exits 1. Files committed by APM 0.35.x or earlier (for example cursor rules, codex agents) may be refused once: move them aside and rerun `apm install`. (#4382)
+- `apm install` keeps a managed file it cannot prove it deployed (no receipt, not render-equal), names it and exits 1. (#4382)
 - After upgrading, `apm uninstall` needs deployment evidence for each file it deletes; without it, it changes nothing and names each file. If the source is unreachable, see the uninstall reference. (#3701)
 - In CI, `apm install` with a committed lockfile now verifies it like `--frozen`; pass `--no-frozen` to opt out. (#4509)
 
 ### Changed
 
+- `apm install` upgrades projects last installed by an APM before 0.37 automatically: unedited files re-render once, and edited files are kept and named. (#4398)
 - `apm install` names every kept edited file with one message and a runnable next step; an upgrade blocked by a kept edit exits 1. (#4504)
 - Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)
 - CI: merge-queue integration uses the release shard planner, and a daily alarm fails when `main` moves without a `merge_group` run. (#4149)
@@ -42,8 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm update` records restored marketplace provenance in its single lockfile write; a failed update leaves `apm.lock.yaml` unchanged. (#4525)
+- `apm install` and `apm update` run `post-install` scripts after MCP and LSP reconciliation, so scripts see the final lockfile and it is written once. (#4486)
 - `apm install --dry-run` after `apm deny`, a revoked approval or an org executables deny names each hook, MCP server, LSP server and bin/ the next install retires, and writes nothing. (#4478)
 - A failed `apm install <bundle>` no longer leaves a pending-executables record behind; `apm approve --pending` lists only bundles whose install completed. (closes #4492, #4505)
+- `apm install --frozen` no longer deletes a dropped target's files and then fails: it refuses with no writes, and `apm audit --ci` fails the same state. (#4517, #4519)
 - `apm update` names each local bundle whose executables are parked, with the approval next step, instead of reporting nothing. (closes #4441, #4471)
 - `apm update` with nothing to change applies org policy like `apm install`: a denied dependency exits 1 and nothing is written. (closes #4458, #4482)
 - `apm install` blocked by org policy ends with a runnable next step: remove or replace the blocked dependencies, check `apm policy status`, then re-run. (closes #4404, #4418)
@@ -123,6 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
+- `apm audit --ci` names a local dependency whose content changed since the lock, as `apm install --frozen` does. (closes #4447, #4474)
 - `apm audit --ci` fails and names a user's MCP entry that differs from a declared server with the same name, matching `apm install --frozen`. (#4493)
 - `apm audit --ci` names locked git and registry entries that carry no content hash and points at `security.integrity.require_hashes`, without changing the exit code. (closes #4453, #4495)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)

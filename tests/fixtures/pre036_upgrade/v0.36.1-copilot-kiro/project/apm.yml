@@ -1,0 +1,8 @@
+name: copilot-kiro-project
+version: 1.0.0
+targets:
+- copilot
+- kiro
+dependencies:
+  apm:
+  - path: ../pkg

@@ -3954,6 +3954,21 @@
       ]
     },
     {
+      "issue": 4319,
+      "fixed_in": "Unreleased",
+      "summary": "apm install with a post-install script committed apm.lock.yaml before MCP/LSP reconciliation, so the script saw a lockfile without the final service state and the command wrote it twice; scripts now fire after reconciliation and the lockfile is written once.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_post_install_script_sees_the_final_lockfile_written_once"
+      ]
+    },
+    {
       "issue": 4320,
       "fixed_in": "Unreleased",
       "summary": "A registry MCP install in CI or E2E mode prints no bare 'environment detected' line per server.",
@@ -4142,6 +4157,22 @@
       ]
     },
     {
+      "issue": 4398,
+      "fixed_in": "Unreleased",
+      "summary": "The first 0.37 install of a project last installed by an APM before 0.37 refused unedited files whose render changed and exited 1; a pre-0.37 lockfile hash now proves a git-clean file APM wrote, so it re-renders once, while edited files are kept and named.",
+      "failure_modes": ["ownership", "outcome"],
+      "properties": ["ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c1_unedited_pre036_files_re_render_silently_once",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c2_one_edited_pre036_file_is_kept_and_named_once",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c4_frozen_install_of_untouched_pre036_project_writes_nothing",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c5_unedited_036_project_upgrades_unchanged",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c5b_036_stamped_project_whose_render_changed_converges",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout"
+      ]
+    },
+    {
       "issue": 4400,
       "fixed_in": "Unreleased",
       "summary": "A marketplace plugin version that resolves to a ref other than the one a committed install recorded is refused (exit 1, both refs named) at project scope and with -g, instead of being re-recorded after one warning; the recorded pin and project state stay unchanged.",
@@ -4217,6 +4248,22 @@
       "properties": ["outcome.status_matches_state"],
       "regression_tests": [
         "tests/integration/test_local_bundle_hooks_lifecycle.py::test_update_names_a_bundle_whose_executables_are_parked"
+      ]
+    },
+    {
+      "issue": 4447,
+      "fixed_in": "Unreleased",
+      "summary": "audit --ci names a local dependency whose content differs from its locked snapshot, through the same verdict install --frozen applies.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_local_dependency_content_parity_lifecycle.py::test_audit_ci_and_frozen_refuse_alike_a_changed_local_dependency",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
       ]
     },
     {
@@ -4368,6 +4415,16 @@
       "regression_tests": [
         "tests/integration/test_local_bundle_hooks_lifecycle.py::test_approve_pending_lists_parked_bundle_executables",
         "tests/lifecycle/security/test_integrity.py::test_integrity_row"
+      ]
+    },
+    {
+      "issue": 4517,
+      "fixed_in": "Unreleased",
+      "summary": "apm install --frozen refuses, before any write, a lock that still records files of a target apm.yml dropped, naming the target, its files and the catalog remedy, instead of deleting them and then failing; apm audit --ci fails the same state (lockfile-targets-current), and the executed remedy converges both.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "lockfile.frozen_preserves_bytes", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_frozen_dropped_target_lifecycle.py::test_frozen_refuses_a_dropped_target_with_zero_writes_and_its_remedy_runs"
       ]
     }
   ],

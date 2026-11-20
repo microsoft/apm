@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import itertools
 import json
 import os
 import sys
@@ -204,6 +205,12 @@ class DeploymentMaterializationSession:
         self.render_evidence: DeploymentEvidence | None = None
         # Managed files kept because nothing proved APM wrote them: (owner, path).
         self.kept_overwrites: list[tuple[str, Path]] = []
+        # Kept files a pre-0.37 lock proves edited, by resolved path: "drift"
+        # when the package brings the recorded bytes, else "blocked" (#4398).
+        self.kept_edit_kinds: dict[str, str] = {}
+        # A frozen install verifies; it never migrates pre-0.37 renders (#4398).
+        self.frozen = False
+        self._legacy_hashes = legacy_lock_hashes(lockfile)
         self._load()
 
     def _validate_paths(self) -> None:
@@ -418,11 +425,38 @@ class DeploymentMaterializationSession:
                 return True
         except OSError:
             return False
+        if not self.frozen and self.legacy_owned(path, claim):
+            return True
         evidence = self.render_evidence
         return (
             evidence is not None
             and evidence.render_verdict(claim, path, rendered_as=None) == AUTHORIZED
         )
+
+    def legacy_recorded_hash(self, claim: str) -> str | None:
+        """The hash a pre-0.37 lock recorded for *claim*, else ``None`` (#4398)."""
+        return self._legacy_hashes.get(claim.replace("\\", "/"))
+
+    def legacy_owned(self, path: Path, claim: str) -> bool:
+        """Whether a pre-0.37 lock proves APM wrote *path*'s current bytes (#4398).
+
+        An APM before 0.37 did not require receipt evidence, so its lock hash
+        is the record of what it deployed. It counts only for such a lock,
+        only when the file still holds those bytes, and only when git does
+        not hold an uncommitted change to it, so a forged lock cannot vouch
+        for a staged or unstaged edit.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        recorded = self.legacy_recorded_hash(claim)
+        try:
+            return (
+                recorded is not None
+                and compute_file_hash(path) == recorded
+                and git_permits_legacy_adoption(path)
+            )
+        except OSError:
+            return False
 
     def _trusted_hash(
         self,
@@ -649,6 +683,79 @@ class DeploymentMaterializationSession:
         cls(project_root, scope, None).retire(deleted)
 
 
+# Locks written before 0.37, whose APM never refused an overwrite for lack of a
+# receipt (#4360), are the only record of what that APM deployed.
+_LOCK_HASH_EVIDENCE_BEFORE = (0, 37)
+
+
+def legacy_lock_hashes(lockfile: LockFile | None) -> dict[str, str]:
+    """Map each claim to its recorded hash when *lockfile* predates 0.37 (#4398).
+
+    A lock written before 0.37 (or one recording no version) comes from an APM
+    that did not require receipt evidence, so its hash is the record of what
+    that APM deployed. A claim two owners record with different hashes is dropped.
+    """
+    if lockfile is None or not _predates_receipt_evidence(lockfile.apm_version):
+        return {}
+    hashes: dict[str, str] = {}
+    conflicts: set[str] = set()
+    recorded = [dep.deployed_file_hashes for dep in lockfile.dependencies.values()]
+    recorded.append(lockfile.local_deployed_file_hashes)
+    for mapping in recorded:
+        for claim, digest in (mapping or {}).items():
+            key = claim.replace("\\", "/")
+            if hashes.setdefault(key, digest) != digest:
+                conflicts.add(key)
+    for key in conflicts:
+        del hashes[key]
+    return hashes
+
+
+def _predates_receipt_evidence(version: str | None) -> bool:
+    if not version:
+        return True
+    parts: list[int] = []
+    for piece in version.split(".")[:2]:
+        digits = "".join(itertools.takewhile(str.isdigit, piece))
+        if not digits:
+            return False
+        parts.append(int(digits))
+    return tuple(parts) < _LOCK_HASH_EVIDENCE_BEFORE
+
+
+def git_permits_legacy_adoption(path: Path) -> bool:
+    """Whether git lets a pre-0.37 lock hash vouch for *path* (#4398).
+
+    A forger can only know committed bytes, and those stay recoverable, so a
+    file git tracks unchanged qualifies, as does one git does not track at all
+    (untracked, ignored, or no repository). A tracked file with a staged or
+    unstaged change that exactly matches the lock is suspicious and does not.
+    Any other git error fails closed.
+    """
+    import subprocess
+
+    env = {**os.environ, "LC_ALL": "C"}
+
+    def git(*args: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            ["git", *args], cwd=path.parent, env=env, capture_output=True, check=False, timeout=30
+        )
+
+    try:
+        inside = git("rev-parse", "--is-inside-work-tree")
+        if inside.returncode != 0:
+            return b"not a git repository" in inside.stderr.lower()
+        tracked = git("ls-files", "--error-unmatch", "--", path.name)
+        if tracked.returncode != 0:
+            return b"did not match any file" in tracked.stderr.lower()
+        status = git("status", "--porcelain", "--", path.name)
+    except FileNotFoundError:
+        return True  # no git installed: nothing can track the file
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return status.returncode == 0 and not status.stdout.strip()
+
+
 @contextmanager
 def recorded_writes(
     skill_integrator: Any,
@@ -694,12 +801,39 @@ class OverwriteGate:
             path, claim, self.targets
         )
 
-    def keep(self, path: Path) -> bool:
-        """Record a kept dependency file; its prior lock entry stays (reported at finalize)."""
+    def keep(self, path: Path, *, edit: str | None = None) -> bool:
+        """Record a kept dependency file; its prior lock entry stays (reported at finalize).
+
+        *edit* classifies a file a pre-0.37 lock proves edited: ``"drift"`` or
+        ``"blocked"`` (#4398).
+        """
         if self.session is None or self.owner == ".":
             return False
         self.session.kept_overwrites.append((self.owner, path))
+        if edit is not None:
+            self.session.kept_edit_kinds[path.resolve().as_posix()] = edit
         return True
+
+    def adopt_legacy(self, path: Path, claim: str) -> bool:
+        """A frozen install keeps an unedited pre-0.37 render as it is (#4398)."""
+        return (
+            self.session is not None
+            and self.session.frozen
+            and self.session.legacy_owned(path, claim)
+        )
+
+    def legacy_edit(self, path: Path, claim: str, rendered_hash: str) -> str | None:
+        """Classify a pre-0.37 managed file whose bytes differ from its lock hash.
+
+        ``"drift"`` when the package renders the recorded bytes (a user edit
+        with nothing new to deploy), ``"blocked"`` when it renders new bytes.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        recorded = self.session.legacy_recorded_hash(claim) if self.session else None
+        if recorded is None or compute_file_hash(path) == recorded:
+            return None
+        return "drift" if rendered_hash == recorded else "blocked"
 
     @property
     def user_scope(self) -> bool:

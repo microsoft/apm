@@ -1129,6 +1129,12 @@ FROZEN_LOCAL_CONTENT_CHANGED = _entry(
     "apm install",
     "accept and record the local content change (without --frozen)",
 )
+FROZEN_TARGET_DROPPED = _entry(
+    "frozen-target-dropped",
+    "apm install",
+    f"retire the dropped target and update apm.lock.yaml ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
+)
 FROZEN_LOCKFILE_WITHHELD = _entry(
     "frozen-lockfile-withheld",
     "apm install",

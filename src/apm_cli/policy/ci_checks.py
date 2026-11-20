@@ -418,6 +418,37 @@ def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
     )
 
 
+def _check_lockfile_targets_current(
+    project_root: Path, lock: LockFile, *, user_scope: bool
+) -> CheckResult:
+    """Verify apm.lock.yaml records no files of a target apm.yml dropped (#4517).
+
+    The same dropped-target owner ``apm install --frozen`` refuses through, so
+    audit and frozen agree and share one remedy.
+    """
+    from ..install.manifest_reconcile import dropped_target_files
+
+    dropped = dropped_target_files(project_root, lock, user_scope=user_scope)
+    if not dropped:
+        return CheckResult(
+            name="lockfile-targets-current",
+            passed=True,
+            message="Lockfile records only declared targets",
+        )
+    fix = remediation.FROZEN_TARGET_DROPPED
+    targets = ", ".join(sorted(set(dropped.values())))
+    return CheckResult(
+        name="lockfile-targets-current",
+        passed=False,
+        message=(
+            f"apm.lock.yaml records {len(dropped)} file(s) of target(s) {targets} "
+            f"that apm.yml no longer declares -- {fix.clause()}"
+        ),
+        details=[f"{path} (target {dropped[path]})" for path in sorted(dropped)],
+        remediations=(fix,),
+    )
+
+
 def _check_no_orphans(
     manifest: APMPackage,
     lock: LockFile,
@@ -897,6 +928,25 @@ def verify_deployed_file_hashes(
     return hash_mismatches, unresolved_hash_paths
 
 
+def _local_content_drift(project_root: Path, lock: LockFile) -> list[str]:
+    """Name local dependencies whose content differs from the lock, as frozen does."""
+    from ..core.scope import manifest_file
+    from ..install.local_content_verdict import local_content_reasons
+    from ..models.apm_package import APMPackage
+    from ..models.dependency.replacement import project_manifest_dependencies
+    from ..models.manifest_io import InvalidManifestError
+
+    path = manifest_file(project_root)
+    if not path.is_file():
+        return []
+    try:
+        manifest = APMPackage.from_apm_yml(path)
+    except (InvalidManifestError, OSError, ValueError):
+        return []  # The manifest checks report an unreadable apm.yml.
+    reasons = local_content_reasons(manifest, lock, project_manifest_dependencies(manifest))
+    return [reason.strip().removeprefix("- ") for reason in reasons]
+
+
 def _check_content_integrity(
     project_root: Path,
     lock: LockFile,
@@ -967,11 +1017,13 @@ def _check_content_integrity(
         project_root, lock, targets
     )
     staged_drift = lock.staged_hash_drift(project_root)
+    local_drift = _local_content_drift(project_root, lock)
 
     if (
         not critical_files
         and not hash_mismatches
         and not staged_drift
+        and not local_drift
         and not missing_ownership
         and not unresolved_hash_paths
         and not scan.incomplete
@@ -1045,6 +1097,13 @@ def _check_content_integrity(
                 )
             )
         remedies.extend(item.clause() for item in remediations)
+    if local_drift:
+        # install --frozen refuses the same local dependencies (#4447).
+        parts.extend(local_drift)
+        remedies.append(
+            "restore the locked local content, or "
+            + remediation.FROZEN_LOCAL_CONTENT_CHANGED.clause()
+        )
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
         remedies.append(remediation.STAGED_BUNDLE_DRIFT.clause())
@@ -1518,7 +1577,10 @@ def run_baseline_checks(
         return result
 
     # Check 5: No orphaned packages
-    if _run(_check_no_orphans(manifest, lock)):
+    # 5b: no files of a target apm.yml dropped (#4517), as --frozen refuses
+    if _run(_check_no_orphans(manifest, lock)) or _run(
+        _check_lockfile_targets_current(project_root, lock, user_scope=user_scope)
+    ):
         return result
 
     # Check 6: Skill subset consistency (manifest vs lockfile)

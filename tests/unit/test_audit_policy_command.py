@@ -107,12 +107,31 @@ class TestCiWithPolicyFlag:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        # Advisories go to stderr (#4453); the JSON document is stdout alone.
+        # The hash-less lock row fires the integrity advisory: it goes to
+        # stderr, and stdout stays exactly the JSON document (#4453).
+        assert "without a content hash" in result.stderr
         data = json.loads(result.stdout)
         # Baseline: up to 7 checks, Policy: 17 checks -> total > 7 when
         # policy evaluation actually ran.  Asserting > 7 (not > 6) catches
         # the regression where only baseline checks are returned.
         assert data["summary"]["total"] > 7
+
+    def test_ci_sarif_stdout_is_only_the_document_when_an_advisory_fires(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """An advisory never reaches stdout under SARIF (#4453)."""
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(tmp_path)
+
+        result = runner.invoke(
+            audit,
+            ["--ci", "--no-drift", "--policy", str(policy_path), "-f", "sarif"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "without a content hash" in result.stderr
+        assert json.loads(result.stdout)["version"] == "2.1.0"
 
     def test_ci_with_policy_deny_fails(self, runner, tmp_path, monkeypatch):
         """Policy deny list causing failure -> exit 1."""
@@ -326,13 +345,14 @@ class TestCiWithoutPolicy:
         data = json.loads(result.stdout)
         # Baseline checks only, including deployment ownership and the
         # recorded executables decisions (#4053); no policy checks.
-        assert data["summary"]["total"] == data["summary"]["passed"] == 13
+        assert data["summary"]["total"] == data["summary"]["passed"] == 14
         assert [check["name"] for check in data["checks"]] == [
             "lockfile-exists",
             "ref-consistency",
             "deployment-ledger-owners",
             "deployed-files-present",
             "no-orphaned-packages",
+            "lockfile-targets-current",
             "skill-subset-consistency",
             "config-consistency",
             "native-mcp-ownership",

@@ -271,6 +271,11 @@ def _canonical_hash_bytes(raw: bytes) -> bytes:
     return normalize_crlf_to_lf(text).encode("utf-8")
 
 
+def content_hash_of_bytes(raw: bytes) -> str:
+    """Hash *raw* as :func:`compute_file_hash` hashes a file holding it."""
+    return f"sha256:{hashlib.sha256(_canonical_hash_bytes(raw)).hexdigest()}"
+
+
 def compute_file_hash(file_path: Path) -> str:
     """Compute SHA-256 of a single file's content (line-ending-normalized).
 

@@ -20,7 +20,7 @@ steps:
     run: [apm install]
     exit: 0
     files: [apm.lock.yaml, .gitignore, apm_modules/, .agents/skills/p-skill/SKILL.md]
-    key_lines: ["[+] lifecycle/p-skill #v1.0.0", "Skill integrated -> .agents/skills/"]
+    key_lines: ["[+] lifecycle/p-skill #v1.0.0", "skill(s) integrated -> .agents/skills/"]
     forbidden_lines: ["[x]"]
   - n: 2
     run: [apm install --mcp io.github.lifecycle/p-registry]
@@ -58,10 +58,3 @@ steps:
       - "[i] APM_RELEASE_METADATA_URL override active -- using mirrored metadata"
       - "[+] You're already on the latest version"
 known_cells:
-  # A lockfile written through PROXY_REGISTRY_URL records no resolved_commit,
-  # so every later --frozen install refuses it (network on or off).
-  - id: e03-frozen-refuses-proxy-lockfile
-    law: O5
-    tracking: "#4172"
-    step: 5
-    match: "'apm install --frozen' exited 1, step expects 0"

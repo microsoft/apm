@@ -676,6 +676,59 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     return files, hashes
 
 
+def _dropped_target_of(
+    *,
+    active_targets: Iterable[TargetProfile],
+    declared_targets: Iterable[TargetProfile] | None,
+    user_scope: bool,
+) -> Callable[[str], str | None]:
+    """Return a classifier naming the undeclared known target that governs a path.
+
+    The single dropped-target predicate: contraction deletes these rows, and
+    ``--frozen`` refuses before any write when the lock still records one (#4517).
+    """
+    allowed = [*active_targets, *(declared_targets or [])]
+    allowed_prefixes, allowed_schemes = install_governance(allowed)
+    allowed_names = {profile.name for profile in allowed}
+    dropped = [
+        (profile.name, *install_governance([profile]))
+        for profile in _scoped_known_targets_for_reconciliation(
+            user_scope=user_scope, active_targets=active_targets, declared_targets=declared_targets
+        ).values()
+        if profile.name not in allowed_names
+    ]
+
+    def classify(path: str) -> str | None:
+        if is_governed_by_install(path, allowed_prefixes, allowed_schemes):
+            return None
+        for name, prefixes, schemes in dropped:
+            if is_governed_by_install(path, prefixes, schemes):
+                return name
+        return None
+
+    return classify
+
+
+def dropped_target_files(
+    project_root: Path, lockfile: LockFile, *, user_scope: bool = False
+) -> dict[str, str]:
+    """Map each lock-recorded file of a target apm.yml no longer declares to that target.
+
+    Empty when the manifest declares no targets (auto-detect keeps every row).
+    """
+    declared = declared_target_profiles(project_root, user_scope=user_scope)
+    if declared is None:
+        return {}
+    classify = _dropped_target_of(
+        active_targets=(), declared_targets=declared, user_scope=user_scope
+    )
+    recorded = [
+        *(path for dep in lockfile.dependencies.values() for path in dep.deployed_files),
+        *lockfile.local_deployed_files,
+    ]
+    return {path: name for path in recorded if (name := classify(path)) is not None}
+
+
 def reconcile_target_deployed_files(
     *,
     project_root: Path,
@@ -725,30 +778,16 @@ def reconcile_target_deployed_files(
         if selected_owner_removal
         else None
     )
-    allowed_targets = [*active_targets, *(declared_targets or [])]
-    allowed_prefixes, allowed_schemes = install_governance(allowed_targets)
-    known_targets = list(
-        _scoped_known_targets_for_reconciliation(
-            user_scope=user_scope,
-            active_targets=active_targets,
-            declared_targets=declared_targets,
-        ).values()
+    dropped_target = _dropped_target_of(
+        active_targets=active_targets, declared_targets=declared_targets, user_scope=user_scope
     )
-    known_prefixes, known_schemes = install_governance(known_targets)
 
     def _retained(files: list[str]) -> list[str]:
         if selected_owner_removal:
             return [path for path in files if path in survivor_files or "://" in path]
         if declared_targets is None:
             return list(files)
-        return [
-            path
-            for path in files
-            if not (
-                is_governed_by_install(path, known_prefixes, known_schemes)
-                and not is_governed_by_install(path, allowed_prefixes, allowed_schemes)
-            )
-        ]
+        return [path for path in files if dropped_target(path) is None]
 
     changed = False
     prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)

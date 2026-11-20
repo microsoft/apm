@@ -139,6 +139,8 @@ def install_pipeline_options(
     The caller adds the frozen replay decision from ``InstallService.frozen_disposition``.
     """
     return dict(
+        # Post-install scripts fire after MCP/LSP reconciliation (#4319).
+        post_install_after_services=True,
         force=ctx.force,
         parallel_downloads=ctx.parallel_downloads,
         logger=logger,

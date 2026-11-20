@@ -8,7 +8,7 @@ This file is generated. Do NOT edit by hand. Run
 
 ## Honesty contract
 
-There is NO automated CI detector for spec-vs-behaviour drift beyond the four sets enforced by `orphan_check.py`: spec anchors, manifest entries, Appendix C rows, and `@pytest.mark.req` markers. A requirement marked `status=active` is exercised by at least one behavioral assertion: a test that exercises APM itself. A test that only asserts spec text or fixture shape is classified text/shape by `tests/spec_conformance/_test_kind.py` and is not implementation coverage; a requirement with only such tests is `status=text-only`. A requirement marked `status=skipped` carries a written waiver below; this is debt, not coverage. A requirement with `status=xfail` is asserted-but-known-broken.
+There is NO automated CI detector for spec-vs-behaviour drift beyond the four sets enforced by `orphan_check.py`: spec anchors, manifest entries, Appendix C rows, and `@pytest.mark.req` markers. A requirement marked `status=active` is exercised by at least one behavioral assertion: a test that exercises APM itself. A test that only asserts spec text or fixture shape is classified text/shape by `tests/spec_conformance/_test_kind.py` and is not implementation coverage; a requirement with only such tests is `status=text-only`. A requirement marked `status=skipped` carries a written waiver below; this is debt, not coverage. A requirement with `status=xfail` is asserted-but-known-broken. A requirement marked `status=partial` is exercised behaviorally but implemented only to the extent its entry under Partial conformance states.
 
 ## Conformance classes
 
@@ -38,12 +38,12 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 
 ## Coverage summary
 
-| Class | Active | Skipped | Xfail | Text-only | Unbound |
-|-------|-------:|--------:|------:|----------:|--------:|
-| Producer | 9 | 0 | 0 | 3 | 0 |
-| Consumer | 107 | 3 | 2 | 3 | 0 |
-| Registry | 0 | 0 | 0 | 1 | 0 |
-| Governance | 21 | 0 | 0 | 0 | 0 |
+| Class | Active | Partial | Skipped | Xfail | Text-only | Unbound |
+|-------|-------:|--------:|--------:|------:|----------:|--------:|
+| Producer | 9 | 0 | 0 | 0 | 3 | 0 |
+| Consumer | 107 | 1 | 3 | 1 | 3 | 0 |
+| Registry | 0 | 0 | 0 | 0 | 1 | 0 |
+| Governance | 21 | 0 | 0 | 0 | 0 | 0 |
 
 ## Per-requirement coverage
 
@@ -71,7 +71,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-lk-015](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-015) | MUST | 5.6.4 | consumer | active | 4 / 5 | - |
 | [req-lk-016](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-016) | MUST | 5.2 | consumer | active | 8 / 14 | - |
 | [req-lk-017](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-017) | MUST | 5.2 | consumer | active | 4 / 5 | - |
-| [req-lk-018](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-018) | SHOULD | 5.5 | consumer | xfail | 1 / 2 | - |
+| [req-lk-018](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-018) | SHOULD | 5.5 | consumer | partial | 9 / 10 | - |
 | [req-lk-019](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-019) | MUST | 5.2 | consumer | active | 9 / 10 | - |
 | [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 5 / 5 | - |
 | [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 8 / 8 | - |
@@ -198,6 +198,11 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-016](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-016) | MUST | 8.5.9 | consumer | active | 1 / 2 | - |
 | [req-tg-017](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-017) | MUST | 8.5.9 | consumer | active | 2 / 3 | - |
 | [req-tg-018](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-018) | MUST | 8.5.10 | consumer | active | 9 / 9 | - |
+
+## Partial conformance
+
+### req-lk-018
+- default frozen in CI when a lockfile exists; without a lockfile, resolve normally
 
 ## Waivers
 

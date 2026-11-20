@@ -19,7 +19,7 @@ LOCAL = "src/apm_cli/install/phases/local_content.py"
 VALIDATION = "src/apm_cli/install/validation.py"
 DOWNLOADER = "src/apm_cli/deps/github_downloader.py"
 DRIFT = "src/apm_cli/install/drift.py"
-SERVICE = "src/apm_cli/install/service.py"
+LOCAL_VERDICT = "src/apm_cli/install/local_content_verdict.py"
 MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 REFERENCE = "src/apm_cli/models/dependency/reference.py"
 
@@ -62,7 +62,7 @@ def check_single_file_materialization(provider: FactsProvider) -> tuple[Violatio
             },
             "read_local_package_source": {"virtual_file_subdirectory", "load_frontmatter"},
         },
-        SERVICE: {"_verify_frozen_local_content": {"compute_local_package_hash"}},
+        LOCAL_VERDICT: {"local_content_reasons": {"compute_local_package_hash"}},
         MCP_VIEW: {
             "_package_manifest_path": {
                 "read_local_package_source",

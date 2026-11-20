@@ -104,6 +104,14 @@ def differing_unrecorded_native_mcp_entries(
     migrate_legacy_project_target_servers(
         ownership, active_runtimes=set(target_runtimes), user_scope=user_scope
     )
+    self_defined = {
+        name
+        for name, stored in (lockfile.mcp_configs or {}).items()
+        if isinstance(stored, dict) and stored.get("registry") is False
+    }
+    if not any(self_defined - ownership.get(runtime, set()) for runtime in target_runtimes):
+        # Nothing to compare: building the clients would touch the HTTP cache.
+        return []
     clients = native_comparison_clients(
         list(target_runtimes), project_root=project_root, user_scope=user_scope
     )

@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core import remediation
-from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.frozen_selection import (
     _changed_selections,
@@ -347,7 +346,10 @@ class InstallService:
 
         if install_worked:
             post_event = self._build_event("post-install", request)
-            runner.fire("post-install", post_event)
+            if request.post_install_after_services:
+                result.post_install = lambda: runner.fire("post-install", post_event)
+            else:
+                runner.fire("post-install", post_event)
 
         return result
 
@@ -596,7 +598,35 @@ class InstallService:
                 reasons=reasons,
             )
 
+        InstallService._refuse_frozen_dropped_targets(request, lockfile, lockfile_path)
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
+
+    @staticmethod
+    def _refuse_frozen_dropped_targets(
+        request: InstallRequest, lockfile: LockFile, lockfile_path: Path
+    ) -> None:
+        """Refuse, before any write, a lock that records files of a target apm.yml dropped (#4517).
+
+        Retiring them deletes deployed files and rewrites apm.lock.yaml, which
+        ``--frozen`` may not do; a refused frozen install changes nothing.
+        """
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.manifest_reconcile import dropped_target_files
+
+        root = getattr(request.apm_package, "package_path", None) or lockfile_path.parent
+        dropped = dropped_target_files(
+            Path(root), lockfile, user_scope=is_user_scope(request.scope)
+        )
+        if not dropped:
+            return
+        targets = ", ".join(sorted(set(dropped.values())))
+        raise FrozenInstallError(
+            f"--frozen: apm.yml no longer declares target(s) {targets}, "
+            "but apm.lock.yaml still records their files.",
+            reasons=[f"  - {path} (target {dropped[path]})" for path in sorted(dropped)],
+            tip=f"Tip: {remediation.FROZEN_TARGET_DROPPED.sentence()}",
+        )
 
     @staticmethod
     def _selected_locked_replacements(
@@ -637,108 +667,10 @@ class InstallService:
         manifest_deps: list[DependencyReference],
     ) -> None:
         """Verify selected local declarations before any lifecycle or deployment."""
-        from collections import deque
-        from dataclasses import replace
-
-        from apm_cli.deps.apm_resolver import APMDependencyResolver
-        from apm_cli.deps.path_anchoring import (
-            LocalResolutionError,
-            build_local_parent_index,
-            resolve_local_dep_dir,
-        )
         from apm_cli.install.errors import FrozenInstallError
-        from apm_cli.install.phases.local_content import compute_local_package_hash
-        from apm_cli.install.plan import lockfile_satisfies_manifest
-        from apm_cli.models.apm_package import APMPackage
-        from apm_cli.models.dependency.replacement import build_replacement_index
+        from apm_cli.install.local_content_verdict import local_content_reasons
 
-        queue = deque(dep for dep in manifest_deps if dep.is_local)
-        queue.extend(InstallService._selected_locked_replacements(lockfile, manifest_deps))
-        if not queue:
-            return
-        package_root = Path(request.apm_package.package_path).resolve()
-        consumer_root = request.apm_package.source_path or package_root
-        rules = build_replacement_index(request.apm_package.replace_rules or [])
-        parent_index = build_local_parent_index(lockfile)
-        resolved_cache: dict[str, Path] = {}
-        seen: set[str] = set()
-        reasons: list[str] = []
-        while queue:
-            declared = queue.popleft()
-            key = declared.get_unique_key()
-            if key in seen:
-                continue
-            seen.add(key)
-            satisfied, missing = lockfile_satisfies_manifest(lockfile, [declared])
-            if not satisfied:
-                reasons.extend(missing)
-                continue
-            dependency = lockfile.get_dependency(key)
-            try:
-                source = resolve_local_dep_dir(
-                    dependency,
-                    lockfile,
-                    consumer_root,
-                    parent_index=parent_index,
-                    resolved_cache=resolved_cache,
-                )
-                selected_source = source
-                if source.is_file():
-                    # Admission must see the selected leaf, not a resolved symlink.
-                    source_base = resolve_local_dep_dir(
-                        replace(dependency, local_path="."),
-                        lockfile,
-                        package_root,
-                        parent_index=parent_index,
-                    )
-                    selected_source = source_base / Path(dependency.local_path).expanduser()
-                observed_hash = compute_local_package_hash(
-                    selected_source, framed=dependency.content_hash_framed
-                )
-                expected_hash = dependency.content_hash
-                # v0.1 readers also accept the identical SHA-256 digest without its envelope.
-                if (
-                    observed_hash != expected_hash
-                    and observed_hash.removeprefix("sha256:") != expected_hash
-                ):
-                    reasons.append(
-                        f"  - local dependency {declared.local_path!r} content differs "
-                        "from its locked snapshot"
-                    )
-                    continue
-                # Only selected, verified local manifests can introduce further
-                # local declarations. Do not inspect orphan lock entries or
-                # expand local paths declared by untrusted remote packages.
-                if manifest_file(source).is_file():
-                    package = APMPackage.from_apm_yml(manifest_file(source), source_path=source)
-                    for child in package.get_apm_dependencies():
-                        child = rules.bind(
-                            child,
-                            consumer_root=consumer_root,
-                            modules_dir=package_root / "apm_modules",
-                            parent=key,
-                            is_dev=dependency.is_dev,
-                        )
-                        if not child.is_local:
-                            continue
-                        if child.replacement is not None:
-                            queue.append(child)
-                            continue
-                        anchored = APMDependencyResolver._compute_dep_source_path(
-                            child, package, source
-                        )
-                        child = replace(
-                            child,
-                            declaring_parent=key,
-                            anchored_local_path=APMDependencyResolver._portable_anchor_identity(
-                                anchored, request.apm_package.source_path or package_root
-                            ),
-                        )
-                        queue.append(child)
-            except (LocalResolutionError, OSError, ValueError) as exc:
-                reasons.append(
-                    f"  - local dependency {declared.local_path!r} cannot be verified: {exc}"
-                )
+        reasons = local_content_reasons(request.apm_package, lockfile, manifest_deps)
         if reasons:
             raise FrozenInstallError(
                 "--frozen: local dependency content does not match apm.lock.yaml.",

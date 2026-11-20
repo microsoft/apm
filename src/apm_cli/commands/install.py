@@ -2016,6 +2016,8 @@ def _install_apm_packages(ctx, outcome):
     ctx.target_decision = service_result.target_decision
     mcp_count = service_result.mcp_count
     lsp_count = service_result.lsp_count
+    if install_result is not None and install_result.post_install is not None:
+        install_result.post_install()
 
     # Local .apm/ integration already ran inside the package pipeline.
 
