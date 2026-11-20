@@ -229,6 +229,7 @@ class TestGeminiConfigureMCPServer(unittest.TestCase):
     def test_returns_false_for_empty_url(self):
         result = self.adapter.configure_mcp_server("")
         self.assertFalse(result)
+        self.assertFalse(self.settings_json.exists())
 
     def test_returns_false_when_server_not_found(self):
         self.mock_registry.find_server_by_reference.return_value = None

@@ -1002,32 +1002,26 @@ class TestNormalizePluginDirectory:
 
 
 class TestValidatePluginPackage:
-    def test_validate_with_plugin_json(self, tmp_path):
-        plugin_dir = tmp_path / "valid"
+    @pytest.mark.parametrize(
+        ("entries", "expected"),
+        [
+            ({"plugin.json": '{"name": "valid-plugin"}'}, True),
+            ({"agents": None}, True),
+            ({}, False),
+            ({"README.md": "# Hello"}, False),
+        ],
+        ids=["plugin-json", "component-dirs-only", "empty-directory", "readme-only"],
+    )
+    def test_validate_plugin_package(self, tmp_path, entries, expected):
+        plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
-        (plugin_dir / "plugin.json").write_text('{"name": "valid-plugin"}')
+        for name, content in entries.items():
+            if content is None:
+                (plugin_dir / name).mkdir()
+            else:
+                (plugin_dir / name).write_text(content)
 
-        assert validate_plugin_package(plugin_dir) is True
-
-    def test_validate_with_component_dirs_only(self, tmp_path):
-        plugin_dir = tmp_path / "components"
-        plugin_dir.mkdir()
-        (plugin_dir / "agents").mkdir()
-
-        assert validate_plugin_package(plugin_dir) is True
-
-    def test_validate_empty_directory(self, tmp_path):
-        plugin_dir = tmp_path / "empty"
-        plugin_dir.mkdir()
-
-        assert validate_plugin_package(plugin_dir) is False
-
-    def test_validate_readme_only(self, tmp_path):
-        plugin_dir = tmp_path / "readme-only"
-        plugin_dir.mkdir()
-        (plugin_dir / "README.md").write_text("# Hello")
-
-        assert validate_plugin_package(plugin_dir) is False
+        assert validate_plugin_package(plugin_dir) is expected
 
 
 class TestExtractMCPServers:

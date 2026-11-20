@@ -45,50 +45,39 @@ from apm_cli.models.validation import (
 class TestPackageContentTypeFromString:
     """Test PackageContentType.from_string() parsing."""
 
-    def test_instructions_lower(self) -> None:
-        """'instructions' parses to INSTRUCTIONS."""
-        result: PackageContentType = PackageContentType.from_string("instructions")
-        assert result == PackageContentType.INSTRUCTIONS
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("instructions", PackageContentType.INSTRUCTIONS),
+            ("skill", PackageContentType.SKILL),
+            ("hybrid", PackageContentType.HYBRID),
+            ("prompts", PackageContentType.PROMPTS),
+            ("SKILL", PackageContentType.SKILL),
+            ("Instructions", PackageContentType.INSTRUCTIONS),
+            ("  hybrid  ", PackageContentType.HYBRID),
+        ],
+        ids=[
+            "instructions-lower",
+            "skill-lower",
+            "hybrid-lower",
+            "prompts-lower",
+            "uppercase",
+            "mixed-case",
+            "whitespace-stripped",
+        ],
+    )
+    def test_parses_known_values(self, raw, expected) -> None:
+        """Known type names parse case-insensitively after stripping whitespace."""
+        assert PackageContentType.from_string(raw) == expected
 
-    def test_skill_lower(self) -> None:
-        """'skill' parses to SKILL."""
-        result: PackageContentType = PackageContentType.from_string("skill")
-        assert result == PackageContentType.SKILL
-
-    def test_hybrid_lower(self) -> None:
-        """'hybrid' parses to HYBRID."""
-        result: PackageContentType = PackageContentType.from_string("hybrid")
-        assert result == PackageContentType.HYBRID
-
-    def test_prompts_lower(self) -> None:
-        """'prompts' parses to PROMPTS."""
-        result: PackageContentType = PackageContentType.from_string("prompts")
-        assert result == PackageContentType.PROMPTS
-
-    def test_uppercase_accepted(self) -> None:
-        """Uppercase strings are normalised before comparison."""
-        result: PackageContentType = PackageContentType.from_string("SKILL")
-        assert result == PackageContentType.SKILL
-
-    def test_mixed_case_accepted(self) -> None:
-        """Mixed-case strings are normalised before comparison."""
-        result: PackageContentType = PackageContentType.from_string("Instructions")
-        assert result == PackageContentType.INSTRUCTIONS
-
-    def test_leading_trailing_whitespace_stripped(self) -> None:
-        """Leading/trailing whitespace is stripped."""
-        result: PackageContentType = PackageContentType.from_string("  hybrid  ")
-        assert result == PackageContentType.HYBRID
-
-    def test_empty_string_raises(self) -> None:
-        """Empty string raises ValueError."""
-        with pytest.raises(ValueError, match="cannot be empty"):
-            PackageContentType.from_string("")
-
-    def test_invalid_value_raises(self) -> None:
-        """Unknown string raises ValueError with the bad value in the message."""
-        with pytest.raises(ValueError, match="Invalid package type 'bad_type'"):
-            PackageContentType.from_string("bad_type")
+    @pytest.mark.parametrize(
+        ("raw", "match"),
+        [("", "cannot be empty"), ("bad_type", "Invalid package type 'bad_type'")],
+        ids=["empty-string", "invalid-value"],
+    )
+    def test_rejects_empty_or_unknown_value(self, raw, match) -> None:
+        with pytest.raises(ValueError, match=match):
+            PackageContentType.from_string(raw)
 
     def test_invalid_value_lists_valid_types(self) -> None:
         """Error message for unknown value lists valid types."""

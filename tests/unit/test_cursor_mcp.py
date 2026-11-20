@@ -50,6 +50,7 @@ class TestCursorClientAdapter(unittest.TestCase):
     # -- get_current_config --
 
     def test_get_current_config_missing_file(self):
+        self.assertFalse(self.mcp_json.exists())
         self.assertEqual(self.adapter.get_current_config(), {})
 
     def test_get_current_config_existing_file(self):

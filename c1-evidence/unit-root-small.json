@@ -1,7 +1,8 @@
 {
  "partition": "unit root and small subpackages",
  "steps_done": [
-  1
+  1,
+  2
  ],
  "folds": {
   "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_legacy_optional_hint_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_skipped[codex]",
@@ -91,6 +92,13 @@
   "tests/unit/policy/test_policy_checks.py::TestSourceAttribution::test_pass_enabled": "tests/unit/policy/test_policy_checks.py::TestSourceAttribution::test_source_attribution_requirement[pass-enabled]",
   "tests/unit/policy/test_policy_checks.py::TestSourceAttribution::test_pass_not_required": "tests/unit/policy/test_policy_checks.py::TestSourceAttribution::test_source_attribution_requirement[pass-not-required]",
   "tests/unit/test_artifactory_support.py::TestArtifactoryDownloader::test_parse_artifactory_base_url_not_set": "tests/unit/test_artifactory_support.py::TestParseArtifactoryBaseUrlCanonicalVar::test_neither_var_set",
+  "tests/unit/test_auth.py::TestDetectTokenType::test_classic": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes",
+  "tests/unit/test_auth.py::TestDetectTokenType::test_fine_grained": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes",
+  "tests/unit/test_auth.py::TestDetectTokenType::test_github_app_install": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes",
+  "tests/unit/test_auth.py::TestDetectTokenType::test_github_app_refresh": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes",
+  "tests/unit/test_auth.py::TestDetectTokenType::test_oauth_app": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes",
+  "tests/unit/test_auth.py::TestDetectTokenType::test_oauth_user": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes",
+  "tests/unit/test_auth.py::TestDetectTokenType::test_unknown": "tests/unit/core/test_auth_validation.py::TestDetectTokenType::test_token_prefixes",
   "tests/unit/test_auth.py::TestGitlabRestHeaders::test_no_token_returns_empty_dict": "tests/unit/core/test_auth_validation.py::TestGitlabRestHeaders::test_headers[empty]",
   "tests/unit/test_auth.py::TestGitlabRestHeaders::test_oauth_bearer_style": "tests/unit/core/test_auth_validation.py::TestGitlabRestHeaders::test_headers[oauth-access-token]",
   "tests/unit/test_auth.py::TestGitlabRestHeaders::test_pat_uses_private_token_header": "tests/unit/core/test_auth_validation.py::TestGitlabRestHeaders::test_headers[glpat]",
@@ -113,6 +121,15 @@
   "tests/unit/test_init_command_selection.py::TestReadExistingTargets::test_no_target_field_returns_empty": "tests/unit/test_init_command_selection.py::TestReadExistingTargets::test_unusable_manifest_returns_empty[no-target-field]",
   "tests/unit/test_init_command_selection.py::TestReadExistingTargets::test_non_dict_yaml_returns_empty": "tests/unit/test_init_command_selection.py::TestReadExistingTargets::test_unusable_manifest_returns_empty[non-dict-yaml]",
   "tests/unit/test_list_remote_refs.py::TestParseLsRemoteOutput::test_empty_output": "tests/unit/test_list_remote_refs.py::TestParseLsRemoteOutput::test_output_without_refs_returns_empty[empty]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_empty_string_raises": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_rejects_empty_or_unknown_value[empty-string]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_hybrid_lower": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_parses_known_values[hybrid-lower]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_instructions_lower": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_parses_known_values[instructions-lower]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_invalid_value_raises": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_rejects_empty_or_unknown_value[invalid-value]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_leading_trailing_whitespace_stripped": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_parses_known_values[whitespace-stripped]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_mixed_case_accepted": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_parses_known_values[mixed-case]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_prompts_lower": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_parses_known_values[prompts-lower]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_skill_lower": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_parses_known_values[skill-lower]",
+  "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_uppercase_accepted": "tests/unit/test_models_validation_rules.py::TestPackageContentTypeFromString::test_parses_known_values[uppercase]",
   "tests/unit/test_output_formatters_rendering.py::TestFormatDefault::test_returns_non_empty_string": "tests/unit/test_output_formatters_rendering.py::test_format_default_returns_non_empty_string[plain]",
   "tests/unit/test_output_formatters_rendering.py::TestFormatDefaultColor::test_returns_non_empty_string": "tests/unit/test_output_formatters_rendering.py::test_format_default_returns_non_empty_string[color]",
   "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_efficiency_excellent": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-excellent]",
@@ -141,6 +158,10 @@
   "tests/unit/test_output_formatters_rendering.py::TestFormatProjectDiscoveryColorBranches::test_no_constitution_colored": "tests/unit/test_output_formatters_rendering.py::test_project_discovery_text[color-no-constitution]",
   "tests/unit/test_output_formatters_rendering.py::TestFormatVerbose::test_includes_issues_when_present": "tests/unit/test_output_formatters_rendering.py::test_format_verbose_includes_issues[plain]",
   "tests/unit/test_output_formatters_rendering.py::TestFormatVerboseColor::test_includes_issues": "tests/unit/test_output_formatters_rendering.py::test_format_verbose_includes_issues[color]",
+  "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_empty_directory": "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_plugin_package[empty-directory]",
+  "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_readme_only": "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_plugin_package[readme-only]",
+  "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_with_component_dirs_only": "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_plugin_package[component-dirs-only]",
+  "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_with_plugin_json": "tests/unit/test_plugin_parser.py::TestValidatePluginPackage::test_validate_plugin_package[plugin-json]",
   "tests/unit/test_portable_relpath.py::TestPortableRelpath::test_deeply_nested": "tests/unit/test_portable_relpath.py::TestPortableRelpath::test_relative_to_base[deeply-nested]",
   "tests/unit/test_portable_relpath.py::TestPortableRelpath::test_file_in_base": "tests/unit/test_portable_relpath.py::TestPortableRelpath::test_relative_to_base[file-in-base]",
   "tests/unit/test_portable_relpath.py::TestPortableRelpath::test_same_directory": "tests/unit/test_portable_relpath.py::TestPortableRelpath::test_relative_to_base[same-directory]",
@@ -157,10 +178,13 @@
   "marketplace/policy: table-shaped sibling tests folded into parametrized tests; policy_checks missing-file test now asserts its documented no-logging contract via caplog",
   "auth: HostInfo.display_name and gitlab_rest_headers cases from tests/unit/test_auth.py moved into parametrized tests in tests/unit/core/test_auth_validation.py (owner of core/auth unit checks); org suffix cases parametrized",
   "core: experimental flag-name and cowork registration checks, and the three intellij constant guards, merged into single parametrized/combined tests",
-  "root: portable_relpath, ls-remote empty parse, init toggle/read-targets cases folded into parametrized tests; unit copies no longer mirror tests/unit/utils, tests/benchmarks and tests/integration twins (outside this partition)"
+  "root: portable_relpath, ls-remote empty parse, init toggle/read-targets cases folded into parametrized tests; unit copies no longer mirror tests/unit/utils, tests/benchmarks and tests/integration twins (outside this partition)",
+  "test_reference_registry_shorthand identity test removed: identical xfail twin kept in tests/unit/registry/test_compat_matrix.py (P3 kept it on c1/unit-subpkgs)",
+  "test_auth.py TestDetectTokenType one-liners folded as rows into core/test_auth_validation.py TestDetectTokenType::test_token_prefixes",
+  "kept same-body groups (14): 9 have every member in files owned by open PRs; 4 pair tests/unit/core/test_token_manager_lifecycle.py (lifecycle file, must not edit) with tests/test_token_manager.py; 1 pairs core/test_auth_validation TestDetectTokenType::test_token_prefixes with tests/integration/test_commands_auth_flow.py (same assert body, different rows; tests/integration has no owning partition, deleting either loses rows)"
  ],
  "counts_left": {
-  "same_body_groups": 88,
+  "same_body_groups": 14,
   "unclassified_modules": null,
   "placement_offenders": null,
   "weak_tests": null

@@ -152,6 +152,14 @@ class TestDetectTokenType:
             ("ghr_refreshtoken", "github-app"),
             ("some_random_token", "unknown"),
             ("", "unknown"),
+            ("github_pat_abc123", "fine-grained"),
+            ("ghp_abc123", "classic"),
+            ("ghu_abc123", "oauth"),
+            ("gho_abc123", "oauth"),
+            ("ghs_abc123", "github-app"),
+            ("ghr_abc123", "github-app"),
+            ("some-random-token", "unknown"),
+            ("Bearer eyJxxx", "unknown"),
         ],
     )
     def test_token_prefixes(self, token: str, expected: str) -> None:

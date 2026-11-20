@@ -173,8 +173,9 @@ class TestActiveTargets:
 
         from apm_cli.core.target_detection import parse_target_field
 
-        with pytest.raises(ValueError, match="not a valid target"):
+        with pytest.raises(ValueError, match="not a valid target") as exc_info:
             parse_target_field("nonexistent")
+        assert "nonexistent" in str(exc_info.value)
 
     # -- codex detection --
 

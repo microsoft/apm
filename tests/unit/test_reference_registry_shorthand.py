@@ -473,9 +473,3 @@ class TestRegistryFieldsRoundTrip:
     def test_unique_key_includes_repo_url(self):
         d = DependencyReference.parse("acme/foo@corp-main#1.0.0")
         assert d.get_unique_key() == "acme/foo"
-
-    def test_identity_unchanged_by_registry_scope(self):
-        # The registry routing is metadata, not part of the package identity.
-        d_git = DependencyReference.parse("acme/foo#1.0.0")
-        d_reg = DependencyReference.parse("acme/foo@corp-main#1.0.0")
-        assert d_git.get_identity() == d_reg.get_identity() == "acme/foo"

@@ -27,16 +27,6 @@ class TestPromptIntegrator:
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_should_integrate_always_returns_true(self):
-        """Test integration is always enabled (zero-config approach)."""
-        # No .github/ directory needed
-        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
-
-        # Even with .github/ present
-        github_dir = self.project_root / ".github"
-        github_dir.mkdir()
-        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
-
     def test_find_prompt_files_in_root(self):
         """Test finding .prompt.md files in package root."""
         package_dir = self.project_root / "package"
@@ -62,6 +52,7 @@ class TestPromptIntegrator:
         prompts = self.integrator.find_prompt_files(package_dir)
         assert len(prompts) == 1
         assert prompts[0].name == "workflow.prompt.md"
+        assert prompts[0].parent == apm_prompts
 
     def test_copy_prompt_verbatim(self):
         """Test copying prompt file verbatim without metadata injection."""
@@ -314,6 +305,7 @@ Some prompt content."""
 
         assert result["files_removed"] == 0
         assert result["errors"] == 0
+        assert not (self.project_root / ".github" / "prompts").exists()
 
     def test_sync_integration_ignores_apm_package_param(self):
         """Test that sync removes all APM files regardless of installed packages."""

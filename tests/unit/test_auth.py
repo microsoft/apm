@@ -144,34 +144,6 @@ class TestClassifyHost:
 
 
 # ---------------------------------------------------------------------------
-# TestDetectTokenType
-# ---------------------------------------------------------------------------
-
-
-class TestDetectTokenType:
-    def test_fine_grained(self):
-        assert AuthResolver.detect_token_type("github_pat_abc123") == "fine-grained"
-
-    def test_classic(self):
-        assert AuthResolver.detect_token_type("ghp_abc123") == "classic"
-
-    def test_oauth_user(self):
-        assert AuthResolver.detect_token_type("ghu_abc123") == "oauth"
-
-    def test_oauth_app(self):
-        assert AuthResolver.detect_token_type("gho_abc123") == "oauth"
-
-    def test_github_app_install(self):
-        assert AuthResolver.detect_token_type("ghs_abc123") == "github-app"
-
-    def test_github_app_refresh(self):
-        assert AuthResolver.detect_token_type("ghr_abc123") == "github-app"
-
-    def test_unknown(self):
-        assert AuthResolver.detect_token_type("some-random-token") == "unknown"
-
-
-# ---------------------------------------------------------------------------
 # TestResolve
 # ---------------------------------------------------------------------------
 
