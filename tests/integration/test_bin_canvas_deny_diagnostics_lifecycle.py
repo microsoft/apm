@@ -119,6 +119,8 @@ def test_native_bin_plugin_denied_at_user_scope_names_the_deny(
         assert f"Parked native plugin {package}: denied" in denied, denied
         # A user-scope hint names the -g form, which works from any directory (#4154).
         assert f"apm policy explain -g {package}" in denied, denied
+        # The project-only form would fail from the user scope, so it is never shown (#4296).
+        assert f"apm policy explain {package}" not in denied, denied
 
 
 # -- canvas (project scope, apm deny) -----------------------------------------
