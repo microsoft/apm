@@ -25,14 +25,13 @@ and ``check_obligation`` credits the id with the credential-carrying egress,
 its allowed and forbidden hosts and a scan of every file under the project,
 HOME and cache for the sentinels.
 
-Unregistered, missing world support: every ``az-bearer`` id and the ADO
-``helper`` ids (the world's Azure DevOps host answers anonymous requests, so
-APM never reaches those chain steps); ``helper`` on the generic host (no
-generic git host is served); ``registry`` egress (no APM package registry
-service); the E1 and EP rows with REDIRECT=same-origin or cross-origin and
+Unregistered, missing world support: ADO ``api-probe`` (an ADO install sends
+only git requests); ``helper`` on the generic host (no generic git host is
+served); the E1 and EP rows with REDIRECT=same-origin or cross-origin and
 PROXY_ONLY=1 (the world proxy cannot yet script a redirect or an unproxied
 route). A row whose id carries PROXY_ONLY=0 also proves the proxy refused no
-connection; REDIRECT=none proves no response of the step redirected.
+connection; REDIRECT=none proves no response of the step redirected. Rows
+with ``auth`` make Azure DevOps refuse anonymous requests first.
 """
 
 from __future__ import annotations
@@ -141,7 +140,12 @@ def _none(world: World, host: HostSlice) -> Arranged:
 
 
 def _az_bearer(world: World, host: HostSlice) -> Arranged:
-    """``az`` logged in: APM's Azure DevOps chain falls back to its bearer (no PAT set)."""
+    """``az`` logged in: APM's Azure DevOps chain falls back to its bearer (no PAT set).
+
+    The Azure CLI's own token store lives under the world root, outside the
+    scanned roots: only a copy APM itself writes counts as persisting it.
+    """
+    world = _with_env(world, AZURE_CONFIG_DIR=str(world.root / "azure-cli"))
     login_azure(world)
     return Arranged(world, (ADO_BEARER,), tuple(PATS.values()))
 
@@ -178,7 +182,8 @@ def _is_policy(request: ScriptedRequest) -> bool:
     return (
         path.endswith(f"/{POLICY_REPO}/contents/apm-policy.yml")
         or "/contents/apm-policy.yml" in path
-        or ("/_apis/git/repositories/" in path and "apm-policy.yml" in path)
+        # Azure DevOps Items API: the file path travels in the query string.
+        or ("/_apis/git/repositories/" in path and path.endswith("/items"))
     )
 
 
