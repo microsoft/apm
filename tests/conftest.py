@@ -23,6 +23,7 @@
 # the earliest hook we have without writing a pytest plugin.
 
 import contextlib
+import functools
 import os
 import tempfile
 from pathlib import Path
@@ -120,6 +121,89 @@ def _validate_primitive_coverage():
 
     dispatch = get_dispatch_table()
     check_primitive_coverage(dispatch)
+
+
+@pytest.fixture(autouse=True)
+def _apm_state_leak_detector(request: pytest.FixtureRequest):
+    """Fail the test that leaves process state changed, then restore it.
+
+    Snapshots the environment (including PATH), the working directory and the
+    process-global state in ``tests/utils/state_leaks.py`` (console routing,
+    config cache, git/gh executable memos). A leak there reaches every later
+    test on the same xdist worker, so a victim fails far from its cause.
+    Known leakers live in ``tests/fixtures/test_state_leak_baseline.json``,
+    which may only shrink.
+
+    The name sorts first among this file's autouse fixtures, so it wraps the
+    resets below and judges the state they leave; a unit guard pins that.
+    """
+    from tests.utils import state_leaks
+
+    nodeid = request.node.nodeid
+    if not state_leaks.applies_to(nodeid):
+        yield
+        return
+    before = state_leaks.take_snapshot()
+    yield
+    after = state_leaks.take_snapshot()
+    leaks = state_leaks.leaked_keys(before, after)
+    if not leaks and nodeid not in _state_leak_baseline():
+        return
+    state_leaks.restore(before)
+    message = state_leaks.verdict(nodeid, leaks, _state_leak_baseline())
+    if message:
+        pytest.fail(message, pytrace=False)
+
+
+@functools.cache
+def _state_leak_baseline() -> dict[str, frozenset[str]]:
+    from tests.utils import state_leaks
+
+    return state_leaks.load_baseline()
+
+
+@pytest.fixture(autouse=True)
+def _reset_console_state():
+    """Reset APM and Rich console singletons before and after each test.
+
+    Machine-readable output (``--json``, ``--format json``; see
+    ``configure_output_mode``) calls ``set_console_stderr(True)``, which
+    routes rich/click output to stderr for the rest of the process. A test
+    that invokes such a command in-process would otherwise leave every later
+    test on the worker reading empty stdout.
+
+    Tests that initialize Rich's process-global console while its
+    ``Console`` class is patched can also leave a ``MagicMock`` clock
+    behind. Rich progress then compares mock timestamps in later tests.
+    """
+    import rich
+
+    from apm_cli.utils.console import _reset_console
+
+    # ``rich._console`` is Rich's process-global default console (the one
+    # ``rich.get_console()``/``rich.print`` lazily create). Nulling it forces
+    # a fresh real console next call. The attribute has lived at this name
+    # since Rich 10.0; the project pins ``rich>=13.0.0`` (verified on 15.x).
+    _reset_console()
+    rich._console = None
+    yield
+    _reset_console()
+    rich._console = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_cache():
+    """Drop the process-wide ``~/.apm/config.json`` cache around each test.
+
+    ``get_config`` caches the file for the process lifetime. A test that reads
+    config under a patched HOME would otherwise serve that config to later
+    tests on the worker.
+    """
+    from apm_cli import config
+
+    config._invalidate_config_cache()
+    yield
+    config._invalidate_config_cache()
 
 
 @pytest.fixture(autouse=True)
