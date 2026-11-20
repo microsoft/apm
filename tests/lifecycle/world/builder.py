@@ -109,7 +109,7 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
 
 
 def _engine(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    result = subprocess.run(
         (sys.executable, "-m", "apm_cli.cli", *args),
         cwd=cwd,
         env=env,
@@ -117,6 +117,29 @@ def _engine(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> subprocess
         text=True,
         timeout=120,
         check=False,
+    )
+    if result.returncode != 0 and "Git config probe failed" in result.stdout + result.stderr:
+        result.stderr += _git_config_probe_report(env)
+    return result
+
+
+def _git_config_probe_report(env: dict[str, str]) -> str:
+    """Git's own answer to APM's config probe (utils/git_env.py), which APM does not print."""
+    git = shutil.which("git", path=env.get("PATH")) or "git"
+    probe = subprocess.run(
+        (git, "config", "--null", "--show-scope", "--list"),
+        cwd=str(Path(git).resolve().parent),
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    keys = sorted(k for k in env if k.upper().startswith(("GIT_", "HOME", "XDG_", "USERPROFILE")))
+    shown = {k: env[k] for k in keys}
+    return (
+        f"\n[world] git config probe: {git} exit {probe.returncode}\n"
+        f"[world] stderr: {probe.stderr.decode(errors='replace')!r}\n"
+        f"[world] env: {shown!r}\n"
     )
 
 
