@@ -83,7 +83,7 @@ from apm_cli.integration.hook_source_selection import (
     resolve_relative_hook_script,
     select_hook_sources,
 )
-from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
@@ -1118,9 +1118,8 @@ class HookIntegrator(BaseIntegrator):
                 continue
 
             # Write rewritten JSON
-            with open(target_path, "w", encoding="utf-8") as f:
-                json.dump(rewritten, f, indent=2)
-                f.write("\n")
+            write_text_lf(target_path, json.dumps(rewritten, indent=2) + "\n")
+            self.note_rendered_write(target_path)
 
             hooks_integrated += 1
             target_paths.append(target_path)
