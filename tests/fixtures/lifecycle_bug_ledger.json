@@ -2418,6 +2418,16 @@
       ]
     },
     {
+      "issue": 4248,
+      "fixed_in": "Unreleased",
+      "summary": "Deployment rows in the user lockfile record scope user, and a path under a target root outside HOME records a target-relative value instead of an absolute project-relative one; rows in the earlier form read without drift.",
+      "failure_modes": ["portability", "outcome"],
+      "properties": ["portability.byte_deterministic", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_user_lockfile_rows_record_user_scope"
+      ]
+    },
+    {
       "issue": 4270,
       "fixed_in": "Unreleased",
       "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",

@@ -1531,8 +1531,8 @@ class LockFile:
         """
         self.lockfile_version = self._required_lockfile_version()
 
-    def to_yaml(self) -> str:
-        """Serialize to YAML string."""
+    def to_yaml(self, *, user_scope: bool = False) -> str:
+        """Serialize to YAML string; *user_scope* emits the user-lockfile row form."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
 
         self._validate_replacement_evidence()
@@ -1560,7 +1560,7 @@ class LockFile:
             if self.apm_version:
                 data["apm_version"] = self.apm_version
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
-            data["deployments"] = DeploymentLedgerCodec.rows(self.deployment_ledger)
+            data["deployments"] = DeploymentLedgerCodec.persisted_rows(self, user_scope=user_scope)
             if self.mcp_servers:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
@@ -1760,6 +1760,7 @@ class LockFile:
             suppressed.append(self.to_yaml())
             return False
         ensure_lockfile_writable(path)
+        from ..core.deployment_ledger import DeploymentLedgerCodec
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
@@ -1789,6 +1790,7 @@ class LockFile:
             existing = None
         else:
             existing = existing_lockfile
+        user_scope = DeploymentLedgerCodec.prepare_lockfile_write(self, existing, path)
         unchanged = existing is not None and self.is_semantically_equivalent(existing)
         if existing is not None and existing.generated_at is not None:
             if unchanged:
@@ -1808,7 +1810,7 @@ class LockFile:
         elif not _keeps_untranslated_mcp_stamp(self, existing):
             # The generator gate's only signal: whoever changes it owns it (#3962).
             self.apm_version = installed_apm_version()
-        serialized = self.to_yaml()
+        serialized = self.to_yaml(user_scope=user_scope)
         assert_no_staging_paths(serialized, path.name)
         if unchanged and _same_document_on_disk(path, serialized):
             # A proven no-op keeps the file's own bytes (comments, key style).
@@ -1834,7 +1836,9 @@ class LockFile:
 
         # An explicit ``apm_version: null`` is unverifiable, unlike an absent one.
         warn_if_newer(path, "null" if lock._apm_version_null else lock.apm_version)
-        return lock
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
 
     @classmethod
     def load_or_create(cls, path: Path) -> LockFile:

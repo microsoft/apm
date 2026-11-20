@@ -1535,6 +1535,139 @@ class DeploymentLedgerCodec:
         return DeploymentLedger(records=records)
 
     @staticmethod
+    def user_lockfile_rows(lockfile: LockFile) -> list[dict[str, Any]]:
+        """Return the rows a user lockfile (``$APM_HOME``) persists.
+
+        In memory a row keeps its compatibility value and inferred scope;
+        persisted, every row records scope ``user`` and a path under its
+        target's external user root is target-relative. A form read from the
+        lock is reused while it still maps back to the same row.
+        """
+        absolute = DeploymentLedgerCodec._absolute_values(lockfile)
+        read_forms: dict[str, DeploymentLocator] = getattr(lockfile, "_user_row_forms", {})
+        records: dict[str, DeploymentRecord] = {}
+        for record in lockfile.deployment_ledger.records.values():
+            locator = replace(record.locator, scope="user")
+            read_form = read_forms.get(record.locator.key)
+            if locator.kind == LocatorKind.PROJECT_RELATIVE and locator.value in absolute:
+                root = DeploymentLedgerCodec._user_root(locator.target)
+                if (
+                    read_form is not None
+                    and read_form.kind == LocatorKind.TARGET_RELATIVE
+                    and locator.value.endswith(f"/{read_form.value}")
+                ):
+                    root = locator.value[: -len(read_form.value) - 1]
+                relative = locator.value.removeprefix(f"{root}/") if root else ""
+                suffix = f"/{relative}"
+                if (
+                    relative
+                    and relative != locator.value
+                    and sum(value.endswith(suffix) for value in absolute) == 1
+                ):
+                    locator = replace(locator, kind=LocatorKind.TARGET_RELATIVE, value=relative)
+            if locator.key in records:
+                locator = record.locator
+            records[locator.key] = replace(record, locator=locator)
+        return DeploymentLedgerCodec.rows(DeploymentLedger(records=records))
+
+    @staticmethod
+    def adopt_user_lockfile_rows(lockfile: LockFile) -> None:
+        """Map rows read from a user lockfile back to their in-memory form.
+
+        The inverse of :meth:`user_lockfile_rows`; a lock still carrying
+        project-scope rows with absolute values reads unchanged.
+        """
+        absolute = DeploymentLedgerCodec._absolute_values(lockfile)
+        forms: dict[str, DeploymentLocator] = {}
+        records: dict[str, DeploymentRecord] = {}
+        for record in lockfile.deployment_ledger.records.values():
+            locator = record.locator
+            if locator.scope == "user":
+                if locator.kind == LocatorKind.TARGET_RELATIVE:
+                    matches = [v for v in absolute if v.endswith(f"/{locator.value}")]
+                    root = DeploymentLedgerCodec._user_root(locator.target)
+                    value = (
+                        matches[0]
+                        if len(matches) == 1
+                        else f"{root}/{locator.value}"
+                        if root
+                        else None
+                    )
+                    if value is not None:
+                        locator = replace(locator, kind=LocatorKind.PROJECT_RELATIVE, value=value)
+                bundle = record.active_owner == _LOCAL_BUNDLE_OWNER
+                scope = "user" if bundle else DeploymentLedgerCodec.legacy_scope(locator.value)
+                locator = replace(locator, scope=scope)
+                forms[locator.key] = record.locator
+            records[locator.key] = replace(record, locator=locator)
+        lockfile.deployment_ledger = DeploymentLedger(records=records)
+        lockfile._user_row_forms = forms
+
+    @staticmethod
+    def persisted_rows(lockfile: LockFile, *, user_scope: bool) -> list[dict[str, Any]]:
+        """Return the rows *lockfile* persists; *user_scope* selects the user form."""
+        if user_scope:
+            return DeploymentLedgerCodec.user_lockfile_rows(lockfile)
+        return DeploymentLedgerCodec.rows(lockfile.deployment_ledger)
+
+    @staticmethod
+    def prepare_lockfile_write(lockfile: LockFile, existing: LockFile | None, path: Path) -> bool:
+        """Return whether *path* is the user lockfile, carrying its read row forms.
+
+        The user lockfile is the one in the user-scope manifest directory
+        (``$APM_HOME``), the single answer of :mod:`apm_cli.core.scope`.
+        """
+        from apm_cli.core.scope import is_user_scope_root
+
+        if not is_user_scope_root(path.parent):
+            return False
+        if existing is not None:
+            if not hasattr(existing, "_user_row_forms"):
+                DeploymentLedgerCodec.adopt_user_lockfile_rows(existing)
+            lockfile._user_row_forms = {
+                **existing._user_row_forms,
+                **getattr(lockfile, "_user_row_forms", {}),
+            }
+        return True
+
+    @staticmethod
+    def adopt_lockfile_rows(lockfile: LockFile | None, path: Path) -> LockFile | None:
+        """Return *lockfile* read from *path*, its user-lockfile rows in memory form."""
+        from apm_cli.core.scope import is_user_scope_root
+
+        if lockfile is not None and is_user_scope_root(path.parent):
+            DeploymentLedgerCodec.adopt_user_lockfile_rows(lockfile)
+        return lockfile
+
+    @staticmethod
+    def _absolute_values(lockfile: LockFile) -> set[str]:
+        """Return the absolute path values of a lockfile's compatibility views."""
+        values = set(lockfile.local_deployed_files)
+        for owner, dependency in lockfile.dependencies.items():
+            if owner != ".":
+                values.update(dependency.deployed_files)
+        values.update(
+            record.locator.value
+            for record in lockfile.deployment_ledger.records.values()
+            if record.locator.kind == LocatorKind.PROJECT_RELATIVE
+        )
+        return {
+            value
+            for value in values
+            if "://" not in value and (value.startswith("/") or Path(value).is_absolute())
+        }
+
+    @staticmethod
+    def _user_root(target_name: str) -> str | None:
+        """Return the absolute user-scope managed root of *target_name*, if any."""
+        from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+        profile = KNOWN_TARGETS.get(target_name)
+        scoped = scoped_profile_or_none(profile, user_scope=True) if profile else None
+        root = scoped.managed_deploy_root if scoped is not None else None
+        return root.resolve().as_posix() if root is not None else None
+
+    @staticmethod
     def validate_rows(rows: Any) -> None:
         """Reject any malformed deployment row before ledger construction."""
         if not isinstance(rows, list):
