@@ -135,6 +135,8 @@ class SkillIntegrationResult:
     sub_skills_promoted: int = 0
     # Skills whose deployed bytes changed this run; None when not measured.
     skills_changed: int | None = None
+    # Of the promoted skills, those whose identical pre-existing copy was adopted.
+    sub_skills_adopted: int = 0
     bin_deployed: int = 0
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None
@@ -148,15 +150,17 @@ class SkillIntegrationResult:
 
 
 def skills_integrated(result: SkillIntegrationResult) -> int:
-    """Skills one package integrated: its root skill plus promoted skills.
+    """Skills one package integrated: changed skills plus adopted ones.
 
     ``SkillIntegrator`` measures ``skills_changed`` -- skills whose deployed
     bytes changed (new or rewritten) -- so a converged skill directory counts
-    zero (#4184). Results that do not measure it count a new root skill plus
+    zero (#4184); an identical unowned copy it adopts counts once, reported as
+    adopted. Results that do not measure it count a new root skill plus
     promoted skills; a ``skills/`` bundle has no root skill (#4089).
     """
     if isinstance(result.skills_changed, int):
-        return result.skills_changed
+        raw_adopted = getattr(result, "sub_skills_adopted", 0)
+        return result.skills_changed + (raw_adopted if isinstance(raw_adopted, int) else 0)
     root_skill = 1 if result.skill_created and result.skill_path is not None else 0
     return root_skill + result.sub_skills_promoted
 
@@ -178,3 +182,17 @@ def tree_file_hashes(root: Path, key: Callable[[Path], str]) -> dict[str, str]:
             if not _is_link_like(path) and path.is_file():
                 hashes[key(path)] = compute_file_hash(path)
     return hashes
+
+
+def skill_line_label(result: SkillIntegrationResult, skill_count: int) -> str:
+    """Label one package's skill line, reporting identical pre-existing copies as adopted."""
+    promoted = result.sub_skills_promoted
+    raw_adopted = getattr(result, "sub_skills_adopted", 0)
+    adopted = min(raw_adopted if isinstance(raw_adopted, int) else 0, skill_count)
+    if adopted == skill_count:
+        return f"{adopted} skill(s) adopted"
+    integrated = skill_count - adopted
+    if integrated == 1 and not promoted:
+        return "Skill integrated"
+    phrase = f"{integrated} skill(s) integrated"
+    return f"{phrase} ({adopted} adopted)" if adopted else phrase

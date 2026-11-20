@@ -658,7 +658,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
     apm_dir = require_current_cli(get_apm_dir(scope), command="apm uninstall")
     deploy_root = get_deploy_root(scope)
     modules_dir = get_modules_dir(scope)
-    manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
+    from ...install.mcp.command import manifest_label
+
+    manifest_display = (
+        manifest_label(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
+    )
 
     logger = CommandLogger("uninstall", verbose=verbose, dry_run=dry_run)
     staged_local_refreshes = {}

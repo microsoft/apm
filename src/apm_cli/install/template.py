@@ -23,7 +23,7 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginTargetExcludedError,
 )
 from apm_cli.install.outcome import package_install_count
-from apm_cli.install.package_resolution import effective_dependency_selection
+from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.services import (
     IntegratorBundle,
     PackageDeploymentPlan,
@@ -396,6 +396,25 @@ def _dependency_parts_for_skill_subpath(dep_ref) -> tuple[str, str]:
     return base.rstrip("/"), f"{separator}{reference}" if separator else ""
 
 
+def _reinstall_spec(dep_ref) -> str:
+    """Return the ``apm install`` argument that reinstalls *dep_ref*."""
+    dep_base, ref_suffix = _dependency_parts_for_skill_subpath(dep_ref)
+    return f"{dep_base}{ref_suffix}"
+
+
+def _retry_scope_args(ctx) -> tuple[str, ...]:
+    """Return the scope and explicit --target flags a retry hint must repeat."""
+    from apm_cli.core.scope import is_user_scope
+
+    args: list[str] = []
+    target = getattr(ctx, "target_override", None)
+    if target and getattr(ctx, "target_override_source", None) is None:
+        args.extend(("--target", target if isinstance(target, str) else ",".join(target)))
+    if is_user_scope(getattr(ctx, "scope", None)):
+        args.append("--global")
+    return tuple(args)
+
+
 def _agent_plugin_skill_name_for_hint(
     source: DependencySource,
     materialization: Materialization,
@@ -491,7 +510,7 @@ def _integrate_materialization(
     except AgentPluginDeploymentBoundaryError as exc:
         return _record_agent_plugin_boundary_failure(source, m, exc)
 
-    if ctx.skill_subset_from_cli and ctx.skill_subset:
+    if ctx.skill_subset_from_cli and ctx.skill_subset and not is_implicit_local(dep_ref, ctx):
         from apm_cli.install.outcome import require_requested_components
         from apm_cli.integration.skill_integrator import SkillIntegrator
 
@@ -503,6 +522,8 @@ def _integrate_materialization(
             requested=ctx.skill_subset,
             available=available_skills,
             package=dep_key,
+            install_spec=_reinstall_spec(dep_ref),
+            retry_args=_retry_scope_args(ctx),
         ):
             ctx.package_deployed_files[dep_key] = []
             return deltas

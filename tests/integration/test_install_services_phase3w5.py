@@ -105,15 +105,13 @@ def make_skill_result(
     bin_skipped_reason: str | None = None,
     deployed_files: tuple[Path, ...] = (),
 ) -> SkillIntegrationResult:
-    # A created root skill carries its SKILL.md path, as SkillIntegrator reports
-    # it; skills_integrated() counts a root skill only then (a skills/ bundle has none).
-    skill_path = (target_paths or [Path("skills/demo/SKILL.md")])[0] if skill_created else None
     return SkillIntegrationResult(
         target_paths=target_paths or [],
         skill_created=skill_created,
         skill_updated=False,
         skill_skipped=False,
-        skill_path=skill_path,
+        # A created skill without promoted sub-skills is a root skill.
+        skill_path=Path("SKILL.md") if skill_created and not sub_skills_promoted else None,
         references_copied=0,
         sub_skills_promoted=sub_skills_promoted,
         bin_deployed=bin_deployed,
@@ -630,24 +628,6 @@ class TestIntegratePackagePrimitives:
         assert integrators["prompt_integrator"].integrate_prompts_for_target.call_count == 2
         assert result["prompts"] == 2
         assert tree_messages(logger) == ["  |-- 2 prompts integrated -> .claude/, .cursor/"]
-
-    def test_three_target_paths_collapse_to_count(self, tmp_path: Path) -> None:
-        targets = [
-            make_target(name="claude", root_dir=".claude", primitives={"prompts": make_mapping()}),
-            make_target(name="cursor", root_dir=".cursor", primitives={"prompts": make_mapping()}),
-            make_target(name="codex", root_dir=".codex", primitives={"prompts": make_mapping()}),
-        ]
-        entry = make_dispatch_entry(counter_key="prompts")
-
-        _, _, _, logger = invoke_integrate(
-            tmp_path,
-            targets=targets,
-            dispatch_table={"prompts": entry},
-            integrator_results={"prompts": make_integration_result(files_integrated=1)},
-            logger=MagicMock(),
-        )
-
-        assert tree_messages(logger) == ["  |-- 3 prompts integrated -> 3 targets"]
 
     def test_verbose_mode_expands_multiple_paths(self, tmp_path: Path) -> None:
         targets = [

@@ -90,7 +90,7 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/prune.py", 79, '"--dry-run"'),
         Ev("src/apm_cli/commands/prune.py", 85, "def prune(ctx, dry_run)"),
     ),
-    "compile": (Ev(_COMPILE, 1269, '"--target"'), Ev(_COMPILE, 1279, '"--dry-run"')),
+    "compile": (Ev(_COMPILE, 1279, '"--target"'), Ev(_COMPILE, 1289, '"--dry-run"')),
     "lock": (
         Ev("src/apm_cli/commands/lock.py", 108, '"--update"'),
         Ev("src/apm_cli/commands/lock.py", 115, '"--no-policy"'),
@@ -148,7 +148,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 936, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 487, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 625, '"--global"'),
-    "compile": Ev(_COMPILE, 1378, '"--global"'),
+    "compile": Ev(_COMPILE, 1388, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 100, '"--global"'),
     "approve-deny": Ev(_APPROVE, 216, '"--user"'),
     # U5: pack has no --global (options 163-301).
@@ -262,8 +262,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 850, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1050, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 843, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 1045, '"instructions" not in target.primitives'),
         ),
     ),
 }
