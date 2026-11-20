@@ -3617,6 +3617,16 @@
       ]
     },
     {
+      "issue": 4334,
+      "fixed_in": "Unreleased",
+      "summary": "apm install --verbose names the package in its target-restriction and perf materialize lines, so two packages no longer print identical diagnostics.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_install_verbose_diagnostics_lifecycle.py::test_verbose_install_prints_each_package_diagnostic_once"
+      ]
+    },
+    {
       "issue": 4353,
       "fixed_in": "Unreleased",
       "summary": "A refused install keeps every apm_modules package copy as it was before the command, including when it re-fetched the package.",

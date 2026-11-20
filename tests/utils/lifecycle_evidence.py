@@ -424,14 +424,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         # self-update passes the installer's output through; install.sh always colors it.
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
-    KnownOutputCell(
-        "install-verbose-diagnostics-repeat",
-        "I9",
-        "#4334",
-        _runs("install", "--verbose"),
-        r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
-        output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
 )
 
 _EXPECTED_VIOLATIONS: ContextVar[frozenset[str]] = ContextVar(
