@@ -619,7 +619,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         from apm_cli.models.apm_package import APMPackage
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
-        attach_persistent_git_cache(downloader)
+        attach_persistent_git_cache(downloader, read_only=True)
         declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
         if (apm_yml := manifest_file(project_root)).exists():
             manifest = APMPackage.from_apm_yml(apm_yml)

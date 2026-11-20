@@ -41,7 +41,7 @@ HTTP_BUCKET = "http_v1"
 _temp_cache_dir: str | None = None
 
 
-def get_cache_root(*, no_cache: bool = False) -> Path:
+def get_cache_root(*, no_cache: bool = False, ensure: bool = True) -> Path:
     """Resolve the cache root directory.
 
     Args:
@@ -63,10 +63,10 @@ def get_cache_root(*, no_cache: bool = False) -> Path:
     # Escape hatch: APM_CACHE_DIR override
     override = os.environ.get("APM_CACHE_DIR", "").strip()
     if override:
-        return _validate_and_ensure(override)
+        return _validate_and_ensure(override, ensure=ensure)
 
     # Platform default
-    return _validate_and_ensure(_platform_default())
+    return _validate_and_ensure(_platform_default(), ensure=ensure)
 
 
 def get_git_db_path(cache_root: Path) -> Path:
@@ -107,7 +107,7 @@ def _platform_default() -> str:
     return os.path.join(os.path.expanduser("~"), ".cache", "apm")
 
 
-def _validate_and_ensure(path_str: str) -> Path:
+def _validate_and_ensure(path_str: str, *, ensure: bool = True) -> Path:
     """Validate and create cache root, returning the Path.
 
     Raises:
@@ -126,8 +126,9 @@ def _validate_and_ensure(path_str: str) -> Path:
     if not cache_path.is_absolute():
         raise ValueError(f"Cache path must be absolute: {path_str}")
 
-    # Create with restrictive permissions
-    _ensure_dir(cache_path)
+    # Create with restrictive permissions (a read-only caller passes ensure=False)
+    if ensure:
+        _ensure_dir(cache_path)
     return cache_path
 
 

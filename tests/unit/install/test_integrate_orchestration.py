@@ -143,8 +143,9 @@ class TestResolveDownloadStrategy:
         # Mark already resolved so skip_download starts True
         ctx.callback_downloaded["org/pkg"] = "sha1"
 
-        install_path = tmp_path / "pkg"
-        install_path.mkdir()
+        install_path = ctx.apm_modules_dir / "org" / "pkg"
+        install_path.mkdir(parents=True)
+        (install_path / "a.md").write_text("copy\n")
 
         with (
             patch("apm_cli.drift.detect_ref_change", return_value=False),
@@ -153,7 +154,6 @@ class TestResolveDownloadStrategy:
                 "apm_cli.utils.content_hash.verify_package_hash",
                 return_value=False,
             ),
-            patch("apm_cli.utils.path_security.safe_rmtree"),
         ):
             _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
                 ctx, dep_ref, install_path
@@ -162,6 +162,10 @@ class TestResolveDownloadStrategy:
         assert not skip_download
         assert "org/pkg" not in ctx.content_hash_verified_deps
         logger.progress.assert_called()
+        # The copy is staged with the install transaction, so a refusal restores it.
+        assert not install_path.exists()
+        ctx.transaction.rollback()
+        assert (install_path / "a.md").read_text() == "copy\n"
 
     def test_registry_enforce_only_skips_cached(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
