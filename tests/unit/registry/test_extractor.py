@@ -250,3 +250,80 @@ class TestExtractArchiveDispatcher:
         digest = hashlib.sha256(data).hexdigest()
         extract_archive(data, digest, tmp_path, content_type="application/octet-stream")
         assert (tmp_path / "apm.yml").exists()
+
+
+def _build_archive(fmt: str, entries: list[tuple[str, bytes]]) -> bytes:
+    if fmt == "tar.gz":
+        return _build_tar(entries)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, content in entries:
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+def _extract(fmt: str, data: bytes, dest) -> str:
+    digest = hashlib.sha256(data).hexdigest()
+    if fmt == "tar.gz":
+        return extract_tarball(data, digest, dest)
+    return extract_zip(data, digest, dest)
+
+
+@pytest.mark.filterwarnings("ignore:Duplicate name")
+@pytest.mark.parametrize("fmt", ["tar.gz", "zip"])
+class TestArchiveLimitsApplyToEveryFormat:
+    """req-sc-004: every registry archive format gets the same archive limits."""
+
+    def test_entry_count_cap(self, fmt, tmp_path, monkeypatch):
+        monkeypatch.setattr("apm_cli.utils.archive.MAX_ZIP_ENTRIES", 3)
+        data = _build_archive(fmt, [(f"f{i}.txt", b"x") for i in range(4)])
+        with pytest.raises(UnsafeTarballError, match="entries"):
+            _extract(fmt, data, tmp_path / "out")
+
+    def test_entry_count_at_cap_is_accepted(self, fmt, tmp_path, monkeypatch):
+        monkeypatch.setattr("apm_cli.utils.archive.MAX_ZIP_ENTRIES", 3)
+        data = _build_archive(fmt, [(f"f{i}.txt", b"x") for i in range(3)])
+        _extract(fmt, data, tmp_path / "out")
+        assert sorted(p.name for p in (tmp_path / "out").iterdir()) == [
+            "f0.txt",
+            "f1.txt",
+            "f2.txt",
+        ]
+
+    def test_uncompressed_size_cap_counts_streamed_bytes(self, fmt, tmp_path, monkeypatch):
+        monkeypatch.setattr("apm_cli.utils.archive._MAX_UNCOMPRESSED_BYTES", 1024)
+        data = _build_archive(fmt, [("a.bin", b"x" * 600), ("b.bin", b"x" * 600)])
+        with pytest.raises(UnsafeTarballError, match="exceeds size limit"):
+            _extract(fmt, data, tmp_path / "out")
+        assert not [p for p in (tmp_path / "out").rglob("*") if p.is_file()]
+
+    @pytest.mark.parametrize(
+        "second",
+        ["apm.yml", "./apm.yml", "APM.yml", ".//apm.yml"],
+        ids=["exact", "dot-prefix", "case-folded", "doubled-separator"],
+    )
+    def test_duplicate_entry_is_refused(self, fmt, second, tmp_path):
+        data = _build_archive(fmt, [("apm.yml", b"name: first\n"), (second, b"name: second\n")])
+        with pytest.raises(UnsafeTarballError) as refused:
+            _extract(fmt, data, tmp_path / "out")
+        if second in ("apm.yml", "APM.yml"):
+            assert "duplicate" in str(refused.value)
+        assert not (tmp_path / "out" / "apm.yml").exists()
+
+    def test_absolute_and_traversal_paths_are_refused(self, fmt, tmp_path):
+        for name in ("/etc/passwd", "../escape.txt", "C:/win.txt"):
+            data = _build_archive(fmt, [(name, b"x")])
+            with pytest.raises(UnsafeTarballError):
+                _extract(fmt, data, tmp_path / "out")
+        assert not (tmp_path / "escape.txt").exists()
+
+
+def test_tar_special_file_is_refused(tmp_path):
+    def add_fifo(tar):
+        ti = tarfile.TarInfo(name="pipe")
+        ti.type = tarfile.FIFOTYPE
+        tar.addfile(ti)
+
+    data = _build_tar_with(add_fifo)
+    with pytest.raises(UnsafeTarballError, match="special file"):
+        extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")

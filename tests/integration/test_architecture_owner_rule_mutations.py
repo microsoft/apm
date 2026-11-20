@@ -2633,6 +2633,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Tokenless ADO environments can reactivate native Git helpers.",
     ),
     MutationCase(
+        guard_id="transport-platform-archive-extraction-limits",
+        rule_id="transport-platform-archive-extraction-limits",
+        path="src/apm_cli/deps/registry/extractor.py",
+        old="    safe_extract_tar(tar, dest_root, error_type=UnsafeTarballError)",
+        new="    tar.extractall(dest_root)",
+        intent="Registry tar.gz archives extract without the shared archive limits.",
+    ),
+    MutationCase(
         guard_id="transport-platform-artifactory-full-commit-sha",
         rule_id="transport-platform-artifactory-full-commit-sha",
         path="src/apm_cli/utils/github_host.py",
