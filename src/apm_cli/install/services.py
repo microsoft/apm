@@ -232,6 +232,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     """
     enforce_agent_plugin_deployment_boundary(package_info)
 
+    from apm_cli.core.deployment_ledger import record_rendered_writes
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope
@@ -526,6 +527,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
+            record_rendered_writes(
+                integrators.skill, _int_result, target=_target, package_info=package_info
+            )
             _adopted_attr = getattr(_int_result, "files_adopted", 0)
             # Coerce defensively: subclasses (e.g. HookIntegrationResult)
             # always set this, but tests use MagicMock results which

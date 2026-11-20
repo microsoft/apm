@@ -94,6 +94,7 @@ def _write_kiro_hook_docs(
     diagnostics,
     target_paths: list[Path],
     display_payloads: list,
+    rendered_writes: list[Path],
 ) -> tuple[int, int, int]:
     """Write Kiro hook docs from one source hook file."""
     files_integrated = 0
@@ -151,6 +152,7 @@ def _write_kiro_hook_docs(
                 os.chmod(target_path, 0o600)
                 files_integrated += 1
                 target_paths.append(target_path)
+                rendered_writes.append(target_path)
                 display_payloads.append(
                     _display_payload(
                         integrator,
@@ -200,8 +202,8 @@ def _copy_scripts(
     hook_descriptor_files: set[Path],
     source_plan=None,
     selected_bundle_files: frozenset[Path] | None = None,
-) -> tuple[int, int]:
-    """Copy Kiro hook scripts and return copied/adopted counts."""
+) -> tuple[int, int, list[Path]]:
+    """Copy Kiro hook scripts and return copied/adopted counts and written files."""
     copy_result = copy_deployed_hook_bundle(
         integrator,
         package_path=package_path,
@@ -216,7 +218,7 @@ def _copy_scripts(
         source_plan=source_plan,
         selected_bundle_files=selected_bundle_files,
     )
-    return copy_result.scripts_copied, copy_result.files_adopted
+    return copy_result.scripts_copied, copy_result.files_adopted, copy_result.written
 
 
 def integrate_kiro_hooks(
@@ -258,6 +260,7 @@ def integrate_kiro_hooks(
     scripts_copied = 0
     scripts_adopted = 0
     target_paths: list[Path] = []
+    rendered_writes: list[Path] = []
     display_payloads: list = []
 
     for hook_file in hook_files:
@@ -287,11 +290,12 @@ def integrate_kiro_hooks(
             diagnostics,
             target_paths,
             display_payloads,
+            rendered_writes,
         )
         files_integrated += written
         files_skipped += skipped
         files_adopted += adopted
-        copied, adopted_scripts = _copy_scripts(
+        copied, adopted_scripts, written_scripts = _copy_scripts(
             integrator,
             scripts,
             package_info.install_path,
@@ -307,6 +311,7 @@ def integrate_kiro_hooks(
         )
         scripts_copied += copied
         scripts_adopted += adopted_scripts
+        rendered_writes.extend(written_scripts)
 
     return HookIntegrationResult(
         files_integrated=files_integrated,
@@ -316,4 +321,5 @@ def integrate_kiro_hooks(
         scripts_copied=scripts_copied,
         files_adopted=files_adopted + scripts_adopted,
         display_payloads=display_payloads,
+        rendered_writes=rendered_writes,
     )

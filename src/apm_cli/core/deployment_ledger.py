@@ -250,6 +250,37 @@ class DeploymentMaterializationSession:
             )
         return None
 
+    def _write_locator(
+        self, path: Path, targets: Sequence[TargetProfile]
+    ) -> DeploymentLocator | None:
+        """Locate a final-rendered write of any file primitive inside a target's roots."""
+        locator = self._locator(path, targets)
+        if locator is not None:
+            return locator
+        for target in targets:
+            roots = [target.deploy_path(self.root)]
+            if target.resolved_deploy_root is None:
+                roots.extend(
+                    self.root / mapping.deploy_root
+                    for mapping in target.primitives.values()
+                    if mapping.deploy_root
+                )
+            for root in roots:
+                try:
+                    ensure_path_within(path, root)
+                except PathTraversalError:
+                    continue
+                return DeploymentLedgerCodec.locator_for_path(
+                    path, project_root=self.root, target=target, scope=self.scope
+                )
+        return None
+
+    @staticmethod
+    def receipt_owner(package_info: Any) -> str:
+        """Return the ownership key receipts record for one deployed package."""
+        dependency_ref = getattr(package_info, "dependency_ref", None)
+        return dependency_ref.get_unique_key() if dependency_ref is not None else "."
+
     def has_receipt(self, path: Path) -> bool:
         """Return whether any receipt, trusted or not, exists for this physical path."""
         return path.resolve().as_posix() in self._physical_keys
@@ -328,9 +359,9 @@ class DeploymentMaterializationSession:
             return
         prepared: list[tuple[DeploymentRecord, str, str]] = []
         for path, content_hash in written.items():
-            locator = self._locator(path, targets)
-            if locator is None or not _is_canonical_bundle_hash(content_hash):
-                raise ValueError(f"Cannot record unverified skill materialization: {path}")
+            locator = self._write_locator(path, targets)
+            if locator is None or path.is_symlink() or not _is_canonical_bundle_hash(content_hash):
+                raise ValueError(f"Cannot record unverified materialization: {path}")
             prepared.append(
                 (
                     DeploymentRecord(locator, (owner,), owner, content_hash),
@@ -456,6 +487,28 @@ class DeploymentMaterializationSession:
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
         cls(project_root, scope, None).retire(deleted)
+
+
+def record_rendered_writes(
+    skill_integrator: Any, int_result: Any, *, target: TargetProfile, package_info: Any
+) -> None:
+    """Record one integrator call's final-rendered writes as local receipts (#3701).
+
+    The skill integrator holds the installation-bound session for the whole
+    integrate phase; outside it (drift replay, dry runs) nothing is recorded.
+    Adopted and skipped files are never in ``rendered_writes``.
+    """
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    session = getattr(skill_integrator, "materialization_session", None)
+    written = getattr(int_result, "rendered_writes", None)
+    if not isinstance(session, DeploymentMaterializationSession) or not isinstance(written, list):
+        return
+    session.record(
+        {path: compute_file_hash(path) for path in written},
+        [target],
+        DeploymentMaterializationSession.receipt_owner(package_info),
+    )
 
 
 def _is_canonical_bundle_hash(content_hash: str | None) -> bool:

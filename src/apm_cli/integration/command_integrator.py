@@ -518,6 +518,7 @@ class CommandIntegrator(BaseIntegrator):
         files_skipped = 0
         files_adopted = 0
         target_paths: list[Path] = []
+        rendered_writes: list[Path] = []
         total_links_resolved = 0
         any_dropped_keys = False
 
@@ -648,6 +649,7 @@ class CommandIntegrator(BaseIntegrator):
             files_integrated += 1
             total_links_resolved += links_resolved
             target_paths.append(target_path)
+            rendered_writes.append(target_path)
 
         # One-shot install-time notice for cursor-style targets that
         # actually dropped at least one frontmatter key in this batch.
@@ -680,6 +682,7 @@ class CommandIntegrator(BaseIntegrator):
             target_paths=target_paths,
             links_resolved=total_links_resolved,
             files_adopted=files_adopted,
+            rendered_writes=rendered_writes,
         )
 
     def sync_for_target(

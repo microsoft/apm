@@ -112,6 +112,10 @@ class IntegrationResult:
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
 
+    # Final-rendered files this call actually wrote (never adopted or skipped
+    # ones). The install service records them as local deployment receipts.
+    rendered_writes: list[Path] = field(default_factory=list)
+
     # Hook transparency: per-file display metadata populated by HookIntegrator.
     # Each entry is a dict with keys: target_label, output_path, source_hook_file,
     # actions (list of {event, summary}), rendered_json.

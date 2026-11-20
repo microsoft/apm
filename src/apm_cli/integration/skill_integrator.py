@@ -437,6 +437,11 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
+    @property
+    def materialization_session(self) -> "DeploymentMaterializationSession | None":
+        """Return the live installation-bound receipt session, if one is bound."""
+        return self._materialization_session
+
     def _skill_member_skipped(self, _path: Path) -> None:
         self._skill_can_complete = False
 
@@ -1576,7 +1581,10 @@ class SkillIntegrator(BaseIntegrator):
         lockfile_root = (
             get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root
         )
-        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+        from apm_cli.core.deployment_ledger import (
+            DeploymentLedgerCodec,
+            DeploymentMaterializationSession,
+        )
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
         self._skill_files = []
@@ -1585,11 +1593,7 @@ class SkillIntegrator(BaseIntegrator):
         self._skill_can_complete = True
         self._skill_completed_roots = {}
         self._skill_completed_files = {}
-        self._skill_current_owner = (
-            package_info.dependency_ref.get_unique_key()
-            if package_info.dependency_ref is not None
-            else "."
-        )
+        self._skill_current_owner = DeploymentMaterializationSession.receipt_owner(package_info)
         self._skill_current_commit = installing_commit(package_info)
         snapshots = self._hash_snapshots if self._hash_snapshots is not None else {}
         if lockfile_root not in snapshots:
@@ -1856,9 +1860,11 @@ class SkillIntegrator(BaseIntegrator):
 
             skill_base = project_root / target.skills_rel_root / skill_name
             rel_prefix = f"{target.skills_rel_root}/{skill_name}"
-            deployed.extend(self._deploy_bin_files(bin_dir, skill_base, rel_prefix, force, logger))
+            deployed.extend(
+                self._deploy_bin_files(bin_dir, skill_base, rel_prefix, force, logger, target)
+            )
             manifest = self._deploy_plugin_manifest(
-                package_info.install_path, skill_base, rel_prefix, force, logger
+                package_info.install_path, skill_base, rel_prefix, force, logger, target
             )
             if manifest is not None:
                 deployed.append(manifest)
@@ -1882,6 +1888,7 @@ class SkillIntegrator(BaseIntegrator):
         rel_prefix: str,
         force: bool,
         logger,
+        target: TargetProfile,
     ) -> list[Path]:
         """Copy bin/ executables into ``skill_base/bin`` (chmod +x on POSIX)."""
         from apm_cli.utils.path_security import ensure_path_within
@@ -1896,14 +1903,15 @@ class SkillIntegrator(BaseIntegrator):
                 continue
             dest_file = dest_bin / src_file.name
             ensure_path_within(dest_file, dest_bin)
-            self._copy_plugin_file(
+            if self._copy_plugin_file(
                 src_file,
                 dest_file,
                 force=force,
                 make_executable=True,
                 logger=logger,
                 rel_label=f"{rel_prefix}/bin/{src_file.name}",
-            )
+            ):
+                self._record_plugin_write(dest_file, target)
             deployed.append(dest_file)
         return deployed
 
@@ -1914,6 +1922,7 @@ class SkillIntegrator(BaseIntegrator):
         rel_prefix: str,
         force: bool,
         logger,
+        target: TargetProfile,
     ) -> Path | None:
         """Copy ``.claude-plugin/plugin.json`` next to the deployed bin/."""
         plugin_manifest = package_path / ".claude-plugin" / "plugin.json"
@@ -1921,15 +1930,26 @@ class SkillIntegrator(BaseIntegrator):
             return None
         dest_manifest = skill_base / ".claude-plugin" / "plugin.json"
         dest_manifest.parent.mkdir(parents=True, exist_ok=True)
-        self._copy_plugin_file(
+        if self._copy_plugin_file(
             plugin_manifest,
             dest_manifest,
             force=force,
             make_executable=False,
             logger=logger,
             rel_label=f"{rel_prefix}/.claude-plugin/plugin.json",
-        )
+        ):
+            self._record_plugin_write(dest_manifest, target)
         return dest_manifest
+
+    def _record_plugin_write(self, path: Path, target: TargetProfile) -> None:
+        """Record one copied plugin file as a local deployment receipt."""
+        session = self._materialization_session
+        owner = self._skill_current_owner
+        if session is None or owner is None:
+            return
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        session.record({path: compute_file_hash(path)}, [target], owner)
 
     @staticmethod
     def _copy_plugin_file(
@@ -1940,7 +1960,7 @@ class SkillIntegrator(BaseIntegrator):
         make_executable: bool,
         logger,
         rel_label: str,
-    ) -> None:
+    ) -> bool:
         """Hash-gated copy of one plugin file, optionally marking it executable.
 
         Skips the copy when an identical file already exists (unless *force*),
@@ -1971,6 +1991,7 @@ class SkillIntegrator(BaseIntegrator):
 
         if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")
+        return not skip_copy
 
     def sync_integration(
         self,

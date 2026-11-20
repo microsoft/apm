@@ -238,6 +238,7 @@ class AgentIntegrator(BaseIntegrator):
         files_skipped = 0
         files_adopted = 0
         target_paths: list[Path] = []
+        rendered_writes: list[Path] = []
         total_links_resolved = 0
 
         for source_file in agent_files:
@@ -316,6 +317,7 @@ class AgentIntegrator(BaseIntegrator):
                 self._warn_opencode_frontmatter(source_file, diagnostics, package_info.package.name)
             total_links_resolved += links_resolved
             files_integrated += 1
+            rendered_writes.append(target_path)
 
         return IntegrationResult(
             files_integrated=files_integrated,
@@ -324,6 +326,7 @@ class AgentIntegrator(BaseIntegrator):
             target_paths=target_paths,
             links_resolved=total_links_resolved,
             files_adopted=files_adopted,
+            rendered_writes=rendered_writes,
         )
 
     def sync_for_target(

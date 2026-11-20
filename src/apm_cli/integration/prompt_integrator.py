@@ -318,6 +318,7 @@ class PromptIntegrator(BaseIntegrator):
         files_skipped = 0
         files_adopted = 0
         target_paths = []
+        rendered_writes: list[Path] = []
         total_links_resolved = 0
 
         for source_file in prompt_files:
@@ -410,6 +411,7 @@ class PromptIntegrator(BaseIntegrator):
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
+            rendered_writes.append(target_path)
 
         return IntegrationResult(
             files_integrated=files_integrated,
@@ -418,6 +420,7 @@ class PromptIntegrator(BaseIntegrator):
             target_paths=target_paths,
             links_resolved=total_links_resolved,
             files_adopted=files_adopted,
+            rendered_writes=rendered_writes,
         )
 
     # DEPRECATED: use sync_for_target(...) instead.

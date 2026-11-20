@@ -239,8 +239,10 @@ class CanvasIntegrator(BaseIntegrator):
         files_skipped = 0
         files_adopted = 0
         target_paths: list[Path] = []
+        rendered_writes: list[Path] = []
 
         for bundle in bundles:
+            start = len(target_paths)
             outcome = self._deploy_bundle(
                 bundle,
                 extensions_dir,
@@ -258,6 +260,9 @@ class CanvasIntegrator(BaseIntegrator):
                 files_adopted += 1
             elif outcome == "skipped":
                 files_skipped += 1
+            if outcome != "adopted":
+                # Every path a non-adopted bundle appended was copied.
+                rendered_writes.extend(target_paths[start:])
 
         return IntegrationResult(
             files_integrated=files_integrated,
@@ -266,6 +271,7 @@ class CanvasIntegrator(BaseIntegrator):
             target_paths=target_paths,
             links_resolved=0,
             files_adopted=files_adopted,
+            rendered_writes=rendered_writes,
         )
 
     def sync_for_target(
