@@ -50,5 +50,17 @@ approves the row (B10) before it is published to the release gate.
    apm-lifecycle-tests skill (see SKILL.md P5). The finding stays open
    until that test exists and fails on the unfixed code.
 
-Never file issues, comment on PRs or push. Routing is a message to the
-human or coordinator who asked for the pass.
+Filing:
+
+- Non-security findings are filed per the release's bug pipeline, and
+  only after P4 confirms them. Use the release milestone and the labels
+  that pipeline names. Write a neutral title and body, and attach the
+  failing-before brief. Search open issues first: if one already covers
+  the finding, comment on it instead of filing a duplicate.
+- A confirmed blocker is filed and the release coordinator is told at
+  once; it does not wait for a batch cut-off.
+- Security findings are routed privately and never filed publicly.
+- The pass never comments on or pushes to pull requests, and never
+  fixes code or tags. The gate row and each finding's verification
+  status go to the human or coordinator who asked for the pass, who
+  gives the gate verdict.
