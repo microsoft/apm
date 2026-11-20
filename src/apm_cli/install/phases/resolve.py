@@ -122,6 +122,20 @@ def _with_preserved_install_hint(message: str, install_path: Path | None) -> str
     )
 
 
+def _reports_repository_not_found(error: BaseException) -> bool:
+    """Whether *error* (or a cause) is the canonical repository-not-found failure."""
+    from apm_cli.core.auth_outcome import RepositoryNotFoundError
+
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, RepositoryNotFoundError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def _prepare_callback_materialization_path(
     dependency: Any,
     modules_dir: Path,
@@ -742,16 +756,15 @@ def _resolve_dependencies(
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
             fail_msg = _with_preserved_install_hint(fail_msg, install_path)
+            if is_direct and _reports_repository_not_found(e):
+                fail_msg += (
+                    f" Run 'apm uninstall {dep_ref.get_identity()}' to remove it from apm.yml."
+                )
 
-            # Verbose: inline detail via logger (single output path).
-            # Deferred diagnostics below cover the non-logger case.
-            # F7 (#1116): single critical section for both the logger
-            # emission and the result-recording so concurrent failures
-            # don't interleave their lines.
+            # The deferred diagnostics summary prints the failure once, in
+            # every mode (#4199). F7 (#1116): one critical section so
+            # concurrent failures don't interleave their records.
             with callback_lock:
-                if logger:
-                    logger.verbose_detail(f"  {fail_msg}")
-                # Collect for deferred diagnostics summary (always, even non-verbose)
                 callback_failures.add(dep_key)
                 transitive_failures.append((dep_display, fail_msg))
             _tui = getattr(ctx, "tui", None)

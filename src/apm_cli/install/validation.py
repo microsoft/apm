@@ -452,6 +452,11 @@ def _validate_ado_git_package(
     )
     attempts: list[tuple[object, str, dict[str, str]]] = []
     org = dependency_repository_owner(dep_ref)
+    if verbose_log and dep_ctx is not None:
+        verbose_log(
+            f"Auth resolved: host={dep_ctx.host_info.display_name}, org={org}, "
+            f"source={dep_ctx.source}, type={dep_ctx.token_type}"
+        )
     for attempt in transport_plan.attempts:
         if attempt.requested_url is not None:
             probe_url = attempt.requested_url
@@ -862,6 +867,29 @@ def _validate_parse_failure_fallback(
             except Exception:
                 pass
         return False
+
+
+def inaccessible_package_reason(dep_ref, package: str, auth_resolver, verbose: bool) -> str:
+    """Explain a package the host did not serve: host, credential tried, next step.
+
+    Names credential sources, never their values. Outside verbose mode the
+    reason ends with the one command that shows each probe and credential.
+    """
+    host = dep_ref.host or default_host()
+    tried = (
+        auth_resolver.describe_credential_tried(
+            host,
+            dependency_repository_owner(dep_ref),
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
+        if auth_resolver is not None
+        else "no credential sent"
+    )
+    reason = f"not accessible or doesn't exist (host: {host}, {tried})"
+    if verbose:
+        return reason
+    return f"{reason}. Run 'apm install --verbose {package}' to see each probe and credential."
 
 
 def _uses_clone_root_probe(dep_ref) -> bool:
