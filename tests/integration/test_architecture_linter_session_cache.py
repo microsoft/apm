@@ -109,16 +109,16 @@ def test_session_cache_findings_match_uncached_runs_full_matrix() -> None:
 
 def test_session_parses_each_file_content_at_most_once_over_full_matrix() -> None:
     """Guard 2: one session builds each (path, content) once and walks once."""
+    runs = [(case, {case.path: _mutate(case)}) for case in _REPLAYED_CASES]
+    runs += [(case, None) for case in _REPLAYED_CASES]
     with linter_session() as session:
-        for case in _REPLAYED_CASES:
-            run_selected_rules(ROOT, (case.rule_id,), source_overrides={case.path: _mutate(case)})
-        for case in _REPLAYED_CASES:
-            run_selected_rules(ROOT, (case.rule_id,))
+        for case, overrides in runs:
+            run_selected_rules(ROOT, (case.rule_id,), source_overrides=overrides)
+            reparsed = sorted(key[0] for key, count in session.fact_builds.items() if count > 1)
+            assert not reparsed, f"{case.guard_id}: session re-parsed {reparsed[:10]}"
 
     assert session.fact_builds, "the session built no facts"
-    assert session.max_builds_per_content == 1, sorted(
-        key[0] for key, count in session.fact_builds.items() if count > 1
-    )[:10]
+    assert session.max_builds_per_content == 1
     assert session.fact_hits > 0
     assert session.inventory_builds == 1
     assert session.inventory_hits == 2 * len(_REPLAYED_CASES) - 1
