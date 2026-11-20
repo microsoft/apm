@@ -168,18 +168,14 @@ def _executables_need_reconcile(
 
     def _policy() -> Any:
         from apm_cli.install.exec_gate import ExecPolicyUnavailable
-        from apm_cli.policy.discovery import discover_policy_with_chain
-        from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+        from apm_cli.policy.outcome_routing import classify_project_policy
 
-        try:
-            fetch = discover_policy_with_chain(get_deploy_root(scope))
-        except Exception as exc:
-            raise ExecPolicyUnavailable(str(exc)) from exc
-        # Unknown policy fails toward running the install gate, which then
-        # applies the configured fetch-failure posture.
-        if getattr(fetch, "outcome", "") in POLICY_RESOLUTION_FAILURE_OUTCOMES:
-            raise ExecPolicyUnavailable(fetch.outcome)
-        return getattr(fetch, "policy", None)
+        route = classify_project_policy(get_deploy_root(scope))
+        # A blocking or unresolved outcome fails toward running the install
+        # gate, which routes the same outcome and reports it.
+        if route.blocks or route.unresolved:
+            raise ExecPolicyUnavailable(route.outcome)
+        return route.policy
 
     return lock_exec_decisions_stale(
         lockfile,

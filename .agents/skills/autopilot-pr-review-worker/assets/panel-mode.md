@@ -18,8 +18,22 @@ Even `full` is surface-gated.
 ## Core (always, unless docs-only)
 
 - `python-architect` -- skip only on docs/changelog-only
-- `test-coverage-expert` -- skip only on docs-only (`src/` untouched)
+- `test-coverage-expert` -- when `src/` is touched OR the diff has a
+  test cut (below). Skip when neither holds.
 - `apm-ceo` -- always
+
+## Test cut
+
+A diff has a test cut when, for any path under `tests/`:
+
+- `git diff --name-status` shows `D`, or `R` with the old path there
+  (a test file deleted, moved, or renamed); or
+- `git diff -U0` removes a `def test_` line (any indent; a merge that
+  folds tests into a kept file shows as `M`); or
+- it removes more `assert` / `pytest.raises` lines than it adds; or
+- it adds a `--no-policy` literal.
+
+Pure additions are not a cut.
 
 ## Surface-gated (spawn only on path match)
 
@@ -59,7 +73,7 @@ They are not a hard "at most one" quota.
 ## Lean cap
 
 1. the single highest-signal surface owner
-2. test-coverage if `src/` touched
+2. test-coverage if `src/` touched or a test cut
 3. CEO
 
 Architect is optional in `lean` when the diff is under 3 production

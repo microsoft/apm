@@ -107,6 +107,12 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
     check_package_target_authorization,
 )
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
+from scripts.architecture_linter.checks.install_policy_outcome_routing import (
+    GUARD_POLICY_FIELD_TYPES,
+    GUARD_POLICY_OUTCOME_ROUTING,
+    check_policy_field_types,
+    check_policy_outcome_routing,
+)
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
 )
@@ -185,6 +191,16 @@ RULES: tuple[Rule, ...] = (
         _GUARD_PACKAGE_CONTENT_HASH,
         "Package content hashing, its lockfile stream and promotion stay owned by utils/content_hash.py.",
         check_package_content_hash,
+    ),
+    _rule(
+        GUARD_POLICY_OUTCOME_ROUTING,
+        "Every policy-discovery outcome routes through one closed-world owner.",
+        check_policy_outcome_routing,
+    ),
+    _rule(
+        GUARD_POLICY_FIELD_TYPES,
+        "A wrongly typed policy field is a malformed policy, never a parser crash.",
+        check_policy_field_types,
     ),
     _rule(
         GUARD_TRUST_POLICY_OUTCOME,

@@ -133,7 +133,7 @@ class TestValidatePolicy(unittest.TestCase):
             errors,
             [
                 "cache must be a YAML mapping",
-                "dependencies.allow must be a YAML list of package patterns",
+                "dependencies.allow must be a YAML list of package patterns (got str)",
             ],
         )
 
@@ -151,7 +151,7 @@ class TestValidatePolicy(unittest.TestCase):
             [
                 "mcp must be a YAML mapping",
                 "manifest must be a YAML mapping",
-                "dependencies.allow must be a YAML list of package patterns",
+                "dependencies.allow must be a YAML list of package patterns (got list)",
             ],
         )
 

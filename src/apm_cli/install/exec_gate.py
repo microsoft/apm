@@ -14,9 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.remediation import (
     BIN_EXECUTABLES_NOT_RETRUSTED,
-    BIN_EXECUTABLES_UNAPPROVED,
     BIN_EXECUTABLES_UNTRUSTED,
-    HOOKS_UNAPPROVED,
 )
 
 if TYPE_CHECKING:
@@ -539,12 +537,42 @@ def bin_deploy_denial(package_info: Any, policy: Any) -> str | None:
     return "bin_deploy.deny" if package_key in denied else None
 
 
+def executable_skip_reason(
+    ctx: InstallContext | None, package_name: str, label: str, exec_type: str, kind: str
+) -> str:
+    """Return why *kind* of *package_name* was skipped, with the next step.
+
+    The gate records hard-denied types in ``ctx.package_denied_exec_types``;
+    a denied type points to ``apm policy explain`` because approving cannot
+    lift a deny. Any other skip is approvable.
+    """
+    denied = getattr(ctx, "package_denied_exec_types", None) or {}
+    if exec_type in denied.get(package_name, frozenset()):
+        return (
+            f"{kind} skipped (denied). Run 'apm policy explain {label}' to see which deny applies."
+        )
+    from apm_cli.core import remediation
+    from apm_cli.security.executables import EXEC_TYPE_BIN, EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS
+
+    # Only these kinds are skipped as unapproved here; another kind is a caller bug.
+    approve = {
+        EXEC_TYPE_BIN: remediation.BIN_EXECUTABLES_UNAPPROVED,
+        EXEC_TYPE_CANVAS: remediation.CANVAS_SKIPPED_UNAPPROVED,
+        EXEC_TYPE_HOOKS: remediation.HOOKS_UNAPPROVED,
+    }[exec_type]
+    return (
+        f"{kind} skipped (not approved in executables.allow). "
+        f"{approve.bind(package=label).sentence()}"
+    )
+
+
 def log_bin_status(
     skill_result: Any,
     suffix: str,
     package_name: str,
     package_info: Any,
     log_fn,
+    ctx: InstallContext | None = None,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
     from apm_cli.utils.diagnostics import printable_ascii_text
@@ -565,10 +593,12 @@ def log_bin_status(
             "  |-- plugin ships executables; no active Claude Code skills target to receive them"
         )
     elif skill_result.bin_skipped_reason == "not_approved":
-        log_fn(
-            "  |-- bin/ executables skipped (not approved in executables.allow). "
-            f"{BIN_EXECUTABLES_UNAPPROVED.bind(package=package_label).sentence()}"
+        from apm_cli.security.executables import EXEC_TYPE_BIN
+
+        reason = executable_skip_reason(
+            ctx, package_name, package_label, EXEC_TYPE_BIN, "bin/ executables"
         )
+        log_fn(f"  |-- {reason}")
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
             "  |-- bin/ executables skipped (not trusted). "
@@ -602,18 +632,8 @@ def log_hooks_skip(
     from apm_cli.security.executables import EXEC_TYPE_HOOKS
 
     label = package_name or getattr(package_info, "name", "unknown")
-    denied = getattr(ctx, "package_denied_exec_types", None) or {}
-    if EXEC_TYPE_HOOKS in denied.get(package_name, frozenset()):
-        message = (
-            f"{label}: hooks skipped (denied). "
-            f"Run 'apm policy explain {label}' to see which deny applies."
-        )
-    else:
-        message = (
-            f"{label}: hooks skipped (not approved in executables.allow). "
-            f"{HOOKS_UNAPPROVED.bind(package=label).sentence()}"
-        )
-    logger.warning(message, symbol="warning")
+    reason = executable_skip_reason(ctx, package_name, label, EXEC_TYPE_HOOKS, "hooks")
+    logger.warning(f"{label}: {reason}", symbol="warning")
 
 
 class ReplayExecAllowMap:
