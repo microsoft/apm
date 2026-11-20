@@ -326,3 +326,12 @@ def test_noop_write_from_a_fresh_lock_keeps_the_recorded_stamp(tmp_path, stampin
     LockFile(mcp_servers=["same"]).write(path)
     assert path.read_bytes() == before
     assert stamping(path) == "0.1.0"
+
+
+def test_noop_write_records_an_explicit_stamp(tmp_path, stamping):
+    """A caller that stamps a semantically unchanged lock (the MCP translation) is written."""
+    path = _older_lock(tmp_path, LockFile(apm_version="0.35.0", mcp_servers=["same"]))
+    lock = LockFile.read(path)
+    lock.apm_version = "0.40.0"
+    lock.write(path, existing_lockfile=LockFile.read(path))
+    assert stamping(path) == "0.40.0"
