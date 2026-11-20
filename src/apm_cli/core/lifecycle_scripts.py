@@ -557,6 +557,10 @@ class LifecycleScriptRunner:
         matching = [s for s in self._scripts if s.event == event_name]
         if not matching:
             return []
+        # Scripts run outside APM, so they must observe the committed lockfile.
+        from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes
+
+        flush_lockfile_writes()
 
         # command scripts run synchronously (in declared order); http
         # scripts dispatch through a bounded worker pool so a file with

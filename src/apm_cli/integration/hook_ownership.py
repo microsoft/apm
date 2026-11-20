@@ -7,6 +7,7 @@ from collections import Counter, deque
 from pathlib import Path
 from typing import Any, NoReturn
 
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -345,11 +346,11 @@ def lockfile_dependency_identities(
         from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, LockFile, get_lockfile_path
 
         lockfile_path = get_lockfile_path(project_root)
-        if not lockfile_path.exists():
+        if not lockfile_exists(lockfile_path):
             legacy_path = project_root / LEGACY_LOCKFILE_NAME
             if legacy_path.exists():
                 lockfile_path = legacy_path
-        if not lockfile_path.exists():
+        if not lockfile_exists(lockfile_path):
             return [], False
         lockfile = LockFile.read(lockfile_path)
         if lockfile is None:

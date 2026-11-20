@@ -178,7 +178,7 @@ deployments:
 |---|---|---|---|
 | `lockfile_version` | string | yes | `"4"` once a new or promoted lockfile records any `content_hash`; otherwise `"1"` for plain Git projects, `"2"` for registry/Git semver evidence, and candidate `"3"` when a root replacement table is present. |
 | _(Deprecated)_ `generated_at` | ISO 8601 string | no | Legacy write timestamp. New lockfiles omit it; when an existing lockfile carries it, APM refreshes it on substantive writes. Ignored by equivalence checks. |
-| `apm_version` | string | no | APM CLI version that last changed the file; every command that rewrites it records itself. An older APM refuses to install, update, uninstall, prune, lock, audit or pack against it, and read-only commands warn; see [Lockfile written by a newer APM](../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm). Missing or `unknown` values are accepted; a duplicate or invalid value is refused. Otherwise it is diagnostic except for a narrow compatibility path: exact APM 0.28 metadata, a locked `marketplace_plugin` type, and a matching content hash together authorize the receipt-less cached-plugin upgrade. It never overrides canonical `apm.yml` precedence or applies to freshly fetched dependencies. A lockfile written before 0.37 that records `copilot` or `vscode` MCP entries keeps its `apm_version` until an install moves those entries to `.mcp.json`. |
+| `apm_version` | string | no | APM CLI version that last changed the file; every command that rewrites it records itself. An older APM refuses to install, update, uninstall, prune, lock, compile, audit or pack against it, and read-only commands warn; see [Lockfile written by a newer APM](../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm). Missing or `unknown` values are accepted; a duplicate or invalid value is refused. Otherwise it is diagnostic except for a narrow compatibility path: exact APM 0.28 metadata, a locked `marketplace_plugin` type, and a matching content hash together authorize the receipt-less cached-plugin upgrade. It never overrides canonical `apm.yml` precedence or applies to freshly fetched dependencies. A lockfile written before 0.37 that records `copilot` or `vscode` MCP entries keeps its `apm_version` until an install moves those entries to `.mcp.json`. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. A Claude plugin's `${CLAUDE_PLUGIN_ROOT}` is recorded unexpanded; a value an older release recorded expanded at an `apm_modules` path still matches. |
@@ -464,11 +464,17 @@ shipped.
 |---|---|---|
 | `apm install` | existing lockfile (for `--frozen` and incremental reuse) | full rewrite on resolution change |
 | `apm install --frozen` | required | rejects missing pins, incompatible immutable requirements, or MCP config/server-name drift |
-| `apm compile` | yes (resolution + integrity) | no |
+| `apm compile` | yes (resolution + integrity) | only when a `targets:` contraction removes deployed files |
 | `apm audit` | yes | no |
 | `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |
 | `apm deps why`, `apm view --file` | yes | no |
 | `apm unpack` | bundle's pack-enriched lockfile | merges into project lockfile |
+
+Only `apm install` (including `--mcp` and local bundles), `apm lock`, `apm update`
+(and `apm deps update`), `apm uninstall`, `apm prune` and `apm compile` write the
+lockfile. Each writes it at most once, when the command finishes; it is written
+earlier only before lifecycle scripts or native Claude plugin registration need
+to observe it.
 
 `apm install` only rewrites the file when its semantic content changes
 (`generated_at` and `apm_version` are ignored when comparing). A no-op install

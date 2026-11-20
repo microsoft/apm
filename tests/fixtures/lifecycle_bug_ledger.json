@@ -529,6 +529,18 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4086,
+      "fixed_in": "0.37.0",
+      "summary": "The lockfile had no write authority: one install persisted it once per phase, and apm compile could remove deployed files before refusing a lockfile it may not rewrite.",
+      "failure_modes": ["idempotency", "transaction"],
+      "properties": ["idempotency.byte_stable", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_install_commits_the_lockfile_once",
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_compile_commits_the_lockfile_through_the_authority",
+        "tests/integration/test_lockfile_writer_mapping.py::test_each_lock_writing_command_maps_to_its_registered_writer"
+      ]
     }
   ],
   "lifecycle_contracts": [

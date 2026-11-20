@@ -1362,6 +1362,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="An Agent Plugin consumer reimplements the reproducible timestamp fallback.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lockfile-write-authority",
+        rule_id="contracts-tooling-lockfile-write-authority",
+        path="src/apm_cli/commands/compile/cli.py",
+        old="@lockfile_writer(LockfileWriter.COMPILE)\n",
+        new="",
+        intent="apm compile persists the lockfile without opening its writer scope.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-native-lifecycle-evidence",
         rule_id="contracts-tooling-native-lifecycle-evidence",
         path="scripts/check_lifecycle_evidence.py",

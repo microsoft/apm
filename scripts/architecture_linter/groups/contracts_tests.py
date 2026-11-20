@@ -19,6 +19,9 @@ from scripts.architecture_linter.checks.contracts_lifecycle_script_gate import (
 from scripts.architecture_linter.checks.contracts_lockfile_generator import (
     RULES as LOCKFILE_GENERATOR_RULES,
 )
+from scripts.architecture_linter.checks.contracts_lockfile_write_authority import (
+    RULES as LOCKFILE_WRITE_AUTHORITY_RULES,
+)
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
 
@@ -28,6 +31,7 @@ RULES = (
     *GOVERNANCE_RULES,
     *REPLACEMENT_RULES,
     *LOCKFILE_GENERATOR_RULES,
+    *LOCKFILE_WRITE_AUTHORITY_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
 )
 

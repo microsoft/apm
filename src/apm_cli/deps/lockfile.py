@@ -191,19 +191,20 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
     return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
 
 
-def _same_document_on_disk(path: Path, serialized: str) -> bool:
-    """Whether *path* already holds exactly the data *serialized* would write.
+def _same_document(current: str | None, serialized: str) -> bool:
+    """Whether the *current* lockfile text holds exactly the data *serialized* would write.
 
     Only formatting may differ; a legacy layout the writer would migrate is a
     different document and is rewritten.
     """
     from ..utils.yaml_io import load_yaml_str
 
-    try:
-        on_disk = load_yaml_str(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError, ValueError):
+    if current is None:
         return False
-    return on_disk == load_yaml_str(serialized)
+    try:
+        return load_yaml_str(current) == load_yaml_str(serialized)
+    except (UnicodeError, yaml.YAMLError, ValueError):
+        return False
 
 
 def recorded_generator(data: Mapping[str, Any]) -> object:
@@ -1740,6 +1741,8 @@ class LockFile:
         req-lk-006) the serialised content is recorded for the caller and
         the file on disk is left byte-for-byte untouched.  Returns whether
         the file was persisted, so callers never report a withheld write.
+        Inside a writer scope (:mod:`.lockfile_write_authority`) the document
+        is staged and the authority persists it once, when the command ends.
 
         New lockfiles omit ``generated_at``.  When the on-disk lockfile already
         carries the field, keep it stable for semantic no-ops and refresh it for
@@ -1763,11 +1766,13 @@ class LockFile:
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
+        from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
 
         existing: LockFile | None
         legacy_timestamp_present = False
-        if isinstance(existing_lockfile, _ExistingLockfileUnset) and path.exists():
-            existing_text = path.read_text(encoding="utf-8")
+        # The current document is what this command already staged, else disk.
+        existing_text = staged_lockfile_text(path)
+        if isinstance(existing_lockfile, _ExistingLockfileUnset) and existing_text is not None:
             try:
                 existing_data = load_yaml_str(existing_text)
             except (yaml.YAMLError, ValueError):
@@ -1810,15 +1815,23 @@ class LockFile:
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
-        if unchanged and _same_document_on_disk(path, serialized):
+        if unchanged and _same_document(existing_text, serialized):
             # A proven no-op keeps the file's own bytes (comments, key style).
             return True
-        atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
+        # Inside a writer scope the authority persists once, when it commits.
+        if not stage_lockfile(path, serialized):
+            atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
         return True
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None when the file does not exist."""
+        from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
+
+        staged = has_staged_lockfile(path)
+        if staged is not None:
+            # A writer scope already staged (or removed) this command's lockfile.
+            return cls.from_yaml(staged_lockfile_text(path)) if staged else None
         if not path.exists() and not path.is_symlink():
             return None
         try:

@@ -14,6 +14,12 @@ from ..core.scope import InstallScope
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+from ..deps.lockfile_write_authority import (
+    LockfileWriter,
+    flush_lockfile_writes,
+    lockfile_writer,
+    remove_lockfile,
+)
 from ..install.locking import serialized_lifecycle_unless
 from ..install.orphans import (
     InstalledPaths,
@@ -74,6 +80,7 @@ def _preflight_prune_survivors(
 )
 @click.pass_context
 @serialized_lifecycle_unless("dry_run")
+@lockfile_writer(LockfileWriter.PRUNE)
 def prune(ctx, dry_run):
     """Remove orphaned packages and repair stale deployment ownership.
 
@@ -357,8 +364,9 @@ def prune(ctx, dry_run):
             try:
                 if lockfile_has_persisted_state(lockfile):
                     lockfile.write(lockfile_path)
+                    flush_lockfile_writes()
                 else:
-                    lockfile_path.unlink(missing_ok=True)
+                    remove_lockfile(lockfile_path)
             except Exception as e:
                 logger.render_summary()
                 logger.error(f"Failed to update apm.lock.yaml: {e}")

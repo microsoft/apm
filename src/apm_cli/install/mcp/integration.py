@@ -9,6 +9,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
+
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -75,8 +77,8 @@ def prepare_mcp_integration(
         trust_context=getattr(allow_map, "trust_context", None),
     )
     current_view = None
-    if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
-        lockfile = LockFile.read(lock_path) if lock_path.exists() else None
+    if should_install or mcp_deps or apm_modules_path.exists() or lockfile_exists(lock_path):
+        lockfile = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
         # This run records new omission evidence, so none is verified here.
         current_view = CurrentMcpConfigView.select(
             apm_package,
@@ -393,7 +395,7 @@ def run_mcp_integration(  # noqa: PLR0913
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.policy.install_preflight import run_policy_preflight
 
-    previous_lock = LockFile.read(lock_path) if lock_path.exists() else None
+    previous_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
     native_hashes = DeploymentLedgerCodec.mcp_native_hashes(previous_lock) if previous_lock else {}
     old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
 
@@ -807,7 +809,7 @@ def run_mcp_integration(  # noqa: PLR0913
             fail_on_write_error=True,
         )
 
-    if prepared.omission_view is not None and lock_path.exists():
+    if prepared.omission_view is not None and lockfile_exists(lock_path):
         lockfile = LockFile.read(lock_path)
         omissions = prepared.omissions(lockfile) if lockfile is not None else None
         if lockfile is not None and omissions != lockfile.mcp_omissions:

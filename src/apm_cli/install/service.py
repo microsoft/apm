@@ -27,6 +27,7 @@ from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
@@ -192,6 +193,7 @@ class InstallService:
             raise frozen_services_error(reasons)
         return frozenset(deferred)
 
+    @lockfile_writer(LockfileWriter.INSTALL)
     def run(self, request: InstallRequest) -> InstallResult:
         """Execute the install pipeline and return the structured result.
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.claude_plugins.registrar import native_ownership, reconcile_claude_plugins
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes, remove_lockfile
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -54,11 +55,15 @@ def run(ctx: InstallContext) -> None:
     _refuse_retained_loose_claude_files(ctx)
     lock_path = get_lockfile_path(ctx.apm_dir)
     previous = ctx.existing_lockfile
+    previous_owned = None if previous is None else native_ownership(previous)
+    if ctx.claude_native_plugins or previous_owned:
+        # Claude's declarations never run ahead of the lock they follow.
+        flush_lockfile_writes()
     try:
         reconcile_claude_plugins(
             modules_dir=ctx.apm_modules_dir,
             scope=ctx.scope,
-            previous=None if previous is None else native_ownership(previous),
+            previous=previous_owned,
             lockfile=LockFile.read(lock_path),
             prepared=ctx.claude_native_plugins,
             deploy_root=ctx.project_root,
@@ -69,5 +74,5 @@ def run(ctx: InstallContext) -> None:
         if previous is not None:
             previous.write(lock_path)
         else:
-            lock_path.unlink(missing_ok=True)
+            remove_lockfile(lock_path)
         raise

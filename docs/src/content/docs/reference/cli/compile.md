@@ -48,6 +48,8 @@ cleaned up with the same hash and user-edit safeguards as `apm install` --
 this also includes merge-hook config/sidecar entries (see
 [Hooks and commands](../../../producer/write-primitives/#hooks-and-commands)
 for what those files are) even though compile does not itself *deploy* hooks.
+Because this step can rewrite `apm.lock.yaml`, a non-dry-run compile refuses a
+lockfile written by a newer APM before it changes any file.
 
 **When you actually need it:** compile is **optional for the
 `copilot` target** -- GitHub Copilot natively reads

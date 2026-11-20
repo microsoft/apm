@@ -67,6 +67,7 @@ from ..core.command_logger import InstallLogger
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
@@ -647,6 +648,7 @@ def update(
     )
 
 
+@lockfile_writer(LockfileWriter.UPDATE)
 def _run_dep_update(
     *,
     assume_yes: bool,

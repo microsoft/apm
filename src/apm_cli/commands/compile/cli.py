@@ -24,6 +24,7 @@ from ...core.target_catalog import (
     target_help_fragment,
 )
 from ...core.target_detection import TargetParamType, should_compile_agents_md
+from ...deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ...install.locking import serialized_lifecycle_unless
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
@@ -884,6 +885,7 @@ def _report_target_without_compile_output(
 
 
 @serialized_lifecycle_unless("dry_run")
+@lockfile_writer(LockfileWriter.COMPILE)
 def _run_compilation(
     logger: CommandLogger,
     target: str | list[str] | None,
@@ -910,7 +912,13 @@ def _run_compilation(
     Handles both distributed (default) and single-file (``--single-agents``)
     strategies, emits the canonical target-provenance line, runs the
     compiler, reports results, and hard-fails on critical security findings.
+    Compile reconciles apm.lock.yaml, so like every lockfile writer it refuses
+    a lockfile it may not rewrite before it changes anything.
     """
+    if not dry_run:
+        from ...deps.lockfile_generator import require_current_cli
+
+        require_current_cli(Path.cwd(), command="apm compile")
     _pre_compile_then_validate(logger, verbose, source_root, clean=clean, run=run_scripts)
     from ...core.target_detection import (
         REASON_NO_TARGET_FOLDER,

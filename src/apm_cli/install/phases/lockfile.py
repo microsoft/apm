@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -861,7 +862,7 @@ class LockfileBuilder:
         # This is intentionally a FRESH read (not ctx.existing_lockfile)
         # because the partial-install merge above may have modified the
         # in-memory representation.
-        existing_lockfile = _LF.read(lockfile_path) if lockfile_path.exists() else None
+        existing_lockfile = _LF.read(lockfile_path) if lockfile_exists(lockfile_path) else None
         if existing_lockfile and lockfile.is_semantically_equivalent(existing_lockfile):
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail("apm.lock.yaml unchanged -- skipping write")
@@ -1004,7 +1005,7 @@ class LockfileBuilder:
             from apm_cli.deps.lockfile import get_lockfile_path
 
             lockfile_path = get_lockfile_path(self.ctx.apm_dir)
-            if not lockfile_path.exists():
+            if not lockfile_exists(lockfile_path):
                 return
             lockfile = _LF.load_or_create(lockfile_path)
             self._sync_cache_pin_markers(lockfile)
