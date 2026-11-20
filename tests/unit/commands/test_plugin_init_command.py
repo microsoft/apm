@@ -348,6 +348,20 @@ class TestInitDeprecationWarnings:
                 os.chdir(self.original_dir)
 
 
+def test_claude_only_plugin_scaffold_advertises_only_working_formats(tmp_path, monkeypatch):
+    """Every pack command a Claude-only scaffold advertises succeeds (#3994)."""
+    project = tmp_path / "claude-plugin-demo"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["plugin", "init", "--yes", "--target", "claude"])
+    assert result.exit_code == 0, result.output
+    assert "apm pack --format agent-plugin" not in result.output
+    assert "apm pack --format claude-plugin" in result.output
+    packed = runner.invoke(cli, ["pack", "--format", "claude-plugin"])
+    assert packed.exit_code == 0, packed.output
+
+
 class TestInitConsumerNextSteps:
     """Consumer-mode ``apm init`` teaches the noun-verb namespace."""
 

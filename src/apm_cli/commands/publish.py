@@ -195,7 +195,7 @@ def _resolve_registry_name(name: str | None, registries: dict[str, str]) -> str:
     if not registries:
         raise click.ClickException(
             "No registries configured in apm.yml.\n"
-            "Add a 'registries:' block — see 'apm experimental enable registries'."
+            "Add a 'registries:' block -- see 'apm experimental enable registries'."
         )
     if name:
         if name not in registries:

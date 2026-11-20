@@ -527,7 +527,7 @@ def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
         _rich_success(f"{STATUS_SYMBOLS['success']} All {total} check(s) passed")
         return
     _rich_warning(
-        f"{total} check(s) passed; {warned} report violations under "
+        f"{total} check(s) passed; {warned} {'reports' if warned == 1 else 'report'} violations under "
         "'enforcement: warn' and fail once the policy switches to block."
     )
 

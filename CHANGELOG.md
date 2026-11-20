@@ -144,13 +144,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Policy output names a one-shot `APM_POLICY_DISABLE=1 apm <command>`, warn-mode `apm audit --ci` names the dependencies, and `apm policy explain` stops promising deployment. (closes #3994, #4004)
 - `apm uninstall` names the removal route for an MCP server and states that local bundles cannot be uninstalled yet; `apm install -g` warns only for selected targets. (closes #3994, #4004)
 - `apm audit` tells you to reinstall the bundle to restore an edited file a local bundle deployed. (closes #3994, #4004)
-- MCP installs print one success line per server with product names, and Windsurf project installs name `~/.codeium/windsurf/mcp_config.json`. (closes #3994, #4004)
+- MCP installs print one success line per server with product names and name the files they write outside each harness: root `.mcp.json` and Windsurf's `~/.codeium/windsurf/mcp_config.json`. (closes #3994, #4004)
 - `apm compile` names `.agents/skills/`, never leaves `GEMINI.md` importing a missing `AGENTS.md`, and skips the zero-output warning for empty or `.claude/rules/` projects. (closes #3994, #4004)
 - `apm deps list` no longer exits 1 in a project with its own `.apm/` content. (closes #3994, #4004)
 - `apm mcp show` offers `apm install --mcp <name>`; `apm run` passes `exec` once to Codex and no literal `<` to `llm`; `apm preview` keeps `--param`. (closes #3994, #4004)
 - Output reads cleanly: ASCII `...` truncation, folded long names, singular counts, one script success line, path-named prune previews, and `apm find` errors on stderr. (closes #3994, #4004)
 - Errors lead somewhere real: a failed first `marketplace add` says rerun it, Git failures stop citing unprinted stderr, and help examples print one command per line. (closes #3994, #4004)
-- `apm init` lists `apm config set target` in its target precedence comment, and `apm outdated` never clips package names. (closes #3994, #4004)
+- `apm init` lists `apm config set target` in its target precedence comment, `apm plugin init --target claude` advertises only formats that pack, and `apm outdated` never crops columns at 80 characters. (closes #3994, #4004)
 - `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
 
 ### Security

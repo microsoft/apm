@@ -523,6 +523,10 @@ def _perform_init(
                 "Pack as Agent Plugins v1:             apm pack --format agent-plugin",
                 "Pack as Claude plugin:                apm pack --format claude-plugin",
             ]
+            # A Claude-only scaffold has nothing for an Agent Plugin to carry;
+            # pack refuses that format, so do not advertise it (#3994).
+            if resolved_targets and set(resolved_targets) <= {"claude"}:
+                del next_steps[1]
         elif source == "init":
             install_step = "apm install <owner>/<repo>"
             # No targets written and none detectable: install would stop at

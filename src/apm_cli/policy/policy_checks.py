@@ -1243,7 +1243,7 @@ def _check_registry_source(
     for req_name in policy.require:
         if not registries_map or req_name not in registries_map:
             violations.append(
-                f"required registry '{req_name}' is not configured — "
+                f"required registry '{req_name}' is not configured -- "
                 "add it to the 'registries:' block or via 'apm config set registry."
                 f"{req_name}.url <url>'"
             )
