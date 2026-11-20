@@ -1399,11 +1399,18 @@ def _check_dependency_content_hashes(
             enabled=True,
         )
     except RuntimeError as exc:
+        from apm_cli.install.integrity import unhashed_dependencies
+
+        names = ", ".join(
+            sorted(
+                dep.repo_url for dep in unhashed_dependencies(lockfile.get_package_dependencies())
+            )
+        )
         return CheckResult(
             name=check_name,
             passed=False,
             message=(
-                "Locked dependencies are missing required content hashes -- "
+                f"Locked dependencies are missing required content hashes ({names}) -- "
                 "run 'apm install' to regenerate them"
             ),
             details=[str(exc)],

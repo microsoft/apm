@@ -1462,3 +1462,78 @@ def test_bundle_reinstall_retires_hooks_trust_no_longer_admits(
         audit = runner.run(("audit", "--ci"), scenario_id="audit", cwd=project, env=env)
         assert (frozen.returncode, audit.returncode) == (0, 0), output(frozen) + output(audit)
         assert _bundle_hook_residue(project) == []
+
+
+def test_frozen_and_audit_refuse_alike_a_git_row_without_content_hash_under_require_hashes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I3: with require_hashes, a git lock row without content_hash fails both readers.
+
+    ``apm install --frozen`` and ``apm audit --ci`` reach one verdict on the same
+    lockfile: both exit 1 and name the row, and neither writes the project,
+    the lockfile or ``apm_modules``.
+    """
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg = world.publish_package("pkg-a")
+    world.publish_policy({**_POLICY, "security": {"integrity": {"require_hashes": True}}})
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        project = world.consumer(dependencies=[f"{pkg.slug}#v1.0.0"])
+        run_step(runner, ("install",), cwd=project, env=env, step="install")
+        run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="audit-clean")
+        run_step(runner, ("install", "--frozen"), cwd=project, env=env, step="frozen-clean")
+
+        lock_path = project / "apm.lock.yaml"
+        lock = load_yaml(lock_path)
+        rows = [row for row in lock["dependencies"] if row["repo_url"] == pkg.slug]
+        assert len(rows) == 1 and rows[0].pop("content_hash"), rows
+        dump_yaml(lock, lock_path)
+        before = tree_snapshot(project)
+
+        audit = run_step(
+            runner, ("audit", "--ci"), cwd=project, env=env, step="audit-unhashed", expected=1
+        )
+        assert tree_snapshot(project) == before, "I5: audit --ci wrote"
+        frozen = run_step(
+            runner,
+            ("install", "--frozen"),
+            cwd=project,
+            env=env,
+            step="frozen-unhashed",
+            expected=1,
+        )
+        assert tree_snapshot(project) == before, "I7: refused frozen install wrote"
+
+    for result in (audit, frozen):
+        text = " ".join(output(result).split())
+        assert "require_hashes" in text, text
+        assert pkg.slug in text, text
+
+
+def test_frozen_and_audit_agree_on_a_git_row_without_content_hash_by_default(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I3: without require_hashes both readers accept the row alike (security.md defaults)."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg = world.publish_package("pkg-a")
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        project = world.consumer(dependencies=[f"{pkg.slug}#v1.0.0"])
+        run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="install")
+        lock_path = project / "apm.lock.yaml"
+        lock = load_yaml(lock_path)
+        rows = [row for row in lock["dependencies"] if row["repo_url"] == pkg.slug]
+        assert len(rows) == 1 and rows[0].pop("content_hash"), rows
+        dump_yaml(lock, lock_path)
+        before = tree_snapshot(project, exclude=(".git", "apm_modules"))
+
+        for args, step in (
+            (("audit", "--ci", "--no-policy"), "audit-unhashed"),
+            (("install", "--frozen", "--no-policy"), "frozen-unhashed"),
+        ):
+            run_step(runner, args, cwd=project, env=env, step=step)
+            assert tree_snapshot(project, exclude=(".git", "apm_modules")) == before, step
