@@ -317,8 +317,8 @@ class TestCiWithoutPolicy:
         # found; JSON is on stdout. Read stdout explicitly so the warning does
         # not corrupt JSON parsing.
         data = json.loads(result.stdout)
-        # Only the nine baseline checks, including deployment ownership.
-        assert data["summary"]["total"] == 10
+        # Only the baseline checks, including deployment ownership and hook pins.
+        assert data["summary"]["total"] == 11
 
 
 # -- #3195: explicit --policy fails closed when it cannot be loaded -------

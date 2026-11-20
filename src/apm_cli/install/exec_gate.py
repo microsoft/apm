@@ -701,8 +701,9 @@ def locked_hook_pin_mismatches(
     ``apm install --frozen`` and ``apm audit --ci`` both route here, and each
     lock row is judged by the trust owner
     (:func:`~apm_cli.security.trust.recorded_hook_pin_mismatches`), so the two
-    commands reach one verdict. A package not materialized under
-    *modules_dir* is left to the checks that report it.
+    commands reach one verdict. *trust_ctx* may be a provider, called once and
+    only when a locked package deploys hook files. A package not materialized
+    under *modules_dir* is left to the checks that report it.
     """
     from apm_cli.install.drift import _build_package_info
     from apm_cli.security.executables import TRUST_ABSENT, _strip_version
@@ -710,6 +711,13 @@ def locked_hook_pin_mismatches(
 
     if trust_ctx is None or lockfile is None:
         return []
+    resolved: builtins.list[Any] = []
+
+    def _ctx() -> Any:
+        if not resolved:
+            resolved.append(trust_ctx() if callable(trust_ctx) else trust_ctx)
+        return resolved[0]
+
     found: builtins.list[Any] = []
     for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
         if key == "." or dep.exec_status == TRUST_ABSENT:
@@ -724,7 +732,7 @@ def locked_hook_pin_mismatches(
         pkg_key = resolve_package_key(package_info, dep.get_unique_key())
         found.extend(
             recorded_hook_pin_mismatches(
-                trust_ctx,
+                _ctx,
                 tuple(_candidate_keys(pkg_key)),
                 install_path,
                 package=_strip_version(pkg_key),

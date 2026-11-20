@@ -386,11 +386,7 @@ class InstallService:
 
     @staticmethod
     def enforce_frozen_hook_pins(lockfile: LockFile, modules_dir: Path, trust_ctx: Any) -> None:
-        """Refuse a frozen install whose locked hooks their approval no longer admits.
-
-        Runs before any deployment, through the same owner ``apm audit --ci``
-        uses, so both reach one verdict (#4188).
-        """
+        """Before deploying, refuse locked hooks their pin no longer admits, as audit --ci does."""
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.exec_gate import locked_hook_pin_mismatches
 

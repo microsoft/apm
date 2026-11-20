@@ -811,7 +811,7 @@ class HookPinMismatch:
 
 
 def recorded_hook_pin_mismatches(
-    ctx: ExecTrustContext | None,
+    ctx: ExecTrustContext | Callable[[], ExecTrustContext | None] | None,
     package_keys: tuple[str, ...],
     install_path: Path,
     *,
@@ -823,7 +823,8 @@ def recorded_hook_pin_mismatches(
 
     ``apm install --frozen`` (before anything deploys) and ``apm audit --ci``
     both ask this, so they reach one verdict (#4188). A deny is not reported
-    here: the deny ladder owns that verdict.
+    here: the deny ladder owns that verdict. *ctx* may be a provider; it is
+    called only for a package the lock records as deploying hook files.
     """
     from apm_cli.integration.hook_integrator import HookIntegrator
 
@@ -832,16 +833,16 @@ def recorded_hook_pin_mismatches(
     recorded_deployed = (
         recorded_status in (None, TRUST_DEPLOYED) or EXEC_TYPE_HOOKS in recorded_allowed
     )
-    if (
-        ctx is None
-        or not ctx.gate_enabled
-        or not recorded_deployed
-        or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS)
-    ):
-        return []
     root = install_path.resolve()
+    hook_files = HookIntegrator().find_hook_files(root) if recorded_deployed else []
+    if not hook_files:
+        return []
+    if callable(ctx):
+        ctx = ctx()
+    if ctx is None or not ctx.gate_enabled or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS):
+        return []
     mismatches: list[HookPinMismatch] = []
-    for hook_file in HookIntegrator().find_hook_files(root):
+    for hook_file in hook_files:
         verdict = admit(ctx, hook_subject(package_keys, root, hook_file))
         if not verdict.allowed and verdict.reason != REASON_DENIED:
             mismatches.append(

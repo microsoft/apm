@@ -1216,15 +1216,18 @@ def _check_hook_approval_pins(
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR
     )
-    try:
+
+    def trust_ctx() -> Any:
+        # Resolved only when a locked package deploys hook files.
         allow = resolve_project_exec_allow_map(
             deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
         )
+        return getattr(allow, "trust_context", None)
+
+    try:
+        mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
     except PolicyViolationError as exc:
         return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
-    mismatches = locked_hook_pin_mismatches(
-        lock, modules_root, getattr(allow, "trust_context", None)
-    )
     if not mismatches:
         return CheckResult(
             name="hook-approval-pins",
