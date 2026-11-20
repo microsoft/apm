@@ -257,6 +257,42 @@ _FROZEN_DISPOSITION_CONSUMERS = (
 )
 
 
+# The only non-owner functions that take a bare ``frozen`` boolean: the Click
+# option origin and the parameters the owner's disposition is passed into.
+_FROZEN_PARAMETER_SITES = frozenset(
+    {
+        ("src/apm_cli/commands/install.py", "install"),
+        ("src/apm_cli/deps/apm_resolver.py", "__init__"),
+        ("src/apm_cli/deps/immutable_requirements.py", "__init__"),
+        ("src/apm_cli/install/dry_run_plan.py", "with_resolved_dependencies"),
+        ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
+        ("src/apm_cli/install/pipeline.py", "run_install_pipeline"),
+    }
+)
+
+
+def _frozen_parameter(node: ast.AST, path: str) -> str | None:
+    """Describe a new bare ``frozen`` parameter outside the known sites, else None."""
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return None
+    arguments = node.args
+    names = [
+        arg.arg
+        for arg in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            arguments.vararg,
+            arguments.kwarg,
+        )
+        if arg is not None
+    ]
+    name = getattr(node, "name", "<lambda>")
+    if _FROZEN_FLAG in names and (path, name) not in _FROZEN_PARAMETER_SITES:
+        return f"new frozen parameter on {name}"
+    return None
+
+
 def _is_frozen_flag(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and node.value == _FROZEN_FLAG
 
@@ -334,7 +370,7 @@ def check_frozen_flag_reader(provider: FactsProvider) -> tuple[Violation, ...]:
         if index is None:
             continue
         for node in index.nodes:
-            reason = _frozen_flag_read(node)
+            reason = _frozen_flag_read(node) or _frozen_parameter(node, path)
             if reason is not None:
                 findings.append(
                     violation(

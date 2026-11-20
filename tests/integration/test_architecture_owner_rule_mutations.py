@@ -3863,6 +3863,12 @@ def test_frozen_mcp_verification_cannot_bypass_owners(
             "    frozen_disposition: FrozenDisposition | None = None,\n",
             id="disposition-fails-open-when-omitted",
         ),
+        pytest.param(
+            "src/apm_cli/install/phases/cleanup.py",
+            "    frozen_disposition: FrozenDisposition,\n) -> None:",
+            "    frozen_disposition: FrozenDisposition,\n    frozen: bool = False,\n) -> None:",
+            id="new-bare-frozen-parameter",
+        ),
     ],
 )
 def test_frozen_flag_reads_outside_owner_fail_guard(path: str, old: str, new: str) -> None:
