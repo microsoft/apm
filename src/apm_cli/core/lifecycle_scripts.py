@@ -42,6 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import LIFECYCLE_SCRIPTS_UNTRUSTED
 from apm_cli.core.scope import manifest_file
 
 if TYPE_CHECKING:
@@ -532,8 +533,7 @@ class LifecycleScriptRunner:
         self._skip_notice_emitted = True
         count = self._skipped_project_scripts
         msg = (
-            f"Skipped {count} untrusted project script(s). "
-            "Run 'apm lifecycle trust' to enable them."
+            f"Skipped {count} untrusted project script(s). {LIFECYCLE_SCRIPTS_UNTRUSTED.sentence()}"
         )
         if self._logger is not None:
             emit = getattr(self._logger, "warning", None) or getattr(

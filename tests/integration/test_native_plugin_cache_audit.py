@@ -129,7 +129,8 @@ def test_native_cache_tamper_fails_installed_audit(
 
     changed = audit()
     assert changed.returncode != 0, changed.stdout + changed.stderr
-    message = " ".join(changed.stdout.split())
+    # Failed-check details follow their header to stderr (RA-004).
+    message = " ".join(changed.stderr.split())
     assert "Native Agent Plugin cache differs from its replay baseline" in message
     assert "run 'apm install' to restore the package" in message
     assert "Traceback" not in changed.stderr

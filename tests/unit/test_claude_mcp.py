@@ -351,7 +351,7 @@ class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
             text = self._configure_project(
                 self._stdio_info("atlassian", {"JIRA_TOKEN": "${JIRA_TOKEN}"})
             )
-            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
                 ClaudeClientAdapter.emit_install_run_summary()
 
         self.assertNotIn("baked-sentinel", text)
@@ -436,7 +436,7 @@ class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
             for name in ("MISSING_CMD", "MISSING_ARG", "DEFAULTED_ARG", "MISSING_ENV"):
                 os.environ.pop(name, None)
             self._configure_project(info)
-            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
                 ClaudeClientAdapter.emit_install_run_summary()
 
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
@@ -470,7 +470,7 @@ class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
         }
         with patch.dict(os.environ, {"REMOTE_TOKEN": "baked-sentinel"}):
             text = self._configure_project(remote)
-            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
                 ClaudeClientAdapter.emit_install_run_summary()
 
         self.assertNotIn("baked-sentinel", text)

@@ -9,6 +9,9 @@ module size budget; they own no RULES of their own.
 """
 
 from scripts.architecture_linter.checks.contracts_ci_topology import RULES as CI_TOPOLOGY_RULES
+from scripts.architecture_linter.checks.contracts_conformance_coverage import (
+    RULES as CONFORMANCE_COVERAGE_RULES,
+)
 from scripts.architecture_linter.checks.contracts_dependency_policy import RULES as POLICY_RULES
 from scripts.architecture_linter.checks.contracts_dependency_replacements import (
     RULES as REPLACEMENT_RULES,
@@ -19,6 +22,9 @@ from scripts.architecture_linter.checks.contracts_lifecycle_script_gate import (
 )
 from scripts.architecture_linter.checks.contracts_lockfile_generator import (
     RULES as LOCKFILE_GENERATOR_RULES,
+)
+from scripts.architecture_linter.checks.contracts_remediation_advice import (
+    RULES as REMEDIATION_RULES,
 )
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
@@ -33,6 +39,8 @@ RULES = (
     *REPLACEMENT_RULES,
     *LOCKFILE_GENERATOR_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
+    *REMEDIATION_RULES,
+    *CONFORMANCE_COVERAGE_RULES,
     *APPROVE_COMMAND_RULES,
     *CI_TOPOLOGY_RULES,
 )

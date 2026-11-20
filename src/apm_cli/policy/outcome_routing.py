@@ -98,6 +98,12 @@ _OUTCOME_ROUTES: dict[str, str] = {
 if set(_OUTCOME_ROUTES) != POLICY_DISCOVERY_OUTCOMES:  # pragma: no cover - import-time guard
     raise RuntimeError("every policy-discovery outcome needs exactly one route")
 
+# The way out of an org-enforced fail-closed block; never advertise a bypass.
+_FETCH_FAILURE_BLOCK_REMEDY = (
+    "Check that the org policy source is reachable (apm policy status) "
+    "and retry, or ask your org admin."
+)
+
 
 @dataclass(frozen=True)
 class DiscoveryRoute:
@@ -162,11 +168,14 @@ def classify_discovery_outcome(
         reason = None
         if fetch_failure_default == "block":
             hint = getattr(fetch_result, "discovery_hint", None)
-            reason = (
+            sentences = [
                 f"no enforceable org policy was resolved (outcome={outcome}) and "
                 "project apm.yml has policy.fetch_failure_default=block "
-                f"(source={source})" + (f". {hint}" if hint else "")
-            )
+                f"(source={source})"
+            ]
+            if hint:
+                sentences.append(hint.rstrip("."))
+            reason = ". ".join([*sentences, _FETCH_FAILURE_BLOCK_REMEDY])
         return DiscoveryRoute(
             outcome,
             route,

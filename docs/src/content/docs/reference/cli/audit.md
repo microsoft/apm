@@ -355,7 +355,8 @@ dependency was removed without running `apm prune` -- is a hard failure,
 not drift: it always exits `1`, in bare `apm audit` and `--ci` alike, and
 is reported under the `deployment-ledger-owners` check ID in `--ci` output.
 The finding names the owning locator and its invalid owner(s) with one
-remediation: `Run 'apm prune', then rerun 'apm audit'.` `--strip` refuses to
+remediation: `Run 'apm prune' to repair the invalid deployment ownership
+records, then rerun 'apm audit'.` `--strip` refuses to
 modify content while any owner reference is invalid. Stale owner rows never
 authorize deleting files -- only `apm prune` reconciles them, and only ever
 as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
@@ -391,6 +392,12 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), an explicit `--policy` source could not be loaded, or `apm.lock.yaml` was written by a newer APM. |
 
 CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
+
+A failing CI JSON check can carry `remediation`: the structured advice that clears it, with `id`, `command` (the exact `apm` command line), `fixes` (the state it clears) and optional `before` (a manual step first, such as deleting edited files) and `then` (a step after it succeeds). `remediations` lists every applicable remediation; `remediation` is the first. The text message renders the same advice.
+
+```json
+{"name": "lockfile-exists", "passed": false, "remediation": {"id": "lockfile-missing", "command": "apm install", "fixes": "generate apm.lock.yaml"}}
+```
 
 ## Related
 

@@ -139,5 +139,6 @@ def test_manifest_rewrites_name_the_manifest_by_relative_path(
     apm("install", package)
     assert package in manifest.read_text(encoding="utf-8")
     removed = apm("uninstall", package)
-    assert f"[*] Updated {label} (removed 1 package(s))" in removed, removed
+    assert f"[*] Updated {label}" in removed, removed
+    assert "[*] Uninstall complete: removed 1 package" in removed, removed
     assert package not in manifest.read_text(encoding="utf-8")

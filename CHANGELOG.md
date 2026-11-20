@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4158)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
+- `apm audit --format json` adds a structured `remediation` (the command and the state it clears) to failing CI checks. (#4143)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 - Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
 - Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
@@ -26,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
+- `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
+- `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
 - `apm audit --ci` names a local dependency whose content changed since the lock, as `apm install --frozen` does. (closes #4447, #4474)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
