@@ -236,6 +236,9 @@ class AuthResolver:
         # F5 #852: pre-init the per-host dedup set so callers do not need
         # the prior hasattr() guard.
         self._verbose_auth_logged_hosts: set = set()
+        # Secondary credential sources each host was tried with, in order
+        # (labels only, never values), for the not-found diagnostic (#4322).
+        self._secondary_sources_tried: dict[tuple[str, int | None], list[str]] = {}
         # #1212 follow-up: with preflight + list_remote_refs + clone all
         # routing through the ADO auth chain, a single ADO host
         # in an install plan can trigger emit_stale_pat_diagnostic up to
@@ -864,6 +867,7 @@ class AuthResolver:
             gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
             if gh_token:
                 _log(f"gh auth token resolved a credential for {host_info.display_name}")
+                self.note_credential_source_tried(host_info, "gh auth token")
                 return operation(
                     gh_token,
                     _secondary_credential_env(gh_token, "gh-auth-token"),
@@ -875,6 +879,7 @@ class AuthResolver:
             )
             if cred:
                 _log(f"git credential fill resolved a credential for {host_info.display_name}")
+                self.note_credential_source_tried(host_info, "git credential helper")
                 return operation(
                     cred,
                     _secondary_credential_env(cred, "git-credential-fill"),
@@ -1208,6 +1213,14 @@ class AuthResolver:
         lines.append("Run with --verbose for detailed auth diagnostics.")
         return "\n".join(lines)
 
+    def note_credential_source_tried(self, host_info: HostInfo, source: str) -> None:
+        """Record that a secondary credential *source* (a label) was sent to a host."""
+        key = ((host_info.host or "").lower(), host_info.port)
+        with self._lock:
+            tried = self._secondary_sources_tried.setdefault(key, [])
+            if source not in tried:
+                tried.append(source)
+
     def describe_credential_tried(
         self,
         host: str,
@@ -1233,7 +1246,8 @@ class AuthResolver:
                 for key, ctx in self._cache.items()
                 if key.host == wanted_host and key.port == port and key.org in (wanted_org, "")
             ]
-        sources = list(dict.fromkeys(ctx.source for ctx in contexts if ctx.token))
+            secondary = list(self._secondary_sources_tried.get((wanted_host, port), ()))
+        sources = list(dict.fromkeys([*(ctx.source for ctx in contexts if ctx.token), *secondary]))
         if sources:
             label = "credential" if len(sources) == 1 else "credentials"
             return f"{label} tried: {', '.join(sources)}"

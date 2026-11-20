@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install <pkg>` also locks declared local-path dependencies missing from `apm.lock.yaml`, and reports byte-identical pre-existing skills as adopted (#4217)
 - `apm update` lists a moved SHA pin once (under Revision pin updates) and its Total line counts only changed dependencies. (#4217)
 - After `apm deny`, `apm install` names each hook file it removes and no longer reports those removed files as retained historical claims (#4217)
+- A partly successful `apm install` of marketplace plugins records ref pins only for the plugins it installs. (closes #4322, #PR)
+- The repository not-found diagnostic names every credential source tried, in order, never their values. (#4322, #PR)
 
 ## [0.37.0] - 2026-11-20
 
