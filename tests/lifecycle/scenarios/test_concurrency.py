@@ -8,14 +8,16 @@ released afterwards (source: .apm/architecture/owners/install-deployment.json,
 src/apm_cli/install/locking.py).
 PROMISE: P-INV-I1..I9 -- the laws hold for each writer and after the pair.
 
-The holder is always an ``install``. At project scope it parks on the one
-call it makes under the lock, ``git remote get-url origin`` for policy
-discovery, through a one-shot ``git`` shim on PATH. User scope has no git
-remote and makes no such call, so there the holder parks in a one-shot
-``pre-install`` lifecycle script of the user manifest, which also runs under
-the lock. Either way the overlap is deterministic: the contender starts while the holder owns the
-lock, must still be running ``_BLOCKED_WINDOW`` seconds after its imports
-(the shim sees its ``git version``), and must report that it waited. The contenders cover install, update, uninstall,
+The holder is always an ``install``. It parks right after it acquires the
+lifecycle lock until the test releases it: with the engine driver a one-shot
+``sitecustomize`` wraps ``acquire_lifecycle_lock``; with the binary driver a
+one-shot ``git`` shim parks the first ``git remote get-url origin`` (policy
+discovery under the lock) at project scope, and at user scope, which has no
+git remote, a one-shot ``pre-install`` script of the user manifest (it also
+runs under the lock). The overlap is deterministic:
+the contender starts while the holder owns the lock, must still be running
+``_BLOCKED_WINDOW`` seconds after its imports (the shim sees its
+``git version``), and must report that it waited. The contenders cover install, update, uninstall,
 approve, deny and a self-update setting (``config set self-update.channel``,
 the user-config write ``apm self-update`` reads; ``self-update`` itself
 replaces the binary over the network and holds no lifecycle lock).
@@ -95,9 +97,42 @@ class PairRow:
 # -- the parked holder ----------------------------------------------------------------
 
 
+# Engine driver: the first process to take the lifecycle lock parks while holding it.
+_SITECUSTOMIZE = """\
+import os
+import time
+
+from apm_cli.install import locking
+
+_acquire = locking.acquire_lifecycle_lock
+
+
+def _parked_acquire(*args, **kwargs):
+    handle = _acquire(*args, **kwargs)
+    armed = {armed!r}
+    try:
+        os.rename(armed, armed + ".taken")
+    except OSError:
+        return handle
+    open({ready!r}, "w").close()
+    deadline = time.monotonic() + {timeout!r}
+    while not os.path.exists({release!r}) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return handle
+
+
+locking.acquire_lifecycle_lock = _parked_acquire
+"""
+
+
 class _Park:
-    """One-shot park: the first ``git remote get-url`` (project scope) or the first
-    user-manifest ``pre-install`` script (user scope) waits for a release file."""
+    """Park the holder inside the lifecycle lock until a release file appears.
+
+    A one-shot hook parks the first lock holder: the lock acquire itself
+    (engine driver), or with the binary driver ``git remote get-url`` (project
+    scope) or a user-manifest ``pre-install`` script (user scope). A ``git``
+    shim marks the contender's start (GitPython's ``git version`` at import).
+    """
 
     def __init__(self, world, user_manifest: Path | None = None) -> None:
         self.world = world
@@ -107,37 +142,57 @@ class _Park:
         self.ready = self.dir / "ready"
         self.release = self.dir / "release"
         self.started = self.dir / "contender-started"
+        binary = driver.selected_driver() == "binary"
+        park_in_git = binary and user_manifest is None
+        self.user_manifest = user_manifest if binary else None
         real = shutil.which("git", path=world.env["PATH"])
         script = (
             "#!/bin/sh\n"
             # GitPython runs `git version` while apm imports, before the lock.
             f'if [ "$1" = "version" ] && [ -e "{self.ready}" ]; then : > "{self.started}"; fi\n'
-            f'if [ "$1 $2" = "remote get-url" ] && mv "{self.armed}" "{self.armed}.taken" '
-            "2>/dev/null; then\n"
-            f'  : > "{self.ready}"\n'
-            "  i=0\n"
-            f'  while [ ! -e "{self.release}" ] && [ "$i" -lt 1200 ]; do sleep 0.05; i=$((i+1)); done\n'
-            "fi\n"
-            f'exec "{real}" "$@"\n'
         )
+        if park_in_git:
+            script += (
+                f'if [ "$1 $2" = "remote get-url" ] && mv "{self.armed}" "{self.armed}.taken" '
+                "2>/dev/null; then\n"
+                f'  : > "{self.ready}"\n'
+                "  i=0\n"
+                f'  while [ ! -e "{self.release}" ] && [ "$i" -lt 1200 ]; do sleep 0.05; i=$((i+1)); done\n'
+                "fi\n"
+            )
+        script += f'exec "{real}" "$@"\n'
         (self.dir / "git").write_text(script, encoding="ascii")
         (self.dir / "git").chmod(0o755)
-        self.saved_path = world.env["PATH"]
-        world.env["PATH"] = os.pathsep.join((str(self.dir), self.saved_path))
-        self.armed.write_text("", encoding="ascii")
-        self.user_manifest = user_manifest
-        if user_manifest is not None:
+        self.saved_env = dict(world.env)
+        world.env["PATH"] = os.pathsep.join((str(self.dir), world.env["PATH"]))
+        if self.user_manifest is not None:
             park = (
                 f'if mv "{self.armed}" "{self.armed}.taken" 2>/dev/null; then '
                 f': > "{self.ready}"; i=0; '
                 f'while [ ! -e "{self.release}" ] && [ "$i" -lt 1200 ]; '
                 "do sleep 0.05; i=$((i+1)); done; fi"
             )
-            data = yaml.safe_load(user_manifest.read_text(encoding="utf-8"))
+            data = yaml.safe_load(self.user_manifest.read_text(encoding="utf-8"))
             data["lifecycle"] = {
                 "pre-install": [{"type": "command", "bash": park, "timeout_sec": 120}]
             }
-            user_manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+            self.user_manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+        elif not park_in_git:
+            hook = self.dir / "site"
+            hook.mkdir()
+            (hook / "sitecustomize.py").write_text(
+                _SITECUSTOMIZE.format(
+                    armed=str(self.armed),
+                    ready=str(self.ready),
+                    release=str(self.release),
+                    timeout=_PARK_TIMEOUT,
+                ),
+                encoding="ascii",
+            )
+            world.env["PYTHONPATH"] = os.pathsep.join(
+                p for p in (str(hook), world.env.get("PYTHONPATH", "")) if p
+            )
+        self.armed.write_text("", encoding="ascii")
 
     def wait_parked(self, holder: _Run) -> None:
         deadline = time.monotonic() + _PARK_TIMEOUT
@@ -160,7 +215,8 @@ class _Park:
 
     def close(self) -> None:
         self.release.write_text("", encoding="ascii")
-        self.world.env["PATH"] = self.saved_path
+        self.world.env.clear()
+        self.world.env.update(self.saved_env)
 
     def disarm(self) -> None:
         """Drop the park script from the user manifest (an input edit)."""

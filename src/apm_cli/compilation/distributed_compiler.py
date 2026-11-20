@@ -365,6 +365,8 @@ class DistributedAgentsCompiler:
 
             # Compile statistics
             stats = self._compile_distributed_stats(placements, primitives, content_map=content_map)
+            # Every placement was suppressed by dedup: an explained skip, not zero output (#4209).
+            stats["agents_md_suppressed_by_dedup"] = 0 if content_map else len(suppressed_paths)
 
             # Optional: Get referenced contexts for reporting (doesn't copy)
             try:

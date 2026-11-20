@@ -102,6 +102,9 @@ class InstallContext:
     all_apm_deps: list[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: list[Any] = field(default_factory=list)  # resolve
+    # Partial installs: declared local deps added only so the lock claims them
+    # (#4198). The invocation's CLI --skill overlay never applies to them.
+    implicit_local_keys: frozenset[str] = frozenset()  # resolve
     update_plan_complete_dep_keys: set[str] = field(default_factory=set)  # resolve
     # Partial installs: the selected packages' previously locked descendants
     # that the complete graph no longer needs (dropped) or reaches elsewhere
@@ -132,6 +135,8 @@ class InstallContext:
     # ------------------------------------------------------------------
     pre_download_results: dict[str, Any] = field(default_factory=dict)  # download
     pre_downloaded_keys: set[str] = field(default_factory=set)  # download
+    # Packages whose cache/lock content-hash mismatch was already reported (#4351).
+    cache_mismatch_reported: set[str] = field(default_factory=set)  # download
 
     # ------------------------------------------------------------------
     # Pre-integrate inputs (populated by caller before integrate phase)

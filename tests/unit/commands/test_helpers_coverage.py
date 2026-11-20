@@ -354,6 +354,25 @@ class TestLazyConfirmSuccess:
 
 
 class TestCheckOrphanedPackages:
+    def test_returns_empty_when_manifest_has_no_modules_dir(self, tmp_path, monkeypatch) -> None:
+        """A project with apm.yml but no apm_modules/ has no orphans."""
+        from apm_cli.commands._helpers import _check_orphaned_packages
+
+        (tmp_path / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        assert _check_orphaned_packages() == []
+
+    def test_returns_empty_when_manifest_cannot_be_parsed(self, tmp_path, monkeypatch) -> None:
+        """An unparsable apm.yml next to apm_modules/ reports no orphans."""
+        from apm_cli.commands._helpers import _check_orphaned_packages
+
+        (tmp_path / "apm.yml").write_text("name: [unclosed\n", encoding="utf-8")
+        (tmp_path / "apm_modules" / "org" / "pkg").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
+
+        assert _check_orphaned_packages() == []
+
     def test_returns_empty_when_no_apm_yml(self, tmp_path) -> None:
         """Line 299: APM_YML_FILENAME doesn't exist → []."""
         from apm_cli.commands._helpers import _check_orphaned_packages

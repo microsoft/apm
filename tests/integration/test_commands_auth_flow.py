@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -577,8 +578,8 @@ class TestEmitStalePat:
             resolver.emit_stale_pat_diagnostic("dev.azure.com")
 
         # Should only emit once per host
-        azure_lines = [w for w in warnings if "dev.azure.com" in w]
-        assert len(azure_lines) == 1
+        hosts_warned = [m.group(1) for w in warnings if (m := re.search(r"rejected for (\S+);", w))]
+        assert hosts_warned == ["dev.azure.com"]
 
     def test_different_hosts_each_emit_once(self) -> None:
         resolver = AuthResolver()
@@ -590,8 +591,8 @@ class TestEmitStalePat:
             resolver.emit_stale_pat_diagnostic("org1.visualstudio.com")
             resolver.emit_stale_pat_diagnostic("org2.visualstudio.com")
 
-        hosts_warned = {w for w in warnings if "visualstudio.com" in w}
-        assert len(hosts_warned) == 2
+        hosts_warned = [m.group(1) for w in warnings if (m := re.search(r"rejected for (\S+);", w))]
+        assert sorted(hosts_warned) == ["org1.visualstudio.com", "org2.visualstudio.com"]
 
 
 # ===========================================================================

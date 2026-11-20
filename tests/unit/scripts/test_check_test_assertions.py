@@ -268,6 +268,28 @@ def test_aq006_e2e_module_using_cli_runner_fails(tmp_path: Path) -> None:
     assert "test_driving.py" not in result.stderr
 
 
+def test_aq006_lifecycle_world_fixture_drives_the_installed_cli(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write_test(
+        root,
+        _E2E + "def test_world(lifecycle_world):\n"
+        "    lock = lifecycle_world.project / 'apm.lock.yaml'\n"
+        "    assert not lock.exists()\n",
+    )
+    _write_test(
+        root,
+        _E2E + "def test_nothing(tmp_path):\n    assert not (tmp_path / 'x').exists()\n",
+        "test_no_driver.py",
+    )
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, {})
+
+    result = _run(root, baseline)
+
+    assert "tests/test_sample.py:1" not in result.stderr
+    assert f"tests/test_no_driver.py:1: {RULE_AQ006}" in result.stderr
+
+
 def test_update_refuses_growth_without_writing(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     _write_test(root, "def test_sample():\n    assert False\n")

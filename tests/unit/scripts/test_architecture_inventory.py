@@ -59,6 +59,7 @@ def test_excluded_roots_constant_is_exact_and_stable() -> None:
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
+        ".hypothesis",
         ".tox",
         "build",
         "dist",
@@ -271,6 +272,52 @@ def test_source_subtree_vanishing_mid_walk_fails_the_inventory(tmp_path, monkeyp
         if Path(path) == vanishing.resolve():
             (vanishing / "module.py").unlink()
             vanishing.rmdir()
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", _scandir)
+    with pytest.raises(InventoryError, match="cannot inventory repository"):
+        build_inventory(tmp_path)
+
+
+def _path_not_found(path: Path) -> OSError:
+    """The error Windows raises for a directory removed mid-walk (WinError 3)."""
+    error = FileNotFoundError(2, "The system cannot find the path specified", str(path))
+    error.winerror = 3  # type: ignore[attr-defined]
+    return error
+
+
+def test_tool_cache_vanishing_mid_walk_is_never_walked(tmp_path, monkeypatch) -> None:
+    """A test-tool cache that disappears mid-walk cannot fail the inventory."""
+    import os
+
+    _write_minimal_repo(tmp_path)
+    cache_tmp = tmp_path / ".hypothesis" / "tmp"
+    cache_tmp.mkdir(parents=True)
+    nested = tmp_path / "tests" / ".hypothesis" / "tmp"
+    nested.mkdir(parents=True)
+    real_scandir = os.scandir
+
+    def _scandir(path=".", *args, **kwargs):
+        if Path(path).name in {".hypothesis", "tmp"}:
+            raise _path_not_found(Path(path))
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", _scandir)
+    inventory = build_inventory(tmp_path)
+    assert not any(".hypothesis" in name for name in inventory.files)
+
+
+def test_windows_path_not_found_in_source_still_fails_closed(tmp_path, monkeypatch) -> None:
+    """WinError 3 on a source directory aborts the inventory like any walk error."""
+    import os
+
+    _write_minimal_repo(tmp_path)
+    source = (tmp_path / "src").resolve()
+    real_scandir = os.scandir
+
+    def _scandir(path=".", *args, **kwargs):
+        if Path(path) == source:
+            raise _path_not_found(source)
         return real_scandir(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "scandir", _scandir)
