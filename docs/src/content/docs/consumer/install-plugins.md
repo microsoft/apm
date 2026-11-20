@@ -28,7 +28,7 @@ Commit `apm.yml` and `apm.lock.yaml`. Teammates run `apm install`.
 | Lock | `apm.lock.yaml` pins the plugin's commit and records a SHA-256 hash for every file APM deployed. `apm audit` reports drift. |
 | Scan | Every file is scanned for hidden Unicode at install; critical findings block. APM does not inspect what the code does. |
 | Policy | Your organization's `apm-policy.yml` can allow or deny the source before anything is written. |
-| Approve | Hooks, MCP servers, LSP servers and `bin/` deploy unless your project or organization turns on the approval gate; then they wait for `apm approve`. A Claude Code plugin installed whole at user scope is enabled only when one approval pinned to its content covers it ([Approve hooks and MCP servers](../approve-executables/)). |
+| Approve | Hooks, MCP servers, LSP servers and `bin/` (user scope, Claude target only) deploy unless your project or organization turns on the approval gate; then they wait for `apm approve`. A Claude Code plugin installed whole at user scope is enabled only when one approval pinned to its content covers it ([Approve hooks and MCP servers](../approve-executables/)). |
 
 APM decides what gets installed. The harness decides what runs, with its own
 permissions; APM is not a sandbox.

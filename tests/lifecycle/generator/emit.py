@@ -22,6 +22,7 @@ from pathlib import Path
 import yaml
 
 from tests.lifecycle.generator import covering
+from tests.lifecycle.generator.bin_pin import pin_digest
 from tests.lifecycle.generator.factors import (
     EXCEPTION_FACTORS,
     FACTORS,
@@ -29,7 +30,7 @@ from tests.lifecycle.generator.factors import (
     compile_staged_targets,
     row_targets,
 )
-from tests.lifecycle.generator.rules import RULES
+from tests.lifecycle.generator.rules import RULES, U_BIN_CELLS, U_BIN_PIN
 from tests.lifecycle.generator.space import Entry, Space, build_space
 from tests.lifecycle.generator.witnesses import machine_witnesses, scenario_witnesses
 
@@ -156,6 +157,17 @@ def _counts(space: Space, statuses: Mapping[str, str], lanes: Mapping[str, str],
     }
 
 
+def u_bin_audit(digest: str) -> tuple[dict[str, list[str]], dict[str, dict[str, object]]]:
+    """(excluded, reinstated) gate cells of U-BIN for the live pin *digest*.
+
+    The cells are excluded only while *digest* equals the approved U_BIN_PIN;
+    otherwise each one is must-cover again (the rule's premise has changed).
+    """
+    if digest == U_BIN_PIN:
+        return {key: ["U-BIN"] for key in U_BIN_CELLS}, {}
+    return {}, {key: {"rules": ["U-BIN"], "must_cover": True} for key in U_BIN_CELLS}
+
+
 def generate() -> tuple[str, dict[str, str]]:
     """(obligation list JSON text, row file name -> YAML text)."""
     space = build_space()
@@ -205,6 +217,8 @@ def generate() -> tuple[str, dict[str, str]]:
         obligations[key] = record
     rendered = render_rows(rows)
     single, multi = row_targets()
+    digest = pin_digest()
+    excluded, reinstated = u_bin_audit(digest)
     document = {
         "schema_version": 1,
         "description": (
@@ -244,6 +258,9 @@ def generate() -> tuple[str, dict[str, str]]:
             for key, (target, chain) in sorted(space.mapped.items())
         },
         "removed": {key: list(rules) for key, rules in sorted(space.removed.items())},
+        "pins": {"U-BIN": digest},
+        "excluded": excluded,
+        "reinstated": reinstated,
     }
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     document["sha256"] = hashlib.sha256(canonical.encode("ascii")).hexdigest()

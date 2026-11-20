@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import yaml
 
 from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle import oracles, receipts
-from tests.lifecycle.generator import emit, replay
+from tests.lifecycle.generator import bin_pin, emit, replay
 from tests.lifecycle.generator.covering import refusal_line
 from tests.lifecycle.generator.factors import (
     FACTORS,
@@ -34,6 +35,8 @@ from tests.lifecycle.generator.rules import (
     REFUSAL_EVIDENCE,
     RULE_CELL_REFUSALS,
     RULES,
+    U_BIN_CELLS,
+    U_BIN_PIN,
     UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
     classify,
@@ -494,3 +497,74 @@ def test_every_removed_and_mapped_cell_names_its_rules() -> None:
         assert entry["maps_to"] in data["obligations"] or entry["maps_to"].startswith(
             ("refusal|", "rule|")
         ), key
+
+
+# -- U-BIN: closed-world pin of the bin/ deploy domain ------------------------------
+
+
+@dataclass(frozen=True)
+class MutationCase:
+    """A source edit that widens one pinned element of U-BIN."""
+
+    name: str
+    path: str
+    old: str
+    new: str
+
+
+_BIN_MUTATIONS = sorted(
+    (
+        MutationCase(
+            "plugin-bin-deployable-drops-the-scope-check",
+            "install/exec_gate.py",
+            "        or scope is not InstallScope.USER\n",
+            "",
+        ),
+        MutationCase(
+            "second-bin-writer",
+            "install/deployment_plan.py",
+            "\n\ndef ",
+            "\n\ndef _second_bin_writer(integrator, *args):\n"
+            "    return integrator._deploy_bin_files(*args)\n\n\ndef ",
+        ),
+        MutationCase(
+            "unpack-accepts-a-bin-executable",
+            "bundle/unpacker.py",
+            '_EXECUTABLE_DIR_NAMES = frozenset({"hooks", "bin"})',
+            '_EXECUTABLE_DIR_NAMES = frozenset({"hooks"})',
+        ),
+    ),
+    key=lambda case: case.name,
+)
+
+
+def _source_copy(root: Path) -> Path:
+    import shutil
+
+    target = root / "apm_cli"
+    shutil.copytree(bin_pin.SRC_ROOT, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    return target
+
+
+def test_u_bin_pin_matches_the_source_and_excludes_exactly_its_cells() -> None:
+    assert bin_pin.pin_digest() == U_BIN_PIN
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    assert data["pins"] == {"U-BIN": U_BIN_PIN}
+    assert data["excluded"] == {key: ["U-BIN"] for key in U_BIN_CELLS}
+    assert len(U_BIN_CELLS) == 41 and not data["reinstated"]
+
+
+@pytest.mark.parametrize("case", _BIN_MUTATIONS, ids=lambda case: case.name)
+def test_widening_bin_deploy_reinstates_the_u_bin_cells(tmp_path: Path, case) -> None:
+    source = _source_copy(tmp_path)
+    assert bin_pin.pin_digest(source) == U_BIN_PIN  # control: an unchanged copy keeps the pin
+    path = source / case.path
+    text = path.read_text(encoding="utf-8")
+    assert text.count(case.old) >= 1, case
+    path.write_text(text.replace(case.old, case.new, 1), encoding="utf-8")
+    digest = bin_pin.pin_digest(source)
+    assert digest != U_BIN_PIN, case.name
+    excluded, reinstated = emit.u_bin_audit(digest)
+    assert not excluded
+    assert set(reinstated) == set(U_BIN_CELLS)
+    assert all(entry == {"rules": ["U-BIN"], "must_cover": True} for entry in reinstated.values())

@@ -212,6 +212,22 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
         ),
     ),
+    "U-BIN": (
+        "bin/ deploys only for a marketplace plugin installed at user scope with a Claude "
+        "target that supports skills (plugin_bin_deployable); _deploy_bin_files is called "
+        "only from _deploy_plugin_bin, and apm unpack refuses every executable file. A gate "
+        "cell for bin/ on any other path has nothing to remove and is excluded. "
+        "Self-reinstating: the generator hashes these elements (generator/bin_pin.py); when "
+        "the hash differs from U_BIN_PIN the cells return as must-cover and --check fails "
+        "until a reviewed change updates the pin",
+        (
+            Ev("src/apm_cli/install/exec_gate.py", 507, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 508, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 511, 'target.name == "claude"'),
+            Ev("src/apm_cli/integration/skill_integrator.py", 1780, "def _deploy_plugin_bin"),
+            Ev("src/apm_cli/bundle/unpacker.py", 201, "_refuse_executable_content(unique_files"),
+        ),
+    ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
         (Ev(_APPROVE, 184, "if list_decisions:"), Ev(_APPROVE, 188, "if pending:")),
@@ -421,3 +437,28 @@ def classify(family: str, cell: Mapping[str, str]) -> Verdict:
         )
     rules = must_cover_rules(cell)
     return Verdict("obligation", rules, must_cover=bool(rules))
+
+
+# -- U-BIN: gate cells for bin/ where bin/ never deploys (steward ruling) ---------
+
+# The approved digest of tests/lifecycle/generator/bin_pin.py pin_elements().
+U_BIN_PIN = "632062aa61b6d33035fea09d8f5c56cfead40809a19fa62d75cdf6748ff4c6b4"
+_GATE_CHANGES = ("local-deny", "org-deny", "org-enables-gate", "policy-dep-deny", "revoke-approval")
+_LOCAL_CHANGES = ("local-deny", "revoke-approval")
+# Gate removal paths (tests/lifecycle/security, #4107) where bin/ never deploys,
+# and the gate changes each one replays. Only marketplace-install deploys bin/.
+U_BIN_PATHS: Mapping[str, tuple[str, ...]] = {
+    "install": _GATE_CHANGES,
+    "frozen": _GATE_CHANGES,
+    "update": _GATE_CHANGES,
+    "uninstall-prune-rebuild": _GATE_CHANGES,
+    "audit-ci": _GATE_CHANGES,
+    "dry-run": ("local-deny", "org-deny", "revoke-approval"),
+    "install-g": _LOCAL_CHANGES,
+    "frozen-g": _LOCAL_CHANGES,
+    "bundle-install": ("local-deny", "org-deny", "org-enables-gate", "revoke-approval"),
+    "unpack": _GATE_CHANGES,
+}
+U_BIN_CELLS = tuple(
+    sorted(f"G|{path}|{change}|bin" for path, changes in U_BIN_PATHS.items() for change in changes)
+)

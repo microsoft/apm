@@ -70,6 +70,131 @@
    "legacy-receipt"
   ]
  },
+ "excluded": {
+  "G|audit-ci|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|audit-ci|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|audit-ci|org-enables-gate|bin": [
+   "U-BIN"
+  ],
+  "G|audit-ci|policy-dep-deny|bin": [
+   "U-BIN"
+  ],
+  "G|audit-ci|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|bundle-install|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|bundle-install|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|bundle-install|org-enables-gate|bin": [
+   "U-BIN"
+  ],
+  "G|bundle-install|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|dry-run|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|dry-run|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|dry-run|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|frozen-g|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|frozen-g|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|frozen|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|frozen|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|frozen|org-enables-gate|bin": [
+   "U-BIN"
+  ],
+  "G|frozen|policy-dep-deny|bin": [
+   "U-BIN"
+  ],
+  "G|frozen|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|install-g|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|install-g|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|install|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|install|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|install|org-enables-gate|bin": [
+   "U-BIN"
+  ],
+  "G|install|policy-dep-deny|bin": [
+   "U-BIN"
+  ],
+  "G|install|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|uninstall-prune-rebuild|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|uninstall-prune-rebuild|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|uninstall-prune-rebuild|org-enables-gate|bin": [
+   "U-BIN"
+  ],
+  "G|uninstall-prune-rebuild|policy-dep-deny|bin": [
+   "U-BIN"
+  ],
+  "G|uninstall-prune-rebuild|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|unpack|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|unpack|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|unpack|org-enables-gate|bin": [
+   "U-BIN"
+  ],
+  "G|unpack|policy-dep-deny|bin": [
+   "U-BIN"
+  ],
+  "G|unpack|revoke-approval|bin": [
+   "U-BIN"
+  ],
+  "G|update|local-deny|bin": [
+   "U-BIN"
+  ],
+  "G|update|org-deny|bin": [
+   "U-BIN"
+  ],
+  "G|update|org-enables-gate|bin": [
+   "U-BIN"
+  ],
+  "G|update|policy-dep-deny|bin": [
+   "U-BIN"
+  ],
+  "G|update|revoke-approval|bin": [
+   "U-BIN"
+  ]
+ },
  "factors": {
   "DEPLOYED": [
    "absent",
@@ -22496,6 +22621,10 @@
    ]
   }
  },
+ "pins": {
+  "U-BIN": "632062aa61b6d33035fea09d8f5c56cfead40809a19fa62d75cdf6748ff4c6b4"
+ },
+ "reinstated": {},
  "removed": {
   "T3|OP=approve-deny|SRC=inline-mcp|PRIM=bin": [
    "U8"
@@ -23677,6 +23806,16 @@
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
+  "U-BIN": {
+   "evidence": [
+    "src/apm_cli/install/exec_gate.py:507",
+    "src/apm_cli/install/exec_gate.py:508",
+    "src/apm_cli/install/exec_gate.py:511",
+    "src/apm_cli/integration/skill_integrator.py:1780",
+    "src/apm_cli/bundle/unpacker.py:201"
+   ],
+   "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable); _deploy_bin_files is called only from _deploy_plugin_bin, and apm unpack refuses every executable file. A gate cell for bin/ on any other path has nothing to remove and is excluded. Self-reinstating: the generator hashes these elements (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin"
+  },
   "U1": {
    "evidence": [],
    "text": "a modifier the command does not accept is one refusal cell per command"
@@ -23747,5 +23886,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "611cff6f5e921cadbd2f46a4d9e71570d35a0e3385c3a4c8b2ac606f52bcbd85"
+ "sha256": "30cf9e28361e6919a990063fd2770cb7f53c54edd77cae4bddb45696f18a1cdf"
 }
