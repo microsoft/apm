@@ -290,7 +290,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   keep their lockfile entries and are never cleaned up as stale.
   When no evidence covers a locally edited skill, install refuses without
   changing anything. The message names the deployed skill directory: move it
-  aside (or delete it if it holds no edits), then run `apm install`.
+  aside (or delete it if it holds no edits), then run `apm install`. That
+  rewrites only that skill; edited files elsewhere are kept.
   Invalid evidence fails explicitly.
 - **Edited managed files.** Install replaces an existing instruction, agent, prompt, command or rule file that differs from what it renders only with the same evidence: a local deployment receipt, or bytes equal to what the locked version renders. Lockfile hashes are never that proof. Without evidence (for example a fresh clone, or a project last installed by an APM that recorded no receipts) the file is kept and named, the files that could be written are written and recorded, the kept file keeps its previous lockfile entry, and install exits `1`. Move the file aside and rerun `apm install` to restore it, or use `--force` to overwrite it.
   Creating this state requires filesystem hard-link support. State-write failures

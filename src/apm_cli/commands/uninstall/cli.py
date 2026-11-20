@@ -386,6 +386,8 @@ def _uninstall_deletion_evidence(
         lockfile=lockfile,
         lockfile_root=lockfile_path.parent,
         diagnostics=logger.diagnostics,
+        # Not an integrating install: nothing was kept this run.
+        kept=(),
     )
     if lockfile:
         evidence.prepare(

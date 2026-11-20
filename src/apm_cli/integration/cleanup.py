@@ -80,17 +80,13 @@ class DeploymentEvidence:
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
-        kept: Iterable[str] = (),
+        kept: Iterable[str],
     ) -> None:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
-        self._kept = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
-        # Every ancestor directory of a kept member, so each lookup stays O(1).
-        self._kept_parents = frozenset(
-            "/".join(parts[:index])
-            for parts in (value.split("/") for value in self._kept)
-            for index in range(1, len(parts))
-        )
+        self._kept: frozenset[str] = frozenset()
+        self._kept_parents: frozenset[str] = frozenset()
+        self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
         self._owners = dict(owners or {})
@@ -100,7 +96,7 @@ class DeploymentEvidence:
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
         """Evidence that authorizes nothing: every lockfile-listed file is kept."""
-        return cls(deploy_root=deploy_root, receipts={}, render=None)
+        return cls(deploy_root=deploy_root, receipts={}, render=None, kept=())
 
     @classmethod
     def collect(
@@ -111,7 +107,7 @@ class DeploymentEvidence:
         lockfile: LockFile | None,
         lockfile_root: Path,
         diagnostics,
-        kept: Iterable[str] = (),
+        kept: Iterable[str],
     ) -> DeploymentEvidence:
         """Load this installation's receipts and bind a lazy render of *lockfile*.
 
@@ -175,6 +171,19 @@ class DeploymentEvidence:
             if rendered is not None and compute_file_hash(physical) == rendered:
                 return True
         return False
+
+    def retain(self, kept: Iterable[str]) -> None:
+        """Adopt this run's skip set; evidence built before integration learns it late."""
+        values = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
+        if values == self._kept:
+            return
+        self._kept = values
+        # Every ancestor directory of a kept member, so each lookup stays O(1).
+        self._kept_parents = frozenset(
+            "/".join(parts[:index])
+            for parts in (value.split("/") for value in values)
+            for index in range(1, len(parts))
+        )
 
     def kept(self, value: str) -> bool:
         """Return whether this install kept *value*, or a member under that directory."""
