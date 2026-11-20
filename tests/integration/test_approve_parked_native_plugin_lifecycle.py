@@ -129,8 +129,12 @@ def test_user_scope_claude_plugin_is_approved_by_the_printed_command(
     world = _World(tmp_path, apm_binary_path, "user", "claude")
     plugin = _claude_plugin(world.packages)
     installed = _parked_install(world, plugin)
-    claude_json = world.home / ".claude.json"
-    assert _SERVER not in (claude_json.read_text("utf-8") if claude_json.is_file() else "")
+    settings = world.home / ".claude" / "settings.json"
+
+    def enabled() -> bool:
+        return settings.is_file() and "p-native-claude" in settings.read_text("utf-8")
+
+    assert not enabled(), "a parked plugin was enabled in Claude settings"
 
     explained = world.run_hint(installed.stdout, r"Explain: (apm policy explain -g \S+)")
     assert explained.returncode == 0 and "verdict: blocked" in explained.stdout, _evidence(
@@ -143,7 +147,7 @@ def test_user_scope_claude_plugin_is_approved_by_the_printed_command(
     deployed = world.apm("install", "-g")
     assert deployed.returncode == 0, _evidence(deployed)
     assert "Parked" not in deployed.stdout, _evidence(deployed)
-    assert _SERVER in claude_json.read_text("utf-8")
+    assert enabled(), _evidence(deployed)
     pending = world.apm("approve", "-g", "--pending")
     assert "All packages with executables are approved." in pending.stdout, _evidence(pending)
 
