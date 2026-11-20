@@ -417,12 +417,13 @@ def gate_retirements(
     if route.blocks or route.unresolved:
         return None
     denied = policy_denied_locked_packages(lockfile, route.policy)
-    view = CurrentMcpConfigView.select(
+    # The bare derivation: folding recorded omissions in first would put each
+    # parked server's locked config back and hide the problem asked for here.
+    view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         modules_dir,
         admission=McpAdmission.for_project(project_root, user_scope=user_scope),
-        recorded=lockfile,
     )
     return denied, view.consent_problems(lockfile)
 

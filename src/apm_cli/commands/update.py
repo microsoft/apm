@@ -217,6 +217,20 @@ def _gate_retirements_pending(
     return retirements is not None and any(retirements)
 
 
+def _reconcile_note(exec_reconcile_required: bool, gate_retirement: bool) -> str | None:
+    """The info line for an update that reconciles deployed state without moving refs."""
+    if gate_retirement:
+        return (
+            "The current gates no longer allow something deployed; reconciling it as install would."
+        )
+    if exec_reconcile_required:
+        return (
+            "Executables approvals changed since the last install; "
+            "reconciling deployed executables."
+        )
+    return None
+
+
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
     """Build the downloader used for authoritative revision-pin ref checks."""
     return GitHubPackageDownloader(auth_resolver=AuthResolver())
@@ -874,15 +888,12 @@ def _run_dep_update_locked(
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            if not _exec_reconcile_required and _gate_retirements_pending(
-                _existing_lock, _modules_dir, scope, staged_apm_package
-            ):
-                plan_state.gate_retirement = True
-            if _exec_reconcile_required or plan_state.gate_retirement:
-                logger.info(
-                    "Executables approvals changed since the last install; "
-                    "reconciling deployed executables."
-                )
+            plan_state.gate_retirement = not _exec_reconcile_required and (
+                _gate_retirements_pending(_existing_lock, _modules_dir, scope, staged_apm_package)
+            )
+            reconcile_note = _reconcile_note(_exec_reconcile_required, plan_state.gate_retirement)
+            if reconcile_note:
+                logger.info(reconcile_note)
             elif not _cache_rehydration_required:
                 retained_count = len(revision_pin_resolution.skips)
                 if retained_count:
