@@ -2455,6 +2455,20 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective package-target authorization loses its single resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-cache-pin",
+        rule_id="install-deployment-policy-cache-pin",
+        path="src/apm_cli/policy/discovery.py",
+        old=(
+            "        if not _cached_policy_verified(serialized, meta, expected_hash):\n"
+            "            return None\n"
+        ),
+        new=(
+            "        if not _cached_policy_verified(serialized, meta, expected_hash):\n"
+            "            pass\n"
+        ),
+        intent="A cached policy that fails verification is still parsed and applied.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-disable-switch-owner",
         rule_id="install-deployment-policy-disable-switch-owner",
         path="src/apm_cli/commands/audit.py",
