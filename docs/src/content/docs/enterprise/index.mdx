@@ -1,0 +1,60 @@
+---
+title: Govern your organization
+description: Control and audit what coding agents load across many repositories and harnesses, roll it out in stages, and answer security reviews with facts.
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+This journey is for a platform or security team. Your job: control and audit what
+coding agents load across hundreds of repositories and several harnesses (the agent
+tools that read the files, such as GitHub Copilot, Claude Code and Cursor), roll it out
+without breaking teams, and answer your CISO honestly.
+
+**You need:** repositories that commit `apm.yml` and `apm.lock.yaml`. If you have none
+yet, start with [Give every teammate the same skills, plugins and MCP servers](../quickstart/).
+
+The pattern organizations run today: a central team publishes versioned skills, hooks
+and MCP servers through its own marketplace; repositories install them with version
+ranges; an org policy restricts sources; a required CI check replays every lockfile.
+APM governs what gets installed. Your harness governs what runs.
+
+## Questions you can answer
+
+Security reviews, audits and incidents tend to ask the same questions about coding agents.
+Once your repositories use APM, each one has a factual answer:
+
+| The question | How you answer it | Where |
+|---|---|---|
+| What does this repository's agent load, and from which commit? | `apm.lock.yaml` lists every skill, plugin and MCP server with its commit and file hashes; `apm find` traces any file to its package. | [Inventory and drift](./drift-detection/) |
+| Which repositories use version 1.2 of our review skill? | Every repository commits its lockfile, so a code search across your organization answers it; CI can also keep a CycloneDX or SPDX inventory per release. | [Inventory and drift](./drift-detection/) |
+| Can a team pull a skill or MCP server from a source we have not approved? | Not past CI: under `enforcement: block`, a required `apm audit --ci` check fails the pull request. | [Set an org policy](./apm-policy/) |
+| Did someone edit the agent files after review? | `apm audit` rebuilds what the lockfile describes and reports every file that differs. | [Gate pull requests](./enforce-in-ci/) |
+| Which hooks and MCP servers run code on developer machines, and who allowed them? | With the executables gate on, each one needs an approval. Project approvals live in `apm.yml`, so git history shows who approved what and when; personal grants and organization recommendations can also admit a package, and `apm policy explain <package>` shows which layer decided. | [Control executables](./control-executables/) |
+| How do we ship a fix to every repository? | Release a new version through your marketplace; repositories receive it as a reviewed lockfile change from `apm update`, Dependabot or Renovate. | [Build your organization's marketplace](./org-marketplace/) |
+| What do we hand an auditor? | The lockfiles, the CI check history and an exported inventory. The inventory lists what was installed; it is not an attestation. | [Agent supply chain security model](./security/) |
+
+## Roll out in stages
+
+Each stage is reversible. Move on when the exit criteria hold in your pilot repositories.
+
+| Stage | What you turn on | Exit criteria |
+|---|---|---|
+| 1. Lock | `apm.yml` and `apm.lock.yaml` committed in each repository | A fresh clone passes `apm install --frozen` |
+| 2. CI check | `apm install --frozen` and `apm audit --ci` as a required pull-request check | Every pilot repository shows the check, green |
+| 3. Policy in warn | `apm-policy.yml` with `enforcement: warn`; CI adds `--policy org` | `apm policy status --check` passes everywhere; warnings triaged |
+| 4. Block | `enforcement: block` and `fetch_failure: block` in the policy; `policy.fetch_failure_default: block` in each `apm.yml` | A pull request that adds a denied source fails; a run that cannot load the policy fails |
+| 5. Executables and inventory | The executables gate with recommended approvals; `apm lock export` | Every hook and MCP server is approved; an inventory per release |
+
+## Tasks
+
+<CardGrid>
+  <LinkCard title="Agent supply chain security model" description="What each control does and does not do, and the threat model." href="./security/" />
+  <LinkCard title="Set an org policy" description="Restrict package sources for every repository, starting in warn." href="./apm-policy/" />
+  <LinkCard title="Gate pull requests" description="Make the lockfile and policy check a required CI check." href="./enforce-in-ci/" />
+  <LinkCard title="Control executables" description="Decide which packages may run hooks, MCP servers and scripts." href="./control-executables/" />
+  <LinkCard title="Build your organization's marketplace" description="Publish approved agent capabilities that teams install by name." href="./org-marketplace/" />
+  <LinkCard title="Install through a proxy or offline" description="Route downloads through a mirror, or install with no network." href="./registry-proxy/" />
+  <LinkCard title="Inventory and drift" description="Trace files to packages, catch drift, export an SBOM." href="./drift-detection/" />
+</CardGrid>
+
+New to the idea? Read [The agent supply chain](../concepts/agent-supply-chain/).

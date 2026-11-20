@@ -192,7 +192,7 @@ apm install --target claude
 
 The local exclusion avoids changing repository-wide ignore rules. This install
 also adds deploy paths to `apm.lock.yaml`; leave that local override uncommitted.
-Check the [target catalogue](../../concepts/primitives-and-targets/#target-catalogue)
+Check the [target catalogue](../../reference/targets-matrix/)
 for other targets; some write to more than one root.
 
 ## Testing

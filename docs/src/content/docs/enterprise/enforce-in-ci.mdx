@@ -1,0 +1,187 @@
+---
+title: Gate pull requests
+description: Make a required CI check replay every lockfile and apply your org policy, so a pull request that adds a denied source or skips the policy cannot merge.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+You need the org policy to hold even when a developer skipped it locally. This page adds
+one CI job that replays the lockfile and applies the policy on every pull request, then
+makes it a required check. Local bypasses (`--no-policy`, `APM_POLICY_DISABLE=1`) do not
+reach this job.
+
+**You need:** an org policy ([Set an org policy](../apm-policy/)) and repositories that
+commit `apm.yml` and `apm.lock.yaml`.
+
+## Add the check
+
+<Steps>
+
+1. **Add the workflow** to each repository, or to a shared workflow your repositories
+   call:
+
+   ```yaml title=".github/workflows/apm.yml"
+   name: APM
+   on: pull_request
+   jobs:
+     apm:
+       runs-on: ubuntu-latest
+       permissions:
+         contents: read
+         security-events: write
+       env:
+         GITHUB_APM_PAT: ${{ secrets.APM_PAT }}
+       steps:
+         - uses: actions/checkout@v4
+         - uses: microsoft/apm-action@v1
+           with:
+             setup-only: true
+         - run: apm policy status --check
+         - run: apm install --frozen
+         - run: apm audit --ci --policy org -f sarif -o apm.sarif
+         - if: always()
+           uses: github/codeql-action/upload-sarif@v3
+           with:
+             sarif_file: apm.sarif
+             category: apm
+   ```
+
+   Each step does one job:
+   - `apm policy status --check` fails when no usable policy resolves: missing,
+     unreachable, or no git remote.
+   - `apm install --frozen` installs exactly what the lockfile records. It fails when
+     `apm.lock.yaml` is missing or out of sync with `apm.yml`, and runs the install-time
+     policy gate and content scan.
+   - `apm audit --ci --policy org` runs the [Baseline CI checks](../../reference/baseline-checks/),
+     replays the lockfile to catch drift, and applies the org policy. It exits 1 on any
+     failure.
+   - `if: always()` uploads SARIF even when the audit failed, so findings show up in
+     GitHub code scanning.
+
+   `APM_PAT` needs read access to your private packages and the policy repository.
+   `setup-only: true` installs the CLI and nothing else.
+
+2. **Open a pull request** and let the job run once. GitHub registers the check under
+   the job name, `apm`.
+
+3. **Make it required** with a ruleset (next section). Do not add `paths:` filters to a
+   required workflow: a skipped required check stays pending and blocks merges.
+
+</Steps>
+
+## What a red check looks like
+
+Reproduce both locally with a policy file before you roll out. In CI the source is
+`org`; the output is the same.
+
+**A dependency outside the policy.** Under `enforcement: block`:
+
+```bash frame="terminal"
+apm audit --ci --policy ./apm-policy.yml
+```
+
+```text frame="none"
+...
+| [x]      | dependency-allowlist     | 1 dependency(ies) not in allow list                        |
+| [+]      | drift                    | no drift detected against lockfile                         |
++--------------------------------------------------------------------------------------------------+
+
+  dependency-allowlist details:
+    - github.com/github/awesome-copilot/skills/review-and-refactor: not in allowed sources
+
+[x] 1 of 11 check(s) failed
+```
+
+Under `enforcement: warn` the same row reads `[+] ... (enforcement: warn)` and the job
+passes. Until you switch to block, a green check does not mean the policy holds.
+
+**A policy that cannot be loaded.** An explicit source that fails to load fails closed:
+
+```bash frame="terminal"
+apm audit --ci --policy ./policy-mirror/apm-policy.yml
+```
+
+```text frame="none"
+[x] Policy './policy-mirror/apm-policy.yml' could not be loaded: Policy file not found: ./policy-mirror/apm-policy.yml
+    --policy was passed explicitly, so the audit fails closed instead of skipping enforcement. Fix the policy source above and re-run.
+```
+
+With `--policy org`, a fetch failure fails the audit when the repository's
+`apm.yml` sets `policy.fetch_failure_default: block`; without it, the audit warns and
+skips policy checks. If the policy file is deleted, `--policy org` runs no policy checks at all. That
+is why the workflow runs `apm policy status --check` before the audit: it exits 1 in both cases.
+
+## Require the check with GitHub rulesets
+
+An organization ruleset makes the check mandatory across many repositories at once.
+
+1. Organization **Settings** > **Repository** > **Rulesets** > **New branch ruleset**.
+2. **Enforcement status:** start with `Evaluate` (logs would-be blocks), then `Active`.
+3. **Bypass list:** leave it empty. Anyone listed can merge a red check.
+4. **Target repositories:** all, or those with a custom property such as `uses-apm`.
+5. **Target branches:** the default branch.
+6. **Rules:** require a pull request, and require status checks to pass with the check
+   `apm` from GitHub Actions. Enable "require branches to be up to date".
+
+The check name must match the registered name exactly; copy it from a pull request's
+checks tab. Protect the policy repository the same way, with CODEOWNERS for your team.
+
+## Azure DevOps and GitLab
+
+The exit code is the gate on every CI system. Run the same three commands and keep
+`apm.sarif` as a build artifact.
+
+```yaml title="azure-pipelines.yml"
+steps:
+  - script: |
+      curl -sSL https://aka.ms/apm-unix | sh -s -- --prefix "$HOME/.local"
+      export PATH="$HOME/.local/bin:$PATH"
+      apm policy status --check
+      apm install --frozen
+      apm audit --ci --policy org -f sarif -o apm.sarif
+    env:
+      ADO_APM_PAT: $(ADO_PAT)
+```
+
+In Azure Repos, add the pipeline as a **Build validation** branch policy on the default
+branch.
+
+```yaml title=".gitlab-ci.yml"
+apm:
+  image: python:3.12
+  script:
+    - pip install apm-cli
+    - apm policy status --check
+    - apm install --frozen
+    - apm audit --ci --policy org -f sarif -o apm.sarif
+  artifacts:
+    when: always
+    paths: [apm.sarif]
+```
+
+In GitLab, set the merge check **Pipelines must succeed**. The CI token needs read
+access to every `apm-policy` project in the group path.
+
+## When the check fails
+
+| Failed check | Fix |
+|---|---|
+| `lockfile-exists`, `ref-consistency`, `--frozen` refused | Run `apm install`, commit `apm.yml` and `apm.lock.yaml` |
+| `content-integrity`, `drift` | A deployed file was edited: run `apm export-patch` to keep the edit upstream, then `apm install --force` to restore the locked file (plain `apm install` keeps the edit). `content-integrity` also fails on critical hidden Unicode; review the file before you strip or replace it |
+| `dependency-allowlist`, `dependency-denylist` | Use an allowed package, or open a pull request against the policy repository |
+| `apm policy status --check` | Discovery failed; see [Debug a policy failure](../apm-policy/#debug-a-policy-failure) |
+
+There is no per-pull-request override. An exception is a change to `apm-policy.yml`,
+reviewed like any other.
+
+<Aside type="caution" title="Experimental: external scanners">
+`apm audit --external` ingests findings from third-party SARIF scanners. It requires
+`apm experimental enable external-scanners` and does not run with `--ci`. See
+[External scanners](../../integrations/external-scanners/).
+</Aside>
+
+## Related
+
+- [Baseline CI checks](../../reference/baseline-checks/): every check `--ci` runs.
+- [`apm audit`](../../reference/cli/audit/): all flags and output formats.
+- [Run in CI](../../consumer/run-in-ci/): the single-repository version of this job.
