@@ -1655,6 +1655,7 @@ def run_policy_checks(
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..models.dependency.replacement import project_manifest_dependencies
     from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
@@ -1675,8 +1676,6 @@ def run_policy_checks(
     # Load raw YAML for field-level checks
     raw_yml = _load_raw_apm_yml(project_root)
 
-    # Get dependencies from manifest (disk view)
-    apm_deps = manifest.get_apm_dependencies()
     # Every MCP server the lock keeps as baseline deploys (root, transitive and
     # recorded local-bundle servers), so policy judges the audit view's set,
     # as the install preflight judges the merged set.
@@ -1694,6 +1693,9 @@ def run_policy_checks(
 
     try:
         source_deps = _audit_source_dependencies(manifest, lock)
+        # Production declarations through ``replace:``, as the install gate
+        # judges them: required-package matching follows source replacement.
+        apm_deps = project_manifest_dependencies(manifest, include_dev=False)
     except ValueError as exc:
         result.checks.append(
             CheckResult(

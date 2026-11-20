@@ -128,7 +128,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-pl-015](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-015) | MUST | 6.3.5 | governance | active | 1 | - |
 | [req-pl-016](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-016) | MUST | 6.8 | governance | active | 1 | - |
 | [req-pl-017](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-017) | MUST | 6.8 | governance | active | 1 | - |
-| [req-pl-018](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-018) | MUST | 6.3.1 | governance | active | 4 | - |
+| [req-pl-018](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-018) | MUST | 6.3.1 | governance | active | 5 | - |
 | [req-pl-019](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-019) | MUST | 6.8.1 | governance | active | 14 | - |
 | [req-pl-020](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-020) | MUST | 6.8.1 | governance | active | 3 | - |
 | [req-pl-021](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-021) | MUST | 6.1 | governance | active | 5 | - |
@@ -142,7 +142,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-pr-008](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-008) | MUST | 8.3.1 | consumer | active | 28 | - |
 | [req-rg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rg-001) | MUST | 11.3.3 | registry | active | 1 | - |
 | [req-rpl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-001) | MUST | 4.8.1 | consumer | active | 7 | - |
-| [req-rpl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-002) | MUST | 4.8.1 | consumer | active | 5 | - |
+| [req-rpl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-002) | MUST | 4.8.1 | consumer | active | 6 | - |
 | [req-rpl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-003) | MUST | 4.8.1 | consumer | active | 5 | - |
 | [req-rpl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-004) | MUST | 4.8.1 | consumer | active | 6 | - |
 | [req-rs-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-001) | MUST | 7.2 | consumer | active | 6 | - |

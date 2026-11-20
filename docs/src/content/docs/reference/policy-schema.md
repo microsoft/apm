@@ -166,6 +166,8 @@ A dependency written as an explicit registry-proxy path (`host/artifactory/...`)
 
 A project's `default_host:` does not change what a hostless entry names, and `GITHUB_HOST` can differ between machines: for an org-wide policy, write every `require` entry with its host. Ports are ignored, as for `deny`.
 
+Required-package matching follows source replacement. When a root `replace:` rule swaps `example-org/app` for `fork-org/app-fork`, an entry identifies the selected package. Write `fork-org/app-fork` (with its host, if that is not the default). `required-packages-deployed` reads the lock entry, which stays recorded under `example-org/app`. `apm install` and `apm audit --ci` match the same way, and both judge `registry_source` against the selected source.
+
 ## mcp
 
 Rules over MCP server references, including transitive ones declared by deep dependencies.
