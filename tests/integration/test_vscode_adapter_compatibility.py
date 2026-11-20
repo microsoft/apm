@@ -100,7 +100,8 @@ class TestUpdateConfig:
             result = adapter.update_config({"servers": {}})
         assert result is False
         captured = capsys.readouterr()
-        assert "Error" in captured.out
+        # Adapter errors render through the library logger on stderr (RA-004).
+        assert "Error" in captured.out + captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +150,8 @@ class TestGetCurrentConfig:
             result = adapter.get_current_config()
         assert result == {}
         captured = capsys.readouterr()
-        assert "Error" in captured.out
+        # Adapter errors render through the library logger on stderr (RA-004).
+        assert "Error" in captured.out + captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +172,7 @@ class TestConfigureMcpServer:
         result = adapter.configure_mcp_server("")
         assert result is False
         captured = capsys.readouterr()
-        assert "server_url cannot be empty" in captured.out
+        assert "server_url cannot be empty" in captured.out + captured.err
 
     def test_server_not_in_registry_raises_value_error(self, tmp_path):
         adapter = _make_adapter(tmp_path)
