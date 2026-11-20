@@ -7,7 +7,8 @@ so ``egress_log`` sees all of it. The proxy terminates TLS for these origins:
 - git smart HTTP for ``github.com`` and the host aliases (GHE Cloud, GHES,
   Azure DevOps, GitLab URL shapes), answered by ``git http-backend`` from
   local bare repositories;
-- ``api.github.com`` (and the GHE Cloud / GHES API shapes): repository
+- ``api.github.com`` (and the GHE Cloud / GHES API shapes, including
+  ``https://<host>/api/v3`` on both): repository
   metadata, commits and the Contents API, read from the same repositories --
   policy discovery and marketplace catalogs use it;
 - ``raw.githubusercontent.com``;
@@ -72,6 +73,10 @@ _ADO_POLICY_REPOS = {("apm", "apm-policy"), ("_apm", "_apm")}
 # API base per GitHub-family host: GHE Cloud uses an api. subdomain, GHES /api/v3.
 _API_HOSTS = {API_HOST: "", f"api.{HOST_ALIASES['ghe'][0]}": ""}
 _GHES_API_PREFIX = "/api/v3"
+# Hosts that also answer ``https://<host>/api/v3``: GHES, and GHE Cloud, whose
+# contents and commits APM reads there (deps/download_strategies.py,
+# policy/discovery.py).
+_V3_API_HOSTS = frozenset({HOST_ALIASES["ghes"][0], HOST_ALIASES["ghe"][0]})
 _GIT_SERVICES = ("/info/refs", "/git-upload-pack", "/HEAD")
 
 # Policy documents per variant (schema: src/apm_cli/policy/schema.py).
@@ -284,7 +289,7 @@ class WorldServices:
             return refusal
         if request.host == ADO_HOST and _ADO_ITEMS in path:
             return self._ado_items(request, path)
-        if request.host == HOST_ALIASES["ghes"][0] and path.startswith(_GHES_API_PREFIX + "/"):
+        if request.host in _V3_API_HOSTS and path.startswith(_GHES_API_PREFIX + "/"):
             return self._api(request, path[len(_GHES_API_PREFIX) :])
         service = next((s for s in _GIT_SERVICES if path.endswith(s)), None)
         if service is None:

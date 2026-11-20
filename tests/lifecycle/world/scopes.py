@@ -17,7 +17,7 @@ import yaml
 
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.contract import World
-from tests.lifecycle.world.services import ADO_BEARER, ADO_PAT, policy_org
+from tests.lifecycle.world.services import ADO_BEARER, ADO_PAT, HOST_ALIASES, policy_org
 from tests.lifecycle.world.shims import AZ_TOKEN_FILE
 
 # A sha256 no served policy has: the hash-mismatch variant pins it.
@@ -36,18 +36,18 @@ def apm_home_outside_home(world: World) -> World:
 def use_policy(world: World, variant: str, host: str = "github") -> None:
     """Make org policy *variant* govern ``world.project``, as its git remote does for a user.
 
-    ``host="ado"`` points the remote at dev.azure.com, so APM reads the policy
-    through the Azure DevOps Items API instead of the GitHub Contents API.
+    ``host`` picks the remote's host: ``github`` (Contents API on api.github.com),
+    ``ghe`` (GHE Cloud, ``https://<host>/api/v3``) or ``ado`` (Azure DevOps Items API).
     """
     org = policy_org(variant)
     git = ("git", "-C", str(world.project))
     if not (world.project / ".git").exists():
         subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
-    remote = (
-        f"https://dev.azure.com/{org}/lifecycle/_git/consumer"
-        if host == "ado"
-        else f"https://github.com/{org}/consumer.git"
-    )
+    remote = {
+        "github": f"https://github.com/{org}/consumer.git",
+        "ghe": f"https://{HOST_ALIASES['ghe'][0]}/{org}/consumer.git",
+        "ado": f"https://{HOST_ALIASES['ado'][0]}/{org}/lifecycle/_git/consumer",
+    }[host]
     existing = subprocess.run(
         (*git, "remote"), env=world.env, capture_output=True, text=True, check=True
     ).stdout.split()
