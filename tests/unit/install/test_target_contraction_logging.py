@@ -20,6 +20,7 @@ from apm_cli.install.manifest_reconcile import (
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 class _RecordingLogger:
@@ -73,6 +74,7 @@ def test_contraction_deletion_is_surfaced_at_default_verbosity(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         logger=logger,
     )
 
@@ -88,6 +90,7 @@ def test_contraction_user_edit_skip_is_surfaced(tmp_path):
     """A user-edited dropped-target file MUST be kept AND reported via
     ``logger.cleanup_skipped_user_edit`` so the user learns APM preserved it."""
     lockfile, _claude_rel, cursor_rel, _claude_abs, cursor_abs = _seed_lockfile(tmp_path)
+    evidence = receipted_evidence(tmp_path)
     cursor_abs.write_text("# cursor rule\nUSER EDIT\n", encoding="utf-8")
     logger = _RecordingLogger()
 
@@ -97,6 +100,7 @@ def test_contraction_user_edit_skip_is_surfaced(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=evidence,
         logger=logger,
     )
 
@@ -120,6 +124,7 @@ def test_contraction_without_logger_still_deletes(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
     )
 
     assert changed is True
@@ -157,6 +162,7 @@ def test_contraction_removes_only_selected_removed_target_ownership(tmp_path):
         active_targets=[KNOWN_TARGETS["agent-skills"]],
         declared_targets=[KNOWN_TARGETS["agent-skills"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         dependency_keys={removed.get_unique_key()},
         remove_selected_ownership=True,
         user_scope=True,
@@ -196,6 +202,7 @@ def test_selected_ownership_cleanup_removes_unique_active_target_file(tmp_path):
         active_targets=[KNOWN_TARGETS["opencode"]],
         declared_targets=[KNOWN_TARGETS["opencode"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         dependency_keys={removed.get_unique_key()},
         remove_selected_ownership=True,
         user_scope=True,
@@ -225,6 +232,7 @@ def test_selected_cleanup_outcome_keeps_lock_truthful_after_partial_removal(tmp_
     )
     lockfile = LockFile()
     lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
     kept_abs.write_text("# edited\n", encoding="utf-8")
     key = removed.get_unique_key()
     outcome = SelectedCleanupOutcome()
@@ -235,6 +243,7 @@ def test_selected_cleanup_outcome_keeps_lock_truthful_after_partial_removal(tmp_
         active_targets=[target],
         declared_targets=[target],
         diagnostics=DiagnosticCollector(),
+        evidence=evidence,
         dependency_keys={key},
         remove_selected_ownership=True,
         selected_outcome=outcome,
@@ -267,6 +276,7 @@ def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
     )
     lockfile = LockFile()
     lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
     (tmp_path / kept_rel).write_text("# edited\n", encoding="utf-8")
     key = removed.get_unique_key()
     outcome = SelectedCleanupOutcome()
@@ -277,6 +287,7 @@ def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
         active_targets=[target],
         declared_targets=[target],
         diagnostics=DiagnosticCollector(),
+        evidence=evidence,
         dependency_keys={key},
         remove_selected_ownership=True,
         selected_outcome=outcome,

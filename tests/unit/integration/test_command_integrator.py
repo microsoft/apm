@@ -21,6 +21,7 @@ from apm_cli.integration.command_integrator import (
     CommandIntegrator,
     _extract_input_names,
 )
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _to_bundle(d: dict) -> IntegratorBundle:
@@ -1443,6 +1444,7 @@ class TestCursorCommandIntegration:
             None,
             temp_project,
             managed_files=managed,
+            evidence=receipted_evidence(temp_project),
         )
 
         assert result["files_removed"] == 1
