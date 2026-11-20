@@ -2853,7 +2853,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:e78d7ec47894e1b3f229d91200769cc2547e5f979e38b9f04e31d679fc23c86d
+  content_hash: sha256:03fbd47154a1536e62f1fdfe639b0f0a670a41ee5d59d451e7381ab73929ca3a
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/references/verifier-brief.md
@@ -3667,7 +3667,7 @@ local_deployed_file_hashes:
   .agents/skills/release-acceptance/evals/trigger-evals.json: sha256:342290adca5441be54d6222fc3dac31de73c60ba3ef5c0ef7e8cfc8f237d61b5
   .agents/skills/release-acceptance/references/atlas-protocol.md: sha256:f93d0ecbe9cbfce3c7e91a5f216b98a18615fd35895f2135519ed95e7db1a302
   .agents/skills/release-acceptance/references/lenses.md: sha256:87a609b1c929329f698dc8630ab15ed7fc15ec591cf9770cee16974960c092cc
-  .agents/skills/release-acceptance/references/rubric.md: sha256:e78d7ec47894e1b3f229d91200769cc2547e5f979e38b9f04e31d679fc23c86d
+  .agents/skills/release-acceptance/references/rubric.md: sha256:03fbd47154a1536e62f1fdfe639b0f0a670a41ee5d59d451e7381ab73929ca3a
   .agents/skills/release-acceptance/references/verifier-brief.md: sha256:d0d9a9d1bb1a2721f1130feba1ce583b1bb2c86509e37396e962ada9ceb2c004
   .agents/skills/release-acceptance/references/walker-brief.md: sha256:3e0190461cbcdef88f81b750ab2016a7f64465f25525c122b398335640c3c539
   .agents/skills/release-acceptance/scripts/brief_lint.py: sha256:faefe5c3c41d9e9f7b5b89ebecdf33c0036393c9df27d396c5af789b10c43869
