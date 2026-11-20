@@ -545,6 +545,20 @@
       ]
     },
     {
+      "issue": 4059,
+      "fixed_in": "Unreleased",
+      "summary": "Uninstall-time LSP reconciliation re-selected targets from the saved default or harness detection instead of the recorded lsp_target_servers, so a --target copilot project failed with No harness detected and a saved default moved surviving servers to another harness.",
+      "failure_modes": ["routing", "cleanup", "outcome"],
+      "properties": ["routing.authorized_targets_only", "ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_uninstall_without_targets_key_uses_the_recorded_target",
+        "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_saved_default_target_never_moves_a_surviving_server",
+        "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_malformed_recorded_target_config_still_fails_closed",
+        "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_manifest_targets_still_win_over_the_recorded_target",
+        "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_lock_without_recorded_targets_keeps_the_fallback"
+      ]
+    },
+    {
       "issue": 4116,
       "fixed_in": "Unreleased",
       "summary": "PERF-H1, PERF-H9: the declared merge_group gate (full integration, binary build, release validation, global coverage floor) gated no merge after 2026-09-09 while merge-gate.yml and the workflow comments still described it as live; regressions outside lifecycle smoke surfaced only in the nightly.",
