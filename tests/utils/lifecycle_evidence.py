@@ -571,14 +571,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
     ),
     KnownOutputCell(
-        "install-adapter-unreadable-config-warning-twice",
-        "I9",
-        "#4332",
-        _runs("install"),
-        r"stderr repeats a line: 'WARNING apm_cli\.adapters\.client\.\w+ Could not read",
-        output=r"as a JSON object -- skipping config write",
-    ),
-    KnownOutputCell(
         "update-deny-all-lifecycle-notice-repeats",
         "I9",
         "#4333",
@@ -593,15 +585,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "install-hook-summary-line-twice",
-        "I9",
-        "#4336",
-        _runs("install"),
-        r"repeats a line: '\|   \w+: runs ",
-        # The same hook summary line printed twice back to back in one package block.
-        output=r"^  (\|   \w+: runs [^\n]*)\n  \1$",
     ),
     KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
