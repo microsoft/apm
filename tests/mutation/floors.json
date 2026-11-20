@@ -536,6 +536,7 @@
         }
       ],
       "test_seams": [
+        "tests/unit/policy/test_outcome_routing.py",
         "tests/unit/policy/test_trust_policy_outcome.py",
         "tests/unit/policy/test_pr_832_findings.py"
       ]

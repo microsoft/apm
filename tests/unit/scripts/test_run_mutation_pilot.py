@@ -454,7 +454,6 @@ def test_run_mutmut_respects_cache_mode_and_passes_owner_patterns(
     monkeypatch.setattr(
         pilot.shutil, "rmtree", lambda path, ignore_errors: removals.append(path)
     )
-    monkeypatch.setattr(pilot.shutil, "which", lambda name: f"/venv/bin/{name}")
     run = Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(pilot.subprocess, "run", run)
     owner = _owner(pilot)
@@ -463,18 +462,37 @@ def test_run_mutmut_respects_cache_mode_and_passes_owner_patterns(
 
     assert len(removals) == expected_removals
     assert run.call_args.args[0] == [
-        "/venv/bin/mutmut",
+        sys.executable,
+        "-c",
+        pilot._MUTMUT_SHIM,
         "run",
         "--max-children",
         "3",
         *owner.patterns,
     ]
+    assert run.call_args.kwargs["cwd"] == tmp_path
+
+
+def test_mutmut_shim_keeps_stats_working_after_a_test_chdirs(
+    pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import mutmut
+    import mutmut.mutation.trampoline as trampoline
+
+    monkeypatch.setattr(mutmut, "_stats", set())
+    monkeypatch.setattr(trampoline, "record_trampoline_hit", trampoline.record_trampoline_hit)
+    shim = pilot._MUTMUT_SHIM.replace("sys.exit(cli())\n", "")
+    exec(compile(shim, "<shim>", "exec"), {})  # noqa: S102 - the runner's own constant
+    monkeypatch.chdir(tmp_path)
+
+    trampoline.record_trampoline_hit("apm_cli.x.x_fn")
+
+    assert mutmut._stats == {"apm_cli.x.x_fn"}
 
 
 def test_run_mutmut_failure_is_reported(
     pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(pilot.shutil, "which", lambda name: f"/venv/bin/{name}")
     monkeypatch.setattr(
         pilot.subprocess,
         "run",

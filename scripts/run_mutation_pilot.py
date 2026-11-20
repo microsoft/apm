@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import importlib.util
 import json
 import math
 import os
@@ -96,6 +97,26 @@ SENSITIVE_ENVIRONMENT_NAMES = frozenset(
         "SYSTEM_ACCESSTOKEN",
     }
 )
+
+
+# mutmut 3.6.0 resolves the relative ``source_paths`` against the current
+# directory on every stats hit, so any test that chdirs (monkeypatch.chdir)
+# crashes stats collection with FileNotFoundError. With max_stack_depth=-1 the
+# resolved paths are unused, so record the hit anyway.
+_MUTMUT_SHIM = """\
+import sys
+import mutmut
+import mutmut.mutation.trampoline as trampoline
+from mutmut.__main__ import cli
+_hit = trampoline.record_trampoline_hit
+def _cwd_safe_hit(name):
+    try:
+        _hit(name)
+    except FileNotFoundError:
+        mutmut._stats.add(name)
+trampoline.record_trampoline_hit = _cwd_safe_hit
+sys.exit(cli())
+"""
 
 
 class PilotError(RuntimeError):
@@ -359,11 +380,18 @@ def _run_mutmut(
     """Execute exactly the owners' function patterns."""
     if not reuse_cache:
         shutil.rmtree(repo_root / "mutants", ignore_errors=True)
-    executable = shutil.which("mutmut")
-    if executable is None:
+    if importlib.util.find_spec("mutmut") is None:
         raise PilotError("mutmut is not installed; run uv sync --extra dev")
     patterns = [pattern for owner in owners for pattern in owner.patterns]
-    command = [executable, "run", "--max-children", str(max_children), *patterns]
+    command = [
+        sys.executable,
+        "-c",
+        _MUTMUT_SHIM,
+        "run",
+        "--max-children",
+        str(max_children),
+        *patterns,
+    ]
     started = time.monotonic()
     result = subprocess.run(  # noqa: S603 - fixed executable and owner patterns
         command,
