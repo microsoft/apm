@@ -83,6 +83,7 @@ lifecycle_smoke"``. Goldens: ``goldens/<J>/<nn>.txt``, written by
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import fnmatch
 import importlib
@@ -484,7 +485,7 @@ class JourneyRun:
                 (work / relative).parent.mkdir(parents=True, exist_ok=True)
                 (work / relative).write_text(text, encoding="utf-8")
             subprocess.run(command, env=self.world.env, check=True, capture_output=True, timeout=60)
-        shutil.rmtree(work)
+        remove_tree(work)
 
     def close(self) -> None:
         _unreachable(self.world.services).clear()
@@ -993,7 +994,8 @@ class JourneyRun:
                     found.append(f"after the advice {line!r} still exits {result.returncode}")
                 facts.record("O8", Evidence(exit=0), result)
         finally:
-            shutil.rmtree(copy, ignore_errors=True)
+            with contextlib.suppress(OSError):
+                remove_tree(copy)
         return found
 
     def _remediate(self, world, actions, text: str) -> list[str]:
