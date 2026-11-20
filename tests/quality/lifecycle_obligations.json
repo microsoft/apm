@@ -23649,7 +23649,7 @@
   "E3": {
    "evidence": [
     "src/apm_cli/install/services.py:850",
-    "src/apm_cli/install/services.py:1050"
+    "src/apm_cli/install/services.py:1052"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23667,8 +23667,8 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:684",
-    "src/apm_cli/commands/compile/cli.py:716"
+    "src/apm_cli/commands/compile/cli.py:686",
+    "src/apm_cli/commands/compile/cli.py:720"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },
@@ -23693,34 +23693,34 @@
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:162"
+    "src/apm_cli/commands/pack.py:165"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:32",
-    "src/apm_cli/commands/pack.py:33"
+    "src/apm_cli/commands/pack.py:35",
+    "src/apm_cli/commands/pack.py:36"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:953"
+    "src/apm_cli/commands/install.py:956"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1233",
-    "src/apm_cli/commands/install.py:997",
-    "src/apm_cli/commands/install.py:971",
+    "src/apm_cli/commands/install.py:1236",
+    "src/apm_cli/commands/install.py:1000",
+    "src/apm_cli/commands/install.py:974",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:698",
     "src/apm_cli/commands/uninstall/engine.py:857",
     "src/apm_cli/commands/uninstall/engine.py:690",
-    "src/apm_cli/commands/update.py:448",
+    "src/apm_cli/commands/update.py:453",
     "src/apm_cli/commands/prune.py:199",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "8d7eed3bb30c6b6798616c9dff449a8470da001da41dbe77d98cac41ef03815a"
+ "sha256": "4646fe1573c663d7334a59405347b2cadfc1168e7c30936d7c78307f5039ebdf"
 }
