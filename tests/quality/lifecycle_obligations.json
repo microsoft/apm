@@ -23650,7 +23650,7 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:842",
+    "src/apm_cli/install/services.py:850",
     "src/apm_cli/install/services.py:1050"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
@@ -23730,12 +23730,12 @@
   },
   "U9": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:184",
-    "src/apm_cli/commands/approve.py:188"
+    "src/apm_cli/commands/approve.py:174",
+    "src/apm_cli/commands/approve.py:178"
    ],
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
  "schema_version": 1,
- "sha256": "0f31d7f1440c52f4b7e72068767bfa17eae99d386bc31e031dfce33e8d0a2e1f"
+ "sha256": "1dbec0fa89c1a5b2bf57598f8cfa8828f40ccd0d96c325c8379c4af0a2e85793"
 }

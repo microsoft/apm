@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1017, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 460, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 470, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 491, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 518, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 456, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 466, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 487, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 514, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 583, 'argument("packages"'),
@@ -104,8 +104,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "bundle-install": (Ev(_INSTALL, 1233, "detect_local_bundle"),),
     "mcp-install": (Ev(_INSTALL, 953, '"--mcp"'), Ev(_INSTALL, 885, '"--target"')),
     "approve-deny": (
-        Ev(_APPROVE, 134, 'argument("packages"'),
-        Ev(_APPROVE, 214, 'argument("packages"'),
+        Ev(_APPROVE, 124, 'argument("packages"'),
+        Ev(_APPROVE, 207, 'argument("packages"'),
     ),
     "audit": (
         Ev("src/apm_cli/commands/audit.py", 1369, 'argument("package"'),
@@ -146,11 +146,11 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 917, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 483, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 479, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 591, '"--global"'),
     "compile": Ev(_COMPILE, 1378, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 100, '"--global"'),
-    "approve-deny": Ev(_APPROVE, 149, '"--user"'),
+    "approve-deny": Ev(_APPROVE, 139, '"--user"'),
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 162, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 77, "def prune(ctx, dry_run)"),
@@ -234,7 +234,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
-        (Ev(_APPROVE, 184, "if list_decisions:"), Ev(_APPROVE, 188, "if pending:")),
+        (Ev(_APPROVE, 174, "if list_decisions:"), Ev(_APPROVE, 178, "if pending:")),
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
@@ -262,7 +262,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 842, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 850, "staged_files"),
             Ev("src/apm_cli/install/services.py", 1050, '"instructions" not in target.primitives'),
         ),
     ),
