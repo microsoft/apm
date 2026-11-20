@@ -395,6 +395,7 @@ class TestWatchMode:
             pass  # any other error is acceptable — we just check no crash loop
         finally:
             os.chdir(old_cwd)
+        assert not (tmp_path / "AGENTS.md").exists()
 
     def test_watch_mode_initial_compilation_success(self, tmp_path) -> None:
         """Successful initial compilation calls logger.success."""

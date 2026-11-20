@@ -820,6 +820,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         joined = " ".join(progress_calls)
         self.assertIn("Instructions already in .claude/rules/", joined)
         self.assertIn("CLAUDE.md not generated", joined)
+        self.assertFalse((Path(self.tmp_resolved) / "CLAUDE.md").exists())
 
     def test_skip_instructions_ignores_symlink_outside_project(self):
         """A .claude/rules/ symlinked outside the project does not trigger skip."""

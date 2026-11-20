@@ -788,6 +788,7 @@ class TestCleanupOrphanedFiles:
         with patch.object(Path, "unlink", side_effect=OSError("permission denied")):
             msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
         assert any("Failed to remove" in m for m in msgs)
+        assert f.exists()
 
     def test_all_hand_authored_reports_zero_removed(self, tmp_path: Path) -> None:
         """When every file in the list fails the marker re-check, reports '0 files removed'."""

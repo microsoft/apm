@@ -247,6 +247,7 @@ class TestConstitutionInjector:
         assert status == "SKIPPED"
         assert hash_val is None
         assert final == compiled
+        assert not output_path.exists()
 
     def test_skipped_preserves_existing_block(self, tmp_path):
         constitution = "Constitution rule\n"
@@ -263,6 +264,7 @@ class TestConstitutionInjector:
         final, status, hash_val = injector.inject("# Title\n\nBody.\n", False, output_path)  # noqa: RUF059
         assert status == "SKIPPED"
         assert _BEGIN in final
+        assert output_path.read_text() == existing
 
     def test_missing_when_no_constitution_file(self, tmp_path):
         injector = self._make_injector(tmp_path)
@@ -270,6 +272,7 @@ class TestConstitutionInjector:
         final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "MISSING"
         assert hash_val is None
+        assert not output_path.exists()
 
     def test_missing_preserves_existing_block(self, tmp_path):
         # AGENTS.md already has a block, but no constitution file present
@@ -281,6 +284,7 @@ class TestConstitutionInjector:
         final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "MISSING"
         assert _BEGIN in final
+        assert output_path.read_text() == f"# Title\n\n{existing_block}\nBody.\n"
 
     def test_created_with_constitution_file(self, tmp_path):
         spec_path = tmp_path / ".specify" / "memory"
@@ -294,6 +298,7 @@ class TestConstitutionInjector:
         assert hash_val is not None
         assert _BEGIN in final
         assert "New rule." in final
+        assert not output_path.exists()
 
     def test_unchanged_when_same_constitution(self, tmp_path):
         constitution = "Same rule.\n"
@@ -310,6 +315,7 @@ class TestConstitutionInjector:
 
         final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "UNCHANGED"
+        assert output_path.read_text() == existing
 
     def test_updated_when_constitution_changes(self, tmp_path):
         old_constitution = "Old rule.\n"
@@ -328,6 +334,7 @@ class TestConstitutionInjector:
         assert status == "UPDATED"
         assert "New rule." in final
         assert "Old rule." not in final
+        assert output_path.read_text() == existing
 
     def test_output_path_not_exists(self, tmp_path):
         spec_path = tmp_path / ".specify" / "memory"
@@ -338,6 +345,7 @@ class TestConstitutionInjector:
         output_path = tmp_path / "nonexistent.md"
         final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "CREATED"
+        assert not output_path.exists()
 
     def test_trailing_newline_in_output(self, tmp_path):
         spec_path = tmp_path / ".specify" / "memory"
@@ -348,6 +356,7 @@ class TestConstitutionInjector:
         output_path = tmp_path / "AGENTS.md"
         final, status, hash_val = injector.inject("# Title\n\nBody.", True, output_path)  # noqa: RUF059
         assert final.endswith("\n")
+        assert not output_path.exists()
 
     def test_hash_value_extracted_correctly(self, tmp_path):
         constitution = "My rules.\n"
@@ -360,6 +369,7 @@ class TestConstitutionInjector:
         _, _, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
         expected = compute_constitution_hash(constitution)
         assert hash_val == expected
+        assert not output_path.exists()
 
     def test_oserror_reading_existing_file_treated_as_empty(self, tmp_path):
         """OSError when reading AGENTS.md is caught; existing_content defaults to '' (lines 37-38)."""
@@ -386,6 +396,7 @@ class TestConstitutionInjector:
         # OSError causes existing_content = "" → no existing block → block CREATED
         assert status == "CREATED"
         assert hash_val is not None
+        assert output_path.read_text() == "existing content"
 
     def test_compiled_content_without_double_newline_uses_full_as_header(self, tmp_path):
         """Compiled content lacking \\n\\n causes _split_header to return full content as header (line 48)."""
@@ -402,6 +413,7 @@ class TestConstitutionInjector:
         assert status == "CREATED"
         assert hash_val is not None
         assert _BEGIN in final
+        assert not output_path.exists()
 
     def test_hash_value_none_when_block_has_single_line(self, tmp_path):
         """When render_block returns a single-line block, hash_value is None (branch 85->90)."""
@@ -417,6 +429,7 @@ class TestConstitutionInjector:
 
         assert hash_val is None
         assert status == "CREATED"
+        assert not output_path.exists()
 
     def test_hash_value_none_when_hash_line_has_no_value(self, tmp_path):
         """When hash line has no value after 'hash:', hash_value is None (branch 87->90)."""
@@ -432,3 +445,4 @@ class TestConstitutionInjector:
             _final, _status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
 
         assert hash_val is None
+        assert not output_path.exists()
