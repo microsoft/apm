@@ -24,7 +24,14 @@ from tests.integration._install_audit_replay_kit import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
 
-_DECLARED = (".claude/rules/glob.md", ".cursor/rules/glob.mdc", ".claude/skills/helper/SKILL.md")
+# The always-on ``glob`` instruction is Claude compile input since #4034; the
+# path-scoped ``py`` one stays a Claude rule.
+_DECLARED = (
+    "apm_modules/bundler/.apm/instructions/glob.instructions.md",
+    ".claude/rules/py.md",
+    ".cursor/rules/glob.mdc",
+    ".claude/skills/helper/SKILL.md",
+)
 _UNDECLARED_ROOTS = (".github", ".codex", ".opencode", ".gemini")
 
 
@@ -59,6 +66,7 @@ def test_bundle_install_lands_only_in_manifest_targets(
         assert (project / path).is_file(), path
     for root in _UNDECLARED_ROOTS:
         assert not (project / root).exists(), root
+    assert not (project / ".claude/rules/glob.md").exists()
     assert (project / "apm.yml").read_bytes() == manifest
     world.audit_clean()
 
@@ -107,7 +115,7 @@ def test_dropping_a_declared_target_after_an_explicit_target_install_is_refused(
     write(project / "apm.yml", "name: proj\nversion: 1.0.0\ntargets: [claude, cursor]\n")
     world.apm("install", str(artifact), NO_POLICY)
     world.apm("install", str(artifact), "--target", "copilot", NO_POLICY)
-    assert (project / ".claude/rules/glob.md").is_file()
+    assert (project / ".claude/rules/py.md").is_file()
     assert (project / ".github/agents/rev.agent.md").is_file()
 
     write(project / "apm.yml", "name: proj\nversion: 1.0.0\ntargets: [cursor]\n")

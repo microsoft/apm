@@ -28,7 +28,7 @@ _APM_PRIMITIVE_SUFFIXES = (
 _UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
 # Target formats local bundle install renders from a packed Markdown source
 # instead of copying it (#3714); any other source for them is skipped.
-_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})
+_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent", "claude_rules"})
 
 
 def bundle_pack_files(bundle_info: LocalBundleInfo) -> dict[str, str]:

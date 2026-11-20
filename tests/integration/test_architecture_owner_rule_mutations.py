@@ -3862,6 +3862,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="install-deployment-claude-agents-md-routing",
         rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/install/local_bundle_instructions.py",
+        old="if self._user_scope or not routes_to_agents_md(_apply_to(text), self._project_root):",
+        new="if self._user_scope:",
+        intent="Bundle installs stage Claude instructions without the routing owner's verdict.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
         path="src/apm_cli/integration/instruction_integrator.py",
         old="blocker = claude_agents_md_blocker(live_root)",
         new="blocker = None",
