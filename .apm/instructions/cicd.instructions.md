@@ -50,6 +50,9 @@ integration suite runs only at merge time via GitHub Merge Queue
    - **Linux x86_64 only**. Live inference smoke tests (`apm run`) isolated from release pipeline.
    - Uses `GH_MODELS_PAT` for GitHub Models API access.
    - Failures do not block releases - annotated as warnings.
+6. **`main-architecture-ratchets.yml`** - `push` to main only
+   - Re-runs ci.yml's `test-architecture-contracts` job (check `Architecture Ratchet Contracts (main)`), so a change that reaches main without a `merge_group` run cannot leave main silently red on the ratchet contracts.
+   - Never opts into provisional baselines. `tests/quality/test_ci_topology.py` pins the job to ci.yml's, so the two cannot drift.
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.

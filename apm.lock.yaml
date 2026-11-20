@@ -3181,7 +3181,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:a5f19cafb5b53ddce3d6ce842d8ef36f1335b70d789f8261f0286d03237cd28a
+  content_hash: sha256:bf4d5d024b8c6b6abbb449258ebbd83876ad892f05abf00c181ec526addc216a
 - kind: project-relative
   target: copilot
   value: .github/instructions/cli.instructions.md
@@ -3722,7 +3722,7 @@ local_deployed_file_hashes:
   .github/agents/test-coverage-expert.agent.md: sha256:637c44b825f5239caf67770ae2cebe8e53f43f2935ddae20c4aeb7235a28924d
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
   .github/instructions/changelog.instructions.md: sha256:575bafcc313df6387b5724ae002858bd0d0020aee10eeb780a057f53eedf0dac
-  .github/instructions/cicd.instructions.md: sha256:a5f19cafb5b53ddce3d6ce842d8ef36f1335b70d789f8261f0286d03237cd28a
+  .github/instructions/cicd.instructions.md: sha256:bf4d5d024b8c6b6abbb449258ebbd83876ad892f05abf00c181ec526addc216a
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
