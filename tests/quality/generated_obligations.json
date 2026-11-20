@@ -974,13 +974,18 @@
     "P|policy-status|no_git_remote/warn": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|policy-status|no_git_remote/warn]",
     "P|update-regate-shortcircuit|absent/block": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|absent/block]",
     "P|update-regate-shortcircuit|absent/warn": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|absent/warn]",
+    "P|update-regate-shortcircuit|cache=cold": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cache=cold]",
+    "P|update-regate-shortcircuit|cache=stale<7d": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cache=stale<7d]",
     "P|update-regate-shortcircuit|cache=stale>7d-or-expired": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cache=stale>7d-or-expired]",
+    "P|update-regate-shortcircuit|cache=warm-fresh": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cache=warm-fresh]",
     "P|update-regate-shortcircuit|cache_miss_fetch_fail/block": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cache_miss_fetch_fail/block]",
     "P|update-regate-shortcircuit|cache_miss_fetch_fail/warn": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cache_miss_fetch_fail/warn]",
     "P|update-regate-shortcircuit|cached_stale/org-block": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cached_stale/org-block]",
+    "P|update-regate-shortcircuit|cached_stale/warn": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|cached_stale/warn]",
     "P|update-regate-shortcircuit|disabled": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|disabled]",
     "P|update-regate-shortcircuit|empty/block": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|empty/block]",
     "P|update-regate-shortcircuit|empty/warn": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|empty/warn]",
+    "P|update-regate-shortcircuit|found": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|found]",
     "P|update-regate-shortcircuit|garbage_response/block": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|garbage_response/block]",
     "P|update-regate-shortcircuit|garbage_response/warn": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|garbage_response/warn]",
     "P|update-regate-shortcircuit|hash_mismatch": "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome[P|update-regate-shortcircuit|hash_mismatch]",
@@ -1089,11 +1094,6 @@
     "P|exec-map(getattr: uninstall/hook rebuild/lsp)|incomplete_chain": "#4185",
     "P|exec-map(getattr: uninstall/hook rebuild/lsp)|malformed/block": "#4185",
     "P|exec-map(getattr: uninstall/hook rebuild/lsp)|no_git_remote/block": "#4185",
-    "P|mcp-install-preflight|cache_miss_fetch_fail/block": "#4179",
-    "P|update-regate-shortcircuit|cache=cold": "#4458",
-    "P|update-regate-shortcircuit|cache=stale<7d": "#4458",
-    "P|update-regate-shortcircuit|cache=warm-fresh": "#4458",
-    "P|update-regate-shortcircuit|cached_stale/warn": "#4458",
-    "P|update-regate-shortcircuit|found": "#4458"
+    "P|mcp-install-preflight|cache_miss_fetch_fail/block": "#4179"
   }
 }

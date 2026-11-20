@@ -189,6 +189,25 @@ def _executables_need_reconcile(
     )
 
 
+def _enforce_policy_without_changes(
+    apm_package: Any, scope: InstallScope, logger: InstallLogger, dry_run: bool
+) -> None:
+    """Apply org policy to the declared dependencies when an update changes nothing."""
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root, manifest_root
+    from apm_cli.install.pipeline_entry import enforce_declared_policy
+
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    enforce_declared_policy(
+        manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER),
+        list(project_manifest_dependencies(apm_package)),
+        list(apm_package.get_all_mcp_dependencies()) or None,
+        logger,
+        dry_run=dry_run,
+    )
+
+
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
     """Build the downloader used for authoritative revision-pin ref checks."""
     return GitHubPackageDownloader(auth_resolver=AuthResolver())
@@ -903,6 +922,9 @@ def _run_dep_update_locked(
                         "All dependencies already at their latest matching refs.",
                         symbol="check",
                     )
+                # Nothing to change still judges the installed set against org
+                # policy, as install does (#4458).
+                _enforce_policy_without_changes(apm_package, scope, logger, dry_run)
                 return False
             plan_state.cache_rehydration_requested = True
 
@@ -990,7 +1012,8 @@ def _run_dep_update_locked(
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except PolicyViolationError as e:
-        _rich_error(str(e), symbol="error", err=True)
+        logger.render_summary()
+        _rich_error(f"{e} Nothing was written.", symbol="error", err=True)
         sys.exit(1)
     except (DirectDependencyError, RequiredIntegrationError) as e:
         logger.error(str(e))
