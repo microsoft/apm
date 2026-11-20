@@ -23,6 +23,7 @@ from ..core.deployment_ledger import (
     DeploymentLedgerCodec,
     DeploymentOwnerViolation,
 )
+from ..core.remediation import HIDDEN_CHARACTERS_FOUND, HIDDEN_CHARACTERS_PREVIEWED
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..install.locking import serialized_lifecycle_when
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
@@ -346,7 +347,7 @@ def _render_summary(
     remedy = (
         "Review structured or external prompt fields manually; --strip does not rewrite native settings."
         if any(not entry.strippable and entry.file in findings_by_file for entry in coverage)
-        else "  Review file contents, then run 'apm audit --strip' to remove hidden characters"
+        else f"  {HIDDEN_CHARACTERS_FOUND.sentence()}"
     )
 
     _rich_echo("")
@@ -518,7 +519,7 @@ def _preview_strip(
 
     _rich_echo("")
     logger.progress(f"{affected} file(s) would be modified")
-    logger.progress("Run 'apm audit --strip' to apply")
+    logger.progress(HIDDEN_CHARACTERS_PREVIEWED.sentence())
     return affected
 
 

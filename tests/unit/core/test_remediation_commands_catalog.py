@@ -31,10 +31,13 @@ EXECUTED = frozenset(
         "executables-approved",
         "executables-denied",
         "executables-unapproved",
+        "hidden-characters-found",
+        "hidden-characters-previewed",
         "installed-files-differ",
         "lockfile-missing-lock",
         "lockfile-unreadable",
         "orphaned-packages-prune",
+        "project-manifest-bootstrap",
         "project-manifest-missing",
     }
 )
@@ -95,6 +98,12 @@ COMPONENT_ONLY: dict[str, str] = {
     "user-manifest-missing": "installs a user-scope package; covered by the global lifecycle tests",
     "user-packages-missing": _OUTSIDE,
     "lifecycle-scripts-untrusted": _OUTSIDE,
+    "frozen-update-conflict": "usage refusal; the reported state is the flag combination, "
+    "not project state",
+    "bundle-repack-plugin": "runs in the publisher's source project, not the consumer that "
+    "reported the bundle",
+    "legacy-bundle-unpack": _OUTSIDE,
+    "registry-package-install": _NETWORK,
 }
 
 

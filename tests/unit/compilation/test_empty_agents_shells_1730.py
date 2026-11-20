@@ -27,6 +27,7 @@ from apm_cli.compilation.distributed_compiler import (
     DistributedAgentsCompiler,
     PlacementResult,
 )
+from apm_cli.core.remediation import ORPHANED_AGENTS_MD
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
 # ---------------------------------------------------------------------------
@@ -503,9 +504,7 @@ class TestCleanRemovesEmptyShells:
             "global.instructions.md: No 'applyTo' pattern specified" in warning
             for warning in result.warnings
         )
-        assert all(
-            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
-        )
+        assert all(ORPHANED_AGENTS_MD.option() not in warning for warning in result.warnings)
 
     @pytest.mark.windows_compat
     def test_plain_compile_reports_managed_orphan_retention(self, project_with_stale_shell) -> None:
@@ -540,9 +539,7 @@ class TestCleanRemovesEmptyShells:
             "global.instructions.md: No 'applyTo' pattern specified" in warning
             for warning in result.warnings
         )
-        assert all(
-            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
-        )
+        assert all(ORPHANED_AGENTS_MD.option() not in warning for warning in result.warnings)
 
 
 # ---------------------------------------------------------------------------

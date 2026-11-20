@@ -469,10 +469,91 @@ RUNTIME_MISSING = _entry(
     "runtime-missing", "apm runtime setup copilot", "install the primary runtime"
 )
 
+HIDDEN_CHARACTERS_FOUND = _entry(
+    "hidden-characters-found",
+    "apm audit --strip",
+    "remove the hidden characters",
+    before="review the file contents",
+)
+HIDDEN_CHARACTERS_PREVIEWED = _entry(
+    "hidden-characters-previewed", "apm audit --strip", "apply the previewed removals"
+)
+FROZEN_UPDATE_CONFLICT = _entry(
+    "frozen-update-conflict",
+    "apm update",
+    "refresh the locked refs",
+    then="use 'apm install --frozen' in CI",
+)
+BUNDLE_REPACK_PLUGIN = _entry(
+    "bundle-repack-plugin",
+    "apm pack --claude-plugin --archive",
+    "repack the source as a plugin-format bundle archive",
+)
+LEGACY_BUNDLE_UNPACK = _entry(
+    "legacy-bundle-unpack", "apm unpack <bundle-path>", "deploy the legacy bundle"
+)
+REGISTRY_PACKAGE_INSTALL = _entry(
+    "registry-package-install", "apm install <org/package>", "install from the registry instead"
+)
+PROJECT_MANIFEST_BOOTSTRAP = _entry(
+    "project-manifest-bootstrap", "apm install <org/repo>", "create apm.yml with that package"
+)
+
 # -- end commands/** (W1) -----------------------------------------------------
 
 # -- W3 (every other src/apm_cli module) -------------------------------------
 # -- W3 deps-compilation --
+# Advice printed by src/apm_cli/deps and src/apm_cli/compilation.
+
+ROOT_INSTRUCTIONS_HAND_AUTHORED = _entry(
+    "root-instructions-hand-authored",
+    "apm compile",
+    "regenerate it",
+    before="delete or rename it, or prepend the line '{marker}' to the top of the file",
+)
+ROOT_CONTEXT_HAND_AUTHORED = _entry(
+    "root-context-hand-authored",
+    "apm compile",
+    "regenerate it",
+    before="delete or rename the file",
+)
+NESTED_REPOSITORY_SKIPPED = _entry(
+    "nested-repository-skipped",
+    "apm compile",
+    "compile it separately",
+    before="change to {root}",
+)
+SINGLE_AGENTS_COMPILATION = _entry(
+    "single-agents-compilation",
+    "apm compile --single-agents",
+    "compile one traditional AGENTS.md file instead",
+)
+ORPHANED_AGENTS_MD = _entry(
+    "orphaned-agents-md", "apm compile --clean", "remove the orphaned AGENTS.md files"
+)
+IMMUTABLE_REQUIREMENTS_CONFLICT = _entry(
+    "immutable-requirements-conflict",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    before="align the requested refs in the root or parent manifests to the same commit",
+)
+IMMUTABLE_REQUIREMENTS_CONFLICT_FROZEN = _entry(
+    "immutable-requirements-conflict-frozen",
+    "apm install",
+    "regenerate apm.lock.yaml (--frozen never rewrites it)",
+    before="align the requested refs in the root or parent manifests to the same commit",
+)
+FROZEN_LOCKFILE_STALE = _entry(
+    "frozen-lockfile-stale",
+    "apm install",
+    "regenerate apm.lock.yaml (--frozen never rewrites it)",
+)
+PROTOCOL_FALLBACK_DISALLOWED = _entry(
+    "protocol-fallback-disallowed",
+    "apm config set allow-protocol-fallback true",
+    "allow cross-protocol fallback (not recommended)",
+)
+
 # -- end W3 deps-compilation --
 # -- W3 plugins-runtime --
 # Advice printed by adapters/, agent_plugins/, claude_plugins/, codex_plugins/,
