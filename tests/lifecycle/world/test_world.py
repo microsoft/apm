@@ -86,7 +86,6 @@ CLONE_BUDGET_SECONDS = 0.25
 _GATED = frozenset({"hook", "mcp", "lsp", "bin", "canvas", "native"})
 # Native plugins have their own source tests (Claude targets, user-scope bin/).
 _APM_GIT_PACKAGES = tuple(name for name in GIT_PUBLISHED if not name.startswith("p-native-"))
-_TRACK_CODEX_APP_SERVER_EGRESS = "#4432"
 
 # Files each package deploys after an approval, relative to the deploy root
 # (the project, or HOME at user scope), with a marker the file must contain.
@@ -136,9 +135,7 @@ _TARGETS = {
     "p-native-codex": "codex",
     "p-native-claude-bin": "claude",
 }
-_KNOWN = {
-    ("p-native-codex", "user"): _TRACK_CODEX_APP_SERVER_EGRESS,
-}
+_KNOWN = {}
 
 
 def _deploy_root(world: World, scope: str) -> Path:

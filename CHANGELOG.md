@@ -108,6 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - `apm install --frozen` checks lock sync against package copies that match the lock, so it agrees with `apm audit --ci` on an edited `apm_modules` copy. (closes #4389, #4401)
 - `apm audit --ci`, `apm install --frozen` and `apm update` read locked git sources through one cache and reach one verdict; a refused install leaves `apm_modules` unchanged. (closes #4356, #4353, #4363, #4385)
+- A Codex bundle parked by `apm install -g` is not counted as installed, and `apm install -g --frozen` fails until `apm approve -g` approves it. (#4434)
+- A local native Codex plugin install at user scope stays offline: the Codex app-server APM starts does not sync its curated marketplace. (#4434)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
 - MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
