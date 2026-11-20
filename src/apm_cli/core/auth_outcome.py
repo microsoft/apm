@@ -562,6 +562,11 @@ def is_repository_not_found(error: object) -> bool:
     return outcome.kind is AuthOutcomeKind.NOT_FOUND
 
 
+def reports_repository_not_found(error: BaseException) -> bool:
+    """Return whether *error* or one of its causes is a :class:`RepositoryNotFoundError`."""
+    return any(isinstance(current, RepositoryNotFoundError) for current in _cause_chain(error))
+
+
 def raise_for_auth_outcome(
     response: Any,
     *,

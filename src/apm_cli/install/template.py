@@ -53,8 +53,8 @@ def effective_allow_map(ctx) -> dict | None:
       ``allowExecutables`` alias) read from disk;
     * user consent -- ``~/.apm/config.json`` (lowest authority).
 
-    Returns ``None`` when the gate is disabled (backward-compatible: every
-    executable deploys).
+    Returns an explicit gate-disabled map when no layer opts into the gate
+    (backward-compatible: every executable deploys).
     """
     from apm_cli.security.executables import (
         exec_trust_context_for_project,
@@ -225,6 +225,8 @@ def preflight_skill_materializations(
 
     local_plan = None
     if ctx.root_has_local_primitives and ctx.targets:
+        from apm_cli.security.executables import AUTHORIZED_FIRST_PARTY, authorized_exec_map
+
         local = build_project_local_package_info(ctx.source_root or ctx.project_root)
         local_plan = prepare_package_deployment(
             local,
@@ -237,6 +239,7 @@ def preflight_skill_materializations(
             skill_subset=effective_dependency_selection(None, ctx).skill_subset,
             ctx=ctx,
             is_first_party=True,
+            allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),
         )
         check(local, local_plan)
     unmanaged = [conflict for conflict in conflicts if not conflict.untrusted]

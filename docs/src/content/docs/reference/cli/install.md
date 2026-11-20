@@ -15,7 +15,7 @@ apm install [PACKAGE_REF...] [OPTIONS]
 
 `apm install` resolves the dependencies declared in `apm.yml`, downloads them (with transitive resolution and a content-addressed cache), runs the built-in security scan, and deploys the resulting primitives plus the project's own `.apm/` content into every harness target it detects. It writes `apm.lock.yaml` so the next install on any machine reproduces the same files.
 
-With no arguments it installs everything from `apm.yml`. With one or more `PACKAGE_REF` arguments it adds those packages to `apm.yml` (creating one if needed) and installs only what was added. `apm install --mcp NAME` is the dedicated path for adding an MCP server entry.
+With no arguments it installs everything from `apm.yml`. With one or more `PACKAGE_REF` arguments it adds those packages to `apm.yml` (creating one if needed) and installs only what was added, plus any declared local-path dependency that `apm.lock.yaml` does not record yet. `apm install --mcp NAME` is the dedicated path for adding an MCP server entry.
 
 Repeating an existing positional package without requesting a change reports
 `already in apm.yml`, not `updated ref in apm.yml`. It preserves the existing

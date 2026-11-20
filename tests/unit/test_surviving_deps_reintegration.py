@@ -435,6 +435,7 @@ def test_hook_reintegration_sanitizes_blocked_dependency_identity(
     """A hostile dependency label must not reach prune output unchanged."""
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.hook_reintegration import build_hook_reintegration_source_plan
+    from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
     source_plan = MagicMock()
     source_plan.scan_security.return_value.should_block = True
@@ -455,7 +456,7 @@ def test_hook_reintegration_sanitizes_blocked_dependency_identity(
             dependency,
             MagicMock(),
             [],
-            allow_executables=None,
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
     message = str(error.value)

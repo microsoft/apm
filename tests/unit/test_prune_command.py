@@ -1366,3 +1366,32 @@ dependencies:
             assert prod_dir.exists(), "Prod dependency must remain"
             assert dev_dir.exists(), "Dev dependency must remain"
             assert not orphan_dir.exists(), "Orphaned package must be removed"
+
+
+class TestPruneLocalBundleHookRecheck:
+    """Only a target-resolution failure lets prune skip the hook re-check."""
+
+    @pytest.fixture
+    def project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / "apm.yml").write_text(_APM_YML_NO_DEPS)
+        monkeypatch.chdir(tmp_path)
+        clear_apm_yml_cache()
+        return tmp_path
+
+    def test_unresolved_targets_warn_and_continue(self, project: Path) -> None:
+        with patch(
+            "apm_cli.integration.targets.resolve_targets",
+            side_effect=RuntimeError("no targets"),
+        ):
+            result = CliRunner().invoke(cli, ["prune"])
+        assert result.exit_code == 0, result.output
+        assert "Local bundle hooks were NOT re-checked" in " ".join(result.output.split())
+
+    def test_other_recheck_failures_fail_closed(self, project: Path) -> None:
+        with patch(
+            "apm_cli.install.local_bundle_hook_trust.retire_unadmitted_bundle_hooks",
+            side_effect=OSError("lockfile unreadable"),
+        ):
+            result = CliRunner().invoke(cli, ["prune"])
+        assert result.exit_code == 1, result.output
+        assert "Local bundle hook re-check failed" in " ".join(result.output.split())

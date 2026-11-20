@@ -1,6 +1,6 @@
 """Deletion requires deployment evidence, never a lockfile hash alone (req-lk-024).
 
-PROPOSED amendment 0.1.69 (issue #3701, provisional number). The oracles drive
+Amendment 0.1.69 (issue #3701), adopted 2026-11-20. The oracles drive
 the cleanup owner directly: a forged lockfile row whose hash matches a user
 file keeps the file and names it; a local deployment receipt or byte
 equality with the locked render authorizes the deletion; a file that

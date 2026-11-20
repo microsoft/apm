@@ -726,8 +726,12 @@ class APMPackage:
                 bind_plugin_roots((parsed_group or {}).get(kind), package_path)
 
         # Merge user/policy registry URLs and config.json default routing.
-        from ..deps.registry.config_loader import resolve_effective_registries
+        from ..deps.registry.config_loader import (
+            resolve_effective_registries,
+            user_registry_config_path,
+        )
 
+        project_registries = registries
         registries, default_registry = resolve_effective_registries(
             registries,
             default_registry,
@@ -736,9 +740,13 @@ class APMPackage:
         if registries or default_registry:
             from ..deps.registry.feature_gate import require_package_registry_enabled
 
+            user_source = None
+            if not project_registries:
+                user_source = user_registry_config_path(create_config=create_config)
             require_package_registry_enabled(
                 "Registry configuration",
                 create_config=create_config,
+                config_source=str(user_source) if user_source else None,
             )
 
         # Route unscoped deps to the effective default registry when configured.

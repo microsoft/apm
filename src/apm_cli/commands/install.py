@@ -27,6 +27,7 @@ from apm_cli.deps.lockfile_generator import (
     check_current_cli,
     refusal_exit,
 )
+from apm_cli.deps.registry.feature_gate import UserRegistryConfigDisabledError
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -108,6 +109,7 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
+from apm_cli.install.repository_access import inaccessible_package_reason
 
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
@@ -129,7 +131,6 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _uses_clone_root_probe,
     _validate_package_exists,
-    inaccessible_package_reason,
 )
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -1724,6 +1725,9 @@ def _install_apm_packages(ctx, outcome):
             apm_package = outcome.prospective_package
     except click.UsageError:
         raise
+    except UserRegistryConfigDisabledError as e:
+        logger.error(str(e))
+        raise InstallFailureAlreadyRendered("Registry configuration needs registries") from e
     except Exception as e:
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         raise InstallFailureAlreadyRendered("Failed to parse install manifest") from e
