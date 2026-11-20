@@ -32,6 +32,9 @@ GATE_CELLS_PATH = QUALITY_DIR / "gate_cell_obligations.json"
 # Required witnesses and known-failing cells of the generated obligation space
 # (security tables and journey step oracles, ``tests/lifecycle/obligation_space.py``).
 GENERATED_PATH = QUALITY_DIR / "generated_obligations.json"
+# Optional overlay of further required witnesses and known-failing cells for the
+# same generated space; read on top of ``GENERATED_PATH`` when present.
+LIFECYCLE_PATH = QUALITY_DIR / "lifecycle_obligations.json"
 # The oracle id ``oracles.check_obligation`` writes; mirrors oracles.OBLIGATION_ORACLE.
 OBLIGATION_ORACLE = "OBLIGATION"
 # The single promise catalog; every promise id resolves here and nowhere else.
@@ -151,19 +154,27 @@ def load_catalog(
 
 def load_generated(
     path: Path = GENERATED_PATH,
+    overlay_path: Path = LIFECYCLE_PATH,
 ) -> tuple[dict[str, Obligation], dict[str, str], dict[str, str], dict[str, str]]:
     """The generated universe, its required witnesses, baseline lanes and known-failing cells.
 
-    The baseline is every generated id that is neither required nor known
-    failing, mapped to the lane that owns it; it is derived, never listed.
+    ``overlay_path`` (``lifecycle_obligations.json``), when present, adds its
+    ``required`` and ``known_failing`` entries on top of *path*. The baseline
+    is every generated id that is neither required nor known failing, mapped
+    to the lane that owns it; it is derived, never listed.
     """
     from tests.lifecycle.obligation_space import generated_obligations
 
     rows = generated_obligations()
     universe = {key: Obligation(key, strength=strength) for key, (strength, _) in rows.items()}
-    data = json.loads(path.read_text(encoding="ascii")) if path.is_file() else {}
-    required = dict(data.get("required", {}))
-    known = dict(data.get("known_failing", {}))
+    required: dict[str, str] = {}
+    known: dict[str, str] = {}
+    for source in (path, overlay_path):
+        if not source.is_file():
+            continue
+        data = json.loads(source.read_text(encoding="ascii"))
+        required.update(data.get("required", {}))
+        known.update(data.get("known_failing", {}))
     baseline = {
         key: lane for key, (_, lane) in rows.items() if key not in required and key not in known
     }
