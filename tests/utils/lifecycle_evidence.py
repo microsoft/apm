@@ -323,6 +323,7 @@ class LifecycleEvidencePlugin:
 # ---------------------------------------------------------------------------
 
 _TRACEBACK = "Traceback (most recent call last)"
+_POLICY_CACHE_AGE = re.compile(r"fetched \d+[smhd] ago")
 _STATUS_PREFIXES = ("[+]", "[!]", "[x]", "[i]", "[*]", "[>]")
 _TREE_PREFIXES = ("|--", "+--", "`--", "\\--")
 # The narrowest console width Rich wraps at when stdout is not a terminal.
@@ -624,7 +625,8 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
     found: list[OutputViolation] = []
     if _TRACEBACK in text:
         found.append(OutputViolation("I9", f"{stream} has a Python traceback"))
-    lines = _logical_lines(text)
+    # A cached-policy age ticks between phases; the same banner must still compare equal.
+    lines = [_POLICY_CACHE_AGE.sub("fetched <AGE> ago", line) for line in _logical_lines(text)]
     # Rules and table borders legitimately repeat; diagnostics carry words.
     consecutive = dict.fromkeys(
         first.strip()
