@@ -73,8 +73,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 848, '"--dry-run"'),
         Ev(_INSTALL, 850, '"--force"'),
         Ev(_INSTALL, 855, '"--frozen"'),
-        Ev(_INSTALL, 880, '"--target"'),
-        Ev(_INSTALL, 1012, '"--no-policy"'),
+        Ev(_INSTALL, 879, '"--target"'),
+        Ev(_INSTALL, 1011, '"--no-policy"'),
     ),
     "update": (
         Ev("src/apm_cli/commands/update.py", 557, 'argument("packages"'),
@@ -102,7 +102,7 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_PACK, 237, '"--force"'),
     ),
     "bundle-install": (Ev(_INSTALL, 1227, "detect_local_bundle"),),
-    "mcp-install": (Ev(_INSTALL, 948, '"--mcp"'), Ev(_INSTALL, 880, '"--target"')),
+    "mcp-install": (Ev(_INSTALL, 947, '"--mcp"'), Ev(_INSTALL, 879, '"--target"')),
     "approve-deny": (
         Ev(_APPROVE, 224, 'argument("packages"'),
         Ev(_APPROVE, 328, 'argument("packages"'),
@@ -145,7 +145,7 @@ USER_SCOPE_OPS = frozenset(
     }
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
-    "install": Ev(_INSTALL, 912, '"--global"'),
+    "install": Ev(_INSTALL, 911, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 580, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 769, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
@@ -192,7 +192,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U7": (
         "mcp-install acts on the requested server; other primitives keep no-collateral-write",
-        (Ev(_INSTALL, 948, '"--mcp"'),),
+        (Ev(_INSTALL, 947, '"--mcp"'),),
     ),
     "U8": (
         "the source decides the command: bundle-install is install of a local bundle (install "
@@ -206,8 +206,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "prune leave it untouched). A native plugin carries no canvas primitive",
         (
             Ev(_INSTALL, 1227, "detect_local_bundle"),
-            Ev(_INSTALL, 992, '"--registry"'),
-            Ev(_INSTALL, 966, '"--url"'),
+            Ev(_INSTALL, 991, '"--registry"'),
+            Ev(_INSTALL, 965, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 749, "is an MCP server, not a package"),
@@ -227,9 +227,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 685, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 686, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 689, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 701, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 702, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 705, 'target.name == "claude"'),
         ),
     ),
     "U9": (
