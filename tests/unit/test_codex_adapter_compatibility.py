@@ -183,7 +183,7 @@ class TestGetCurrentConfig:
         config_file = codex_dir / "config.toml"
         config_file.write_text("this is ::: not valid toml !!!", encoding="utf-8")
         adapter = _make_adapter(project_root=tmp_path)
-        with patch("apm_cli.adapters.client.codex._rich_warning"):
+        with patch("apm_cli.core.null_logger._rich_warning"):
             result = adapter.get_current_config()
         assert result is None
 

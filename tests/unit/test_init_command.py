@@ -2,11 +2,9 @@
 
 import json  # noqa: F401
 import os
-import re
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -962,21 +960,13 @@ class TestInitAgentrcSuggestion:
             assert result.exit_code == 0
             assert "agentrc init" in result.output
 
-    def test_agentrc_not_in_path_no_instructions_shows_tip(self):
-        """When agentrc NOT in PATH and no instructions, show tip line."""
-        _url_re = re.compile(r"https?://[^\s\[\]<>'\"]+")
+    def test_agentrc_not_in_path_prints_no_tip(self):
+        """When agentrc is NOT in PATH, the default init path names no third-party tool (#4089)."""
         with self.runner.isolated_filesystem():
             with patch("apm_cli.commands.init.shutil.which", return_value=None):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
-            assert "agentrc" in result.output
-            urls = [urlparse(m) for m in _url_re.findall(result.output)]
-            assert any(
-                u.scheme == "https"
-                and u.hostname == "github.com"
-                and u.path.startswith("/microsoft/agentrc")
-                for u in urls
-            ), "agentrc URL not found in output"
+            assert "agentrc" not in result.output
 
     def test_agentrc_suppressed_when_copilot_instructions_exist(self):
         """When .github/copilot-instructions.md exists, no agentrc mention."""

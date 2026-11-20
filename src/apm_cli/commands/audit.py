@@ -209,10 +209,11 @@ def _render_findings_table(
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 title=title,
                 show_header=True,
                 header_style="bold cyan",
@@ -474,10 +475,11 @@ def _preview_strip(
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 show_header=True,
                 header_style="bold cyan",
             )
@@ -541,10 +543,11 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 title=f"{STATUS_SYMBOLS['search']} APM Policy Compliance",
                 show_header=True,
                 header_style="bold cyan",

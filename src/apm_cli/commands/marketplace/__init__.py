@@ -734,9 +734,9 @@ def list_cmd(verbose):
                 logger.tree_item(f"  {s.name}  ({s.display_source})")
             return
 
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title="Registered Marketplaces",
             show_header=True,
             header_style="bold cyan",
@@ -963,10 +963,11 @@ def _render_build_table(logger, report):
             logger.tree_item(f"  [+] {pkg.name}  {pkg.ref}  {sha_short}  ({ref_kind})")
         return
 
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Resolved Packages",
         show_header=True,
         header_style="bold cyan",
@@ -1080,10 +1081,11 @@ def _render_outdated_table(logger, rows):
             )
         return
 
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Package Version Status",
         show_header=True,
         header_style="bold cyan",
@@ -1136,10 +1138,11 @@ def _render_check_table(logger, results):
             logger.tree_item(f"  {icon} {r.name}: {detail}")
         return
 
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Entry Health Check",
         show_header=True,
         header_style="bold cyan",
@@ -1198,10 +1201,11 @@ def _render_doctor_table(logger, checks):
             logger.tree_item(f"  {icon} {c.name}: {c.detail}")
         return
 
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Environment Diagnostics",
         show_header=True,
         header_style="bold cyan",
@@ -1283,9 +1287,9 @@ def search(expression, limit, verbose):
             )
             return
 
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title=f"Search Results: '{query}' in {marketplace_name}",
             show_header=True,
             header_style="bold cyan",

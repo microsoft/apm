@@ -644,22 +644,24 @@ def integrate_package_primitives(  # noqa: PLR0913
     _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1
-        if _skill_expansion:
-            _log_integration("  |-- Skill integrated:")
-            for line in _skill_expansion:
-                _log_integration(line)
-        else:
-            _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
+    # One tree line per package, whatever mix of root and promoted skills (#4089).
+    from apm_cli.integration.skill_support import skills_integrated
+
+    _skill_count = skills_integrated(skill_result)
+    if _skill_count > 0:
+        _skill_label = (
+            "Skill integrated"
+            if _skill_count == 1 and not skill_result.sub_skills_promoted
+            else f"{_skill_count} skill(s) integrated"
+        )
         if _skill_expansion:
-            _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:")
+            _log_integration(f"  |-- {_skill_label}:")
             for line in _skill_expansion:
                 _log_integration(line)
         else:
-            _log_integration(
-                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
-            )
+            _log_integration(f"  |-- {_skill_label} -> {_skill_suffix}")
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
         from apm_cli.install.exec_gate import log_bin_status
 

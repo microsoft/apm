@@ -38,10 +38,10 @@ def run(ctx, script_name, param, verbose):
                 console = _get_console()
                 if console:
                     try:
-                        from rich.table import Table
+                        from apm_cli.utils.console import new_table
 
                         # Show available scripts in a table
-                        table = Table(show_header=False, box=None, padding=(0, 1))
+                        table = new_table(show_header=False, box=None, padding=(0, 1))
                         table.add_column("Icon", style="cyan")
                         table.add_column("Script", style="highlight")
                         table.add_column("Command", style="white")

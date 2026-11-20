@@ -601,8 +601,7 @@ def outdated(global_, verbose, parallel_checks):
     ]
     # Render the table
     try:
-        from rich.box import ASCII
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
         from ._helpers import _get_console
 
@@ -610,11 +609,10 @@ def outdated(global_, verbose, parallel_checks):
         if console is None:
             raise ImportError("Rich console not available")
 
-        table = Table(
+        table = new_table(
             title="Dependency Status",
             show_header=True,
             header_style="bold cyan",
-            box=ASCII,
         )
         # Minimum widths that overflow the terminal make Rich crop whole rows
         # (the Source column lost "marketplace: <name>" at 80 columns), so

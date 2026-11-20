@@ -332,9 +332,9 @@ def search(ctx, query, limit, verbose):
         )
 
         # Professional results table
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(show_header=True, header_style="bold cyan", border_style="cyan")
+        table = new_table(show_header=True, header_style="bold cyan", border_style="cyan")
         table.add_column("Name", style="bold white", no_wrap=True, min_width=20)
         table.add_column("Description", style="white", ratio=1)
         table.add_column("Latest", style="cyan", justify="center", min_width=8)
@@ -437,10 +437,10 @@ def show(ctx, server_name, verbose):
             repo_url = server_info["repository"].get("url", "Unknown")
 
         # Professional server info table with consistent styling
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
         # Main server information table
-        info_table = Table(
+        info_table = new_table(
             title=f" MCP Server: {name}",
             show_header=True,
             header_style="bold cyan",
@@ -475,7 +475,7 @@ def show(ctx, server_name, verbose):
 
         # Show remote endpoints if available
         if remotes:
-            remote_table = Table(
+            remote_table = new_table(
                 title=" Remote Endpoints",
                 show_header=True,
                 header_style="bold cyan",
@@ -500,7 +500,7 @@ def show(ctx, server_name, verbose):
 
         # Installation packages in consistent table format
         if packages:
-            pkg_table = Table(
+            pkg_table = new_table(
                 title=" Local Packages",
                 show_header=True,
                 header_style="bold cyan",
@@ -530,7 +530,7 @@ def show(ctx, server_name, verbose):
 
         # Installation instructions in structured table format
         install_name = server_info.get("name", server_name)
-        install_table = Table(
+        install_table = new_table(
             title="* Installation Guide",
             show_header=True,
             header_style="bold cyan",
@@ -612,9 +612,9 @@ def list(ctx, limit, verbose):  # noqa: F811
             )
 
         # Professional catalog table
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(show_header=True, header_style="bold cyan", border_style="cyan")
+        table = new_table(show_header=True, header_style="bold cyan", border_style="cyan")
         table.add_column("Name", style="bold white", no_wrap=True, min_width=25)
         table.add_column("Description", style="white", ratio=1)
         table.add_column("Latest", style="cyan", justify="center", min_width=8)

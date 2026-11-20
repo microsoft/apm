@@ -338,7 +338,7 @@ class TestCreateFilesTable:
     def test_returns_none_on_exception(self):
         from apm_cli.utils.console import _create_files_table
 
-        with patch("apm_cli.utils.console.Table", side_effect=Exception("boom")):
+        with patch("apm_cli.utils.console.new_table", side_effect=Exception("boom")):
             result = _create_files_table([{"name": "x", "description": "y"}])
         assert result is None
 
@@ -660,3 +660,31 @@ def test_ascii_ellipsis_keeps_ansi_styles_intact():
     assert ".." in out
     assert not re.search(r"\x1b\[[0-9;]*\.", out)
     assert "\x1b[32mabcdefgh\x1b[0m" in out
+
+
+def test_new_table_draws_ascii_on_a_utf_console():
+    """new_table() owns the box, so even a plain UTF Rich console renders ASCII (#4089)."""
+    import io
+
+    from rich.console import Console
+
+    from apm_cli.utils.console import new_table
+
+    buf = io.StringIO()
+    table = new_table(title="Files")
+    table.add_column("File")
+    table.add_row("apm.yml")
+    Console(file=buf, width=40, force_terminal=False).print(table)
+    out = buf.getvalue()
+    assert out.isascii(), out
+    assert "+" in out
+
+
+def test_new_table_rejects_a_unicode_box():
+    from rich import box
+
+    from apm_cli.utils.console import new_table
+
+    assert new_table(box=None).box is None
+    with pytest.raises(ValueError, match="ASCII boxes only"):
+        new_table(box=box.ROUNDED)

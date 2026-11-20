@@ -11,11 +11,11 @@ import re
 from pathlib import Path
 from typing import ClassVar
 
+from ...core.command_logger import library_logger
 from ...core.docker_args import DockerArgsProcessor
 from ...mcp_transport import canonical_remote_transport
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from ...utils.console import _rich_warning
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .base import (
     _ENV_VAR_RE,
@@ -96,10 +96,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             if not vscode_dir.exists():
                 vscode_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            if logger:
-                logger.warning(f"Could not create .vscode directory: {e}")
-            else:
-                print(f"Warning: Could not create .vscode directory: {e}")
+            (logger or library_logger()).warning(f"Could not create .vscode directory: {e}")
 
         return str(mcp_config_path)
 
@@ -121,10 +118,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             self._write_json_config(Path(config_path), new_config, shared=True)
             return True
         except Exception as e:
-            if logger:
-                logger.error(f"Error updating VSCode MCP configuration: {e}")
-            else:
-                print(f"Error updating VSCode MCP configuration: {e}")
+            (logger or library_logger()).error(f"Error updating VSCode MCP configuration: {e}")
             return False
 
     def get_current_config(self, logger=None):
@@ -142,10 +136,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             except (FileNotFoundError, json.JSONDecodeError):
                 return {}
         except Exception as e:
-            if logger:
-                logger.error(f"Error reading VSCode MCP configuration: {e}")
-            else:
-                print(f"Error reading VSCode MCP configuration: {e}")
+            (logger or library_logger()).error(f"Error reading VSCode MCP configuration: {e}")
             return {}
 
     def configure_mcp_server(
@@ -178,10 +169,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             ValueError: If server is not found in registry.
         """
         if not server_url:
-            if logger:
-                logger.error("server_url cannot be empty")
-            else:
-                print("Error: server_url cannot be empty")
+            (logger or library_logger()).error("server_url cannot be empty")
             return False
 
         try:
@@ -223,10 +211,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             )
 
             if not server_config:
-                if logger:
-                    logger.error(f"Unable to configure server: {server_url}")
-                else:
-                    print(f"Unable to configure server: {server_url}")
+                (logger or library_logger()).error(f"Unable to configure server: {server_url}")
                 return False
 
             # Ensure servers and inputs sections exist
@@ -251,20 +236,16 @@ class VSCodeClientAdapter(MCPClientAdapter):
             result = self.update_config(current_config, logger=logger)
 
             if result:
-                if logger:
-                    logger.verbose_detail(f"Configured MCP server '{config_key}' for VS Code")
-                else:
-                    print(f"Successfully configured MCP server '{config_key}' for VS Code")
+                (logger or library_logger()).verbose_detail(
+                    f"Configured MCP server '{config_key}' for VS Code"
+                )
             return result
 
         except ValueError:
             # Re-raise ValueError for registry errors
             raise
         except Exception as e:
-            if logger:
-                logger.error(f"Error configuring MCP server: {e}")
-            else:
-                print(f"Error configuring MCP server: {e}")
+            (logger or library_logger()).error(f"Error configuring MCP server: {e}")
             return False
 
     def render_server_config(
@@ -419,7 +400,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                         variable_name = (
                             unresolved_variables[0] if unresolved_variables else "unknown"
                         )
-                        _rich_warning(
+                        library_logger().warning(
                             "Could not resolve required container run option "
                             f"'{variable_name}' for '{package.get('name', '')}'; "
                             "target configuration was not changed. Set the required "
@@ -755,7 +736,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 offenders.extend(_LEGACY_ANGLE_VAR_RE.findall(value))
         if offenders:
             unique = sorted(set(offenders))
-            _rich_warning(
+            library_logger().warning(
                 f"Server '{server_name}' {field} use legacy <VAR> placeholder(s) "
                 f"({', '.join('<' + n + '>' for n in unique)}) which VS Code "
                 f"cannot resolve. Use ${{VAR}} or ${{env:VAR}} instead so the "

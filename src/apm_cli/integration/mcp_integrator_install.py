@@ -10,6 +10,7 @@ import builtins
 import copy
 import logging
 import re
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -223,6 +224,27 @@ class _TargetSelectionSource(str, Enum):
 
     __str__ = str.__str__
     __format__ = str.__format__
+
+
+@dataclass(frozen=True)
+class ResolvedMcpTargets:
+    """MCP target runtimes resolved once for an install run.
+
+    ``runtimes`` is ``None`` when no runtime can accept MCP configuration.
+    """
+
+    runtimes: tuple[str, ...] | None
+
+
+def resolve_mcp_targets(**kwargs: Any) -> ResolvedMcpTargets:
+    """Resolve (and announce) the MCP target runtimes once for this run.
+
+    Takes the keyword arguments of :func:`_resolve_target_runtimes`. Pass the
+    result to :func:`run_mcp_install` as ``resolved_targets`` so the install
+    neither re-resolves nor re-announces the target set (#4089).
+    """
+    runtimes = _resolve_target_runtimes(**kwargs)
+    return ResolvedMcpTargets(None if runtimes is None else tuple(runtimes))
 
 
 def _announce_registry_endpoint(registry_client: Any, logger: Any) -> None:
@@ -1745,6 +1767,7 @@ def run_mcp_install(  # noqa: PLR0913
     prevalidated_registry_servers: dict[str, dict] | None = None,
     fail_on_write_error: bool = False,
     native_hashes: dict[str, dict[str, str]] | None = None,
+    resolved_targets: ResolvedMcpTargets | None = None,
 ) -> int:
     """Install MCP dependencies.
 
@@ -1767,6 +1790,8 @@ def run_mcp_install(  # noqa: PLR0913
             runtimes whose adapter declares ``supports_user_scope``
             are targeted; workspace-only runtimes are skipped.
         managed_target_servers: Mutable per-target APM ownership state.
+        resolved_targets: Targets this run already resolved (``--frozen``
+            checks them first); the install reuses them as they are.
 
     Returns:
         Number of MCP servers newly configured or updated.
@@ -1829,19 +1854,21 @@ def run_mcp_install(  # noqa: PLR0913
         logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
 
     # Runtime detection, gating, and scope filtering
-    target_runtimes = _resolve_target_runtimes(
-        runtime=runtime,
-        exclude=exclude,
-        verbose=verbose,
-        apm_config=apm_config,
-        project_root=project_root,
-        user_scope=user_scope,
-        explicit_target=explicit_target,
-        target_decision=target_decision,
-        scope=scope,
-        logger=logger,
-        console=console,
-    )
+    if resolved_targets is None:
+        resolved_targets = resolve_mcp_targets(
+            runtime=runtime,
+            exclude=exclude,
+            verbose=verbose,
+            apm_config=apm_config,
+            project_root=project_root,
+            user_scope=user_scope,
+            explicit_target=explicit_target,
+            target_decision=target_decision,
+            scope=scope,
+            logger=logger,
+            console=console,
+        )
+    target_runtimes = None if resolved_targets.runtimes is None else list(resolved_targets.runtimes)
     if target_runtimes is None:
         if fail_on_write_error:
             raise RequiredIntegrationError(

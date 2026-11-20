@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
@@ -246,6 +247,39 @@ class CommandLogger:
         """Render diagnostic summary if any diagnostics were collected."""
         if self._diagnostics and self._diagnostics.has_diagnostics:
             self._diagnostics.render_summary()
+
+
+# --- Library output -----------------------------------------------------------
+# Library code below the command layer (MCP client adapters, the safe MCP
+# installer) has no logger parameter. It emits through library_logger(), which
+# returns the logger the running command bound, so its lines share that
+# command's verbosity and rendering (#4089).
+
+_LIBRARY_LOGGER: ContextVar[CommandLogger | None] = ContextVar("apm_library_logger", default=None)
+
+
+@contextmanager
+def library_output(logger: CommandLogger | None) -> Iterator[None]:
+    """Route library output through *logger* for the duration of the block."""
+    token = _LIBRARY_LOGGER.set(logger)
+    try:
+        yield
+    finally:
+        _LIBRARY_LOGGER.reset(token)
+
+
+def library_logger() -> CommandLogger:
+    """Return the logger library code emits through.
+
+    That is the logger the running command bound, else the console-fallback
+    ``NullCommandLogger`` so library code works without a live logger.
+    """
+    bound = _LIBRARY_LOGGER.get()
+    if bound is not None:
+        return bound
+    from apm_cli.core.null_logger import NullCommandLogger
+
+    return NullCommandLogger()
 
 
 class InstallLogger(CommandLogger):

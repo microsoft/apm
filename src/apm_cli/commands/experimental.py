@@ -60,10 +60,12 @@ def _print_list_footer(flags_shown: list, logger: "CommandLogger") -> None:
     else:
         logger.progress("Tip: apm experimental disable <name> to revert")
 
+    # Unknown or retired flags in config are ignored; say so once, in verbose mode.
     stale = get_stale_config_keys()
     if stale:
-        logger.progress(
-            f"Note: {len(stale)} unknown flag(s) in config "
+        logger.verbose_detail(
+            f"Ignoring {len(stale)} unknown or retired flag(s) in config: "
+            f"{', '.join(display_name(key) for key in stale)} "
             "(run 'apm experimental reset' to clean up)"
         )
 
@@ -76,13 +78,13 @@ def _build_table(flags_to_show, logger):
     from ..core.experimental import is_enabled
 
     try:
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
         console = _get_console()
         if console is None:
             raise ImportError("Rich console unavailable")
 
-        table = Table(
+        table = new_table(
             title="Experimental Features",
             show_header=True,
             header_style="bold cyan",
