@@ -194,7 +194,7 @@ def test_omitted_mcp_stays_omitted_across_install_audit_and_repeat(
             False,
             marks=pytest.mark.xfail(
                 strict=True,
-                reason="#4356: audit --ci verdict parity with frozen install on a tampered cached copy",
+                reason="#4389: install --frozen judges lock sync from an unverified cached copy",
             ),
         ),
         True,
