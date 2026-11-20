@@ -2,9 +2,12 @@
 
 The installed CLI is a black box: the only honest way to observe how often a
 command writes the lockfile is to watch the project directory while it runs.
-``LockFile.write`` publishes through an atomic rename (``IN_MOVED_TO``); a
-direct write closes a writable handle (``IN_CLOSE_WRITE``). Reads produce
-neither event, so the count is exactly the number of persisted writes.
+``LockFile.write`` publishes only through an atomic rename (``IN_MOVED_TO``),
+and each rename is its own event, so ``writes`` counts publications exactly.
+An in-place write closes a writable handle on the lockfile name
+(``IN_CLOSE_WRITE``); unread identical events of that kind coalesce, so they
+cannot be counted. Any such event therefore fails the oracle outright: the
+write shape is enforced separately from the count.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ class LockfileWriteCounter:
 
     name: str
     writes: int = 0
+    in_place_writes: int = 0
     events: list[str] = field(default_factory=list)
 
 
@@ -49,8 +53,13 @@ def _drain(fd: int, counter: LockfileWriteCounter) -> None:
             offset = start + length
             if mask & _IN_Q_OVERFLOW:
                 raise AssertionError("inotify queue overflowed; write count is unreliable")
-            if name == counter.name and mask & (_IN_CLOSE_WRITE | _IN_MOVED_TO):
+            if name != counter.name:
+                continue
+            if mask & _IN_MOVED_TO:
                 counter.writes += 1
+                counter.events.append(hex(mask))
+            elif mask & _IN_CLOSE_WRITE:
+                counter.in_place_writes += 1
                 counter.events.append(hex(mask))
 
 
@@ -72,5 +81,10 @@ def count_lockfile_writes(
         counter = LockfileWriteCounter(name=name)
         yield counter
         _drain(fd, counter)
+        if counter.in_place_writes:
+            raise AssertionError(
+                f"{name} was written in place ({counter.events}); lockfile writes must "
+                "publish through an atomic rename, so the write count is unreliable"
+            )
     finally:
         os.close(fd)

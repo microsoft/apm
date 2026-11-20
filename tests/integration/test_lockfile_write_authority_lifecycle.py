@@ -333,3 +333,25 @@ def test_every_lockfile_writer_refuses_a_newer_generator_before_changing_files(
         assert after.lockfile_bytes == before.lockfile_bytes, args
         assert after.files == before.files, (args, _evidence(refused))
         assert scenario.project.manifest_path.read_bytes() == manifest, args
+
+
+@pytest.mark.skipif(not INOTIFY_AVAILABLE, reason="requires Linux inotify")
+def test_write_counter_counts_publications_and_refuses_in_place_writes(tmp_path: Path) -> None:
+    """The oracle counts each atomic publication and fails on any in-place write."""
+    import os
+
+    published = tmp_path / "published"
+    published.mkdir()
+    with count_lockfile_writes(published) as counter:
+        for index in range(3):
+            staged = published / f".staged-{index}"
+            staged.write_text(str(index), encoding="ascii")
+            os.replace(staged, published / "apm.lock.yaml")
+    assert counter.writes == 3
+
+    in_place = tmp_path / "in-place"
+    in_place.mkdir()
+    with pytest.raises(AssertionError, match="written in place"):
+        with count_lockfile_writes(in_place):
+            for index in range(3):
+                (in_place / "apm.lock.yaml").write_text(str(index), encoding="ascii")
