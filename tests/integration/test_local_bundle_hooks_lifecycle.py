@@ -121,6 +121,22 @@ def _run_hook(world: MarketplacePackWorld, project: Path, matcher: str) -> str:
     return ran.stdout
 
 
+def _assert_lock_matches_disk(world: MarketplacePackWorld, project: Path) -> None:
+    """I1: every local-bundle file the lock records exists with its recorded hash."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    hashes = world.lock(project)["local_deployed_file_hashes"]
+    assert hashes, "the lock records no local bundle files"
+    for rel, digest in hashes.items():
+        assert compute_file_hash(project / rel) == digest, rel
+    scripts = {
+        path.relative_to(project).as_posix()
+        for path in (project / ".claude" / "hooks").rglob("*")
+        if path.is_file()
+    }
+    assert scripts <= set(hashes), scripts - set(hashes)
+
+
 def test_bundle_hooks_park_then_register_like_a_source_install(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -190,10 +206,31 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
 
     # A newer bundle whose hooks are not approved retires only this bundle's entries.
     world.apm(consumer, "install", str(dep), "--no-policy")
-    unapproved, _ = _repack(world, producer, tmp_path, "1.0.1", "#!/bin/sh\necho v2\n")
+    unapproved, new_key = _repack(world, producer, tmp_path, "1.0.1", "#!/bin/sh\necho v2\n")
     text = output(world.apm(consumer, "install", str(unapproved), "--no-policy"))
-    assert "Retired hooks from local bundle 'hookpkg'" in text, text  # #4216
+    # #4216: the earlier hook is retired AND the new one is parked with its exact key.
+    assert "Retired hooks from local bundle 'hookpkg'" in text, text
+    assert "not approved for this exact bundle content" in text, text
     assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
+
+    # Apply the printed remedy as printed (no runnable 'apm approve' exists for a
+    # local bundle key): the apm.yml executables.allow snippet, then reinstall.
+    printed = re.search(
+        r"add to apm\.yml: executables: allow: \"([^\"]+)\": (\w+): true Then rerun the install",
+        text,
+    )
+    assert printed is not None, text
+    printed_key = re.sub(r"\s+", "", printed.group(1))
+    assert printed_key == new_key, (printed_key, new_key)
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"]["allow"][printed_key] = {printed.group(2): True}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(unapproved), "--no-policy")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Write", "Bash"]}
+    assert _run_hook(world, consumer, "Bash") == "v2\n"
+    _assert_lock_matches_disk(world, consumer)
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
     world.apm(consumer, "install", str(bundle), "--no-policy")
     assert _hook_entries(consumer) == {"PreToolUse": ["Write", "Bash"]}
 
