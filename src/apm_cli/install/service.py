@@ -173,6 +173,7 @@ class InstallService:
         from apm_cli.adapters.client._remote_shapes import may_refuse_remote
         from apm_cli.install.mcp.ownership import (
             migrate_legacy_project_target_servers,
+            native_mcp_entry_matches_declaration,
             native_mcp_entry_present,
         )
 
@@ -226,6 +227,14 @@ class InstallService:
                     )
                 ):
                     deferred.add((name, target))
+                    continue
+                if service == "MCP" and native_mcp_entry_matches_declaration(
+                    target,
+                    name,
+                    stored_config=lockfile.mcp_configs.get(name),
+                    project_root=project_root,
+                    user_scope=user_scope,
+                ):
                     continue
                 reasons.append(frozen_unrecorded_reason(service, name, target))
         if reasons:

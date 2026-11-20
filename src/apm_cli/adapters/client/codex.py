@@ -55,6 +55,18 @@ def _ascii_names(names: list[str]) -> str:
     return ", ".join(ascii(name)[1:-1] for name in names)
 
 
+def _connection_identity(config: dict) -> dict:
+    """Drop empty ``args`` and ``env``, which Codex treats as absent."""
+    return {
+        key: value
+        for key, value in config.items()
+        if not (key in _EMPTY_AS_ABSENT and value in ([], {}))
+    }
+
+
+_EMPTY_AS_ABSENT = frozenset({"args", "env"})
+
+
 class CodexClientAdapter(MCPClientAdapter):
     """Codex CLI implementation of MCP client adapter.
 
@@ -221,13 +233,20 @@ class CodexClientAdapter(MCPClientAdapter):
         return migrated
 
     def matches_managed_server_config(self, native: object, expected: dict) -> bool:
-        """Accept the historical empty-ID spelling without accepting foreign identity."""
+        """Compare connection identity: the command Codex runs and what it passes.
+
+        Accepts the historical empty-ID spelling without accepting foreign
+        identity. Codex's ``enabled`` switch is the user's activation choice,
+        not part of the connection, and empty ``args`` or ``env`` equal absent.
+        """
         if not isinstance(native, dict) or self.get_registry_id(native):
             return False
         comparable = dict(native)
         if comparable.get("id") == "":
             comparable.pop("id")
-        return comparable == expected
+        if isinstance(comparable.get("enabled"), bool):
+            comparable.pop("enabled")
+        return _connection_identity(comparable) == _connection_identity(expected)
 
     def matches_legacy_managed_server_config(
         self, native: object, expected: dict, *, recorded_write: bool | None = None
