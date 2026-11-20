@@ -16,15 +16,11 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_UPDATE_REDEFINED = "S-pending (neutral issue to follow): update and install agreement on gated surfaces after a definition change"
-_UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
 _UNINSTALL_SIBLING = (
     "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
 )
 _DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
 _XFAIL = {
-    "G|update|definition-changed|hook": _UPDATE_REDEFINED,
-    "G|update|policy-dep-deny|hook": _UPDATE_DEP_DENY,
     **{f"G|uninstall-prune-rebuild|{change}|hook": _UNINSTALL_SIBLING for change in _ALL},
     **{f"G|dry-run|{change}|hook": _DRY_RUN for change in ("local-deny", "org-deny")},
     "G|dry-run|revoke-approval|hook": _DRY_RUN,
