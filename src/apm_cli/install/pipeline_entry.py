@@ -9,6 +9,10 @@ resolution, policy gate and commit gate, then stops before the first write;
 
 from __future__ import annotations
 
+import contextlib
+import os
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,6 +44,25 @@ def record_preview_resolution(ctx: Any, graph: Any) -> None:
         raise PreviewIncomplete()
 
 
+@contextlib.contextmanager
+def _preview_tool_state() -> Iterator[None]:
+    """Child tools (gh credential lookups) keep their state in a throwaway dir.
+
+    ``gh`` records state under ``$XDG_STATE_HOME`` on every call; a preview
+    writes nothing under the user's home.
+    """
+    previous = os.environ.get("XDG_STATE_HOME")
+    with tempfile.TemporaryDirectory(prefix="apm-preview-state-") as state:
+        os.environ["XDG_STATE_HOME"] = state
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = previous
+
+
 def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
     """Return the install pipeline's ``--dry-run`` plan, or None when none was built.
 
@@ -58,7 +81,7 @@ def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
     from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
 
     try:
-        with config_creation_suppressed():
+        with config_creation_suppressed(), _preview_tool_state():
             result = run_pipeline()
     except (
         AuthenticationError,

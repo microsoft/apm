@@ -598,14 +598,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         ),
     ),
     KnownOutputCell(
-        "install-frozen-parked-mcp-notice-per-phase",
-        "I9",
-        "#4299",
-        _runs("install", "--frozen"),
-        r"Parked MCP server",
-        output=r"^\s*(\[!\] Parked MCP server [^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
         "I9",
         "#4291",

@@ -26,6 +26,7 @@ import pytest
 from apm_cli.deps.lockfile import LockFile
 from tests.integration._fault_injection_kit import FaultWorld, build_world, evidence
 from tests.utils.artifact_snapshot import assert_unchanged
+from tests.utils.lifecycle_evidence import expect_output_violation
 
 pytestmark = [
     pytest.mark.integration,
@@ -123,11 +124,12 @@ def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install
         agent.write_text(agent.read_text(encoding="ascii") + "v2\n", encoding="ascii")
         deployed = world.project / ".github/agents/alpha.agent.md"
 
-    killed = world.runner.run(
-        ("install", "--no-policy", *audit_args, *args),
-        cwd=world.project,
-        env=dict(world.env, APM_TEST_LOCK_COMMIT="kill"),
-    )
+    with expect_output_violation("I8", reason="the process is killed at its commit point"):
+        killed = world.runner.run(
+            ("install", "--no-policy", *audit_args, *args),
+            cwd=world.project,
+            env=dict(world.env, APM_TEST_LOCK_COMMIT="kill"),
+        )
     assert killed.returncode == 137, evidence(killed)
     assert world.lockfile_bytes() == lock
     assert deployed.is_file(), evidence(killed)

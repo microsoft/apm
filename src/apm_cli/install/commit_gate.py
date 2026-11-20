@@ -29,6 +29,19 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
+class _AnnouncedPolicyLogger:
+    """Forward to the install logger; the policy gate already announced the policy."""
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    def policy_resolved(self, **_kwargs: Any) -> None:
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
+
+
 class _SilentLogger:
     """Discard collection output; the service stage reports admissions once."""
 
@@ -195,7 +208,7 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
         user_scope=user_scope,
         project_root=ctx.project_root,
         no_policy=ctx.no_policy,
-        logger=ctx.logger,
+        logger=_AnnouncedPolicyLogger(ctx.logger),
         dry_run=ctx.dry_run,
     )
     ctx.mcp_policy_enforced = True
