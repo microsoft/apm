@@ -55,6 +55,42 @@ ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/deps/registry/extractor.py",
+            "    safe_extract_tar(tar, dest_root, error_type=UnsafeTarballError)",
+            "    tar.extractall(dest_root)",
+            id="registry-tar-extractall",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/download_strategies.py",
+            "return read_zip_member(zf, entry, error_type=ArchiveError)",
+            "return archive_handle.open(entry).read()",
+            id="renamed-zip-member-read",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/packer.py",
+            "from ..utils.archive import (",
+            'import zipfile\n_SIDE = zipfile.ZipFile("side.zip")\nfrom ..utils.archive import (',
+            id="unlisted-archive-opener",
+        ),
+    ],
+)
+def test_archive_member_reads_cannot_bypass_the_limits_owner(
+    path: str, original: str, replacement: str
+) -> None:
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "transport-platform-archive-extraction-limits"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/install/drift.py",
             "deployment_modules_dir, deployment_frame = replay_deployment_frame(",
             "deployment_modules_dir, deployment_frame = private_deployment_frame(",
@@ -2672,6 +2708,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Tokenless ADO environments can reactivate native Git helpers.",
     ),
     MutationCase(
+        guard_id="transport-platform-archive-extraction-limits",
+        rule_id="transport-platform-archive-extraction-limits",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="return read_zip_member(zf, entry, error_type=ArchiveError)",
+        new='return zf.open(entry, "r").read()',
+        intent="An archive reader reads a zip member directly instead of through the capped owner reader.",
+    ),
+    MutationCase(
         guard_id="transport-platform-artifactory-full-commit-sha",
         rule_id="transport-platform-artifactory-full-commit-sha",
         path="src/apm_cli/utils/github_host.py",
@@ -3533,7 +3577,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = [key for key in lockfile.dependencies if key not in wanted]\n",
-            "orphaned_packages must come from the decide_orphan_removal decision",
+            "Removal sites must not filter installed or locked sets",
             id="renamed-evidence-predicate",
         ),
         pytest.param(
