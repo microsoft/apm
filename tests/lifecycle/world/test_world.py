@@ -743,6 +743,17 @@ def test_forbid_direct_refuses_and_records_direct_content(lifecycle_world: World
     assert result.returncode != 0, result.stdout
     statuses = {e["status"] for e in world.services.egress_log() if e["host"] != PROXY_HOST}
     assert statuses == {403}, world.services.egress_log()
+    # Operator-configured registries are sanctioned routes under PROXY_REGISTRY_ONLY.
+    assert _get(world, f"https://{REGISTRY_HOST}/v0.1/servers").status_code == 200
+    registry_versions = f"{registry.URL}/v1/packages/{ORG}/p-skill/versions"
+    sanctioned = requests.get(
+        registry_versions,
+        headers={"Authorization": f"Bearer {registry.TOKEN}"},
+        proxies={"https": world.services.proxy_url},
+        verify=str(world.services.ca_path),
+        timeout=30,
+    )
+    assert sanctioned.status_code == 200, sanctioned.text
     world.services.reset()
     assert world.services.routes.direct_forbidden is False
     assert world.services.routes.scripted == []
