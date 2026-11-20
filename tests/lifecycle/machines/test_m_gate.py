@@ -86,6 +86,8 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("audit_ci", False),
     ("uninstall", "lsp"),
     ("declare", "plugin"),
+    ("uninstall", "plugin"),
+    ("update_package", "plugin"),
     ("prune",),
     ("uninstall", "hook"),
     ("install", "plain"),

@@ -169,6 +169,28 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         match=r"^approve plugin recorded no grant",
     ),
     KnownCell(
+        "gate-cell-approve-usage",
+        "R",
+        "#4262",
+        lambda machine, op, before, after, result: (
+            op.name == "approve" and not op.cell_kinds and result is not None
+        ),
+        match=r"^approve without a package exited 1, expected 2$",
+    ),
+    KnownCell(
+        "gate-cell-update-empty",
+        "R",
+        "#4263",
+        lambda machine, op, before, after, result: (
+            op.name == "update"
+            and bool(op.cell_kinds)
+            and not machine.declared
+            and result is not None
+            and result.returncode == 0
+        ),
+        match=r"^update [a-z]+ exited 0, expected 1$",
+    ),
+    KnownCell(
         "gate-cell-c-lock",
         "I1",
         "#4043",
@@ -703,12 +725,12 @@ class GateMachine(RuleBasedStateMachine):
         self.converged = result is not None and result.returncode == 0 and self.converged
 
     def decide_nothing(self, verdict: str) -> None:
-        """Spine step: ``apm approve`` / ``apm deny`` naming no package is refused."""
+        """Spine step: ``apm approve`` / ``apm deny`` naming no package is a usage error."""
         user = ("--user",) if self.scope == "user" else ()
 
         def reference(before, after, result) -> list[str]:
-            if result is not None and result.returncode != 1:
-                return [f"{verdict} without a package exited {result.returncode}, expected 1"]
+            if result is not None and result.returncode != 2:
+                return [f"{verdict} without a package exited {result.returncode}, expected 2"]
             return []
 
         self._step(

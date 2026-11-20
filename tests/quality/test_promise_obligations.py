@@ -166,8 +166,11 @@ def _earn_install_receipts(tmp_path: Path) -> list[receipts.Receipt]:
     )
     start = len(receipts.earned())
     # A converged install repeated as a no-op, then a refused one.
-    for code, fields in ((0, {"paired": {"audit": 0}}), (2, {})):
-        result = CommandResult(("apm", "install"), code, "[+] done\n", "", tmp_path)
+    for code, fields, out in (
+        (0, {"paired": {"audit": 0}}, "[+] done\n"),
+        (2, {}, "[x] Usage error: no target\n"),
+    ):
+        result = CommandResult(("apm", "install"), code, out, "", tmp_path)
         op = oracles.operation_for(("install",), forbidden={"project": ("*",)}, **fields)
         oracles.check_cross_cutting(observation, observation, result, _Model(code == 0), op)
     return list(receipts.earned()[start:])

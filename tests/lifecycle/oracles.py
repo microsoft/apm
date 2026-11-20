@@ -454,8 +454,9 @@ def _i3_frozen_audit(
     return found
 
 
-# A remediation names an apm command line ("run 'apm install'", "apm approve <pkg>").
-_REMEDIATION = re.compile(r"\bapm [a-z][a-z-]+")
+# A remediation names an apm command line ("run 'apm install'", "apm approve <pkg>")
+# or tells the user what to rerun ("Rerun the same install command without --frozen").
+_REMEDIATION = re.compile(r"\bapm [a-z][a-z-]+|\bre-?run\b", re.I)
 
 
 def _i4_gate_monotonicity(
