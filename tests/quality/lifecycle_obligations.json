@@ -23644,13 +23644,13 @@
   "E2": {
    "evidence": [
     "src/apm_cli/install/mcp/retired_destinations.py:84",
-    "src/apm_cli/install/mcp/retired_destinations.py:163"
+    "src/apm_cli/install/mcp/retired_destinations.py:165"
    ],
    "text": "targets are equivalent except MCP ownership (MCPOWN)"
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:850",
+    "src/apm_cli/install/services.py:823",
     "src/apm_cli/install/services.py:1050"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
@@ -23689,7 +23689,7 @@
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:756"
+    "src/apm_cli/install/manifest_reconcile.py:761"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
@@ -23722,7 +23722,7 @@
     "src/apm_cli/commands/uninstall/engine.py:698",
     "src/apm_cli/commands/uninstall/engine.py:857",
     "src/apm_cli/commands/uninstall/engine.py:690",
-    "src/apm_cli/commands/update.py:448",
+    "src/apm_cli/commands/update.py:452",
     "src/apm_cli/commands/prune.py:199",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "4dee5e5bfe53206a8743cbecb65cf53f78886289a414990a87a8468893c358a1"
+ "sha256": "49c3807a188d4715ef5e80a6043eaf421618f02dbfff9b5c10015c9210881f73"
 }

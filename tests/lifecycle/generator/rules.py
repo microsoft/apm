@@ -154,7 +154,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 162, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 77, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1490, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1495, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
 }
 
@@ -180,7 +180,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         (
             Ev(
                 "src/apm_cli/install/manifest_reconcile.py",
-                756,
+                761,
                 "canonical target-contraction owner",
             ),
         ),
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 698, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 690, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 448, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 452, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 199, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
@@ -254,7 +254,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
             Ev(
                 "src/apm_cli/install/mcp/retired_destinations.py",
-                163,
+                165,
                 "def heal_retired_project_mcp_destinations",
             ),
         ),
@@ -262,7 +262,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 850, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 823, "staged_files"),
             Ev("src/apm_cli/install/services.py", 1050, '"instructions" not in target.primitives'),
         ),
     ),
