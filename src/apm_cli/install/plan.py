@@ -253,6 +253,7 @@ def build_update_plan(
         new_hash = (resolved_content_hashes or {}).get(key)
         same_source = old is not None and old.matches_replacement(dep)
         new_ref, new_commit = _extract_new_ref_and_commit(dep)
+        new_ref = _recorded_ref(dep, old, new_ref)
         # Unannotated registry dep (cached, not re-downloaded): no concrete
         # version was resolved this run, so treat the locked value as current.
         # Require the locked entry to also be registry-sourced -- otherwise a
@@ -375,6 +376,27 @@ _ACTION_ORDER = {
     _ACTION_REMOVE: 2,
     _ACTION_UNCHANGED: 3,
 }
+
+
+def _recorded_ref(
+    dep: DependencyReference, old: LockedDependency | None, new_ref: str | None
+) -> str | None:
+    """Return the ref the lockfile records for *dep*, compared against the lock.
+
+    A git dependency declared without a ref follows the remote default
+    branch. The resolver names that branch, but the lockfile records the
+    declared (absent) ref, so the plan compares absent with absent; a moved
+    branch still differs by commit (#4166).
+    """
+    if (
+        new_ref is not None
+        and old is not None
+        and old.resolved_ref is None
+        and getattr(dep, "reference", None) is None
+        and getattr(dep, "source", None) != "registry"
+    ):
+        return None
+    return new_ref
 
 
 def _extract_new_ref_and_commit(dep: DependencyReference) -> tuple[str | None, str | None]:

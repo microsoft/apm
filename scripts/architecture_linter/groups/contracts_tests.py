@@ -16,6 +16,9 @@ from scripts.architecture_linter.checks.contracts_governance import RULES as GOV
 from scripts.architecture_linter.checks.contracts_lifecycle_script_gate import (
     RULES as LIFECYCLE_SCRIPT_GATE_RULES,
 )
+from scripts.architecture_linter.checks.contracts_local_path_anchor import (
+    RULES as LOCAL_PATH_ANCHOR_RULES,
+)
 from scripts.architecture_linter.checks.contracts_lockfile_generator import (
     RULES as LOCKFILE_GENERATOR_RULES,
 )
@@ -24,6 +27,9 @@ from scripts.architecture_linter.checks.contracts_lockfile_write_authority impor
 )
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
+from scripts.architecture_linter.checks.contracts_update_plan_ref import (
+    RULES as UPDATE_PLAN_REF_RULES,
+)
 
 RULES = (
     *EXISTING_RULES,
@@ -33,6 +39,8 @@ RULES = (
     *LOCKFILE_GENERATOR_RULES,
     *LOCKFILE_WRITE_AUTHORITY_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
+    *LOCAL_PATH_ANCHOR_RULES,
+    *UPDATE_PLAN_REF_RULES,
 )
 
 __all__ = ["COLLECTORS", "RULES"]

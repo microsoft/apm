@@ -380,7 +380,7 @@ def _resolve_dependencies(
         _warn_insecure_dependencies,
     )
     from apm_cli.install.package_selection import selected_dependency_keys
-    from apm_cli.install.phases.local_content import _copy_local_package
+    from apm_cli.install.phases.local_content import copy_local_dependency
 
     # 3b. Dedicated registry resolver (design §3.1, §8)
     # Built when:
@@ -422,7 +422,6 @@ def _resolve_dependencies(
 
     # 5. Download callback for transitive resolution
     scope = ctx.scope
-    project_root = ctx.project_root
     # Local-path package references in apm.yml are relative to the
     # manifest's location (source_root), not the deploy override.
     # source_root is required on InstallContext; equals project_root
@@ -567,54 +566,38 @@ def _resolve_dependencies(
 
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
-                if (
-                    scope is InstallScope.USER
-                    and not Path(dep_ref.local_path).expanduser().is_absolute()
-                ):
-                    # At user scope, relative local paths have no meaningful
-                    # root (cwd is arbitrary, $HOME is not a project).  Only
-                    # absolute paths are unambiguous; reject relative refs.
-                    with callback_lock:
-                        callback_failures.add(dep_ref.get_unique_key())
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_failed(dep_ref.get_unique_key())
-                    return None
-                # Anchor relative paths on the *declaring* package's source
-                # directory when available (#857). Falls back to project_root
-                # for direct deps and for parents that predate source_path.
-                # Direct deps from the root project anchor at ``source_root``
-                # (which equals ``project_root`` unless ``apm install --root``
-                # redirects writes -- then it stays at $PWD).  Transitive
-                # deps from a parent local package anchor at that package's
-                # source_path, which is already an absolute path and not
-                # affected by ``--root``.
-                base_dir = (
-                    parent_pkg.source_path
-                    if dep_ref.replacement is None
-                    and parent_pkg is not None
-                    and parent_pkg.source_path is not None
-                    else source_root
-                )
-                result_path = _copy_local_package(
+                # The declaring package anchors relative paths (#857, #4153).
+                failure = copy_local_dependency(
                     dep_ref,
                     replacement_path,
-                    base_dir,
-                    project_root=project_root,
-                    logger=logger,
+                    declaring_dir=(
+                        parent_pkg.source_path
+                        if dep_ref.replacement is None and parent_pkg is not None
+                        else None
+                    ),
+                    source_root=source_root,
+                    user_scope=scope is InstallScope.USER,
                 )
-                if result_path:
-                    with callback_lock:
-                        pending_callback_downloads[replacement_path] = (
-                            dep_ref.get_unique_key(),
-                            None,
+                dep_key = dep_ref.get_unique_key()
+                with callback_lock:
+                    if failure is None:
+                        pending_callback_downloads[replacement_path] = (dep_key, None)
+                        return replacement_path
+                    callback_failures.add(dep_key)  # the barrier stops (#3874)
+                    if dep_key in direct_dep_keys and logger:
+                        logger.error(failure)
+                    elif dep_key not in direct_dep_keys:
+                        via = f" (via {parent_chain})" if parent_chain else ""
+                        transitive_failures.append(
+                            (
+                                dep_ref.local_path,
+                                f"Failed to resolve transitive dep {dep_ref.local_path}{via}: "
+                                f"{failure}",
+                            )
                         )
-                    return replacement_path
-                with callback_lock:  # not a package: the barrier stops (#3874)
-                    callback_failures.add(dep_ref.get_unique_key())
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
-                    _tui.task_failed(dep_ref.get_unique_key())
+                    _tui.task_failed(dep_key)
                 return None
 
             # --- Git-source semver range resolution (issue #1488) ---
@@ -864,17 +847,13 @@ def _resolve_dependencies(
     try:
         tree = dependency_graph.dependency_tree
         for node in tree.nodes.values():
-            if node.dependency_ref.replacement is not None:
-                dep_base_dirs[node.dependency_ref.get_unique_key()] = source_root
-                continue
+            # Only declaring-package dirs; path_anchoring decides the rest.
             parent_node = node.parent
-            if parent_node is None or parent_node.package is None:
+            if node.dependency_ref.replacement is not None or parent_node is None:
                 continue
-            anchor = (
-                parent_node.package.source_path
-                if parent_node.package.source_path is not None
-                else project_root
-            )
+            anchor = getattr(parent_node.package, "source_path", None)
+            if anchor is None:
+                continue
             key = node.dependency_ref.get_unique_key()
             existing = dep_base_dirs.get(key)
             if existing is not None and existing != anchor:
@@ -894,7 +873,7 @@ def _resolve_dependencies(
             dep_base_dirs[key] = anchor
     except (AttributeError, KeyError):
         # Tree shape may differ across releases; fall back to empty map
-        # (callers default to project_root anchoring, matching legacy).
+        # (callers fall back to the root anchor in path_anchoring).
         # Narrow set: real bugs (TypeError/NameError) should surface, not
         # silently degrade to legacy anchoring.
         dep_base_dirs = {}

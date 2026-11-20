@@ -1299,6 +1299,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="lifecycle test --execute fires scripts the script gate would withhold.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-local-path-anchor",
+        rule_id="contracts-tooling-local-path-anchor",
+        path="src/apm_cli/install/sources.py",
+        old="        base_dir = local_dep_base_dir(",
+        new=(
+            "        base_dir = (ctx.scope is not InstallScope.USER"
+            " or Path(dep_ref.local_path).is_absolute()) and dict("
+        ),
+        intent="Local sources re-decide the user-scope anchor instead of calling the owner.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-generator-gate",
         rule_id="contracts-tooling-lockfile-generator-gate",
         path="src/apm_cli/commands/pack.py",
@@ -1435,6 +1446,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='part.removesuffix(".git")',
         new='part.rstrip(".git")',
         intent="Repository segment validation strips a .git character set again (#3715).",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-update-plan-recorded-ref",
+        rule_id="contracts-tooling-update-plan-recorded-ref",
+        path="src/apm_cli/install/plan.py",
+        old="        new_ref = _recorded_ref(dep, old, new_ref)",
+        new="        new_ref = new_ref or None",
+        intent="Update plans compare the resolver's default-branch name with the recorded ref.",
     ),
     MutationCase(
         guard_id="hooks-integrations-claude-mcp-paths",

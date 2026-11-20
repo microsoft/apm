@@ -122,20 +122,19 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     """
     if scope is None:
         return None
-    from pathlib import Path
-
     from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
 
-    if dep_ref.is_local and scope is InstallScope.USER:
-        local_path = dep_ref.local_path or ""
-        # Match the rest of the install pipeline (sources.py, phases/resolve.py)
-        # which expanduser()s local paths before consuming them: `~/pkg` is
-        # absolute after expansion and must NOT be rejected here.
-        if not Path(local_path).expanduser().is_absolute():
-            return (
-                "relative local paths are not supported at user scope (--global). "
-                "Use an absolute path or a remote reference (owner/repo) instead"
-            )
+    # A CLI argument is root-declared: the anchor owner decides (#4153).
+    if (
+        dep_ref.is_local
+        and scope is InstallScope.USER
+        and local_dep_base_dir(
+            dep_ref.local_path or "", declaring_dir=None, source_root=None, user_scope=True
+        )
+        is None
+    ):
+        return USER_SCOPE_RELATIVE_PATH_ERROR
     if dep_ref.is_parent_repo_inheritance and scope is InstallScope.USER:
         return GIT_PARENT_USER_SCOPE_ERROR
     return None

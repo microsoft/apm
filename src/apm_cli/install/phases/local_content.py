@@ -403,3 +403,26 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
     except LocalPackageError as exc:
         logger.error(str(exc))
         return None
+
+
+def copy_local_dependency(dep_ref, install_path, *, declaring_dir, source_root, user_scope):
+    """Anchor and copy a local dependency; return ``None`` or the failure reason.
+
+    The anchor comes from :func:`apm_cli.deps.path_anchoring.local_dep_base_dir`
+    so a relative path resolves against the package that declared it.
+    """
+    from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
+
+    base_dir = local_dep_base_dir(
+        dep_ref.local_path,
+        declaring_dir=declaring_dir,
+        source_root=source_root,
+        user_scope=user_scope,
+    )
+    if base_dir is None:
+        return f"{dep_ref.local_path} -- {USER_SCOPE_RELATIVE_PATH_ERROR}"
+    try:
+        materialize_local_package(dep_ref, install_path, base_dir)
+    except LocalPackageError as exc:
+        return str(exc)
+    return None

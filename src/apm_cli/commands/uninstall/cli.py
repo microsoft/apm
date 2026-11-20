@@ -309,6 +309,7 @@ def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
 def _cleanup_stale_lsp(
     *,
     apm_package: Any,
+    manifest_path: Any,
     lockfile: Any,
     lockfile_path: Any,
     modules_dir: Any,
@@ -316,10 +317,19 @@ def _cleanup_stale_lsp(
     user_scope: bool,
     logger: Any,
 ) -> tuple[bool, Exception | None]:
-    """Reconcile LSP state after uninstall and render an actionable failure."""
-    try:
-        from ...install.lsp.integration import reconcile_lsp_after_uninstall
+    """Reconcile LSP state after uninstall and render an actionable failure.
 
+    The post-removal manifest is loaded here when MCP cleanup did not already
+    load it, so LSP-only scopes reconcile too (#4045, #3768).
+    """
+    try:
+        from ...install.lsp.integration import (
+            has_recorded_lsp_state,
+            reconcile_lsp_after_uninstall,
+        )
+
+        if apm_package is None and has_recorded_lsp_state(lockfile):
+            apm_package = APMPackage.from_apm_yml(manifest_path)
         updated = reconcile_lsp_after_uninstall(
             apm_package=apm_package,
             lockfile=lockfile,
@@ -1049,6 +1059,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         lsp_lock_updated, lsp_cleanup_error = _cleanup_stale_lsp(
             apm_package=apm_package,
+            manifest_path=manifest_path,
             lockfile=lockfile,
             lockfile_path=lockfile_path,
             modules_dir=modules_dir,

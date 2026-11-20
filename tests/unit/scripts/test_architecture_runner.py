@@ -609,6 +609,7 @@ contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
 contracts-tooling-lifecycle-script-gate
+contracts-tooling-local-path-anchor
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp
 contracts-tooling-lockfile-read
@@ -624,6 +625,7 @@ contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
+contracts-tooling-update-plan-recorded-ref
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
