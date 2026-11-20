@@ -9,6 +9,10 @@ import sys
 
 import click
 
+from apm_cli.core.remediation import (
+    EXPERIMENTAL_FLAGS_UNKNOWN,
+)
+
 from ..core.command_logger import CommandLogger
 from ..core.experimental import (
     FLAGS,
@@ -63,8 +67,7 @@ def _print_list_footer(flags_shown: list, logger: "CommandLogger") -> None:
     stale = get_stale_config_keys()
     if stale:
         logger.progress(
-            f"Note: {len(stale)} unknown flag(s) in config "
-            "(run 'apm experimental reset' to clean up)"
+            f"Note: {len(stale)} unknown flag(s) in config ({EXPERIMENTAL_FLAGS_UNKNOWN.clause()})"
         )
 
 

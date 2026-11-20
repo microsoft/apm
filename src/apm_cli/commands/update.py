@@ -62,6 +62,11 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core.remediation import (
+    CLI_BINARY_OUTDATED,
+    USER_MANIFEST_MISSING,
+)
+
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
 from ..core.target_catalog import target_help_fragment
@@ -572,8 +577,7 @@ def update(
         manifest_path = get_apm_dir(scope) / "apm.yml"
         if not manifest_path.is_file():
             _rich_error(
-                f"No apm.yml found in {manifest_path.parent}. "
-                "Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         if check_only:
@@ -595,12 +599,12 @@ def update(
             if target is not None:
                 _rich_warning(
                     "--target is ignored when forwarding to 'apm self-update' "
-                    "(no apm.yml found). Use 'apm self-update' directly.",
+                    f"(no apm.yml found). {CLI_BINARY_OUTDATED.sentence()}",
                     symbol="warning",
                 )
             _rich_warning(
-                "'apm update' refreshes APM dependencies. To update the CLI binary, "
-                "use 'apm self-update'. Forwarding for back-compat (deprecated).",
+                "'apm update' refreshes APM dependencies. "
+                f"{CLI_BINARY_OUTDATED.sentence()} Forwarding for back-compat (deprecated).",
                 symbol="warning",
             )
             ctx.invoke(_self_update_cmd, check=check_only)
@@ -722,8 +726,7 @@ def _run_dep_update_locked(
     # the CLI binary.
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         _rich_info(
-            "'apm update' refreshes APM dependencies. "
-            "Use 'apm self-update' to update the CLI binary.",
+            f"'apm update' refreshes APM dependencies. {CLI_BINARY_OUTDATED.sentence()}",
             symbol="info",
         )
 

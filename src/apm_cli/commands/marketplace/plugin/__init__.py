@@ -8,6 +8,11 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    MARKETPLACE_CONFIG_DUPLICATE,
+    MARKETPLACE_CONFIG_MISSING,
+)
+
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
     GitLsRemoteError,
@@ -39,8 +44,8 @@ def _ensure_yml_exists(logger: CommandLogger) -> Path:
     if _has_marketplace_block(apm_path) and legacy_path.exists():
         logger.error(
             "Both apm.yml (with a 'marketplace:' block) and "
-            "marketplace.yml exist. Remove marketplace.yml or run "
-            "'apm marketplace migrate --force' to consolidate.",
+            "marketplace.yml exist. Remove marketplace.yml, or "
+            f"{MARKETPLACE_CONFIG_DUPLICATE.clause()}.",
             symbol="error",
         )
         sys.exit(1)
@@ -48,7 +53,7 @@ def _ensure_yml_exists(logger: CommandLogger) -> Path:
     path = _yml_path()
     if not path.exists() or (path == apm_path and not _has_marketplace_block(path)):
         logger.error(
-            "No marketplace authoring config found. Run 'apm marketplace init' to scaffold one.",
+            f"No marketplace authoring config found. {MARKETPLACE_CONFIG_MISSING.sentence()}",
             symbol="error",
         )
         sys.exit(1)

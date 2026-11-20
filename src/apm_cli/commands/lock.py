@@ -43,6 +43,11 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    LOCKFILE_MISSING_LOCK,
+    PROJECT_MANIFEST_MISSING,
+    USER_MANIFEST_MISSING,
+)
 from apm_cli.install.locking import serialized_lifecycle
 
 from ..core.command_logger import InstallLogger
@@ -192,8 +197,7 @@ def _run_lock(
         manifest_path = get_apm_dir(scope) / "apm.yml"
         if not manifest_path.is_file():
             _rich_error(
-                f"No apm.yml found in {manifest_path.parent}. "
-                "Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         project_root = manifest_path.parent
@@ -203,7 +207,7 @@ def _run_lock(
         if manifest_path is None:
             _rich_error(
                 "No apm.yml found in this directory or any parent directory. "
-                "Run 'apm init' to create one."
+                f"{PROJECT_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         project_root = manifest_path.parent
@@ -314,7 +318,7 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
-        _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
+        _rich_error(f"No lockfile found at {lockfile_path}. {LOCKFILE_MISSING_LOCK.sentence()}")
         sys.exit(1)
 
     resolved_timestamp = _resolve_export_timestamp(timestamp, lockfile.generated_at)

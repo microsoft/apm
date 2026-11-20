@@ -11,6 +11,10 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    DEPENDENCIES_NOT_INSTALLED,
+)
+
 from ..constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ..core.auth import AuthResolver
 from ..core.command_logger import CommandLogger
@@ -786,7 +790,7 @@ def view(
 
     if not apm_modules_path.exists():
         logger.error("No apm_modules/ directory found")
-        logger.progress("Run 'apm install' to install dependencies first")
+        logger.progress(DEPENDENCIES_NOT_INSTALLED.sentence())
         sys.exit(1)
 
     package_path = resolve_package_path(package, apm_modules_path, logger)

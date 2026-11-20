@@ -5,6 +5,10 @@ import sys
 
 import click
 
+from apm_cli.core.remediation import (
+    RUNTIME_MISSING,
+)
+
 from ..core.command_logger import CommandLogger
 from ..runtime.registry import runtime_names
 from ..utils.console import (
@@ -166,7 +170,7 @@ def status():
 Active runtime: {available_runtime if available_runtime else "None available"}"""
 
             if not available_runtime:
-                status_content += f"\n\n{STATUS_SYMBOLS['info']} Run 'apm runtime setup copilot' to install the primary runtime"
+                status_content += f"\n\n{STATUS_SYMBOLS['info']} {RUNTIME_MISSING.sentence()}"
 
             _rich_panel(status_content, title=" Runtime Status", style="cyan")
 
@@ -181,7 +185,7 @@ Active runtime: {available_runtime if available_runtime else "None available"}""
                 logger.success(f"Active runtime: {available_runtime}")
             else:
                 logger.error("No runtimes available")
-                logger.progress("Run 'apm runtime setup copilot' to install the primary runtime")
+                logger.progress(RUNTIME_MISSING.sentence())
 
     except Exception as e:
         logger.error(f"Error checking runtime status: {e}")

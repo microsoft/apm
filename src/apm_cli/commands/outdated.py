@@ -14,6 +14,10 @@ from dataclasses import replace
 
 import click
 
+from apm_cli.core.remediation import (
+    OUTSIDE_CONSTRAINT_RELEASE,
+)
+
 from ..deps.lockfile import LockedDependency
 from ..deps.outdated_row import OutdatedRow
 from ..deps.revision_pins import (
@@ -701,8 +705,8 @@ def outdated(global_, verbose, parallel_checks):
     if has_outside_constraint:
         logger.progress(
             "Registry Latest is published; Wanted respects the manifest constraint. "
-            "'apm update' stays within that constraint. Select a newer version explicitly "
-            "in apm.yml, then run 'apm install' to take an outside-constraint release."
+            "'apm update' stays within that constraint. "
+            f"{OUTSIDE_CONSTRAINT_RELEASE.sentence()}"
         )
     conflicts = [row for row in rows if row.status == "origin-conflict"]
     for row in conflicts:

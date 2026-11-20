@@ -187,6 +187,268 @@ DRIFT_KIND_REMEDIATION: Mapping[str, Remediation | None] = MappingProxyType(
 )
 
 
+# -- commands/** (W1) ---------------------------------------------------------
+# Advice printed by src/apm_cli/commands. Keep W1 additions inside this block.
+
+PROJECT_MANIFEST_MISSING = _entry("project-manifest-missing", "apm init --yes", "create apm.yml")
+USER_MANIFEST_MISSING = _entry(
+    "user-manifest-missing",
+    "apm install -g <org/repo>",
+    "create the user manifest with that package",
+)
+DEPENDENCIES_NOT_INSTALLED = _entry(
+    "dependencies-not-installed", "apm install", "install the dependencies apm.yml declares"
+)
+DEPENDENCY_UNPLACED = _entry(
+    "dependency-unplaced", "apm install", "place it in the resolved dependency tree"
+)
+ORPHANED_PACKAGES_PRUNE = _entry(
+    "orphaned-packages-prune", "apm prune", "remove the orphaned packages"
+)
+LOCKFILE_MISSING_LOCK = _entry("lockfile-missing-lock", "apm lock", "generate apm.lock.yaml")
+LOCKFILE_UNREADABLE = _entry(
+    "lockfile-unreadable",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    before="delete or fix {path}",
+)
+LOCKFILE_RECORDS_INCONSISTENT = _entry(
+    "lockfile-records-inconsistent",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    then="retry",
+)
+DEPLOYMENT_RECORDS_STALE = _entry(
+    "deployment-records-stale",
+    "apm install",
+    "rebuild the deployment records in apm.lock.yaml",
+)
+PROJECT_OWNED_FILE = _entry(
+    "project-owned-file",
+    "apm install",
+    "redeploy the project's own files",
+    before="edit the project's own source (for example under .apm/)",
+)
+INSTALLED_FILES_DIFFER = _entry(
+    "installed-files-differ",
+    "apm install",
+    "restore the installed files from apm.lock.yaml",
+    then="retry",
+)
+EXECUTABLES_UNAPPROVED = _entry(
+    "executables-unapproved",
+    "apm approve <package>",
+    "pin its executables",
+    before="review each definition",
+)
+EXECUTABLES_APPROVED = _entry(
+    "executables-approved", "apm install", "deploy the approved executables"
+)
+EXECUTABLES_DENIED = _entry(
+    "executables-denied", "apm install", "remove executables already deployed"
+)
+INTEGRATIONS_UNSYNCED = _entry(
+    "integrations-unsynced", "apm install", "resync the remaining integrations"
+)
+INTEGRATIONS_UNSYNCED_AFTER = _entry(
+    "integrations-unsynced-after-fix",
+    "apm install",
+    "resync the remaining integrations",
+    before="{fix}",
+)
+INTEGRATED_FILES_STALE = _entry(
+    "integrated-files-stale", "apm install", "rebuild the integrated files"
+)
+HOOK_CONFIG_STALE = _entry("hook-config-stale", "apm install", "rebuild the hook configuration")
+COPILOT_PLUGIN_REGISTRATION_STALE = _entry(
+    "copilot-plugin-registration-stale",
+    "apm install",
+    "re-register the GitHub Copilot plugins",
+    before="resolve the cause above",
+)
+CLAUDE_PLUGIN_REGISTRATION_STALE = _entry(
+    "claude-plugin-registration-stale",
+    "apm install --global",
+    "reconcile the Claude native plugin registrations",
+    before="resolve the errors above",
+)
+MCP_ENTRY_STALE = _entry(
+    "mcp-entry-stale",
+    "apm install",
+    "reconcile the stale MCP entries",
+    before="{fix}",
+)
+MCP_DEPENDENCY_DECLARED = _entry(
+    "mcp-dependency-declared",
+    "apm install",
+    "remove it from your harnesses",
+    before="remove '{name}' under dependencies.mcp in apm.yml",
+)
+LOCAL_DEPENDENCY_UNRESOLVED = _entry(
+    "local-dependency-unresolved",
+    "apm install",
+    "refresh the local dependency",
+    before="check the exact path in apm.yml",
+    then="retry",
+)
+LOCAL_DEPENDENCY_UNMAPPED = _entry(
+    "local-dependency-unmapped",
+    "apm install",
+    "regenerate apm.lock.yaml",
+)
+LOCKFILE_STATE_UNRECONCILED = _entry(
+    "lockfile-state-unreconciled",
+    "apm install --force",
+    "resync the lockfile state",
+    then="retry",
+)
+PRUNE_INCOMPLETE = _entry(
+    "prune-incomplete",
+    "apm prune",
+    "finish the filesystem cleanup",
+    before="resolve the removal errors",
+)
+PRUNE_PARTIAL = _entry(
+    "prune-partial",
+    "apm prune",
+    "finish the filesystem cleanup",
+    then="run 'apm audit'",
+)
+LIFECYCLE_SCRIPTS_UNTRUSTED = _entry(
+    "lifecycle-scripts-untrusted",
+    "apm lifecycle trust",
+    "allow the project lifecycle scripts to run",
+)
+EXPERIMENTAL_FLAG_DISABLED = _entry(
+    "experimental-flag-disabled",
+    "apm experimental enable {flag}",
+    "enable the {flag} experimental flag",
+)
+EXPERIMENTAL_FLAGS_UNKNOWN = _entry(
+    "experimental-flags-unknown",
+    "apm experimental reset",
+    "remove the unknown flags from config",
+)
+OUTSIDE_CONSTRAINT_RELEASE = _entry(
+    "outside-constraint-release",
+    "apm install",
+    "take an outside-constraint release",
+    before="select a newer version explicitly in apm.yml",
+)
+CLI_BINARY_OUTDATED = _entry("cli-binary-outdated", "apm self-update", "update the APM CLI binary")
+CLI_INSTALLER_UNREACHABLE = _entry(
+    "cli-installer-unreachable",
+    "apm self-update",
+    "update the APM CLI binary from the mirror",
+    before="set APM_INSTALLER_BASE_URL=<mirror>",
+)
+DEPS_UPDATE_DEPRECATED = _entry(
+    "deps-update-deprecated", "apm update", "refresh dependencies with the supported command"
+)
+REGISTRY_CANONICAL_UNRECORDED = _entry(
+    "registry-canonical-unrecorded",
+    "apm uninstall {canonical}",
+    "remove it by its canonical name",
+    before="confirm the registry resolution is correct",
+)
+MARKETPLACE_REF_UNRESOLVED = _entry(
+    "marketplace-ref-unresolved",
+    "apm uninstall <owner/repo>",
+    "remove it by its owner/repo name",
+)
+USER_PACKAGES_MISSING = _entry(
+    "user-packages-missing", "apm install -g <package>", "install packages globally"
+)
+USER_INSTRUCTIONS_MISSING = _entry(
+    "user-instructions-missing", "apm install -g <package>", "add global instructions"
+)
+USER_MANIFEST_INVALID = _entry(
+    "user-manifest-invalid",
+    "apm compile -g",
+    "compile the user scope",
+    before="fix {path}",
+)
+COMPILED_OUTPUTS_ORPHANED = _entry(
+    "compiled-outputs-orphaned",
+    "apm compile --clean",
+    "remove the orphaned outputs (watch mode ignores --clean)",
+)
+TARGET_NOT_DEPLOYED = _entry(
+    "target-not-deployed", "apm install --target {target}", "deploy to {target}"
+)
+STAGED_BUNDLE_DRIFT = _entry(
+    "staged-bundle-drift", "apm install <bundle> --force", "restage the bundle"
+)
+INIT_TARGETS_UNDETECTED = _entry(
+    "init-targets-undetected",
+    "apm init --target <target,...>",
+    "choose the targets explicitly",
+)
+MARKETPLACE_BUILD_REMOVED = _entry(
+    "marketplace-build-removed",
+    "apm pack",
+    "produce marketplace.json from the apm.yml 'marketplace:' block",
+)
+MARKETPLACE_CONFIG_MISSING = _entry(
+    "marketplace-config-missing", "apm marketplace init", "scaffold a marketplace config"
+)
+MARKETPLACE_CONFIG_LEGACY = _entry(
+    "marketplace-config-legacy", "apm marketplace migrate", "fold marketplace.yml into apm.yml"
+)
+MARKETPLACE_CONFIG_DUPLICATE = _entry(
+    "marketplace-config-duplicate",
+    "apm marketplace migrate --force",
+    "consolidate marketplace.yml into apm.yml",
+)
+MARKETPLACE_JSON_MISSING = _entry(
+    "marketplace-json-missing", "apm pack", "generate .claude-plugin/marketplace.json"
+)
+MARKETPLACE_ADD_FAILED = _entry(
+    "marketplace-add-failed",
+    "apm marketplace add <source>",
+    "register the marketplace",
+    before="fix the cause",
+)
+MARKETPLACES_NONE_REGISTERED = _entry(
+    "marketplaces-none-registered",
+    "apm marketplace add <source>",
+    "register one (OWNER/REPO, HTTPS URL, SSH URL, or local path)",
+)
+MARKETPLACE_SEARCH_FORMAT = _entry(
+    "marketplace-search-format",
+    "apm search <query>@<marketplace>",
+    "search one registered marketplace",
+)
+MCP_REGISTRY_URL_OVERRIDE = _entry(
+    "mcp-registry-url-override",
+    "apm config unset mcp-registry-url",
+    "use the default MCP registry",
+)
+AGENT_PLUGIN_BUNDLE_CONSUMER = _entry(
+    "agent-plugin-bundle-consumer",
+    "apm install --target copilot",
+    "deploy the bundle",
+    before="add the bundle path under dependencies.apm in apm.yml",
+)
+LEGACY_BUNDLE_FORMAT = _entry(
+    "legacy-bundle-format",
+    "apm install <bundle-path>",
+    "install the bundle",
+    before="repack with the default plugin format",
+)
+BUNDLE_TARGET_MISMATCH = _entry(
+    "bundle-target-mismatch",
+    "apm pack",
+    "produce a {target}-targeted bundle",
+    before="ask the publisher to declare targets: [{target}] in apm.yml",
+)
+RUNTIME_MISSING = _entry(
+    "runtime-missing", "apm runtime setup copilot", "install the primary runtime"
+)
+
+# -- end commands/** (W1) -----------------------------------------------------
+
+
 __all__ = [
     "DRIFT_KIND_REMEDIATION",
     "Remediation",

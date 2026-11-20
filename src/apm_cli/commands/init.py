@@ -9,6 +9,10 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    INIT_TARGETS_UNDETECTED,
+)
+
 from ..bundle.formats import PREFERRED_PLUGIN_FORMAT, BundleFormat
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
@@ -841,7 +845,7 @@ def _resolve_init_targets(
             if yes or not is_tty:
                 logger.error(message)
                 logger.progress(
-                    "Re-run 'apm init --target <target,...>' to choose the targets explicitly.",
+                    INIT_TARGETS_UNDETECTED.sentence(),
                     symbol="info",
                 )
                 sys.exit(1)
