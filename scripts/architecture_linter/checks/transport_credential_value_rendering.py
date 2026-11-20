@@ -141,7 +141,37 @@ def _is_rendered(node: ast.expr) -> bool:
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         if node.func.id in _RENDERING_CALLS:
             return True
-    return ast.unparse(node) in _SAFE_EXPRESSIONS
+    return _is_remediation_render(node) or ast.unparse(node) in _SAFE_EXPRESSIONS
+
+
+_REMEDIATION_RENDERS = frozenset({"sentence", "clause", "option"})
+
+
+def _is_remediation_render(node: ast.expr) -> bool:
+    """A core/remediation.py catalog render is static advice (#4090).
+
+    ``ENTRY.sentence()`` is safe; ``ENTRY.bind(...).sentence()`` is safe only
+    when every bound value is itself rendered, so a secret cannot ride in.
+    """
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _REMEDIATION_RENDERS
+        and not node.args
+        and not node.keywords
+    ):
+        return False
+    receiver = node.func.value
+    if (
+        isinstance(receiver, ast.Call)
+        and isinstance(receiver.func, ast.Attribute)
+        and receiver.func.attr == "bind"
+        and not receiver.args
+    ):
+        if not all(_is_rendered(keyword.value) for keyword in receiver.keywords):
+            return False
+        receiver = receiver.func.value
+    return isinstance(receiver, ast.Name) and receiver.id.isupper()
 
 
 def _raw_output_sinks(provider: FactsProvider, inventory: frozenset[str]) -> list[Violation]:

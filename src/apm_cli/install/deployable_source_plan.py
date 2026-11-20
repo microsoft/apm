@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import AGENT_SOURCE_SYMLINKED
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import printable_ascii_text
@@ -157,8 +158,7 @@ class DeployableSourcePlan:
                         "Skipped symlinked agent source: "
                         f"{printable_ascii_text(relative)}. "
                         "Symlinked agent sources are not deployed. "
-                        "Use real files and directories in .apm/agents/ "
-                        "(or real *.agent.md files at the package root), then rerun apm install."
+                        f"{AGENT_SOURCE_SYMLINKED.sentence()}"
                     ),
                     package=printable_ascii_text(package_name),
                 )

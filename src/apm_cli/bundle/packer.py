@@ -6,6 +6,7 @@ from pathlib import Path
 
 from apm_cli.core.scope import manifest_file
 
+from ..core.remediation import PACK_INSTALLED_FILES_MISSING, PACK_LOCKFILE_MISSING
 from ..core.target_detection import detect_target
 from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 from ..models.apm_package import APMPackage
@@ -123,9 +124,7 @@ def pack_bundle(
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
-        raise FileNotFoundError(
-            "apm.lock.yaml not found  -- run 'apm install' first to resolve dependencies."
-        )
+        raise FileNotFoundError(f"apm.lock.yaml not found -- {PACK_LOCKFILE_MISSING.clause()}.")
 
     # 2. Read apm.yml for name / version / config target
     apm_yml_path = manifest_file(project_root)
@@ -244,8 +243,8 @@ def pack_bundle(
             missing.append(disk_path)
     if missing:
         raise ValueError(
-            f"The following deployed files are missing on disk  -- "  # noqa: F541
-            f"run 'apm install' to restore them:\n" + "\n".join(f"  - {m}" for m in missing)  # noqa: F541
+            f"The following deployed files are missing on disk -- "
+            f"{PACK_INSTALLED_FILES_MISSING.clause()}:\n" + "\n".join(f"  - {m}" for m in missing)
         )
     refuse_credential_files(_bundle_file_paths(project_root, unique_files, path_mappings))
 

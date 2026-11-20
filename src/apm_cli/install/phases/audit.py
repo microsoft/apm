@@ -103,12 +103,12 @@ def run(ctx: InstallContext) -> None:
     blocking = decision.mode == "block" and has_critical and not ctx.force
 
     if blocking:
+        from apm_cli.core.remediation import HIDDEN_CHARACTERS_FLAGGED, INSTALL_AUDIT_FORCE, either
         from apm_cli.install.errors import PolicyViolationError
 
+        advice = either(HIDDEN_CHARACTERS_FLAGGED, INSTALL_AUDIT_FORCE)
         raise PolicyViolationError(
-            f"Install-time audit blocked: {summary}. "
-            f"Run 'apm audit --strip' to clean hidden characters, or "
-            f"'apm install --force' to override"
+            f"Install-time audit blocked: {summary}. {advice[:1].upper()}{advice[1:]}"
             + (
                 ", or '--no-policy' to skip the policy floor"
                 if "policy" in decision.source.lower()

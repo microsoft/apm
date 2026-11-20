@@ -4133,7 +4133,7 @@ class TestMCPConflictMatrix:
 
         from apm_cli.install.mcp.conflicts import validate_mcp_conflicts
 
-        with pytest.raises(click.UsageError, match="cannot use --only apm"):
+        with pytest.raises(click.UsageError, match="--only apm cannot be combined"):
             validate_mcp_conflicts(**self._base_kwargs(only="apm"))
 
     def test_e4_transport_flags_with_mcp(self) -> None:
@@ -4151,7 +4151,7 @@ class TestMCPConflictMatrix:
 
         from apm_cli.install.mcp.conflicts import validate_mcp_conflicts
 
-        with pytest.raises(click.UsageError, match="use 'apm update'"):
+        with pytest.raises(click.UsageError, match="run 'apm update' to update MCP entries"):
             validate_mcp_conflicts(**self._base_kwargs(update=True))
 
     def test_e9_header_without_url(self) -> None:

@@ -22,6 +22,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -52,7 +53,7 @@ _LEGACY_USER_TARGET_PREFIXES = {
 }
 _LOCAL_BUNDLE_OWNER = "local-bundle"
 UNATTRIBUTED_TARGET = "legacy"
-DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
+DEPLOYMENT_OWNER_REMEDIATION = DEPLOYMENT_OWNERS_INVALID.sentence()
 LOCAL_STATE_DIR = ".apm-local"
 """Per-deployment-root directory for local, never-shared APM state."""
 _SHA256_PREFIX = "sha256:"
