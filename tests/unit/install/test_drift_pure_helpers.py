@@ -168,3 +168,12 @@ def test_check_logger_phases_to_stderr(capsys):
 # ---------------------------------------------------------------------------
 # Defense-in-depth: _ReadOnlyProjectGuard wired into run_replay
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["modified", "unrecorded", "unmanaged-conflict", "orphaned"])
+def test_render_text_advisory_drift_never_prints_error_header(kind):
+    """Advisory drift does not fail the run, so it never renders [x] (#4191)."""
+    finding = DriftFinding(path=".claude/skills/x/SKILL.md", kind=kind)
+    out = render_drift_text([finding], advisory=True)
+    assert out.splitlines()[0] == "[!] Drift detected: 1 file(s)"
+    assert "[x]" not in out

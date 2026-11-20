@@ -2476,7 +2476,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_audit_drift_exit_contract_lifecycle.py::test_plain_audit_drift_line_severity_matches_exit_code",
-        "tests/unit/install/test_drift.py::test_render_text_advisory_drift_never_prints_error_header"
+        "tests/unit/install/test_drift_pure_helpers.py::test_render_text_advisory_drift_never_prints_error_header"
       ]
     },
     {
@@ -2525,7 +2525,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_failed_marketplace_install_writes_no_ref_pin",
-        "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+        "tests/integration/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
       ]
     },
     {
@@ -2761,7 +2761,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin",
-        "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+        "tests/integration/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
       ]
     },
     {
