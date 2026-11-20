@@ -10,8 +10,10 @@ repositories stay with the template.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import replace
@@ -31,6 +33,18 @@ def _reflink_command(source: Path, dest: Path) -> tuple[str, ...] | None:
     return None
 
 
+def remove_tree(path: Path, *, missing_ok: bool = True) -> None:
+    """Remove *path*; git writes read-only pack files, which Windows will not delete."""
+    if not path.exists():
+        if missing_ok:
+            return
+        raise FileNotFoundError(path)
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            os.chmod(os.path.join(root, name), stat.S_IWRITE | stat.S_IREAD)
+    shutil.rmtree(path)
+
+
 def copy_tree(source: Path, dest: Path) -> str:
     """Copy *source* to a new *dest*; return the method used (reflink or copytree)."""
     command = _reflink_command(source, dest)
@@ -38,7 +52,7 @@ def copy_tree(source: Path, dest: Path) -> str:
         result = subprocess.run(command, capture_output=True, check=False, timeout=60)
         if result.returncode == 0:
             return "reflink"
-        shutil.rmtree(dest, ignore_errors=True)
+        remove_tree(dest)
     shutil.copytree(source, dest, symlinks=True)
     return "copytree"
 

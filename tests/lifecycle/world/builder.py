@@ -27,7 +27,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +34,7 @@ from pathlib import Path
 import yaml
 
 from tests.lifecycle.world import registry
+from tests.lifecycle.world.clone import remove_tree
 from tests.lifecycle.world.contract import PackageRef, World
 from tests.lifecycle.world.packages import GIT_PUBLISHED, author_packages
 from tests.lifecycle.world.services import (
@@ -109,14 +109,6 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
     return served
 
 
-def _remove_tree(path: Path) -> None:
-    """Remove *path*; git writes read-only pack files, which Windows will not delete."""
-    for root, _dirs, files in os.walk(path):
-        for name in files:
-            os.chmod(os.path.join(root, name), stat.S_IWRITE | stat.S_IREAD)
-    shutil.rmtree(path)
-
-
 def _engine(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(
         (sys.executable, "-m", "apm_cli.cli", *args),
@@ -158,8 +150,8 @@ def _pack_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
             "apm pack",
         )
     finally:
-        _remove_tree(work)
-        _remove_tree(scratch)
+        remove_tree(work)
+        remove_tree(scratch)
     (bundle,) = sorted(output.iterdir())
     return bundle
 
@@ -193,8 +185,8 @@ def _pack_apm_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
             "apm pack --format apm",
         )
     finally:
-        _remove_tree(work.parent)
-        _remove_tree(scratch)
+        remove_tree(work.parent)
+        remove_tree(scratch)
     (bundle,) = sorted(output.iterdir())
     return bundle
 

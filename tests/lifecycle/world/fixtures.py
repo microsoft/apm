@@ -13,8 +13,8 @@ APM's config probe with ``fatal: '$GIT_DIR' too big``.
 
 from __future__ import annotations
 
+import contextlib
 import os
-import shutil
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from tests.lifecycle.world.builder import build_template
-from tests.lifecycle.world.clone import clone
+from tests.lifecycle.world.clone import clone, remove_tree
 from tests.lifecycle.world.contract import World
 
 _SHORT_ROOT_ENV = "APM_LIFECYCLE_SHORT_ROOT"
@@ -51,7 +51,8 @@ def _world_dir(tmp_path: Path) -> Iterator[Path]:
     try:
         yield base / "world"
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            remove_tree(base)
 
 
 @pytest.fixture(scope="session")
@@ -68,7 +69,8 @@ def lifecycle_template(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Wor
     finally:
         template.services.close()
         if parent is not None:
-            shutil.rmtree(base, ignore_errors=True)
+            with contextlib.suppress(OSError):
+                remove_tree(base)
 
 
 @pytest.fixture

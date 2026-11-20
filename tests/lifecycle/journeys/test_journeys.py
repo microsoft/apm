@@ -115,6 +115,7 @@ from tests.lifecycle.oracles import (
     operation_for,
 )
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
+from tests.lifecycle.world.clone import remove_tree
 from tests.lifecycle.world.scopes import use_policy
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, ArtifactSnapshotSet
@@ -441,7 +442,7 @@ class JourneyRun:
     def _prepare(self, step: dict) -> None:
         if step.get("cold_cache"):
             cache = Path(self.world.env["APM_CACHE_DIR"])
-            shutil.rmtree(cache, ignore_errors=True)
+            remove_tree(cache)
             cache.mkdir(parents=True)
         for edit in step.get("edit") or ():
             if "serve" in edit:
