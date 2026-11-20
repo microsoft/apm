@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reinstalling a local bundle re-evaluates the hooks it deployed earlier against current approvals, deny lists and org policy, and retires the ones no longer admitted, with their scripts and lock rows. (#4283)
 - Registry archives get the same archive limits for every accepted format, and every entry is validated before anything is written. (closes #4235, #4266)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)
