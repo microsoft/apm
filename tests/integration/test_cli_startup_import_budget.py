@@ -127,19 +127,7 @@ def test_installed_cli_startup_stays_within_import_budget(
     )
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        pytest.param(
-            ("--version",),
-            marks=pytest.mark.xfail(
-                strict=True, reason="I5: fixed by H3 experimental-flag pure read"
-            ),
-        ),
-        ("--help",),
-    ],
-    ids=lambda a: " ".join(a),
-)
+@pytest.mark.parametrize("args", [("--version",), ("--help",)], ids=lambda a: " ".join(a))
 def test_installed_cli_startup_writes_nothing(
     apm_binary_path: Path, startup_env: dict[str, str], args: tuple[str, ...]
 ) -> None:
