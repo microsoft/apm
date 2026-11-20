@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 from ..utils.credential_rendering import redact_secrets
 
 # Secret redaction (gate for every external diagnostic string) is owned by
-# utils/credential_rendering.py; re-exported here for existing callers.
+# utils/credential_rendering.py.
 
 _MAX_DETAIL_CHARS = 300
 
