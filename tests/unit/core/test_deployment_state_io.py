@@ -1,0 +1,539 @@
+"""Tests for canonical deployment state and lockfile encoding (filesystem, process and CLI boundary cases)."""
+
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import (
+    DeploymentIntent,
+    DeploymentLedger,
+    DeploymentLocator,
+    DeploymentReconciler,
+    DeploymentRecord,
+    LocatorKind,
+    MaterializationResult,
+    MaterializationStatus,
+    NativePayloadValidation,
+)
+from apm_cli.core.scope import InstallScope
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.integration.targets import TargetProfile
+from apm_cli.utils.diagnostics import DiagnosticCollector
+
+pytestmark = pytest.mark.component
+
+
+def _target(name: str, root: str, managed: Path | None = None) -> TargetProfile:
+    capability = TARGET_CAPABILITIES.get(name)
+    if capability is None:
+        capability = replace(
+            TARGET_CAPABILITIES["copilot"],
+            name=name,
+            aliases=(),
+            runtimes=(),
+        )
+    return TargetProfile(
+        capability=capability,
+        root_dir=str(managed or root),
+        primitives={},
+        resolved_deploy_root=managed,
+    )
+
+
+def _locator(
+    value: str = ".github/agents/demo.agent.md",
+    *,
+    target: str = "copilot",
+    runtime: str | None = None,
+) -> DeploymentLocator:
+    return DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target=target,
+        value=value,
+        runtime=runtime,
+        scope="project",
+    )
+
+
+def _materialization(
+    owner: str,
+    locator: DeploymentLocator,
+    *,
+    status: MaterializationStatus = MaterializationStatus.WRITTEN,
+    valid: bool = True,
+    content_hash: str | None = "sha256:new",
+) -> MaterializationResult:
+    return MaterializationResult(
+        locator=locator,
+        owners=frozenset({owner}),
+        status=status,
+        content_hash=content_hash,
+        validation=NativePayloadValidation(valid=valid, contract="native-v1"),
+    )
+
+
+def _record(locator: DeploymentLocator, owners=("old",), active="old") -> DeploymentRecord:
+    return DeploymentRecord(
+        locator=locator,
+        owners=owners,
+        active_owner=active,
+        content_hash="sha256:old",
+    )
+
+
+def _reconciler(tmp_path: Path) -> DeploymentReconciler:
+    profiles = {
+        "copilot": _target("copilot", ".github"),
+        "claude": _target("claude", ".claude"),
+        "cursor": _target("cursor", ".cursor"),
+    }
+    return DeploymentReconciler(
+        tmp_path,
+        profiles,
+        diagnostics=DiagnosticCollector(),
+    )
+
+
+def _intent(
+    *,
+    active=frozenset({"copilot"}),
+    declared=None,
+    owners=None,
+    authoritative=True,
+) -> DeploymentIntent:
+    return DeploymentIntent(
+        active_targets=active,
+        declared_targets=declared,
+        desired_owners=owners,
+        authoritative_targets=authoritative,
+    )
+
+
+def test_last_successful_writer_is_active_and_order_is_deterministic(tmp_path: Path) -> None:
+    locator = _locator()
+    results = [
+        _materialization("alpha", locator, content_hash="sha256:a"),
+        _materialization("beta", locator, content_hash="sha256:b"),
+        _materialization("alpha", locator, content_hash="sha256:c"),
+    ]
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        DeploymentLedger(records={}),
+        results,
+        _intent(owners=frozenset({"alpha", "beta"})),
+    )
+
+    record = reconciled.ledger.records[locator.key]
+    assert record.owners == ("beta", "alpha")
+    assert record.active_owner == "alpha"
+    assert record.content_hash == "sha256:c"
+
+
+def test_uninstall_handoff_requires_successful_survivor(tmp_path: Path) -> None:
+    locator = _locator()
+    prior = DeploymentLedger(
+        records={locator.key: _record(locator, owners=("survivor", "removed"), active="removed")}
+    )
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        prior,
+        [_materialization("survivor", locator)],
+        _intent(owners=frozenset({"survivor"})),
+    )
+
+    record = reconciled.ledger.records[locator.key]
+    assert record.active_owner == "survivor"
+    assert reconciled.owner_handoffs == ((locator.key, "removed", "survivor"),)
+
+
+def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
+    tmp_path: Path,
+) -> None:
+    locator = _locator()
+    prior = DeploymentLedger(
+        records={
+            locator.key: _record(
+                locator,
+                owners=("zeta", "alpha", "removed"),
+                active="removed",
+            )
+        }
+    )
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        prior,
+        [],
+        _intent(
+            owners=frozenset({"alpha", "zeta"}),
+            authoritative=False,
+        ),
+    )
+
+    record = reconciled.ledger.records[locator.key]
+    assert record.owners == ("zeta", "alpha")
+    assert record.active_owner == "zeta"
+    assert record.active_owner in record.owners
+
+
+def test_codec_reconciles_owners_through_canonical_reconciler(tmp_path: Path) -> None:
+    lockfile = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha"),
+            "beta": LockedDependency(repo_url="beta"),
+        }
+    )
+    shared = _locator(".claude/rules/shared.md", target="claude")
+    beta_only = _locator(".claude/rules/beta.md", target="claude")
+    workspace = _locator(".claude/rules/local.md", target="claude")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            shared.key: _record(
+                shared,
+                owners=("alpha", "beta"),
+                active="beta",
+            ),
+            beta_only.key: _record(
+                beta_only,
+                owners=("beta",),
+                active="beta",
+            ),
+            workspace.key: _record(
+                workspace,
+                owners=(".", "local-bundle"),
+                active="local-bundle",
+            ),
+        }
+    )
+    lockfile._deployments_present = True
+
+    reconciled = DeploymentLedgerCodec.reconcile_owner_references(
+        lockfile,
+        excluded_dependency_keys={"beta"},
+        project_root=tmp_path,
+        diagnostics=DiagnosticCollector(),
+    )
+
+    assert reconciled.changed is True
+    assert beta_only.key not in reconciled.ledger.records
+    assert reconciled.ledger.records[shared.key].owners == ("alpha",)
+    assert reconciled.ledger.records[shared.key].active_owner == "alpha"
+    assert reconciled.ledger.records[workspace.key].owners == (".", "local-bundle")
+    assert lockfile.deployment_ledger.records[shared.key].active_owner == "beta"
+
+
+def test_dependency_merge_retains_canonical_locators_and_surviving_owners(tmp_path: Path) -> None:
+    """Partial replacement keeps opaque locators and removes only replaced ownership."""
+    prior = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha", resolved_commit="old-alpha"),
+            "beta": LockedDependency(repo_url="beta", resolved_commit="old-beta"),
+        }
+    )
+    shared = _locator(".agents/skills/shared/SKILL.md")
+    stale = _locator(".agents/skills/removed/SKILL.md")
+    copilot = _locator(".agents/skills/untouched/SKILL.md")
+    cursor = replace(copilot, target="cursor")
+    external = replace(copilot, kind=LocatorKind.TARGET_RELATIVE, value="skills/untouched")
+    service = replace(copilot, kind=LocatorKind.URI, target="mcp", value="server", runtime="vscode")
+    untouched = {
+        locator.key: _record(locator, owners=("beta",), active="beta")
+        for locator in (copilot, cursor, external)
+    }
+    untouched[service.key] = _record(service, owners=(".",), active=".")
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(
+            records={
+                **untouched,
+                shared.key: _record(shared, owners=("beta", "alpha"), active="alpha"),
+                stale.key: _record(stale, owners=("alpha",), active="alpha"),
+            }
+        ),
+        prior,
+    )
+    updated = LockFile(
+        dependencies={"alpha": LockedDependency(repo_url="alpha", resolved_commit="new-alpha")}
+    )
+    added = _locator(".agents/skills/new/reference.md")
+    current_record = _record(added, owners=("alpha",), active="alpha")
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(records={added.key: current_record}), updated
+    )
+
+    DeploymentLedgerCodec.merge_dependencies(
+        prior, updated, project_root=tmp_path, diagnostics=DiagnosticCollector()
+    )
+
+    assert prior.deployment_ledger.records == {
+        **untouched,
+        shared.key: _record(shared, owners=("beta",), active="beta"),
+        added.key: current_record,
+    }
+    assert prior.dependencies["alpha"].resolved_commit == "new-alpha"
+    assert prior.dependencies["beta"].resolved_commit == "old-beta"
+    assert prior.dependencies["alpha"].deployed_files == [".agents/skills/new/reference.md"]
+    assert prior.mcp_target_servers == {"vscode": ["server"]}
+    assert LockFile.from_yaml(prior.to_yaml()).deployment_ledger == prior.deployment_ledger
+
+
+def test_no_handoff_without_successful_survivor(tmp_path: Path) -> None:
+    locator = _locator()
+    prior = DeploymentLedger(
+        records={locator.key: _record(locator, owners=("survivor", "removed"), active="removed")}
+    )
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        prior,
+        [_materialization("survivor", locator, status=MaterializationStatus.FAILED)],
+        _intent(owners=frozenset({"survivor"})),
+    )
+
+    assert reconciled.ledger.records[locator.key] == prior.records[locator.key]
+    assert reconciled.owner_handoffs == ()
+
+
+def test_same_target_stale_and_undeclared_target_are_removed(tmp_path: Path) -> None:
+    active = _locator("active.md")
+    ghost = _locator(".claude/rules/ghost.md", target="claude")
+    prior = DeploymentLedger(
+        records={
+            active.key: _record(active),
+            ghost.key: _record(ghost),
+        }
+    )
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        prior,
+        [],
+        _intent(declared=frozenset({"copilot"})),
+    )
+
+    assert reconciled.ledger.records == {}
+    assert set(reconciled.removed) == {active, ghost}
+
+
+@pytest.mark.parametrize(
+    ("selected_root", "selected_value"),
+    [
+        ("profiles/b", "profiles/b"),
+        ("/outside/profiles/b", "/outside/profiles/b"),
+        ("D:\\profiles\\b", "D:/profiles/b"),
+    ],
+    ids=["home-relative", "absolute", "windows-absolute"],
+)
+@pytest.mark.parametrize(
+    ("target", "default_root"), [("claude", ".claude"), ("hermes", ".hermes"), ("codex", ".codex")]
+)
+def test_other_profile_rows_are_not_stale(
+    tmp_path: Path, selected_root: str, selected_value: str, target: str, default_root: str
+) -> None:
+    """Rows under another CLAUDE_CONFIG_DIR/HERMES_HOME/CODEX_HOME root survive a selected install."""
+    selected = _locator(f"{selected_value}/skills/demo/SKILL.md", target=target)
+    default = _locator(f"{default_root}/skills/demo/SKILL.md", target=target)
+    sibling = _locator("profiles/c/skills/demo/SKILL.md", target=target)
+    prior = DeploymentLedger(
+        records={locator.key: _record(locator) for locator in (selected, default, sibling)}
+    )
+    reconciler = DeploymentReconciler(
+        tmp_path,
+        {target: _target(target, selected_root)},
+        diagnostics=DiagnosticCollector(),
+    )
+
+    reconciled = reconciler.reconcile(prior, [], _intent(active=frozenset({target})))
+
+    assert reconciled.removed == (selected,)
+    assert set(reconciled.ledger.records) == {default.key, sibling.key}
+
+
+@pytest.mark.parametrize(
+    ("dropped_target", "surviving_target"),
+    (
+        ("claude", "cursor"),
+        ("copilot", "cursor"),
+    ),
+)
+def test_shared_agents_rows_contract_by_value_with_current_skill_claims(
+    tmp_path: Path,
+    dropped_target: str,
+    surviving_target: str,
+) -> None:
+    """A generic shared skill row must yield to a current concrete target row."""
+    del dropped_target  # Target identity must not change shared-root semantics.
+    shared = ".agents/skills/shared/SKILL.md"
+    beta_only = ".agents/skills/beta-only/SKILL.md"
+    alpha_only = ".agents/skills/alpha-only/SKILL.md"
+    generic_shared = _locator(shared, target="agents")
+    generic_beta = _locator(beta_only, target="agents")
+    generic_alpha = _locator(alpha_only, target="agents")
+    previous = DeploymentLedger(
+        records={
+            generic_shared.key: _record(
+                generic_shared,
+                owners=("alpha", "beta"),
+                active="beta",
+            ),
+            generic_beta.key: _record(generic_beta, owners=("beta",), active="beta"),
+            generic_alpha.key: _record(generic_alpha, owners=("alpha",), active="alpha"),
+        }
+    )
+    current_shared = _locator(shared, target=surviving_target)
+    current_beta = _locator(beta_only, target=surviving_target)
+    intent = _intent(
+        active=frozenset({surviving_target}),
+        declared=frozenset({surviving_target}),
+        owners=frozenset({"beta"}),
+    )
+    intent = replace(
+        intent,
+        generic_governed_values=frozenset({shared, beta_only, alpha_only}),
+    )
+    results = [
+        _materialization("beta", current_shared, content_hash="sha256:shared-current"),
+        _materialization("beta", current_beta, content_hash="sha256:beta-current"),
+    ]
+
+    reconciled = _reconciler(tmp_path).reconcile(previous, results, intent)
+
+    assert set(reconciled.ledger.records) == {current_shared.key, current_beta.key}
+    assert reconciled.ledger.records[current_shared.key].owners == ("beta",)
+    assert reconciled.ledger.records[current_shared.key].content_hash == "sha256:shared-current"
+    assert reconciled.ledger.records[current_beta.key].owners == ("beta",)
+    assert reconciled.ledger.records[current_beta.key].content_hash == "sha256:beta-current"
+    assert reconciled.removed == (generic_alpha,)
+
+    repeated = _reconciler(tmp_path).reconcile(reconciled.ledger, results, intent)
+    assert repeated.ledger == reconciled.ledger
+    assert repeated.changed is False
+    assert repeated.removed == ()
+
+
+def test_generic_agents_contraction_dry_run_and_failed_cleanup_preserve_row(tmp_path: Path) -> None:
+    """No generic row is removed without a successful, non-dry-run cleanup proof."""
+    alpha = _locator(".agents/skills/alpha-only/SKILL.md", target="agents")
+    previous = DeploymentLedger(
+        records={alpha.key: _record(alpha, owners=("alpha",), active="alpha")}
+    )
+    intent = replace(
+        _intent(
+            active=frozenset({"cursor"}),
+            declared=frozenset({"cursor"}),
+            owners=frozenset({"alpha"}),
+        ),
+        generic_governed_values=frozenset({alpha.value}),
+    )
+    reconciler = _reconciler(tmp_path)
+
+    dry_run = reconciler.reconcile(previous, [], replace(intent, dry_run=True))
+    failed = reconciler.reconcile(
+        previous,
+        [_materialization("alpha", alpha, status=MaterializationStatus.FAILED)],
+        intent,
+    )
+
+    assert dry_run.ledger is previous
+    assert dry_run.changed is False
+    assert failed.ledger == previous
+    assert failed.failed == (alpha,)
+
+
+def test_unknown_declared_universe_preserves_sibling_target(tmp_path: Path) -> None:
+    sibling = _locator(".claude/rules/kept.md", target="claude")
+    prior = DeploymentLedger(records={sibling.key: _record(sibling)})
+
+    reconciled = _reconciler(tmp_path).reconcile(prior, [], _intent())
+
+    assert reconciled.ledger.records[sibling.key] == prior.records[sibling.key]
+
+
+def test_failed_cleanup_retains_prior_row(tmp_path: Path) -> None:
+    locator = _locator()
+    prior = DeploymentLedger(records={locator.key: _record(locator)})
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        prior,
+        [_materialization("old", locator, status=MaterializationStatus.FAILED)],
+        _intent(),
+    )
+
+    assert reconciled.ledger == prior
+    assert reconciled.failed == (locator,)
+
+
+def test_invalid_native_payload_aborts_the_ledger_transition(tmp_path: Path) -> None:
+    prior_locator = _locator("prior.md")
+    new_locator = _locator("new.md")
+    prior = DeploymentLedger(records={prior_locator.key: _record(prior_locator)})
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        prior,
+        [
+            _materialization("new", new_locator),
+            _materialization("bad", _locator("bad.md"), valid=False),
+        ],
+        _intent(),
+    )
+
+    assert reconciled.ledger is prior
+    assert reconciled.changed is False
+
+
+def test_locator_round_trips_project_external_uri_and_mcp(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    external = tmp_path / "external"
+    project.mkdir()
+    external.mkdir()
+    copilot = _target("copilot", ".github")
+    cowork = _target("copilot-cowork", ".copilot", external)
+
+    project_locator = DeploymentLedgerCodec.locator_for_path(
+        project / ".github" / "agents" / "demo.agent.md",
+        project_root=project,
+        target=copilot,
+        scope=InstallScope.PROJECT,
+    )
+    external_locator = DeploymentLedgerCodec.locator_for_path(
+        external / "skills" / "demo" / "SKILL.md",
+        project_root=project,
+        target=cowork,
+        scope=InstallScope.USER,
+    )
+    uri_locator = DeploymentLedgerCodec.locator_for_path(
+        "copilot-app-db://workflows/demo",
+        project_root=project,
+        target=copilot,
+        scope=InstallScope.PROJECT,
+    )
+    mcp_locator = DeploymentLedgerCodec.locator_for_path(
+        "mcp://demo",
+        project_root=project,
+        target=_target("mcp", ".mcp"),
+        runtime="vscode",
+        scope=InstallScope.PROJECT,
+    )
+
+    assert project_locator.kind == LocatorKind.PROJECT_RELATIVE
+    assert (
+        DeploymentLedgerCodec.resolve_locator(project_locator, project_root=project, target=copilot)
+        == (project / project_locator.value).resolve()
+    )
+    assert external_locator.kind == LocatorKind.TARGET_RELATIVE
+    assert external_locator.value == "skills/demo/SKILL.md"
+    assert (
+        DeploymentLedgerCodec.resolve_locator(external_locator, project_root=project, target=cowork)
+        == (external / external_locator.value).resolve()
+    )
+    assert (
+        DeploymentLedgerCodec.resolve_locator(uri_locator, project_root=project, target=copilot)
+        == "copilot-app-db://workflows/demo"
+    )
+    assert mcp_locator.runtime == "vscode"
+
+
+# ---------------------------------------------------------------------------
+#  MCP native hash baseline — ledger-side support
+# ---------------------------------------------------------------------------

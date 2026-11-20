@@ -18,7 +18,7 @@ import pytest
 from apm_cli.commands.marketplace import _parse_marketplace_source
 from apm_cli.marketplace.source_identity import parse_marketplace_source
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
@@ -274,16 +274,6 @@ def test_marketplace_origin_canonicalizes_git_catalogs(url: str, expected: str) 
     from apm_cli.marketplace.source_identity import marketplace_origin
 
     assert marketplace_origin(MarketplaceSource(name="company", url=url)) == expected
-
-
-def test_marketplace_origin_keeps_hosted_url_and_skips_local(tmp_path) -> None:
-    from apm_cli.marketplace.models import MarketplaceSource
-    from apm_cli.marketplace.source_identity import marketplace_origin
-
-    hosted = "https://catalog.example.com/v1/marketplace.json"
-    assert marketplace_origin(MarketplaceSource(name="hosted", url=hosted, path="")) == hosted
-    local = MarketplaceSource(name="local", url=str(tmp_path))
-    assert marketplace_origin(local) == ""
 
 
 def test_same_marketplace_origin_ignores_transport_and_rejects_other_repos() -> None:

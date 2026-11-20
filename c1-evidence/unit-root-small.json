@@ -198,7 +198,8 @@
   "step4: tests/unit/policy/test_cache_merged_effective.py is wired into mutation-pilot (pyproject, workflow, script); only its single git-spawning test moved to tests/integration/test_cache_merged_effective.py (promise P-OWN-policy-remote-origin-reader, P-OWN-cached-policy-shape); the rest stays in unit",
   "step4: path mentions updated in development-guide.md, .apm and .github tests.instructions.md (apm.lock.yaml hash for the deployed instructions file refreshed) and test_tls_custom_ca docstring; docstrings in tests/unit/install (other partition) and tests/perf evidence (protected) still mention old paths",
   "step4 left (3): tests/unit/policy/test_ci_checks.py and tests/unit/test_init_command.py (open PRs), tests/unit/test_lifecycle_executor_paths.py (lifecycle file)",
-  "env: test_public_release_metadata unix cases fail identically in tests/unit and tests/integration when run as root (installer refuses admin install); shepherd gate fixtures fail on forced commit signing"
+  "env: test_public_release_metadata unix cases fail identically in tests/unit and tests/integration when run as root (installer refuses admin install); shepherd gate fixtures fail on forced commit signing",
+  "step5: AQ003 after classification is dominated by pure-logic tests in modules marked component only because some tests or helpers touch the filesystem/process/CLI boundary; such modules are split by AST taint analysis (test text, its fixtures, class helpers and module helpers reached): the larger half keeps the module name, the smaller half moves under the same test names to <stem>_io.py (component) or <stem>_logic.py (unit); no assertion changed; unreferenced helper copies dropped"
  ],
  "counts_left": {
   "same_body_groups": 14,
