@@ -31,8 +31,8 @@
   "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_multiple_files_with_info_only": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
   "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_empty_findings_returns_immediately": "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_nothing_rendered_without_visible_rows",
   "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_info_filtered_in_non_verbose_mode": "tests/unit/commands/test_audit_error_handling.py::TestRenderFindingsTable::test_nothing_rendered_without_visible_rows",
-  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_none_returns_none": "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_scalar_target_resolution",
-  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_single_string_passthrough": "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_scalar_target_resolution"
+  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_none_returns_none": "tests/unit/compilation/test_compile_cli_surface.py::TestResolveCompileTarget::test_scalar_target_resolution",
+  "tests/unit/compilation/test_compile_target_flag.py::TestResolveCompileTarget::test_single_string_passthrough": "tests/unit/compilation/test_compile_cli_surface.py::TestResolveCompileTarget::test_scalar_target_resolution"
  },
  "decisions": [
   "step0: the 6 nodes unmapped after 011445baa/08030d1b4 each have a same-named or same-scenario survivor in the kept module whose assertions are a superset (pack: exact share line and extra help flags; distributed: same asserts on a markerless fixture constant, plus suppressed_empty_paths default)",
@@ -47,12 +47,13 @@
   "nodeset base: origin/danielmeppiel-refactored-happiness moved forward during the run (shared refs); mapping is checked against this branch's merge-base 49bcb1c50, which has no differences in scope",
   "step5 lane split: pure-logic classes moved into the module that becomes unit-marked and filesystem/CliRunner classes into the component sibling, verbatim (nodes map as moved): watcher TestWatchMode -> commands/compile/test_watch_mode_coverage.py (test_watcher_events now unit); pack helper-render classes -> test_pack.py (now unit), pack CLI/gate tests -> test_pack_cli_surface.py",
   "step5 lane split: install pure helper classes -> test_install_resolve_refs.py (now unit), its GitLab persistence class -> test_install_context_and_resolution.py; deps pure helper classes -> test_deps_cli_helpers.py (now unit), its _resolve_scope_deps filesystem classes -> test_deps_cli_cli_surface.py",
-  "step5 lane split: TestConstitutionInjector (on-disk injection) -> test_constitution.py; test_constitution_injector.py keeps the pure constitution_block helpers and is now unit"
+  "step5 lane split: TestConstitutionInjector (on-disk injection) -> test_constitution.py; test_constitution_injector.py keeps the pure constitution_block helpers and is now unit",
+  "step5 lane split: compile command CliRunner/filesystem classes -> test_compile_target_flag.py; pure compile helper, config and merge classes from test_compile_target_flag.py and test_compile_no_dedup_flag.py -> test_compile_cli_surface.py (now unit)"
  ],
  "counts_left": {
   "same_body_groups": 0,
   "unclassified_modules": 3,
   "placement_offenders": 0,
-  "weak_tests": 1008
+  "weak_tests": 959
  }
 }

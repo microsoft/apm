@@ -24,25 +24,6 @@ from apm_cli.primitives.models import Instruction, PrimitiveCollection
 pytestmark = pytest.mark.component
 
 
-class TestCompilationConfigNoDedup:
-    """CompilationConfig carries the no_dedup field."""
-
-    def test_no_dedup_default_is_false(self):
-        """no_dedup must default to False (opt-in, preserves backward-compat)."""
-        config = CompilationConfig()
-        assert config.no_dedup is False
-
-    def test_no_dedup_can_be_set_true(self):
-        """no_dedup can be toggled on via constructor."""
-        config = CompilationConfig(no_dedup=True)
-        assert config.no_dedup is True
-
-    def test_from_apm_yml_passes_no_dedup_override(self):
-        """from_apm_yml propagates the no_dedup kwarg."""
-        config = CompilationConfig.from_apm_yml(no_dedup=True)
-        assert config.no_dedup is True
-
-
 class TestNoDedupFlagCLI:
     """CLI accepts --no-dedup and --force-instructions."""
 
