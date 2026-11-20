@@ -117,20 +117,12 @@ def prune(ctx, dry_run):
 
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            declared_deps = apm_package.get_all_apm_dependencies()
-            project_root = Path.cwd()
-            lockfile_path = get_lockfile_path(project_root)
-            lockfile = LockFile.read(lockfile_path)
-            expected_installed = _build_expected_install_paths(
-                declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
-            )
-        except (MaterializationPathCollisionError, LockfileFormatError) as e:
-            logger.error(str(e))
-            sys.exit(1)
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
+        # Runs before the lockfile is read: retiring a revoked bundle's hooks
+        # rewrites apm.lock.yaml, and prune must not write a stale copy back.
         # A re-check that cannot resolve targets writes nothing; package
         # removal still proceeds, as with hook reconciliation below. Any other
         # re-check failure (policy, lockfile, integrator) fails closed.
@@ -150,6 +142,21 @@ def prune(ctx, dry_run):
             )
         except Exception as e:
             logger.error(f"Local bundle hook re-check failed: {e}")
+            sys.exit(1)
+
+        try:
+            declared_deps = apm_package.get_all_apm_dependencies()
+            project_root = Path.cwd()
+            lockfile_path = get_lockfile_path(project_root)
+            lockfile = LockFile.read(lockfile_path)
+            expected_installed = _build_expected_install_paths(
+                declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
+            )
+        except (MaterializationPathCollisionError, LockfileFormatError) as e:
+            logger.error(str(e))
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
         installed_packages = (
