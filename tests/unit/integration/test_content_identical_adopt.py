@@ -751,15 +751,17 @@ class TestCommandIntegratorAdopt:
         return pkg_dir, target, _make_package_info(pkg_dir)
 
     def test_adopt_fires_before_format_dispatch_when_bytes_identical(self, tmp_path: Path) -> None:
-        """Adopt check fires before format dispatch when source and on-disk
-        file are byte-identical (proves the check is wired, not dead-code).
+        """Adopt check fires before format dispatch when the on-disk file is
+        byte-identical to the rendered command APM would write (#4360).
         """
         body = b"---\ndescription: cmd\n---\n# Cmd\n"
-        _pkg_dir, target, pkg_info = self._build(tmp_path, body)
-        # Pre-place the target with the SAME bytes as the source file.
-        # This simulates a scenario where the on-disk file matches the source
-        # (e.g. a copy-through format or a manually placed file).
-        target.write_bytes(body)
+        pkg_dir, target, pkg_info = self._build(tmp_path, body)
+        # Pre-place the target with the bytes the command render produces.
+        rendered = CommandIntegrator()._render_command(
+            pkg_dir / ".apm" / "prompts" / "cmd.prompt.md", target, "claude_command"
+        )
+        assert rendered is not None
+        target.write_text(rendered, encoding="utf-8", newline="\n")
 
         result = CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS["claude"],
