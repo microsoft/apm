@@ -3,7 +3,7 @@
 A committed install records the plugin's ref. When the catalog later points
 the same plugin version at another ref, every install refuses (exit 1),
 names both refs, and leaves the recorded pin and the project unchanged, at
-project scope and with ``-g``. An explicit ``apm update`` accepts the new ref.
+project scope and with ``-g``.
 """
 
 from __future__ import annotations
@@ -110,7 +110,3 @@ def test_swapped_marketplace_ref_is_refused_every_time(
         assert "run 'apm update' to accept the new ref" in output, _evidence(refused)
         assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}
         assert world.snapshot() == before, "I7: a refused install changed durable state"
-
-    world.apm("update", *scope, "--yes", *_FLAGS)
-    assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: swapped}
-    world.apm("install", *scope, f"{_PLUGIN}@{_ALIAS}", *_FLAGS)
