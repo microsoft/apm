@@ -229,7 +229,8 @@ def test_user_scope_bundle_reads_grants_from_the_user_manifest(
     text = output(world.apm(repo, "install", "-g", str(bundle), "--target", "claude"))
     assert user_servers() == [], text
     # Rich wraps long paths mid-token; compare without whitespace.
-    assert f"addtotheusermanifest{user_manifest}:" in "".join(text.split()), text
+    grant_entry = f"Thesamegrantasthisentryintheusermanifest{user_manifest}:"
+    assert grant_entry in "".join(text.split()), text
 
     write(user_manifest, f"name: user\nversion: 1.0.0\ntargets: [claude]\n{grant}")
     world.apm(repo, "install", "-g", str(bundle), "--target", "claude")
