@@ -63,6 +63,7 @@ def withdraw_unrecorded_deployments(
         lockfile=None,
         lockfile_root=lockfile_dir,
         diagnostics=diagnostics,
+        kept=(),
     )
     kept: list[str] = []
     deleted: list[Path] = []
