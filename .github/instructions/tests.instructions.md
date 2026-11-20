@@ -121,7 +121,13 @@ pytestmark = [pytest.mark.<behavioral>, pytest.mark.promise("<catalog id>")]
 
 - `<behavioral>`: exactly one of `unit`, `component` or `e2e`, chosen by
   the boundary the tests cross (see "Behavioral classification authority"
-  below). Directory names are not evidence.
+  below). Directory names are not evidence, with one exception: every module
+  under `tests/lifecycle/{journeys,machines,replay,scenarios,security,world}/`
+  drives the installed CLI, so the directory determines `e2e`. A module there
+  declares only its promise (`pytestmark = [pytest.mark.promise("<id>")]`);
+  `tests/lifecycle/conftest.py` applies `e2e` at collection, and a module
+  there that declares another behavioral marker fails the gate. The list is
+  `DIRECTORY_MARKERS` in `tests/quality/taxonomy.py`.
 - `<catalog id>`: one or more ids from `tests/quality/promise-catalog.json`
   (`P-OWN-*`, `P-INV-*`, `P-LAW-*`, `P-DOC-*`); spec-conformance modules use
   their OpenAPM `req-*` ids. Add a missing promise to the catalog in the

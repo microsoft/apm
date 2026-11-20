@@ -403,7 +403,14 @@ def status(policy_source, no_cache, as_json, output_format, check, global_):
     help="Explain the effective executable-trust decision for an installed package",
 )
 @click.argument("package")
-def explain(package):
+@click.option(
+    "-g",
+    "--global",
+    "global_scope",
+    is_flag=True,
+    help="Explain a package installed at user scope (apm install -g).",
+)
+def explain(package, global_scope):
     """Explain the effective executable-trust decision for PACKAGE.
 
     Prints, per executable type the package declares, whether it is allowed,
@@ -412,14 +419,15 @@ def explain(package):
     companion to ``apm policy status`` (the policy-chain view) and the
     fleet-level executable-trust drift check in ``apm doctor``.
 
-    Note: only resolves packages that are installed in the current project.
+    Note: resolves packages installed in the current project, or at user
+    scope (apm install -g) with -g.
     """
     from ..install.errors import PolicyViolationError
     from .approve import _report_policy_block, explain_decision
 
     logger = CommandLogger("policy explain")
     try:
-        explain_decision(package, logger=logger)
+        explain_decision(package, logger=logger, global_scope=global_scope)
     except PolicyViolationError as exc:
         _report_policy_block(exc)
         sys.exit(1)
