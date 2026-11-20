@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.remediation import LOCAL_EDITS_EXPORT, RESTORE_EDITED_SKILL
+from apm_cli.integration.base_integrator import kept_edit_message
 from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
     output,
@@ -136,8 +137,8 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     """Edits in 2 packages -> 2 patches; audit and install point at export-patch.
 
     Per primitive kind (RA-009): a plain install keeps every edit (#4360);
-    an edited agent is named and the install exits 1, edited skills are kept
-    with a warning, and audit points at ``apm export-patch``.
+    each receipted edit (agent and skills) is kept and named with the true
+    reason, exit 0 (RA-012), and audit points at ``apm export-patch``.
     """
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
@@ -172,11 +173,15 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     assert len(patches) == 2, [p.name for p in patches]
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
 
-    install = world.apm(project, "install", "--no-policy", expect=1)
+    # The receipts prove every edit; with nothing new upstream each is kept and
+    # named with the true reason, and the install exits 0 (RA-012, skill parity).
+    install = world.apm(project, "install", "--no-policy")
     install_text = " ".join(output(install).split())
     assert "overwrites" not in install_text
-    assert "Kept .claude/agents/ra.md:" in install_text
-    assert "Move it aside, then run 'apm install'" in install_text
+    assert (
+        kept_edit_message(".claude/agents/ra.md", user_scope=False, proven_edit=True)
+        in install_text
+    ), install_text
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
     assert agent.read_bytes() != agent_before
     assert agent.read_text().endswith("agent edit\n")
