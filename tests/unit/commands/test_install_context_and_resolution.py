@@ -235,6 +235,7 @@ class TestValidateAndAddPackagesToApmYml:
                     )
         # Dry-run: packages returned but NOT written
         assert "owner/repo" in validated
+        assert apm_yml.read_text() == "name: project\nversion: 1.0.0\ndependencies:\n  apm: []\n"
 
     def test_validation_summary_false_returns_early(self, tmp_path: Path) -> None:
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml

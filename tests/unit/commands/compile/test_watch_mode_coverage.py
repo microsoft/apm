@@ -177,6 +177,7 @@ class TestWatchModeFullLoop:
             assert any("dry run" in call.lower() for call in success_calls)
         finally:
             os.chdir(old_cwd)
+        assert not list(tmp_path.glob("*.md"))
 
     def test_watch_apm_dir_and_github_paths(self, tmp_path) -> None:
         """Lines 167-185: multiple watch paths scheduled (APM_DIR + .github dirs)."""
@@ -322,6 +323,7 @@ class TestWatchModeStagedHashDrift:
         for logger in (logger_mock, handler_logger):
             warnings = " ".join(str(call.args[0]) for call in logger.warning.call_args_list)
             assert f"hash-drift: staged file {staged} changed since install" in warnings
+        assert not list(tmp_path.glob("*.md"))
 
 
 class TestWatchMode:

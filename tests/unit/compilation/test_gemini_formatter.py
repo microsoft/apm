@@ -128,3 +128,4 @@ class TestGeminiStubWithoutAgentsMd:
             PrimitiveCollection(), dry_run=True
         )
         assert len(result.content_map) == 1
+        assert not list(tmp_path.glob("*.md"))

@@ -98,6 +98,7 @@ Use type hints in Python code.
         assert "AGENTS.md" in result.output_path
         # Content should contain AGENTS.md format elements
         assert "AGENTS.md" in result.content or result.content  # Has content
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_agents_is_alias_for_vscode(self, temp_project, sample_primitives):
         """Test that target='agents' produces same result as 'vscode'."""
@@ -114,6 +115,7 @@ Use type hints in Python code.
         # Both should reference AGENTS.md
         assert "AGENTS.md" in result_vscode.output_path
         assert "AGENTS.md" in result_agents.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_claude_generates_claude_md(self, temp_project, sample_primitives):
         """Test that target='claude' generates CLAUDE.md files."""
@@ -125,6 +127,7 @@ Use type hints in Python code.
         assert result.success
         # Output path should reference CLAUDE.md
         assert "CLAUDE" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_all_generates_both(self, temp_project, sample_primitives):
         """Test that target='all' generates both AGENTS.md and CLAUDE.md."""
@@ -140,6 +143,7 @@ Use type hints in Python code.
         assert result.success
         # Output path should mention both targets
         assert "AGENTS.md" in result.output_path or "CLAUDE" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_codex_generates_agents_md(self, temp_project, sample_primitives):
         """Regression for issue #766: --target codex must produce AGENTS.md, not a silent no-op."""
@@ -155,6 +159,7 @@ Use type hints in Python code.
         assert result.success
         assert result.output_path, "codex target must route to a compiler, not return empty"
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_codex_single_agents_no_claude_preview_issue_765_cli(self, temp_project):
         """Regression for issue #765: CLI --target codex --single-agents must not append Claude preview text.
@@ -215,6 +220,7 @@ Use type hints in Python code.
 
         assert result.success
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_grok_build_generates_agents_md(self, temp_project, sample_primitives):
         """Stable Grok Build compilation produces root project instructions."""
@@ -229,6 +235,7 @@ Use type hints in Python code.
 
         assert result.success
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_gemini_generates_gemini_md(self, temp_project, sample_primitives):
         """target='gemini' must produce GEMINI.md, not a silent no-op."""
@@ -243,6 +250,7 @@ Use type hints in Python code.
         assert result.success
         assert result.output_path, "gemini target must route to a compiler, not return empty"
         assert "GEMINI" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_minimal_generates_agents_md(self, temp_project, sample_primitives):
         """target='minimal' must route to AGENTS.md-only."""
@@ -257,6 +265,7 @@ Use type hints in Python code.
 
         assert result.success
         assert "AGENTS.md" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
     def test_target_vscode_writes_copilot_root_instructions_from_global_rules(self, temp_project):
         """Copilot compile should emit .github/copilot-instructions.md from global instructions."""
@@ -1023,6 +1032,7 @@ Use type hints in Python code.
 
         assert result.success is False
         assert any("Unknown compilation target" in e for e in result.errors)
+        assert not list(temp_project.glob("*.md"))
 
     def test_unknown_frozenset_target_family_returns_failure(self, temp_project, sample_primitives):
         """Unknown multi-target family must fail explicitly instead of silently no-oping."""
@@ -1038,6 +1048,7 @@ Use type hints in Python code.
         assert result.success is False
         assert any("Unknown compilation target family" in e for e in result.errors)
         assert any("not-a-real-family" in e for e in result.errors)
+        assert not list(temp_project.glob("*.md"))
 
 
 class TestCompileCommandCLI:
@@ -1432,6 +1443,7 @@ Use type hints.
         assert result.success
         # The merged output path should reference both targets
         assert "AGENTS.md" in result.output_path or "CLAUDE" in result.output_path
+        assert not list(temp_project.glob("*.md"))
 
 
 class TestClaudeAndAgentsMdConsistentOutput:
