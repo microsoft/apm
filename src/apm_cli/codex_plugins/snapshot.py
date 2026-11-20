@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.codex_plugins.client import CodexNativeError
+from apm_cli.core.remediation import CODEX_NATIVE_REGISTRATION_UNVERIFIED
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.content_hash import compute_native_bundle_hash
@@ -107,7 +108,10 @@ def prepare_snapshot(
 ) -> NativeSnapshot:
     """Materialize only admitted bytes; Codex owns every native-cache mutation."""
     if compute_native_bundle_hash(plan.source_root) != expected_hash:
-        raise CodexNativeError("Codex plugin source changed after admission; rerun apm install.")
+        raise CodexNativeError(
+            "Codex plugin source changed after admission. "
+            + CODEX_NATIVE_REGISTRATION_UNVERIFIED.sentence()
+        )
     if destination.exists() or destination.is_symlink():
         raise CodexNativeError(
             "Native snapshot destination already exists; refusing to replace it."

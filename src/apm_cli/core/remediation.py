@@ -475,6 +475,94 @@ RUNTIME_MISSING = _entry(
 # -- W3 deps-compilation --
 # -- end W3 deps-compilation --
 # -- W3 plugins-runtime --
+# Advice printed by adapters/, agent_plugins/, claude_plugins/, codex_plugins/,
+# copilot_plugins/ and runtime/.
+MCP_ENV_VARS_UNRESOLVED = _entry(
+    "mcp-env-vars-unresolved",
+    "apm install",
+    "write the resolved values into the MCP server configuration",
+    before="set {names} in your environment",
+)
+JETBRAINS_MCP_CONFIG_UNUSABLE = _entry(
+    "jetbrains-mcp-config-unusable",
+    "apm install --target intellij",
+    "reconcile the JetBrains Copilot MCP config",
+    before="{fix}",
+)
+MCP_CONTAINER_OPTION_UNRESOLVED = _entry(
+    "mcp-container-option-unresolved",
+    "apm install",
+    "configure the container MCP server for this target",
+    before="set the required registry runtime variables",
+)
+AGENT_PLUGIN_LEGACY_REPACK = _entry(
+    "agent-plugin-legacy-repack",
+    "apm pack --claude-plugin",
+    "produce a legacy-compatible package yourself",
+)
+AGENT_PLUGIN_BUNDLE_ROUTE = _entry(
+    "agent-plugin-bundle-route",
+    "apm install --target copilot",
+    "materialize it under apm_modules and register it natively with GitHub Copilot",
+    before="declare the plugin as a dependency in apm.yml (a local path works)",
+)
+CLAUDE_PLUGIN_BIN_UNTRUSTED = _entry(
+    "claude-plugin-bin-untrusted",
+    "apm install --global --trust-bin",
+    "trust its bin/ executables and register the plugin",
+)
+CLAUDE_PLUGIN_SOURCE_STALE = _entry(
+    "claude-plugin-source-stale",
+    "apm install --global",
+    "restore the native Claude plugin from apm.lock.yaml",
+)
+CLAUDE_PLUGIN_BINDING_MOVED = _entry(
+    "claude-plugin-binding-moved",
+    "apm install --global",
+    "register the native Claude plugins under this APM home",
+    before="remove the old entries from Claude settings and ~/.agents/plugins, "
+    "delete apm.lock.yaml",
+)
+CODEX_PLUGIN_USER_SCOPE = _entry(
+    "codex-plugin-user-scope",
+    "apm install -g --target codex",
+    "register Codex compatibility plugins at user scope",
+)
+CODEX_NATIVE_CACHE_DIFFERS = _entry(
+    "codex-native-cache-differs",
+    "apm install -g --frozen --target codex",
+    "rebuild it from the admitted source",
+    before="remove only this dependency's disposable apm_modules directory",
+)
+CODEX_PROVENANCE_UNINSTALL = _entry(
+    "codex-provenance-uninstall",
+    "apm uninstall -g {dependency}",
+    "remove the dependency whose provenance is missing",
+    before="save its pinned declaration",
+    then="{reinstall}",
+)
+CODEX_PROVENANCE_REINSTALL = _entry(
+    "codex-provenance-reinstall",
+    "apm install -g <saved-pinned-dependency> --target codex",
+    "reinstall it with recorded source provenance",
+)
+CODEX_NATIVE_REGISTRATION_UNVERIFIED = _entry(
+    "codex-native-registration-unverified",
+    "apm install -g --target codex",
+    "register the Codex plugin again from its admitted source",
+)
+COPILOT_SETTINGS_INVALID = _entry(
+    "copilot-settings-invalid",
+    "apm install",
+    "register the Agent Plugin and install the packages",
+    before="fix or delete the file",
+)
+LLM_TLS_BOOTSTRAP_MISSING = _entry(
+    "llm-tls-bootstrap-missing",
+    "apm runtime setup llm",
+    "install the OS-trust bootstrap into the llm venv",
+    before="use Python 3.10+ or set PIP_CERT to your proxy CA bundle",
+)
 # -- end W3 plugins-runtime --
 # -- W3 core-models --
 # -- end W3 core-models --
