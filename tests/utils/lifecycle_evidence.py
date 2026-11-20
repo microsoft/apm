@@ -571,14 +571,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
     ),
     KnownOutputCell(
-        "install-adapter-unreadable-config-warning-twice",
-        "I9",
-        "#4332",
-        _runs("install"),
-        r"stderr repeats a line: 'WARNING apm_cli\.adapters\.client\.\w+ Could not read",
-        output=r"as a JSON object -- skipping config write",
-    ),
-    KnownOutputCell(
         "update-deny-all-lifecycle-notice-repeats",
         "I9",
         "#4333",
