@@ -110,7 +110,10 @@ Each item is then admitted in this order (first match wins):
 When an approved definition changes upstream, install parks the item and
 warns `Parked MCP server 'kit-docs' (acme/agent-kit): definition changed since
 approval` (or `Parked hook file '<path>' ...`), naming the review and
-re-approve commands.
+re-approve commands. A package none of whose hook files matches its pin
+retires the hooks it deployed earlier. `apm install --frozen` and
+`apm audit --ci` both fail while the lockfile still records such a hook as
+deployed.
 
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
