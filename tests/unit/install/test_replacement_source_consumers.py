@@ -12,7 +12,6 @@ from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 from apm_cli.commands.deps.cli import _build_dep_tree
 from apm_cli.commands.deps.why import _render_human, _render_json
 from apm_cli.commands.outdated import _check_one_dep
-from apm_cli.commands.uninstall.engine import _compute_actual_orphans
 from apm_cli.core.command_logger import InstallLogger
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
@@ -27,6 +26,7 @@ from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
 from apm_cli.install.helpers.ref_reuse import maybe_resolve_git_semver
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
+from apm_cli.install.orphans import OrphanOperation, ReachabilityProbe, decide_orphan_removal
 from apm_cli.install.phases.local_content import materialize_local_package_for_replay
 from apm_cli.install.pipeline import _preflight_auth_check
 from apm_cli.install.plan import build_update_plan
@@ -222,9 +222,11 @@ def test_replacement_uninstall_bounds_unique_unverifiable_manifest_names(
         reachable=frozenset(), complete=False, unverifiable=failures + failures[:1]
     )
     lock = LockFile(replacements=[])
+    (tmp_path / "apm_modules").mkdir()
     with (
         patch(
-            "apm_cli.commands.uninstall.engine._read_survivor_direct_refs", return_value=([], [])
+            "apm_cli.install.orphans._collect_orphan_candidates",
+            return_value=({"owner/orphan"}, set()),
         ),
         patch(
             "apm_cli.deps.reachability.compute_forward_reachable_keys",
@@ -232,14 +234,21 @@ def test_replacement_uninstall_bounds_unique_unverifiable_manifest_names(
         ),
         pytest.raises(ValueError) as refused,
     ):
-        _compute_actual_orphans(
-            lock,
-            {"owner/orphan"},
-            set(),
-            tmp_path / "apm.yml",
-            [],
-            tmp_path / "apm_modules",
-            Mock(),
+        decide_orphan_removal(
+            operation=OrphanOperation.UNINSTALL,
+            roots=(),
+            candidate_universe=lock,
+            installed_paths=None,
+            resolved_keys=None,
+            intended=None,
+            materialized=None,
+            reachability=ReachabilityProbe(
+                project_root=tmp_path,
+                apm_modules_dir=tmp_path / "apm_modules",
+                direct_refs=(),
+                dev_refs=(),
+            ),
+            deployment_claims=None,
         )
 
     names = ", ".join(keys[:3]) + (", ..." if count > 3 else "")

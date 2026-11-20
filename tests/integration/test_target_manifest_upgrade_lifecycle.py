@@ -144,6 +144,10 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         settled_lock = lock_path.read_bytes()
         fixture_lock = _normalized_lock(source / case / "apm.lock.yaml")
         settled = _normalized_lock(lock_path)
+        # The first writable install promotes the old lock to version 4 once
+        # (hash framing hardening, #4000); every later step kept these bytes.
+        assert fixture_lock.pop("lockfile_version") in {"1", "2", "3"}
+        assert settled.pop("lockfile_version") == "4"
         for lock in (fixture_lock, settled):
             lock.pop("deployments", None)
             servers = lock.get("mcp_target_servers") or {}
