@@ -549,15 +549,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^(    \+- \[[^\]\n]+\] required by org policy but not declared)\n\1$",
     ),
     KnownOutputCell(
-        "self-update-installer-color-codes",
-        "I6",
-        "#4308",
-        _runs("self-update"),
-        r"stdout has characters outside printable ASCII \['0x1b'\]",
-        # self-update passes the installer's output through; install.sh always colors it.
-        output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
-    ),
-    KnownOutputCell(
         "command-echoes-non-ascii-path",
         "I6",
         "#4330",

@@ -2914,6 +2914,17 @@
       ]
     },
     {
+      "issue": 4308,
+      "fixed_in": "Unreleased",
+      "summary": "install.sh prints color codes only when stdout is a terminal and NO_COLOR is unset, so piped installer and apm self-update output stays printable ASCII.",
+      "failure_modes": ["outcome", "portability"],
+      "properties": ["outcome.status_matches_state", "portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/unit/test_unix_installer_checksums.py::test_piped_output_has_no_color_codes",
+        "tests/integration/test_self_update_release_lifecycle.py::test_self_update_with_real_installer_preserves_shell_setup_state"
+      ]
+    },
+    {
       "issue": 4323,
       "fixed_in": "Unreleased",
       "summary": "apm pack refuses, in every bundle format and under --dry-run, to pack a file whose name matches the credential-file patterns (.env, .env.*, *.pem, *.key, id_rsa, id_ed25519), naming each path and writing no bundle.",
