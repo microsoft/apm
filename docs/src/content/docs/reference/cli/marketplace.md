@@ -346,7 +346,8 @@ apm marketplace audit local --strict
 ### `apm marketplace outdated`
 
 Show packages in the authoring config that have newer upstream
-versions available.
+versions available. Local-path entries (such as `source: ./`) have no
+remote tags and are listed as skipped.
 
 | Flag | Description |
 |---|---|
