@@ -435,8 +435,12 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4243",
         _runs("install"),
         r"repeats a (line|diagnostic): '\|   ",
-        # One hook integrated into two targets is listed once per target, back to back.
-        output=r"^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+$",
+        # One hook integrated into two targets that render it the same way (Claude
+        # and Windsurf, or a hook file) is listed once per target, back to back.
+        output=(
+            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
+            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
+        ),
     ),
     KnownOutputCell(
         "install-registry-lookup-per-registry",
