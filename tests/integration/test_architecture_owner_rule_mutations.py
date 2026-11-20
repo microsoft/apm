@@ -382,25 +382,31 @@ def test_context_protection_cannot_regress_to_root_only(
             id="frozen-refusal-skips-retirement-owner",
         ),
         pytest.param(
-            "tests/utils/lifecycle_oracle.py",
+            "tests/lifecycle/oracles.py",
             "if after.deployed - before.deployed or retired & model.allowed_surfaces():",
             "if after.deployed - before.deployed:",
             id="i7-x1-widened-to-allowed-surfaces",
         ),
         pytest.param(
-            "tests/utils/lifecycle_oracle.py",
+            "tests/lifecycle/oracles.py",
             "if after.state.lockfile_bytes != before.state.lockfile_bytes:",
             "if False:",
             id="i7-x1-widened-to-lock-writes",
         ),
         pytest.param(
-            "tests/utils/lifecycle_oracle.py",
-            "if not _within_retirement(path, retirement) and _RETIREMENT_BOOKKEEPING not in path",
-            "if False",
+            "tests/lifecycle/oracles.py",
+            "and not _within_retirement(path, retirement)",
+            "and True",
             id="i7-x1-widened-to-any-file",
         ),
         pytest.param(
-            "tests/utils/lifecycle_oracle.py",
+            "tests/lifecycle/oracles.py",
+            "and not (retirement and _RETIREMENT_BOOKKEEPING in path)",
+            "and _RETIREMENT_BOOKKEEPING not in path",
+            id="i7-x1-widened-to-receipts-without-retirement",
+        ),
+        pytest.param(
+            "tests/lifecycle/oracles.py",
             'return path in retirement or any(retired.startswith(path + "/") for retired in retirement)',
             "return True",
             id="i7-x1-widened-beyond-retired-ancestors",
@@ -2020,6 +2026,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    legacy = lockfile.replacements is None\n",
         new=("    legacy = lockfile.replacements is None\n    parent_depth = target.depth - 1\n"),
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-locked-content-verdict",
+        rule_id="install-deployment-locked-content-verdict",
+        path="src/apm_cli/install/drift.py",
+        old=(
+            "    if locked_content_mismatch(\n"
+            "        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info\n"
+            "    ):\n"
+        ),
+        new="    if False:\n",
+        intent="The audit --ci scratch replay stops asking install's locked content verdict.",
     ),
     MutationCase(
         guard_id="install-deployment-locked-copy-validity",

@@ -96,7 +96,7 @@ _DEPLOYED_HASH_FRAGMENTS = (
 # and the GATE oracle's exception stays closed: the lockfile never changes,
 # no allowed surface goes, and no file changes beyond the retired ones.
 _FROZEN_RETIREMENT = "src/apm_cli/install/frozen_retirement.py"
-_GATE_ORACLE = "tests/utils/lifecycle_oracle.py"
+_GATE_ORACLE = "tests/lifecycle/oracles.py"
 _RETIREMENT_FRAGMENTS = (
     (_FROZEN_OWNER, "enforce_frozen_presence(request, committed, withheld,"),
     (_FROZEN_RETIREMENT, "= find_missing_deployed_files(deploy_root, committed, targets)"),
@@ -104,10 +104,9 @@ _RETIREMENT_FRAGMENTS = (
     (_FROZEN_RETIREMENT, "return withheld_executable_sources("),
     (_GATE_ORACLE, "if after.state.lockfile_bytes != before.state.lockfile_bytes:"),
     (_GATE_ORACLE, "if after.deployed - before.deployed or retired & model.allowed_surfaces():"),
-    (
-        _GATE_ORACLE,
-        "if not _within_retirement(path, retirement) and _RETIREMENT_BOOKKEEPING not in path",
-    ),
+    (_GATE_ORACLE, "and not _within_retirement(path, retirement)"),
+    (_GATE_ORACLE, "and not (retirement and _RETIREMENT_BOOKKEEPING in path)"),
+    (_GATE_ORACLE, "retirement = _i7_x1_retirement(before, after, model)"),
     (
         _GATE_ORACLE,
         'return path in retirement or any(retired.startswith(path + "/") for retired in retirement)',

@@ -114,7 +114,7 @@ What gets removed, in order:
    lockfiles adopt only self-defined entries that exactly match their stored
    configuration baseline. LSP cleanup works within the targets
    `lsp_target_servers` records, or the `targets:` in `apm.yml` when declared;
-   a saved `apm config target` or harness detection applies only when the
+   a target saved with `apm config set target` or harness detection applies only when the
    lockfile records none. When another surviving package declares the same LSP
    server name, ownership transfers to that package instead of deleting the
    shared entry. Cleanup attempts every owning runtime before exiting nonzero on

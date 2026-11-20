@@ -9,6 +9,7 @@ from apm_cli.utils.content_hash import (
     _EMPTY_HASH,
     compute_file_hash,
     compute_package_hash,
+    same_package_digest,
     verify_package_hash,
 )
 
@@ -217,6 +218,47 @@ class TestVerifyPackageHash:
         expected = compute_package_hash(tmp_path)
         (tmp_path / "extra.txt").write_text("injected")
         assert verify_package_hash(tmp_path, expected, framed=True) is False
+
+    @pytest.mark.parametrize("encode", [lambda d: d, lambda d: d.removeprefix("sha256:")])
+    def test_bare_and_enveloped_rows_verify_alike(self, tmp_path, encode):
+        """req-lk-016: a bare hex row and a sha256: envelope describe the same bytes."""
+        (tmp_path / "a.txt").write_text("data")
+        recorded = encode(compute_package_hash(tmp_path))
+        assert verify_package_hash(tmp_path, recorded, framed=True) is True
+        (tmp_path / "a.txt").write_text("changed")
+        assert verify_package_hash(tmp_path, recorded, framed=True) is False
+
+
+class TestLockedContentVerdict:
+    """The shared install/audit verdict accepts both lockfile digest encodings."""
+
+    @pytest.mark.parametrize("bare", [False, True])
+    @pytest.mark.parametrize("fresh", [False, True])
+    def test_intact_copy_matches_bare_or_enveloped_row(self, tmp_path, bare, fresh):
+        from types import SimpleNamespace
+
+        from apm_cli.install.source_helpers import locked_content_mismatch
+
+        (tmp_path / "a.txt").write_text("data")
+        digest = compute_package_hash(tmp_path)
+        row = SimpleNamespace(
+            content_hash=digest.removeprefix("sha256:") if bare else digest,
+            content_hash_framed=True,
+            carried_licenses=(),
+        )
+        fresh_hash = digest if fresh else None
+
+        assert not locked_content_mismatch(
+            "o/pkg", row, tmp_path, lockfile=None, fresh_hash=fresh_hash
+        )
+        (tmp_path / "a.txt").write_text("changed")
+        changed = compute_package_hash(tmp_path) if fresh else None
+        assert locked_content_mismatch("o/pkg", row, tmp_path, lockfile=None, fresh_hash=changed)
+
+    def test_same_package_digest_requires_both_values(self):
+        assert same_package_digest("sha256:" + "a" * 64, "A" * 64)
+        assert not same_package_digest("", "")
+        assert not same_package_digest("sha256:" + "a" * 64, "sha256:" + "b" * 64)
 
 
 # ---------------------------------------------------------------------------

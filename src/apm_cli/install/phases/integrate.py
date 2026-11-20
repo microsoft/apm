@@ -279,7 +279,19 @@ def _resolve_download_strategy(
             _dep_locked_chk.carried_licenses or carried_licenses_for(ctx, dep_key, _dep_locked_chk),
             framed=_dep_locked_chk.content_hash_framed,
         ):
-            _hash_msg = f"Content hash mismatch for {dep_ref.get_unique_key()} -- re-downloading"
+            from apm_cli.install.source_helpers import (
+                locked_content_mismatch_line,
+                observed_package_hash,
+            )
+
+            _hash_msg = (
+                locked_content_mismatch_line(
+                    dep_ref.get_unique_key(),
+                    _dep_locked_chk.content_hash,
+                    observed_package_hash(_dep_locked_chk, install_path),
+                )
+                + " Re-downloading from the locked source."
+            )
             diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
             if logger:
                 logger.progress(_hash_msg)
