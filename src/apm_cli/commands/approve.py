@@ -957,6 +957,8 @@ def _is_native_plugin(
     Claude plugin under the user-scope native route (#3290)."""
     if package_type == "agent_plugin":
         return True
+    if package_type is None and _is_agent_plugin(package_dir):
+        return True
     if (package_dir / ".codex-plugin" / "plugin.json").is_file():
         return True
     return (
@@ -964,6 +966,21 @@ def _is_native_plugin(
         and package_type in (None, "marketplace_plugin")
         and (package_dir / ".claude-plugin" / "plugin.json").is_file()
     )
+
+
+def _is_agent_plugin(package_dir: Path) -> bool:
+    """Whether the canonical loader reads *package_dir* as an Agent Plugin.
+
+    Without a lockfile there is no recorded ``package_type`` to consult.
+    """
+    from ..agent_plugins.errors import AgentPluginError
+    from ..agent_plugins.loader import detect_agent_plugin
+
+    try:
+        detection = detect_agent_plugin(package_dir)
+    except (AgentPluginError, OSError):
+        return False
+    return detection is not None and detection.plugin is not None
 
 
 def scan_installed_executable_packages(manifest: Path) -> list:
@@ -974,7 +991,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
         locked_dependency_approval,
         scan_package_executables,
     )
-    from ..security.trust import installed_content_matches_lock
+    from ..security.trust import installed_content_matches_lock, native_declaration
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
@@ -1036,6 +1053,9 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 parent_name=locked.resolved_by if locked.depth > 1 else None,
                 original_identity=approval.original_identity,
             )
+            native = _is_native_plugin(locked.package_type, package_dir, user_scope=user_scope)
+            if native:
+                declaration = native_declaration(declaration, package_dir)
             if declaration.has_executables:
                 results.append(
                     replace(
@@ -1043,9 +1063,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         install_path=str(package_dir),
                         depth=locked.depth,
                         content_verified=installed_content_matches_lock(locked, package_dir),
-                        native_plugin=_is_native_plugin(
-                            locked.package_type, package_dir, user_scope=user_scope
-                        ),
+                        native_plugin=native,
                     )
                 )
         return results
@@ -1081,12 +1099,15 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 version,
                 manifest_data=manifest_data,
             )
+            native = _is_native_plugin(None, pkg_dir, user_scope=user_scope)
+            if native:
+                decl = native_declaration(decl, pkg_dir)
             if decl.has_executables:
                 results.append(
                     replace(
                         decl,
                         install_path=str(pkg_dir),
-                        native_plugin=_is_native_plugin(None, pkg_dir, user_scope=user_scope),
+                        native_plugin=native,
                     )
                 )
 

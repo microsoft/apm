@@ -105,16 +105,20 @@ class ExecutableDeclaration:
     content_verified: bool = True
     # A natively loaded plugin is approved as one item over its whole root.
     native_plugin: bool = False
+    # The native gate's type set (trust owner), which the counts above miss
+    # for native layouts such as an Agent Plugin's root mcp.json.
+    native_exec_types: tuple[str, ...] = ()
 
     @property
     def has_executables(self) -> bool:
         """Return True if this package declares enforced executable primitives."""
-        return (
+        return bool(
             self.hook_count > 0
             or self.bin_count > 0
             or self.mcp_count > 0
             or self.canvas_count > 0
             or self.lsp_count > 0
+            or self.native_exec_types
         )
 
     @property
@@ -131,6 +135,7 @@ class ExecutableDeclaration:
             types.append(EXEC_TYPE_CANVAS)
         if self.lsp_count > 0:
             types.append(EXEC_TYPE_LSP)
+        types.extend(t for t in self.native_exec_types if t not in types)
         return types
 
     def summary_line(self) -> str:
@@ -146,7 +151,21 @@ class ExecutableDeclaration:
             parts.append(f"{self.canvas_count} canvas extension(s)")
         if self.lsp_count:
             parts.append(f"{self.lsp_count} LSP server(s)")
+        native_only = self._native_only_types()
+        if native_only:
+            parts.append(f"native plugin ({', '.join(native_only)})")
         return ", ".join(parts)
+
+    def _native_only_types(self) -> list[str]:
+        """Native gate types no count above reports."""
+        counted = {
+            EXEC_TYPE_HOOKS: self.hook_count,
+            EXEC_TYPE_MCP: self.mcp_count,
+            EXEC_TYPE_BIN: self.bin_count,
+            EXEC_TYPE_CANVAS: self.canvas_count,
+            EXEC_TYPE_LSP: self.lsp_count,
+        }
+        return [t for t in self.native_exec_types if not counted.get(t)]
 
 
 # -------------------------------------------------------------------

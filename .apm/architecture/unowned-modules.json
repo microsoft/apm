@@ -48,7 +48,6 @@
     "src/apm_cli/commands/compile/cli.py",
     "src/apm_cli/commands/compile/staging.py",
     "src/apm_cli/commands/compile/watcher.py",
-    "src/apm_cli/commands/config.py",
     "src/apm_cli/commands/deps/__init__.py",
     "src/apm_cli/commands/deps/_utils.py",
     "src/apm_cli/commands/deps/why.py",
