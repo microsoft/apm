@@ -31,6 +31,7 @@ except TLSConfigurationError as exc:
     # error before any command callback can make a request.
     _TLS_BOOTSTRAP_ERROR = exc
 
+from apm_cli.update_notice import check_and_notify_updates as _check_and_notify_updates
 from apm_cli.version_output import print_version
 
 _CLI_EPILOG = (
@@ -447,13 +448,6 @@ class _OutputModeGroup(click.Group):
         ]
         results.extend(click.Command.shell_complete(self, ctx, incomplete))
         return results
-
-
-def _check_and_notify_updates() -> None:
-    """Run the update notice; deferred so startup skips the helpers module."""
-    from apm_cli.commands._helpers import _check_and_notify_updates as check_and_notify
-
-    check_and_notify()
 
 
 def _configure_logging(verbose: bool = False) -> None:
