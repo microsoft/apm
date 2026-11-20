@@ -9,8 +9,8 @@ looks like when APM prints, logs or exports it.
   masking exactly once.
 * No other product module regrows the secret pattern, a URL userinfo
   stripper or a ``[REDACTED]`` replacement loop (closed world).
-* ``apm config`` prints every ``key: value`` line through one helper that
-  renders the value through the owner.
+* ``apm config`` renders every echoed, logged or tabled value through the
+  owner; any other interpolation is a key name or a fixed literal.
 * Known consumers (debug log filter, script log, SBOM export, proxy and
   registry diagnostics) delegate to the owner.
 """
@@ -54,8 +54,19 @@ _FORBIDDEN_MECHANISMS = re.compile(
     r"|\.replace\([^)\n]*,\s*[\"']\[REDACTED\][\"']\)"
 )
 
-# A ``label: {value}`` echo in apm config bypasses the value renderer.
-_RAW_CONFIG_ECHO = re.compile(r"click\.echo\(\s*f[\"'][^\"'\n]*:\s+\{(?!render_config_value\()")
+# apm config output sinks: every interpolated value must be a key or label
+# name, a fixed literal, or rendered through the owner (closed world).
+_CONFIG_INTERPOLATION_ALLOWLIST = (
+    r"(?:reg_name|scanner_name|scanner|name|key|label|rendered|indent|exc|HIGHLIGHT|RESET"
+    r"|', '\.join\(SUPPORTED_SCANNERS\)"
+    r"|len\(tokens\)|config_module\.CONFIG_FILE|'true' if llm else 'false')\}"
+    r"|render_config_value\(|_valid_config_keys\("
+)
+_RAW_CONFIG_SINKS = re.compile(
+    r"\bf\"[^\"\n]*\{(?!" + _CONFIG_INTERPOLATION_ALLOWLIST + r")"
+    r"|click\.echo\(\s*(?![\"']|f\"|$)"
+    r"|\.add_row\((?!category, setting, render_config_value\()"
+)
 
 _DELEGATING_CONSUMERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -63,6 +74,7 @@ _DELEGATING_CONSUMERS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "from ..utils.credential_rendering import render_config_value",
             'click.echo(f"{indent}{key}: {render_config_value(key, value)}")',
+            "table.add_row(category, setting, render_config_value(setting, value))",
             "_echo_setting(key, (get_registry_config(reg_name) or {}).get(field))",
             '_echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")',
         ),
@@ -123,8 +135,8 @@ def _check_credential_value_rendering(provider: FactsProvider) -> tuple[Violatio
             inventory,
             _RULE_ID,
             (_CONFIG_COMMAND,),
-            _RAW_CONFIG_ECHO,
-            "apm config prints values only through _echo_setting (render_config_value)",
+            _RAW_CONFIG_SINKS,
+            "apm config renders every printed, logged or tabled value through render_config_value",
             exempt=False,
         )
     )

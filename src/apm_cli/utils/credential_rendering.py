@@ -35,11 +35,11 @@ INVALID_URL_PLACEHOLDER = "<redacted-url>"
 # chars) so prose such as "bearer token acquisition failed" stays readable.
 SECRET_RE = re.compile(
     r"(?:"
-    r"(?:token|password|secret|authorization)\s*[:=]\s*"
+    r"(?:token|password|secret|authorization|api[_-]?key)\s*[:=]\s*"
     r"(?:(?:bearer|basic|token)\s+)?"
     r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"
     r"|"
-    r"(?:token|password|secret|bearer|basic)\s+"
+    r"(?:token|password|secret|bearer|basic|api[_-]?key)\s+"
     r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{16,}"
     r"|"
     r"://[^:@/\s]+:[^:@/\s]+@"
@@ -50,6 +50,9 @@ SECRET_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+
+# A URL embedded anywhere in free text, e.g. ``--endpoint=https://...``.
+_EMBEDDED_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
 
 # Last dotted segment of a configuration key that names a stored secret.
 _CREDENTIAL_KEY_SEGMENTS = frozenset({"token", "password", "secret", "pat", "api-key", "apikey"})
@@ -75,19 +78,33 @@ def mask_known_values(text: str, values: Iterable[str]) -> str:
     return redacted
 
 
-def redact_url_userinfo(url: str, *, drop_query: bool = False) -> str:
-    """Return *url* without ``user:password@`` userinfo.
+def _mask_parameters(text: str) -> str:
+    """Mask every value of a ``name=value&...`` string (or the whole string)."""
+    if "=" not in text:
+        return CREDENTIAL_MASK
+    return "&".join(
+        f"{name}={CREDENTIAL_MASK}" if sep else name
+        for name, sep, _value in (pair.partition("=") for pair in text.split("&"))
+    )
 
-    With ``drop_query`` the query string is removed as well (it can carry
-    ``?token=`` style credentials). A URL with nothing to remove is returned
-    unchanged; a malformed URL that carries userinfo renders as a placeholder.
+
+def redact_url_userinfo(url: str, *, drop_query: bool = False) -> str:
+    """Return *url* for display without credentials.
+
+    Removes ``user:password@`` userinfo and masks every query value (and
+    ``key=value`` fragment values), since query parameters such as
+    ``?token=`` or ``?sig=`` can carry credentials under any name or
+    encoding. With ``drop_query`` the query is removed instead. A URL with
+    nothing to remove is returned unchanged; a malformed URL that carries
+    userinfo renders as a placeholder.
     """
     if not url:
         return url
     try:
         parts = urlsplit(url)
         has_userinfo = "@" in (parts.netloc or "")
-        if not has_userinfo and not (drop_query and parts.query):
+        has_fragment_values = "=" in parts.fragment
+        if not (has_userinfo or parts.query or has_fragment_values):
             return url
         netloc = parts.netloc
         if has_userinfo:
@@ -98,8 +115,9 @@ def redact_url_userinfo(url: str, *, drop_query: bool = False) -> str:
                 host = f"[{host}]"
             port = parts.port
             netloc = f"{host}:{port}" if port is not None else host
-        query = "" if drop_query else parts.query
-        return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+        query = "" if drop_query or not parts.query else _mask_parameters(parts.query)
+        fragment = _mask_parameters(parts.fragment) if has_fragment_values else parts.fragment
+        return urlunsplit((parts.scheme, netloc, parts.path, query, fragment))
     except (TypeError, ValueError):
         return INVALID_URL_PLACEHOLDER
 
@@ -129,9 +147,7 @@ def render_config_value(key: str, value: object) -> str:
         return NOT_SET
     if isinstance(value, bool):
         return "true" if value else "false"
-    text = str(value)
-    if "://" in text:
-        text = " ".join(redact_url_userinfo(part) for part in text.split(" "))
+    text = _EMBEDDED_URL_RE.sub(lambda match: redact_url_userinfo(match.group(0)), str(value))
     return redact_secrets(text)
 
 

@@ -36,6 +36,34 @@ _URL = f"https://alice:{_SECRET}@reg.example.invalid/apm"
             "https://reg.example.invalid/apm?[REDACTED]",
         ),
         ("temp-dir", "/tmp/apm", "/tmp/apm"),
+        (
+            "registry.corp.url",
+            f"https://{_SECRET}@reg.example.invalid/apm",
+            "https://reg.example.invalid/apm",
+        ),
+        (
+            "registry.corp.url",
+            f"https://u:a:{_SECRET}@reg.example.invalid/apm",
+            "https://reg.example.invalid/apm",
+        ),
+        (
+            "registry.corp.url",
+            f"https://reg.example.invalid/apm?sig={_SECRET}",
+            "https://reg.example.invalid/apm?sig=********",
+        ),
+        (
+            "registry.corp.url",
+            f"https://reg.example.invalid/apm?%74oken={_SECRET}",
+            "https://reg.example.invalid/apm?%74oken=********",
+        ),
+        (
+            "external.skillspector.args",
+            f"--endpoint={_URL}",
+            "--endpoint=https://reg.example.invalid/apm",
+        ),
+        ("external.skillspector.args", f"--api-key {_SECRET}", "--[REDACTED]"),
+        ("external.skillspector.args", f"--api_key={_SECRET}", "--[REDACTED]"),
+        ("external.skillspector.args", f"apikey: {_SECRET}", "[REDACTED]"),
         ("external.skillspector.args", f"--x {_URL}", "--x https://reg.example.invalid/apm"),
     ],
 )
@@ -47,9 +75,15 @@ def test_render_config_value(key: str, value: object, expected: str) -> None:
     ("url", "drop_query", "expected"),
     [
         (_URL, False, "https://reg.example.invalid/apm"),
-        ("https://u:p@[::1]:8443/x?q=1#f", False, "https://[::1]:8443/x?q=1#f"),
+        ("https://u:p@[::1]:8443/x?q=1#f", False, "https://[::1]:8443/x?q=********#f"),
         (f"https://h.invalid/x?token={_SECRET}#f", True, "https://h.invalid/x#f"),
+        (f"https://h.invalid/x?{_SECRET}", False, "https://h.invalid/x?********"),
         ("https://h.invalid/x", True, "https://h.invalid/x"),
+        (
+            f"https://h.invalid/cb#access_token={_SECRET}",
+            False,
+            "https://h.invalid/cb#access_token=********",
+        ),
         ("https://u:p@:99999/x", False, "<redacted-url>"),
     ],
 )
