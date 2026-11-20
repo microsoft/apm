@@ -231,6 +231,38 @@ def test_branch_switch_back_adopts_committed_link_rewritten_skill(
         assert world.git("status", "--porcelain") == ""
 
 
+def test_pulled_lock_over_gitignored_output_installs(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A receipt the file still holds stays trusted when a pull changes the lock."""
+    world = _new_world(tmp_path, apm_binary_path)
+    v1, v2, _v3 = _publish_kit(world)
+    dump_yaml(_manifest(v1), world.project / "apm.yml")
+    _write(world.project / ".gitignore", "apm_modules/\n.apm-local/\n.agents/\n.github/\n")
+    assert world.apm("install").returncode == 0
+    _init_repo(world)
+    _commit_all(world, "declare kit v1")
+
+    teammate = world.isolated.work_root / "teammate"
+    world.git("clone", "-q", str(world.project), str(teammate))
+    world.git("config", "user.email", "test@example.com", cwd=teammate)
+    world.git("config", "user.name", "APM Test", cwd=teammate)
+    world.git("config", "commit.gpgsign", "false", cwd=teammate)
+    env = dict(world.env, APM_HOME=str(world.isolated.root / "apm-home-teammate"))
+    Path(env["APM_HOME"]).mkdir()
+    dump_yaml(_manifest(v2), teammate / "apm.yml")
+    assert world.apm("install", cwd=teammate, env=env).returncode == 0
+    _commit_all(world, "bump kit to v2", root=teammate)
+
+    world.git("pull", "-q", "--ff-only", str(teammate), "main")
+    notes = world.project / ".agents/skills/alpha/references/notes.md"
+    assert notes.read_text(encoding="ascii") == "Notes v1.\n"
+    before = _tree(world.project, *_KIT_ROOTS)
+    result = world.apm("install")
+    _assert_nothing_deleted(before, world.project)
+    _assert_converged(world, result, world.project)
+    assert notes.read_text(encoding="ascii") == "Notes v2.\n"
+    assert world.git("status", "--porcelain") == ""
+
+
 def test_user_scope_restored_member_adopts_its_render(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

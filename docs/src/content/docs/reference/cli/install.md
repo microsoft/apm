@@ -274,14 +274,23 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Configured external skill roots use the same ownership and receipt checks.
   Switching targets that share a skill path refreshes valid same-writer evidence
   through a guarded copy, even when the source bytes are unchanged.
-  Missing evidence, including installations predating these receipts, does not
-  authorize overwriting existing files. A fresh clone or CI runner is the one
-  exception: a skill directory whose files all match what this install would
-  write, and are recorded in the lockfile, is kept and receipts are recorded.
-  `apm update` also replaces such a skill when its files match what the
+  A receipt vouches only for bytes APM wrote under the current lock, or for
+  bytes still on disk. A new worktree has no receipts, and a receipt written
+  under another branch's lock does not count. Missing evidence, including
+  installations predating these receipts, does not authorize overwriting
+  existing files. The one exception: a skill directory recorded in the
+  lockfile whose files each match either what this install would write
+  (after link rewriting) or their own valid receipt is kept and receipts are
+  recorded. This covers a fresh clone, a new worktree, a branch switch, and
+  files restored by `git checkout` or `git stash`. Install, including
+  `apm update`, also replaces such a skill when its files match what the
   currently locked version renders, fetched from its locked commit.
-  Lockfile hashes are never that proof. Preserve your edits and move the
-  conflicting file aside before reinstalling. Invalid evidence fails explicitly.
+  Lockfile hashes are never that proof. Files that install leaves in place
+  keep their lockfile entries and are never cleaned up as stale.
+  When no evidence covers a locally edited skill, install refuses without
+  changing anything. The message names the deployed skill directory: move it
+  aside (or delete it if it holds no edits), then run `apm install`.
+  Invalid evidence fails explicitly.
   Creating this state requires filesystem hard-link support. State-write failures
   are reported; successful earlier deployment writes are not rolled back.
   Audit and dry-run never establish this authority. Frozen install may record

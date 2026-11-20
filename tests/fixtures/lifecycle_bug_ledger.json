@@ -557,6 +557,32 @@
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_manifest_targets_still_win_over_the_recorded_target",
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_lock_without_recorded_targets_keeps_the_fallback"
       ]
+    },
+    {
+      "issue": 4229,
+      "fixed_in": "Unreleased",
+      "summary": "After a checkout or worktree switch, install refused or kept a deployed skill whose bytes equal its link-rewritten render, because a receipt written under another checkout's lock still decided the baseline.",
+      "failure_modes": ["ownership", "outcome", "idempotency"],
+      "properties": ["ownership.preserve_unowned", "outcome.status_matches_state", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_branch_switch_back_adopts_committed_link_rewritten_skill",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_new_worktree_adopts_committed_link_rewritten_skill",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_pulled_lock_over_gitignored_output_installs",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_restored_member_adopts_its_render",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_discarded_deploy_then_source_edit_installs"
+      ]
+    },
+    {
+      "issue": 4230,
+      "fixed_in": "Unreleased",
+      "summary": "A skill member the install declared but skipped was absent from the run's deployed set, so cleanup treated it as stale and deleted it when its bytes matched the locked render, dropping its lock entry.",
+      "failure_modes": ["cleanup", "transaction", "outcome"],
+      "properties": ["ownership.preserve_unowned", "transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_branch_switch_then_source_edit_never_deletes_skill_members",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_discarded_deploy_then_source_edit_installs",
+        "tests/unit/integration/test_cleanup_helper.py::test_member_this_install_kept_is_retained_despite_evidence"
+      ]
     }
   ],
   "lifecycle_contracts": [

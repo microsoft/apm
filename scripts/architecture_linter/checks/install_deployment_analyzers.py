@@ -33,6 +33,12 @@ from scripts.architecture_linter.checks.install_bundle_compile_staging import (
 from scripts.architecture_linter.checks.install_bundle_compile_staging import (
     check_bundle_compile_staging,
 )
+from scripts.architecture_linter.checks.install_checkout_skill_trust import (
+    GUARD_KEPT_MEMBERS,
+    GUARD_TRUSTED_RECEIPT,
+    check_cleanup_retains_kept_members,
+    check_skill_adoption_trusted_receipt,
+)
 from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
     check_codex_agent_link_resolution,
@@ -291,6 +297,16 @@ RULES: tuple[Rule, ...] = (
         GUARD_SKILL_ADOPTION_BASELINE,
         "Receipt-less skill adoption compares with the locked render when the commit changes.",
         check_skill_adoption_baseline,
+    ),
+    _rule(
+        GUARD_TRUSTED_RECEIPT,
+        "Skill adoption bails only on a trusted receipt the file still holds.",
+        check_skill_adoption_trusted_receipt,
+    ),
+    _rule(
+        GUARD_KEPT_MEMBERS,
+        "Cleanup retains every member the install declared but left unwritten.",
+        check_cleanup_retains_kept_members,
     ),
     _rule(
         GUARD_SELECTION_MERGE,

@@ -131,13 +131,17 @@
     {
       "id": "unmanaged-skill-preflight",
       "decision": "Whole-plan unmanaged skill refusal and unmatched skills: selection refusal before native deployment",
-      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes; the receipt-less adoption exception is integration/skill_adoption.py skill_tree_baselines (rendered current source, then the rendered locked source via LockedSkillSources whenever installing_commit differs from the lock, never lockfile hashes alone)",
+      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes; the adoption exception for members without a trusted receipt the file still holds (none in a new worktree, or one written under another checkout's lock; DeploymentMaterializationSession.baseline decides trust) is integration/skill_adoption.py skill_tree_baselines (rendered current source, then the rendered locked source via LockedSkillSources whenever installing_commit differs from the lock, never lockfile hashes alone)",
       "selectors": [
         "src/apm_cli/install/deployment_plan.py",
         "src/apm_cli/integration/skill_adoption.py",
         "src/apm_cli/integration/skill_preflight.py"
       ],
-      "guards": ["install-deployment-skill-preflight", "install-deployment-skill-adoption-baseline"]
+      "guards": [
+        "install-deployment-skill-preflight",
+        "install-deployment-skill-adoption-baseline",
+        "install-deployment-skill-adoption-trusted-receipt"
+      ]
     },
     {
       "id": "dependency-selection-merge",
@@ -189,7 +193,7 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text); case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; see integrators.instructions.md)",
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text); case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
       "selectors": [
         "src/apm_cli/integration/base_integrator.py",
         "src/apm_cli/integration/cleanup.py",
@@ -198,6 +202,7 @@
       "guards": [
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
+        "install-deployment-cleanup-retains-kept-members",
         "install-deployment-codex-agent-link-resolution",
         "install-deployment-agent-render-then-adopt"
       ]

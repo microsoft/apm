@@ -631,6 +631,7 @@ install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
 install-deployment-agent-render-then-adopt
@@ -656,6 +657,7 @@ install-deployment-package-content-hash
 install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
+install-deployment-skill-adoption-trusted-receipt
 install-deployment-selection-merge
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate

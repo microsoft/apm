@@ -1795,6 +1795,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A skill directory left only for user content pins its removed owner again.",
     ),
     MutationCase(
+        guard_id="install-deployment-cleanup-retains-kept-members",
+        rule_id="install-deployment-cleanup-retains-kept-members",
+        path="src/apm_cli/integration/cleanup.py",
+        old="        if evidence.kept(stale_path):\n",
+        new="        if evidence.kept(stale_path) and not _stale_set:\n",
+        intent="Cleanup deletes a skill member the install kept because it was not rewritten.",
+    ),
+    MutationCase(
         guard_id="install-deployment-codex-agent-link-resolution",
         rule_id="install-deployment-codex-agent-link-resolution",
         path="src/apm_cli/integration/agent_integrator.py",
@@ -2128,6 +2136,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    if ctx.existing_lockfile is None or ctx.downloader is None:\n        return None",
         new="    if not ctx.update_refs or ctx.existing_lockfile is None:\n        return None",
         intent="Plain install after an apm.yml ref change loses the locked-source baseline.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-skill-adoption-trusted-receipt",
+        rule_id="install-deployment-skill-adoption-trusted-receipt",
+        path="src/apm_cli/integration/skill_adoption.py",
+        old="    if all_files_trusted(destination, trusted):\n",
+        new='    if trusted(destination / "SKILL.md") is not None:\n',
+        intent="Adoption bails on another checkout's receipt and refuses unchanged skill bytes.",
     ),
     MutationCase(
         guard_id="install-deployment-skill-layout",
