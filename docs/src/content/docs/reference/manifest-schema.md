@@ -386,9 +386,10 @@ registries:
 |---|---|---|---|---|
 | `<name>` | `RegistryEntry` | at least one when block is non-empty | Non-empty string. Use letters, digits, `.`, `_` and `-` so `apm config set registry.<name>.*` can address it | Registered registry. |
 | `<name>.url` | `string` | REQUIRED per entry | MUST start with `https://` or `http://`; no trailing slash required | Base URL the client appends `/v1/...` paths to. |
+| `<name>.insecure` | `boolean` | OPTIONAL | `true` only | Allows an `http://` URL to a non-local host. Without it, `http://` is a parse error unless the host is loopback or an RFC 1918 private address. |
 | `default` | `string` | OPTIONAL | MUST name one of the configured entries | When set, plain string-shorthand APM deps and object-form deps without an explicit `registry:` key route through this registry. Project value wins over `registry.<name>.default` in `~/.apm/config.json`. |
 
-Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
+Unknown keys under a registry entry MUST be rejected at parse time (typo guard); `x-` extension keys are ignored.
 
 **Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
 

@@ -697,6 +697,7 @@ install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
+install-deployment-registry-url-scheme
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
 install-deployment-resolution-replacement

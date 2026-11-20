@@ -130,10 +130,12 @@ def resolve_registry_basic(
 def _credential_origin_matches(registry_name: str, target_url: str) -> bool:
     """Return whether trusted user config binds *registry_name* to *target_url*."""
     from ...config import get_registry_config
+    from .url_scheme import registry_url_error
 
     cfg = get_registry_config(registry_name)
     configured_url = cfg.get("url") if isinstance(cfg, dict) else None
-    if not isinstance(configured_url, str) or not configured_url:
+    insecure = cfg.get("insecure") if isinstance(cfg, dict) else None
+    if registry_url_error(registry_name, configured_url, insecure=insecure) is not None:
         return False
     target = _normalize_url_prefix(target_url)
     configured = _normalize_url_prefix(configured_url)

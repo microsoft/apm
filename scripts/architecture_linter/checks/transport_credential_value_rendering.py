@@ -207,7 +207,7 @@ _DELEGATING_CONSUMERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("src/apm_cli/deps/registry/client.py", ("    url = redact_url_userinfo(url)",)),
     ("src/apm_cli/deps/registry/auth.py", ("{redact_url_userinfo(target_url)}",)),
     ("src/apm_cli/deps/registry/resolver.py", ("redact_url_userinfo(exc.url)",)),
-    ("src/apm_cli/models/apm_package.py", ("redact_url_userinfo(url)!r",)),
+    ("src/apm_cli/deps/registry/url_scheme.py", ("redact_url_userinfo(url)!r",)),
 )
 
 

@@ -501,6 +501,11 @@ dependencies:
       alias: review-prompt                 # optional local alias
 ```
 
+A registry `url` must use `https://`. `http://` is a parse error unless the
+host is loopback or an RFC 1918 private address, or the entry sets
+`insecure: true`. Unknown keys in a registry entry are rejected; `x-` keys
+are ignored.
+
 Object-form fields:
 
 | Field | Required | Notes |

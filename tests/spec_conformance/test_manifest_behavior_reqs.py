@@ -191,10 +191,6 @@ def test_writer_strips_only_the_selected_default_host(
 
 
 @pytest.mark.req("req-mf-015")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4252: registries.<name> accepts typo keys (v0.1) or rejects x- keys (default)",
-)
 @pytest.mark.parametrize("schema", [None, _V01_SCHEMA], ids=["default", "openapm-v0.1"])
 @pytest.mark.usefixtures("_registries_enabled")
 def test_registry_entry_rejects_typos_but_keeps_vendor_keys(tmp_path: Path, schema) -> None:
