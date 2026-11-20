@@ -427,6 +427,10 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
         if top_level and stripped.startswith(_STATUS_PREFIXES):
             block += 1
             key = (0, stripped)
+        elif not top_level and stripped.startswith("[+]"):
+            # An indented package line ("  [+] <package>") opens that package's block.
+            block += 1
+            key = (0, stripped)
         elif not top_level and stripped.startswith(_STATUS_PREFIXES + _TREE_PREFIXES):
             key = (block, stripped)
         else:

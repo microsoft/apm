@@ -1268,6 +1268,7 @@ def _cli(args: tuple[str, ...], stdout: str = "", stderr: str = "", code: int = 
         (("install",), "[+] a\n  copied\n  copied\n", "", 0, "I9: stdout repeats a line"),
         (("install",), "[!] Skipped x\n[+] b\n[!] Skipped x\n", "", 0, "I9: stdout repeats a"),
         (("install",), "[+] p\n  |-- 1 skill\n  [i] n\n  |-- 1 skill\n", "", 0, "I9: stdout"),
+        (("install",), "[i] t\n  [+] p\n  [+] q\n  [+] p\n", "", 0, "I9: stdout repeats a"),
     ],
 )
 def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, code, law) -> None:
@@ -1281,6 +1282,12 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
         (
             ("install",),
             "[+] p1\n  |-- 1 skill integrated\n[+] p2\n  |-- 1 skill integrated\n",
+            0,
+            _APM,
+        ),
+        (
+            ("install",),
+            "[i] Targets\n  [+] p1\n  |-- 1 skill integrated\n  [+] p2\n  |-- 1 skill integrated\n",
             0,
             _APM,
         ),
