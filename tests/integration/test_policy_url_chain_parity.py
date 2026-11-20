@@ -6,10 +6,14 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.policy.discovery import _read_cache_entry
+
+pytestmark = pytest.mark.component
+
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "policy_url_chain"
 

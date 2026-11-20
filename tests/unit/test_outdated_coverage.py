@@ -14,6 +14,8 @@ from apm_cli.commands.outdated import (
 )
 from apm_cli.models.dependency.types import GitReferenceType
 
+pytestmark = pytest.mark.unit
+
 
 class RemoteRef:
     """Simple helper to represent a remote reference."""

@@ -9,9 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.deps.package_validator import PackageValidator, stamp_plugin_version
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.validation import PackageType
+
+pytestmark = pytest.mark.component
+
 
 # ---------------------------------------------------------------------------
 # Helpers

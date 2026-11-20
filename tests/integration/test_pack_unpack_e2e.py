@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-pytestmark = pytest.mark.requires_github_token
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_github_token]
 
 
 @pytest.fixture

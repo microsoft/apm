@@ -15,6 +15,8 @@ import pytest
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.registry.client import SimpleRegistryClient
 
+pytestmark = pytest.mark.component
+
 
 def safe_rmdir(path):
     """Safely remove a directory with retry logic for Windows.

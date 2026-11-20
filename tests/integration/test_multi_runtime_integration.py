@@ -1,6 +1,10 @@
 """Integration test for multi-runtime architecture."""
 
+import pytest
+
 from apm_cli.runtime.factory import RuntimeFactory
+
+pytestmark = pytest.mark.component
 
 
 def test_runtime_factory_integration():

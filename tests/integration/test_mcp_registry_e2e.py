@@ -68,7 +68,7 @@ def _is_registry_healthy() -> bool:
 E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
-pytestmark = pytest.mark.requires_e2e_mode
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_e2e_mode]
 
 
 def run_command(cmd, check=True, capture_output=True, timeout=180, cwd=None, input_text=None):

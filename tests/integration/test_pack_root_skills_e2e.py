@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 
 def _run_apm(apm_binary_path: Path, project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the installed APM CLI in a project directory."""

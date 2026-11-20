@@ -12,6 +12,7 @@ import yaml
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_e2e_mode,
 ]

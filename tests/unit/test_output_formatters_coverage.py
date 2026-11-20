@@ -37,6 +37,8 @@ from apm_cli.utils.console import (
     set_console_stderr,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestCompilationFormatterBasics:
     """Test CompilationFormatter initialization and basic modes."""

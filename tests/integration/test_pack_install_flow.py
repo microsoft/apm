@@ -29,6 +29,9 @@ from apm_cli.install.transaction import (
     _restore_manifest_from_snapshot,
 )
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
 # ---------------------------------------------------------------------------

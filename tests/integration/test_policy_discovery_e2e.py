@@ -18,6 +18,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
+
 POLICY_E2E = os.environ.get("APM_POLICY_E2E_TESTS") == "1"
 HAS_TOKEN = bool(os.environ.get("GITHUB_APM_PAT") or os.environ.get("GITHUB_TOKEN"))
 

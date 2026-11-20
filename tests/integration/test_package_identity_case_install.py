@@ -3,12 +3,15 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+
+pytestmark = pytest.mark.component
 
 
 def test_mixed_case_install_keeps_first_display_path_without_duplicate_identity(

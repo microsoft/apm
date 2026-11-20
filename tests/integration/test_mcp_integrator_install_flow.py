@@ -14,7 +14,12 @@ import json
 import warnings
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+pytestmark = pytest.mark.component
+
 
 # ---------------------------------------------------------------------------
 # Helpers

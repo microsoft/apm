@@ -29,7 +29,7 @@ import pytest
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.dependency.mcp import MCPDependency
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 
 def _make_stdio_dep(name: str = "test-srv") -> MCPDependency:

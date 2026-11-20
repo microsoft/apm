@@ -23,6 +23,8 @@ from apm_cli.policy.inheritance import (
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.policy_checks import run_policy_checks
 
+pytestmark = pytest.mark.component
+
 
 class TestPolicyDiscoveryIntegration:
     """Integration tests for policy discovery pipeline."""

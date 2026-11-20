@@ -21,6 +21,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_e2e_mode,
 ]

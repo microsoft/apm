@@ -18,6 +18,9 @@ from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.pack import pack_cmd
 from apm_cli.models.validation import PackageType, validate_apm_package
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
