@@ -77,20 +77,26 @@ def lint_lines(stdout: str, stderr: str, rc: int, *, help_output: bool = False) 
                             "text": line.strip()[:160],
                         }
                     )
-            key = line.strip()
-            if not help_output and len(key) >= 12 and not set(key) <= set("-=|+ "):
-                if key in seen:
-                    issues.append(
-                        {
-                            "rule": "duplicate-line",
-                            "stream": stream_name,
-                            "line": lineno,
-                            "detail": f"first at line {seen[key]}",
-                            "text": key[:160],
-                        }
-                    )
-                else:
-                    seen[key] = lineno
+        if help_output:
+            continue
+        # Duplicates are judged on logical lines, so two different warnings
+        # that happen to wrap onto the same tail text are not flagged.
+        for lineno, logical in enumerate(unwrap(text), start=1):
+            key = logical.strip()
+            if len(key) < 12 or set(key) <= set("-=|+ "):
+                continue
+            if key in seen:
+                issues.append(
+                    {
+                        "rule": "duplicate-line",
+                        "stream": stream_name,
+                        "line": lineno,
+                        "detail": f"first at logical line {seen[key]}",
+                        "text": key[:160],
+                    }
+                )
+            else:
+                seen[key] = lineno
     if rc != 0 and not stderr.strip():
         issues.append(
             {
@@ -125,6 +131,8 @@ def unwrap(text: str, width: int = 70) -> list[str]:
             and stripped
             and len(lines[-1]) >= width
             and not stripped.startswith(STATUS_PREFIXES)
+            and not stripped.startswith("|")
+            and not lines[-1].lstrip().startswith("|")
             and not lines[-1].rstrip().endswith((".", ":", "!", "?"))
         ):
             lines[-1] = f"{lines[-1].rstrip()} {stripped}"
@@ -145,7 +153,16 @@ def extract_hints(text: str, docs_root: Path | None) -> list[dict]:
     for line in unwrap(text):
         stripped = line.strip()
         if stripped.startswith("|") and not stripped.startswith("|--"):
-            continue
+            # Panel rows ("| * Label:   apm cmd   |") carry next-step hints;
+            # help tables ("| apm cmd | description |") do not. Keep the
+            # text after a label colon, drop everything else on such rows.
+            inner = stripped.strip("|").strip()
+            label, sep, rest = inner.partition(":")
+            if not sep:
+                continue
+            stripped = re.sub(r"\s{2,}.*$", "", rest.strip())
+            if stripped.startswith("apm "):
+                stripped = f"Run {stripped}"
         candidates = [m.group(1) for m in QUOTED_HINT_RE.finditer(stripped)]
         candidates += [m.group(1) for m in VERB_HINT_RE.finditer(stripped)]
         for raw in candidates:
