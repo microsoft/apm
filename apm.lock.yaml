@@ -1,5 +1,5 @@
-lockfile_version: '4'
-apm_version: 0.37.0
+lockfile_version: '1'
+apm_version: 0.36.1
 dependencies:
 - repo_url: _local/autopilot-issue-accept
   name: autopilot-issue-accept
@@ -14,7 +14,7 @@ dependencies:
     .agents/skills/autopilot-issue-accept/apm.yml: sha256:6b5b15f65c6e6ec4a1099c70e5cdaab4059b6d9e656256e8077769ca47cd5497
   source: local
   local_path: ./packages/autopilot/autopilot-issue-accept
-  content_hash: sha256:5baac7237e82d05f28d24011420eb9e8e9856a27dfec129b7bf1ef22fde21897
+  content_hash: sha256:09023dc4d10e998cb8fae64f8497be24ffe1a4e9fd811b93382e288ecfc819ae
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-issue-delivery-scheduler
   name: autopilot-issue-delivery-scheduler
@@ -29,7 +29,7 @@ dependencies:
     .agents/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md: sha256:a971df108f648c10d738a85204d6d34d81997b7002aa3951c70f110b255598ee
   source: local
   local_path: ./packages/autopilot/autopilot-issue-delivery-scheduler
-  content_hash: sha256:768f484a3e6f799d1d5cf44db3fb3004addcbb4e2fd3d40f1bf82a5ed1b749f7
+  content_hash: sha256:1d52d0be28ecd5cc95e8d3bd40b59d8fc1bc4764658220510430cc1027522b34
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-issue-triage-scheduler
   name: autopilot-issue-triage-scheduler
@@ -50,7 +50,7 @@ dependencies:
     .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py: sha256:11d2cfe947ffb6785104f602a0c45ea23d80aab82cce7c2390fbc1f33e7e67ee
   source: local
   local_path: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:6862b793e3864f734e61828ec410d6e71ae3998ea6832916ba23cc050427096c
+  content_hash: sha256:08fb91761aa678e7a689ff24ed004eeadbe34a1c364384a46ee34c58aedb4c37
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-merge-worker
   name: autopilot-pr-merge-worker
@@ -83,7 +83,7 @@ dependencies:
     .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py: sha256:7cc26972deb8f44fb070c964ae28a289324ae5387a96bb442760fe0b2026f1e5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:444ccf80a17a498bd3bb50360adfd94e59d19ca9ee58f767a9a3f306cb76b465
+  content_hash: sha256:c7c92a0a381f789475f93d89bfb428312411dd947afd1c4574abf465b6185584
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-review-scheduler
   name: autopilot-pr-review-scheduler
@@ -98,7 +98,7 @@ dependencies:
     .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:6c4c5802109cbbb76ecf28ab2299410f4f6f3f9dd9cb2586624c1783538d20a5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-review-scheduler
-  content_hash: sha256:c03b603eca6dd04d036f35b0308b0690f787b43c8a33e5c3ad8871d07e4e88c4
+  content_hash: sha256:a1d271110d4a000e25ff65ccd7b46c468c891f2a0820c859d45191463f8b8fb5
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-triage-scheduler
   name: autopilot-pr-triage-scheduler
@@ -119,7 +119,7 @@ dependencies:
     .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py: sha256:11d2cfe947ffb6785104f602a0c45ea23d80aab82cce7c2390fbc1f33e7e67ee
   source: local
   local_path: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:1d6f800bdebb0541fd4787140e93edbd27e8224812fae74478f4674faa471291
+  content_hash: sha256:a7e69cd6e2c9fb4e38ea4b8826c5caa2e2b7b7895691e5a8ab4c000c510e0468
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-comment
   name: autopilot-comment
@@ -138,7 +138,7 @@ dependencies:
   local_path: ../autopilot-comment
   declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
   anchored_local_path: packages/autopilot/autopilot-comment
-  content_hash: sha256:afa8f587892381beed6774583cf008a5338f3fa1c246afba34382f2ad3c3083c
+  content_hash: sha256:edf0cc37c53511b0ea3498fb9940a9d84e6e93e962537aa1fd2a4d724d83ccb8
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-issue-delivery-worker
   name: autopilot-issue-delivery-worker
@@ -199,7 +199,7 @@ dependencies:
   local_path: ../autopilot-issue-delivery-worker
   declaring_parent: ./packages/autopilot/autopilot-issue-delivery-scheduler
   anchored_local_path: packages/autopilot/autopilot-issue-delivery-worker
-  content_hash: sha256:7a665fad28a6bd5f4da2a69efaec7f0552046579d1b8c17f283e6b2875047198
+  content_hash: sha256:e7be3dff12cbca96420c18a13ed887816d7fe0a1a800c13e8dafac0d6b83b93d
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-issue-triage-worker
   name: autopilot-issue-triage-worker
@@ -224,7 +224,7 @@ dependencies:
   local_path: ../autopilot-issue-triage-worker
   declaring_parent: ./packages/autopilot/autopilot-issue-triage-scheduler
   anchored_local_path: packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:ff022143a030112821d51cfbb8dfb1e52f5268cbc3a469b9af0b97da707bc8a0
+  content_hash: sha256:e73905e4022ad589c49ac787ae6814291931582e1cbcab4b499b5ccbe4bde1df
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-review-worker
   name: autopilot-pr-review-worker
@@ -271,7 +271,7 @@ dependencies:
   local_path: ../autopilot-pr-review-worker
   declaring_parent: ./packages/autopilot/autopilot-pr-review-scheduler
   anchored_local_path: packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:9766f19ef5ed6b79d03bdd4fd71780bb5d159dd2289380d9c14754f9a2dd066d
+  content_hash: sha256:538839312e2bed212fd7e4e15318ca2f8ab83b42a85941e5b122c3e7a4706be1
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-triage-worker
   name: autopilot-pr-triage-worker
@@ -292,7 +292,7 @@ dependencies:
   local_path: ../autopilot-pr-triage-worker
   declaring_parent: ./packages/autopilot/autopilot-pr-triage-scheduler
   anchored_local_path: packages/autopilot/autopilot-pr-triage-worker
-  content_hash: sha256:498475df0a2a7ef5c57500c0c92c0facd4bf31e2f557d8377ca5452edb217adf
+  content_hash: sha256:4d3d19f957ff9360be239ccdef1f835b8c4e64130850c0c7cd1b24033d0ff8ec
   declared_license: Apache-2.0
 - repo_url: _local/pr-description-skill
   name: pr-description-skill
@@ -349,7 +349,7 @@ dependencies:
   local_path: ../../pr-description-skill
   declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
   anchored_local_path: packages/pr-description-skill
-  content_hash: sha256:8fcc146e1254a5349548bcadfd10dc357094981ec946c8887c12e8bfc311e0e2
+  content_hash: sha256:52c9cd1c9fda56b6ee87022150658be68d2c8b89b36764a35a8b2896bfd03efd
   declared_license: Apache-2.0
 deployments:
 - kind: project-relative
