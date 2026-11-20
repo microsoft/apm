@@ -16,6 +16,7 @@ from scripts.architecture_linter.registry import (
     RegistryError,
     load_registry,
     load_registry_documents,
+    promise_vocabulary,
 )
 
 ROOT = Path(__file__).parents[3]
@@ -406,3 +407,142 @@ def test_optional_guard_registry_validation_is_bidirectional() -> None:
             known_guard_ids={"registry-delegation-fixture-owner"},
             owner_specific_guard_ids={"unreferenced-owner-guard"},
         )
+
+
+_BLAST_SELECTOR = "src/apm_cli/owner.py"
+_BLAST_INVENTORY = [_BLAST_SELECTOR, "src/apm_cli/other.py", "tests/integration/test_owner.py"]
+_LEDGER = json.dumps({"property_catalog": [{"id": "ownership.preserve_unowned"}]}).encode("ascii")
+
+
+def _blast_owner(**fields: Any) -> dict[str, Any]:
+    owner = _owner(selector=_BLAST_SELECTOR)
+    owner.update(
+        {
+            "families": ["tests/integration/test_owner*.py"],
+            "state": ["deployed-files", "lockfile"],
+            "promises": ["P-INV-I1", "P-LAW-ownership.preserve_unowned", "P-OWN-fixture-owner"],
+            "modules": ["src/apm_cli/owner.py", "src/apm_cli/other.py"],
+        }
+    )
+    owner.update(fields)
+    return owner
+
+
+def _load_blast(
+    owner: dict[str, Any],
+    *,
+    catalog: dict[str, Any] | None = None,
+    inventory: list[str] | None = None,
+) -> Any:
+    index = json.dumps({"version": 1, "shards": ["core-runtime.json"]}).encode("ascii")
+    shard = json.dumps({"version": 1, "owners": [owner]}).encode("ascii")
+    vocabulary = promise_vocabulary(
+        json.dumps(catalog).encode("ascii") if catalog is not None else None, _LEDGER
+    )
+    return load_registry_documents(
+        index,
+        {"core-runtime.json": shard},
+        inventory or _BLAST_INVENTORY,
+        promise_ids=vocabulary,
+    )
+
+
+def test_blast_radius_overlay_loads_without_changing_ownership_semantics() -> None:
+    """The overlay is exposed on the record but never shifts the ownership hash."""
+    with_overlay = _load_blast(_blast_owner())
+    plain = load_registry_documents(
+        json.dumps({"version": 1, "shards": ["core-runtime.json"]}).encode("ascii"),
+        {
+            "core-runtime.json": json.dumps(
+                {"version": 1, "owners": [_owner(selector=_BLAST_SELECTOR)]}
+            ).encode("ascii")
+        },
+        _BLAST_INVENTORY,
+    )
+
+    owner = with_overlay.owners[0]
+    assert owner.families == ("tests/integration/test_owner*.py",)
+    assert owner.state == ("deployed-files", "lockfile")
+    assert owner.promises[0] == "P-INV-I1"
+    assert owner.modules == ("src/apm_cli/owner.py", "src/apm_cli/other.py")
+    assert plain.owners[0].modules == ()
+    assert with_overlay.semantic_sha256 == plain.semantic_sha256
+
+
+@pytest.mark.parametrize("dropped", ["families", "state", "promises", "modules"])
+def test_blast_radius_fields_are_all_or_none(dropped: str) -> None:
+    owner = _blast_owner()
+    del owner[dropped]
+
+    with pytest.raises(RegistryError, match=f"all-or-none; missing: {dropped}"):
+        _load_blast(owner)
+
+
+@pytest.mark.parametrize(
+    ("fields", "diagnostic"),
+    [
+        ({"state": ["lockfile", "disk"]}, "state has unknown values: disk"),
+        ({"state": ["lockfile", "deployed-files"]}, "state must be sorted"),
+        ({"state": []}, "state must be a non-empty array"),
+        ({"promises": ["I1"]}, "promises has unknown values: I1"),
+        ({"promises": ["P-INV-I10"]}, "promises has unknown values: P-INV-I10"),
+        ({"promises": ["P-INV-I0"]}, "promises has unknown values: P-INV-I0"),
+        ({"promises": ["P-LAW-ownership"]}, "promises has unknown values: P-LAW-ownership"),
+        ({"promises": ["req-cf-001"]}, "promises has unknown values: req-cf-001"),
+        ({"promises": ["P-INV-I4", "P-INV-I1"]}, "promises must be sorted"),
+        ({"promises": ["P-LAW-cache.not_in_ledger"]}, "uncatalogued promise"),
+        ({"promises": ["P-OWN-unregistered-owner"]}, "names an unknown owner"),
+    ],
+)
+def test_blast_radius_vocabulary_is_closed(fields: dict[str, Any], diagnostic: str) -> None:
+    with pytest.raises(RegistryError, match=diagnostic):
+        _load_blast(_blast_owner(**fields))
+
+
+def test_promise_catalog_wins_over_the_ledger_fallback() -> None:
+    """With the catalog present, only its ids count; ledger laws and owners are not implied."""
+    catalog = {"promises": {"P-INV-I1": "x", "P-OWN-fixture-owner": "y"}}
+
+    with pytest.raises(RegistryError, match="uncatalogued promise: P-LAW-ownership"):
+        _load_blast(_blast_owner(), catalog=catalog)
+    with pytest.raises(RegistryError, match="uncatalogued promise: P-OWN-fixture-owner"):
+        _load_blast(_blast_owner(promises=["P-OWN-fixture-owner"]), catalog={"promises": {}})
+    loaded = _load_blast(
+        _blast_owner(promises=["P-INV-I1", "P-OWN-fixture-owner"]), catalog=catalog
+    )
+    assert loaded.owners[0].promises == ("P-INV-I1", "P-OWN-fixture-owner")
+
+
+@pytest.mark.parametrize(
+    ("fields", "diagnostic"),
+    [
+        ({"modules": ["src/other/owner.py"]}, "modules entries must start with src/apm_cli/"),
+        ({"modules": ["tests/integration/test_owner.py"]}, "must start with src/apm_cli/"),
+        ({"modules": ["src/apm_cli/../owner.py"]}, "unsafe POSIX owner selector"),
+        ({"modules": [_BLAST_SELECTOR, "src/apm_cli/gone/*"]}, "matches no supplied file"),
+        ({"modules": ["src/apm_cli/other.py"]}, "must cover its own selector file"),
+        ({"families": ["src/apm_cli/owner.py"]}, "must start with tests/integration/"),
+        ({"families": ["tests/integration/test_gone*.py"]}, "matches no test module"),
+    ],
+)
+def test_blast_radius_globs_are_machine_paths_that_resolve(
+    fields: dict[str, Any], diagnostic: str
+) -> None:
+    with pytest.raises(RegistryError, match=diagnostic):
+        _load_blast(_blast_owner(**fields))
+
+
+def test_owner_touch_gate_tolerates_the_blast_radius_overlay() -> None:
+    """The standalone merge gate accepts the overlay and agrees on the ownership hash."""
+    index = json.dumps({"version": 1, "shards": ["a.json"]}).encode("ascii")
+    shards = {"a.json": json.dumps({"version": 1, "owners": [_blast_owner()]}).encode("ascii")}
+    reusable = load_registry_documents(index, shards, _BLAST_INVENTORY)
+    spec = importlib.util.spec_from_file_location("owner_touch_gate_overlay", OWNER_GATE)
+    assert spec is not None and spec.loader is not None
+    standalone = ModuleType(spec.name)
+    sys.modules[spec.name] = standalone
+    spec.loader.exec_module(standalone)
+
+    _, standalone_hash = standalone._parse_owner_registry(index, shards, _BLAST_INVENTORY)
+
+    assert standalone_hash == reusable.semantic_sha256

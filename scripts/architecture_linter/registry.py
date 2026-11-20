@@ -37,7 +37,9 @@ FAMILIES_ROOT = "tests/integration/"
 PROMISE_CATALOG = "tests/quality/promise-catalog.json"
 LIFECYCLE_LEDGER = "tests/fixtures/lifecycle_bug_ledger.json"
 _INVARIANT_PROMISES = frozenset(f"P-INV-I{number}" for number in range(1, 10))
-_PROMISE_ID = re.compile(r"P-(?:INV-I[1-9]|LAW-[a-z0-9_]+(?:\.[a-z0-9_]+)+|OWN-[a-z0-9]+(?:-[a-z0-9]+)*)")
+_PROMISE_ID = re.compile(
+    r"P-(?:INV-I[1-9]|LAW-[a-z0-9_]+(?:\.[a-z0-9_]+)+|OWN-[a-z0-9]+(?:-[a-z0-9]+)*)"
+)
 _KEBAB_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _SHARD_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.json")
 
@@ -183,17 +185,6 @@ def promise_vocabulary(catalog: bytes | None, ledger: bytes | None) -> PromiseVo
     return PromiseVocabulary(ids=_INVARIANT_PROMISES | laws, owner_ids_from_registry=True)
 
 
-def _blast_radius_hash_fields(owner: OwnerRecord) -> dict[str, list[str]]:
-    if not owner.modules:
-        return {}
-    return {
-        "families": sorted(owner.families),
-        "state": sorted(owner.state),
-        "promises": sorted(owner.promises),
-        "modules": sorted(owner.modules),
-    }
-
-
 def _rooted_globs(value: Any, label: str, root: str) -> tuple[str, ...]:
     items = _string_array(value, label)
     for item in items:
@@ -247,27 +238,36 @@ def _validate_promises(owners: Iterable[OwnerRecord], vocabulary: PromiseVocabul
                 raise RegistryError(f"{owner.id}.promises names an uncatalogued promise: {promise}")
 
 
-def _validate_blast_radius_inventory(owners: Iterable[OwnerRecord], inventory: Sequence[str]) -> None:
+def _matcher(patterns: Iterable[str]) -> Callable[[str], bool]:
+    compiled = tuple(re.compile(fnmatch.translate(pattern)) for pattern in patterns)
+    return lambda path: any(regex.match(path) for regex in compiled)
+
+
+def _validate_blast_radius_inventory(
+    owners: Iterable[OwnerRecord], inventory: Sequence[str]
+) -> None:
     """Every module and family glob resolves; modules cover the owner's own src selectors."""
+    src_files = tuple(path for path in inventory if path.startswith(MODULES_ROOT))
+    test_modules = tuple(
+        path
+        for path in inventory
+        if path.startswith(FAMILIES_ROOT)
+        and path.endswith(".py")
+        and PurePosixPath(path).name.startswith("test_")
+    )
     for owner in owners:
         if not owner.modules:
             continue
         for module in owner.modules:
-            if not any(fnmatch.fnmatchcase(path, module) for path in inventory):
+            if not any(map(_matcher((module,)), src_files)):
                 raise RegistryError(f"{owner.id}.modules matches no supplied file: {module}")
         for family in owner.families:
-            if not any(
-                fnmatch.fnmatchcase(path, family)
-                and PurePosixPath(path).name.startswith("test_")
-                and path.endswith(".py")
-                for path in inventory
-            ):
+            if not any(map(_matcher((family,)), test_modules)):
                 raise RegistryError(f"{owner.id}.families matches no test module: {family}")
-        for path in inventory:
-            if not path.startswith(MODULES_ROOT):
-                continue
-            owned = any(fnmatch.fnmatchcase(path, selector) for selector in owner.selectors)
-            if owned and not any(fnmatch.fnmatchcase(path, module) for module in owner.modules):
+        selected = _matcher(owner.selectors)
+        covered = _matcher(owner.modules)
+        for path in src_files:
+            if selected(path) and not covered(path):
                 raise RegistryError(f"{owner.id}.modules must cover its own selector file: {path}")
 
 
@@ -281,7 +281,6 @@ def _semantic_hash(owners: Iterable[OwnerRecord]) -> str:
                 "owner": owner.owner,
                 "selectors": sorted(owner.selectors),
                 "guards": sorted(owner.guards),
-                **_blast_radius_hash_fields(owner),
             }
             for owner in sorted(owners, key=lambda item: item.id)
         ],
