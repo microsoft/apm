@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm uninstall` keeps your own files inside a removed package's skill directory and succeeds, as `apm prune` does. (closes #4162, #4255)
 - `apm install` refuses a symlinked `apm.lock.yaml` before it deploys anything, at project and user scope. (closes #4168, #4255)
 - `apm install` stops before writing `apm.lock.yaml` or deployed files when a check fails, and `--dry-run` previews through the same pipeline. (#4255)
-- When the install-time audit blocks, `apm install` restores every deployed file to its previous bytes. (closes #4085, #4255)
+- When the install-time audit blocks, `apm install` restores every deployed file to its previous bytes. (refs #4085, #4255)
 - A failed `apm install` removes any empty target directory, such as `.github/`, that it created. (closes #4159, #4255)
 - An interrupted `apm install` restores deployed files and keeps its lockfile; after a killed install, `apm audit --ci` reports it and the next install converges. (closes #4164, #4255)
 - `apm install --mcp` and `apm mcp install` judge org MCP policy through the install check and print the same refusal as `apm install`. (#4255)
