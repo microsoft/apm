@@ -33,18 +33,13 @@ def candidate_refs(org: str, host: str, candidates: Sequence[str]) -> list[str]:
     return [f"{prefix}{org}/{repo}" for repo in candidates]
 
 
-def _record_path(refs: Sequence[str], project_root: Path) -> Path:
-    from apm_cli.policy import discovery
-
-    key = discovery._cache_key("resolution:" + "|".join(refs))
-    return discovery._get_cache_dir(project_root) / f"{key}.resolution.json"
-
-
 def record(result: PolicyFetchResult, refs: Sequence[str], index: int, project_root: Path) -> None:
     """Record a fresh resolution: the source, and the candidates absent above it."""
-    if result.outcome not in ("found", "empty") or result.cached:
+    from apm_cli.policy import discovery
+
+    if result.policy is None or result.cached or result.cache_stale:
         return
-    path = _record_path(refs, project_root)
+    path = discovery._resolution_record_path(list(refs), project_root)
     data = {"source": refs[index], "absent": list(refs[:index])}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,7 +64,8 @@ def after_failure(
     if failed.outcome != "cache_miss_fetch_fail" or not message.startswith(_TRANSPORT_FAILURES):
         return None
     try:
-        data = json.loads(_record_path(refs, project_root).read_text(encoding="utf-8"))
+        record_path = discovery._resolution_record_path(list(refs), project_root)
+        data = json.loads(record_path.read_text(encoding="utf-8"))
         source, absent = data["source"], set(data["absent"])
     except (OSError, ValueError, KeyError, TypeError):
         return None  # no proof of the last resolution: the failure stands
@@ -78,17 +74,4 @@ def after_failure(
     entry = discovery._read_cache_entry(source, project_root, expected_hash=expected_hash)
     if entry is None:
         return None
-    if entry.stale:
-        return discovery._stale_fallback_or_error(
-            entry, message, entry.source, "cache_miss_fetch_fail"
-        )
-    return discovery.PolicyFetchResult(
-        policy=entry.policy,
-        source=entry.source,
-        cached=True,
-        cache_age_seconds=entry.age_seconds,
-        outcome="empty" if discovery._is_policy_empty(entry.policy) else "found",
-        raw_bytes_hash=entry.raw_bytes_hash or None,
-        expected_hash=expected_hash,
-        warnings=entry.warnings,
-    )
+    return discovery._cached_entry_result(entry, expected_hash, message)
