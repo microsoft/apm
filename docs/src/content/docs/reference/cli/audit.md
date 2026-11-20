@@ -331,9 +331,9 @@ do malformed JSON, duplicate keys, and non-JSON constants (`NaN`, `Infinity`,
 
 Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.
 Use `--no-drift` to opt out with reduced coverage. In bare `apm audit`, drift
-findings are advisory by default. With `security.audit.fail_on_drift: true`,
-a failed drift check (including one that could not run) promotes an otherwise
-clean audit to exit `1`. An advisory cache-miss skip remains non-failing
+findings are advisory by default and render as `[!] Drift detected`. With
+`security.audit.fail_on_drift: true`, a failed drift check (including one that
+could not run) promotes the audit to exit `1` and drift renders as `[x]`. An advisory cache-miss skip remains non-failing
 (see [Exit codes](#exit-codes)).
 
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
