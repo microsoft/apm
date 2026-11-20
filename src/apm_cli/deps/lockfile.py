@@ -1266,6 +1266,8 @@ class LockFile:
     replacements: list[dict] | None = field(default=None, repr=False)
     # Whether package content hashes use the framed stream (lockfile version 4).
     framed_content_hashes: bool = field(default=True, repr=False, compare=False)
+    # req-lk-002: a rewrite of a lockfile already at v2 or later never emits v1.
+    version_floor: str = field(default="1", repr=False, compare=False)
 
     def set_content_hash_stream(self, *, framed: bool) -> None:
         """Record which stream every package ``content_hash`` row uses."""
@@ -1520,7 +1522,7 @@ class LockFile:
             return FRAMED_CONTENT_HASH_VERSION
         if self._needs_v3():
             return "3"
-        return "2" if self._needs_v2() else "1"
+        return "2" if self._needs_v2() or self.version_floor != "1" else "1"
 
     def sync_lockfile_version(self) -> None:
         """Re-derive ``lockfile_version`` from current content.
@@ -1789,6 +1791,9 @@ class LockFile:
             existing = None
         else:
             existing = existing_lockfile
+        if existing is not None and existing.lockfile_version != "1":
+            self.version_floor = "2"
+            self.sync_lockfile_version()
         unchanged = existing is not None and self.is_semantically_equivalent(existing)
         if existing is not None and existing.generated_at is not None:
             if unchanged:
