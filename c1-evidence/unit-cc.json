@@ -46,12 +46,13 @@
   "step5: fix only where an honest observable exists: exit codes of CliRunner invocations, files kept/removed on disk, captured stdout; pure return-value and mock-only tests are left (they need a module split into a unit module, which would add new modules needing promise ids)",
   "nodeset base: origin/danielmeppiel-refactored-happiness moved forward during the run (shared refs); mapping is checked against this branch's merge-base 49bcb1c50, which has no differences in scope",
   "step5 lane split: pure-logic classes moved into the module that becomes unit-marked and filesystem/CliRunner classes into the component sibling, verbatim (nodes map as moved): watcher TestWatchMode -> commands/compile/test_watch_mode_coverage.py (test_watcher_events now unit); pack helper-render classes -> test_pack.py (now unit), pack CLI/gate tests -> test_pack_cli_surface.py",
-  "step5 lane split: install pure helper classes -> test_install_resolve_refs.py (now unit), its GitLab persistence class -> test_install_context_and_resolution.py; deps pure helper classes -> test_deps_cli_helpers.py (now unit), its _resolve_scope_deps filesystem classes -> test_deps_cli_cli_surface.py"
+  "step5 lane split: install pure helper classes -> test_install_resolve_refs.py (now unit), its GitLab persistence class -> test_install_context_and_resolution.py; deps pure helper classes -> test_deps_cli_helpers.py (now unit), its _resolve_scope_deps filesystem classes -> test_deps_cli_cli_surface.py",
+  "step5 lane split: TestConstitutionInjector (on-disk injection) -> test_constitution.py; test_constitution_injector.py keeps the pure constitution_block helpers and is now unit"
  ],
  "counts_left": {
   "same_body_groups": 0,
   "unclassified_modules": 3,
   "placement_offenders": 0,
-  "weak_tests": 1027
+  "weak_tests": 1008
  }
 }
