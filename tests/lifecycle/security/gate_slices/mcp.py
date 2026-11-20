@@ -35,7 +35,7 @@ _XFAIL = {
         for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
     },
 }
-_BUNDLE_KEEPS = "S-pending (neutral issue to follow): reinstalling a local bundle keeps hook files the gate no longer allows"
+_BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _XFAIL.update(
     {
         f"G|bundle-install|{change}|mcp": _BUNDLE_KEEPS
