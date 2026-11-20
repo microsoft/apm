@@ -5,8 +5,8 @@ monotonicity on the paths that skip install's own gate (#4444, #4445, #4446):
 it judges org-policy dependency denies with ``policy_denied_locked_packages``
 and recorded MCP servers with install's ``McpAdmission.for_project`` through
 ``CurrentMcpConfigView.consent_problems``. ``apm update`` asks it from its plan
-callback, and the uninstall MCP cleanup derives its surviving servers with the
-same admission and the same policy-deny owner, never an admit-all admission.
+callback, and the uninstall MCP cleanup asks it too, then derives its surviving
+servers with the same admission, never an admit-all admission.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ _REQUIRED = (
     (_OWNER, "gate_retirements", "consent_problems"),
     (_UPDATE, "_gate_retirements_pending", "gate_retirements"),
     (_UPDATE, "_plan_callback", "_gate_retirements_pending"),
-    (_UNINSTALL, "_cleanup_stale_mcp", "policy_denied_locked_packages"),
+    (_UNINSTALL, "_cleanup_stale_mcp", "gate_retirements"),
     (_UNINSTALL, "_cleanup_stale_mcp", "McpAdmission.for_project"),
 )
 _FORBIDDEN = ((_UNINSTALL, "_cleanup_stale_mcp", "McpAdmission.admit_all"),)
