@@ -2338,10 +2338,11 @@ journeys:
     - O5
     - O8
   - n: 5
-    cmd: apm auth (status)
+    cmd: apm auth github.com
     argv:
     - - apm
       - auth
+      - github.com
     kind: apm
     exit: 0
     key_lines: []
@@ -2411,11 +2412,15 @@ journeys:
     oracles:
     - O9
   - n: 4
-    cmd: apm deps list --json; apm find --source <file>
+    cmd: apm deps list; apm deps why <pkg> --json; apm find --source <file>
     argv:
     - - apm
       - deps
       - list
+    - - apm
+      - deps
+      - why
+      - <pkg>
       - --json
     - - apm
       - find

@@ -28,9 +28,11 @@ PACKAGE_NAMES = (
     "p-native-claude",
     "p-native-codex",
     "p-canvas",
+    "p-native-claude-bin",
 )
-# The packages whose source is a git repository on the world's local HTTPS server.
-GIT_PUBLISHED = ("p-skill", "p-exec")
+# The packages whose source is a git repository on the world's local HTTPS server
+# (also listed in the world marketplace).
+GIT_PUBLISHED = ("p-skill", "p-exec", "p-native-claude-bin")
 MCP_SERVER = "p-exec-mcp"
 LSP_SERVER = "p-lsp-server"
 # A command that must never run: a deployed MCP or LSP entry is configuration only.
@@ -135,6 +137,26 @@ def _native_codex(root: Path) -> None:
     )
 
 
+def _native_claude_bin(root: Path) -> None:
+    """A Claude Code plugin that ships bin/: only a marketplace plugin deploys bin/
+    (for Claude, at user scope; install/exec_gate.py plugin_bin_deployable)."""
+    _write_json(
+        root / ".claude-plugin" / "plugin.json",
+        {
+            "name": "p-native-claude-bin",
+            "version": "1.0.0",
+            "description": "Lifecycle world native Claude plugin with bin/.",
+        },
+    )
+    skill = root / "skills" / "p-native-claude-bin" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(_skill("p-native-claude-bin", "Use the bin plugin."), encoding="ascii")
+    script = root / "bin" / "p-native-claude-bin"
+    script.parent.mkdir()
+    script.write_text(_BIN, encoding="ascii")
+    script.chmod(0o755)
+
+
 def author_packages(root: Path) -> dict[str, AuthoredPackage]:
     """Author every world package under *root*; one factory owns them all."""
     factory = LocalPackageFactory(root)
@@ -151,6 +173,8 @@ def author_packages(root: Path) -> dict[str, AuthoredPackage]:
     _native_claude(claude)
     codex = root / "p-native-codex"
     _native_codex(codex)
+    claude_bin = root / "p-native-claude-bin"
+    _native_claude_bin(claude_bin)
     authored = {
         "p-skill": (skill.root, {"skill"}),
         "p-exec": (exec_.root, {"hook", "bin", "mcp"}),
@@ -161,6 +185,7 @@ def author_packages(root: Path) -> dict[str, AuthoredPackage]:
         "p-native-claude": (claude, {"native"}),
         "p-native-codex": (codex, {"native"}),
         "p-canvas": (canvas.root, {"canvas"}),
+        "p-native-claude-bin": (claude_bin, {"native", "bin", "skill"}),
     }
     assert tuple(authored) == PACKAGE_NAMES
     return {

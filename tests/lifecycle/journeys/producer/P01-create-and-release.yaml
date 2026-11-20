@@ -1,0 +1,121 @@
+# P01 Create and release a package, nightly (#4110). Schema: test_journeys.py.
+# The world project is the consumer; the package is a clone of the empty
+# remote you/my-skills (twins_producer.py routes "git push" to it).
+schema: 1
+id: P01
+persona: producer
+title: Create and release a package
+docs: [producer/create-a-package.mdx, producer/test-packages.md, producer/release-a-version.md]
+world:
+  setup:
+    - git clone -q https://github.com/you/my-skills.git my-skills
+steps:
+  - n: 1
+    run:
+      - apm init -y my-skills
+      - apm init --help
+      - "grep ^#.targets: my-skills/apm.yml"
+      - mkdir -p my-skills/.apm/skills/review
+      - touch my-skills/.apm/skills/review/SKILL.md
+    exit: 0
+    chdir: my-skills
+    note: >-
+      the index runs "apm init -y team-skills"; the docs slug you/my-skills is used so
+      steps 5 and 6 run the docs fences literally. The empty SKILL.md is filled by step 2.
+    help_docs: reference/cli/init.md
+    key_lines: ["[*] APM project initialized successfully!", "# targets:"]
+    forbidden_lines: ["[x]", Traceback]
+  - n: 2
+    edit:
+      - append: .apm/skills/review/SKILL.md
+        text: |
+          ---
+          name: review
+          description: Review a diff against the team's checklist. Use when the user asks for a code review or says "review my changes".
+          ---
+
+          # Review
+
+          1. Check that every changed code path has a test.
+          2. Flag names that do not say what the code does.
+          3. List findings as Blocking, Should fix or Nit, with file and line.
+    run: ["apm install --target copilot,claude"]
+    exit: 0
+    files:
+      - apm.lock.yaml
+      - .gitignore
+      - .agents/skills/review/SKILL.md
+      - .claude/skills/review/SKILL.md
+    docs:
+      page: producer/create-a-package.mdx
+      commands: ["apm install --target copilot,claude"]
+      output:
+        - "[i] Targets: claude, copilot  (source: --target flag)"
+        - "  [+] <project root> (local)"
+        - "  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/"
+        - "[i] Added apm_modules/ to .gitignore"
+        - "..."
+        - "[*] Installed 1 APM dependency in 0.6s."
+    key_lines:
+      - "[i] Targets: claude, copilot  (source: --target flag)"
+      - "[+] <project root> (local)"
+      - "|-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/"
+    forbidden_lines: ["[!]", "[x]"]
+  - n: 3
+    run: [apm compile --validate, apm compile --dry-run]
+    exit: 0
+    files: []
+    key_lines: ["[*] All primitives validated successfully!", "[dry-run] showing placement without writing files"]
+    forbidden_lines: ["[x]", "[!]"]
+  - n: 4
+    run: [apm audit]
+    exit: 0
+    files: []
+    docs:
+      page: producer/create-a-package.mdx
+      commands: [apm audit]
+      output: ["[+] Replayed 1 package(s)", "[+] No drift detected"]
+    key_lines: ["[+] No drift detected", "[*] 2 file(s) scanned -- no issues found"]
+    forbidden_lines: ["[!]", "[x]"]
+  - n: 5
+    run:
+      - git add apm.yml apm.lock.yaml .gitignore .apm/
+      - git commit -m "Add review skill"
+      - git tag -a v1.0.0 -m "v1.0.0"
+      - git push --follow-tags
+    exit: 0
+    chdir: ..
+    docs:
+      page: producer/create-a-package.mdx
+      commands:
+        - git add apm.yml apm.lock.yaml .gitignore .apm/
+        - git commit -m "Add review skill"
+        - git tag -a v1.0.0 -m "v1.0.0"
+        - git push --follow-tags
+    key_lines: ["[new tag]         v1.0.0 -> v1.0.0"]
+  - n: 6
+    run: ["apm install you/my-skills#v1.0.0"]
+    exit: 0
+    files: [apm.yml, apm.lock.yaml, .gitignore, apm_modules/, .agents/skills/review/SKILL.md]
+    docs:
+      page: producer/create-a-package.mdx
+      commands: ["apm install you/my-skills#v1.0.0"]
+    key_lines: ["[+] you/my-skills #v1.0.0 @<SHA8>", "|-- 1 skill(s) integrated -> .agents/skills/"]
+    forbidden_lines: ["[!]", "[x]"]
+  - n: 7
+    run: [apm view you/my-skills versions]
+    exit: 0
+    docs:
+      page: producer/create-a-package.mdx
+      commands: [apm view you/my-skills versions]
+    key_lines: ["| v1.0.0 | tag    |"]
+    forbidden_lines: ["[x]"]
+known_cells:
+  # Runner gap, not a CLI defect: the index assigns O1 to this step of a
+  # non-golden journey, and regen_goldens.py refuses non-golden journeys, so no
+  # golden can exist. Remove once the runner skips O1 when golden is false.
+  - id: runner-o1-on-non-golden-journey
+    law: O1
+    tracking: "#0"
+    step: 2
+    match: "no golden tests/lifecycle/journeys/goldens/P01/02.txt"

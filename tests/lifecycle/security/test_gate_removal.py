@@ -31,8 +31,10 @@ marketplace plugins to Claude at user scope).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -58,7 +60,7 @@ from tests.lifecycle.security.gate_paths import Step, paths
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice, slices
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
 from tests.lifecycle.world import use_policy
-from tests.lifecycle.world.services import DENIED_PACKAGE
+from tests.lifecycle.world.services import DENIED_PACKAGE, ORG
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -79,11 +81,13 @@ _SURFACES: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("project", "hook", "copilot"): ".github/hooks/{pkg}-*.json",
     ("project", "mcp", "copilot"): (".mcp.json", '"{pkg}-mcp"'),
     ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
+    ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("project", "native", "claude"): (".mcp.json", '"{pkg}-mcp"'),
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
     ("user", "lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
+    ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
 # HOME prefixes a project command may write: receipts, bookkeeping, script
 # trust and logs, the marketplace cache.
@@ -101,6 +105,14 @@ _PROJECT_HOME_ALLOWED = (
 _GATE_REMOVING = frozenset({"install", "update", "uninstall", "prune"})
 _RECONCILING = frozenset({"install", "update"})
 _SCRIPT_LOG = "script-runs.log"
+# policy-dep-deny: the world policy variant that denies the package of a kind,
+# and the world packages each variant denies (world/services.py).
+_DEP_DENY = {"lsp": "deny-lsp", "native": "deny-native"}
+_DENIED: Mapping[str, frozenset[str]] = {
+    "deny-pkg": frozenset({DENIED_PACKAGE}),
+    "deny-lsp": frozenset({"p-lsp"}),
+    "deny-native": frozenset({"p-native-claude", "p-native-codex", "p-native-claude-bin"}),
+}
 
 
 class GateReplay(RowReplay):
@@ -115,6 +127,7 @@ class GateReplay(RowReplay):
         # (before, result, after) of the first removing step after the change.
         self.removal: tuple[Observation, CommandResult, Observation] | None = None
         self.bundle_key = ""
+        self.gate_off = False
 
     # -- steps -----------------------------------------------------------
 
@@ -134,18 +147,29 @@ class GateReplay(RowReplay):
             self.model = self.model.revoke(key, self.kinds[key])
         elif edit == "redefine":
             kind = str(step["kind"])
-            _redefine(Path(self.world.packages[key].spec), kind)
+            ref = self.world.packages[key]
+            if ref.source == "local-bundle":
+                _redefine_bundle(Path(ref.spec), kind)
+            else:
+                _redefine(Path(ref.spec), kind)
             self.model = self.model.revoke(key, {kind})
         elif edit == "policy":
             variant = str(step["variant"])
             use_policy(self.world, variant)
-            denied = [k for k in self.kinds if self.world.packages[k].name == DENIED_PACKAGE]
-            self.model = self.model.with_policy(variant, denied if variant == "deny-pkg" else ())
+            names = _DENIED.get(variant, frozenset())
+            denied = [k for k in self.kinds if self.world.packages[k].name in names]
+            self.model = self.model.with_policy(variant, denied)
+            if variant == "exec-gate-on" and self.gate_off:
+                # The org turns the gate on: nothing was ever approved, so every
+                # executable the project deployed with the gate off now parks.
+                for name, kinds in self.kinds.items():
+                    self.model = self.model.revoke(name, kinds)
         elif edit == "gate-off":
             manifest = self._manifest_root() / "apm.yml"
             data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
             data.pop("executables", None)
             manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+            self.gate_off = True
             for name, kinds in self.kinds.items():
                 self.model = self.model.approve(name, kinds)
         elif edit in ("bundle-approve", "bundle-deny"):
@@ -198,7 +222,7 @@ class GateReplay(RowReplay):
 
     def _identities(self, key: str) -> tuple[str, ...]:
         ref = self.world.packages[key]
-        return (ref.spec, ref.name)
+        return (ref.spec, ref.name, f"{ORG}/{ref.name}")
 
     def _edit_store(self, edit: Callable[[dict], None]) -> None:
         if self.scope == "project":
@@ -283,8 +307,21 @@ class GateReplay(RowReplay):
     # -- one CLI step ----------------------------------------------------
 
     def _args(self, line: str) -> tuple[str, ...]:
-        url = self.world.services.marketplace_url
-        return tuple(url if arg == "MARKETPLACE_URL" else arg for arg in super()._args(line))
+        raw = driver.command_args(line)
+        args = []
+        for arg in raw:
+            ref = self.world.packages[arg] if arg in self.kinds else None
+            if arg == "MARKETPLACE_URL":
+                args.append(self.world.services.marketplace_url)
+            elif ref is None:
+                args.append(arg)
+            elif raw[0] == "approve" and ref.source == "marketplace":
+                # approve names a marketplace package by owner/name; the spec form
+                # is not found. Only approve maps this way.
+                args.append(f"{ORG}/{ref.name}")
+            else:
+                args.append(ref.spec)
+        return tuple(args)
 
     def _fields(self, args: tuple[str, ...], read_only: bool) -> dict[str, object]:
         if self.scope == "project" and args[0] != "marketplace":
@@ -375,6 +412,28 @@ def _append_arg(node: object) -> None:
             _append_arg(value)
 
 
+def _redefine_bundle(bundle: Path, kind: str) -> None:
+    """Repack the local bundle with a changed *kind* definition (a new bundle digest)."""
+    with zipfile.ZipFile(bundle) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    member = {"hook": "hooks.json", "mcp": ".mcp.json"}[kind]
+    (name,) = (n for n in entries if n.rsplit("/", 1)[-1] == member and n.count("/") == 1)
+    old = hashlib.sha256(entries[name]).hexdigest()
+    if kind == "hook":
+        entries[name] = entries[name].replace(b"echo p-exec", b"echo p-exec-v2")
+    else:
+        data = json.loads(entries[name])
+        _append_arg(data)
+        entries[name] = (json.dumps(data, indent=2) + "\n").encode("ascii")
+    new = hashlib.sha256(entries[name]).hexdigest()
+    # The bundle's own lock pins every file's digest; keep it consistent.
+    (lock,) = (n for n in entries if n.endswith("/apm.lock.yaml"))
+    entries[lock] = entries[lock].replace(old.encode("ascii"), new.encode("ascii"))
+    with zipfile.ZipFile(bundle, "w", zipfile.ZIP_DEFLATED) as archive:
+        for entry, data in entries.items():
+            archive.writestr(entry, data)
+
+
 def _redefine(root: Path, kind: str) -> None:
     """Change the definition of *kind* in the package at *root* (a new version of it)."""
     if kind == "hook":
@@ -425,9 +484,13 @@ CHANGES: Mapping[str, ChangeSpec] = {
     ),
     "org-deny": ChangeSpec(_org("exec-deny-all"), rf"deny_all|denied|{_REMOVAL}"),
     "org-enables-gate": ChangeSpec(
-        _org("exec-deny-all"), rf"deny_all|denied|{_REMOVAL}", gate_off_first=True
+        _org("exec-gate-on"), rf"not approved|{_REMOVAL}", gate_off_first=True
     ),
-    "policy-dep-deny": ChangeSpec(_org("deny-pkg"), r"denied by pattern", refuses_package=True),
+    "policy-dep-deny": ChangeSpec(
+        lambda key, kind: [{"edit": "policy", "variant": _DEP_DENY.get(kind, "deny-pkg")}],
+        r"denied by pattern",
+        refuses_package=True,
+    ),
 }
 
 
@@ -451,7 +514,14 @@ def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
     given: list[Step] = []
     if how.gate_off_first:
         given.append({"edit": "gate-off"})
-        arrange = [step for step in arrange if not str(step).startswith("apm approve")]
+        # With the gate off nothing asks for an approval (and a bundle install
+        # prints no approval key), so the arrange steps approve nothing.
+        arrange = [
+            step
+            for step in arrange
+            if not str(step).startswith("apm approve")
+            and not (isinstance(step, Mapping) and step.get("edit") == "bundle-approve")
+        ]
     given += arrange[:1]
     if spec.sibling:
         given.append("apm install p-skill")

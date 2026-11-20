@@ -31,10 +31,12 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
+import time
 import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -98,6 +100,7 @@ class TamperReplay(RowReplay):
         super().__init__(world, row)
         self.excused: tuple[str, ...] = ()
         self.tampered = False
+        self.home_allowed: tuple[str, ...] = ()
 
     def _args(self, line: str) -> tuple[str, ...]:
         # approve / deny take the version-blind identity (approve.md "Store format").
@@ -119,7 +122,7 @@ class TamperReplay(RowReplay):
         args = self._args(line)
         fields: dict[str, object] = {
             "forbidden": {"home": ("*",)},
-            "allowed": {"home": _PROJECT_HOME_ALLOWED},
+            "allowed": {"home": (*_PROJECT_HOME_ALLOWED, *self.home_allowed)},
             "read_only": read_only,
             "paired": paired or {},
         }
@@ -196,51 +199,69 @@ def _package_copies(world: World, name: str) -> list[Path]:
     ]
 
 
-def _served_repositories(world: World) -> dict[str, Path]:
-    """The world's served ``owner/repo`` -> bare repository map.
+# Pristine bare mirrors of overridden world repositories, per pytest worker.
+_PRISTINE: dict[str, Path] = {}
+_PRISTINE_ROOT: list[Path] = []
+_GIT = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
 
-    TODO(world): replace with a public ``WorldServices.override_repository(slug, path)``
-    context manager; this is the only place the test reaches into the services.
-    """
-    return world.services._repositories
+
+@pytest.fixture(scope="session", autouse=True)
+def _pristine_root(tmp_path_factory: pytest.TempPathFactory) -> None:
+    _PRISTINE_ROOT[:] = [tmp_path_factory.mktemp("integrity-pristine")]
+
+
+def _git(world: World, *args: str) -> None:
+    subprocess.run((*_GIT, *args), env=world.env, check=True, capture_output=True)
 
 
 @contextlib.contextmanager
-def _moved_upstream(world: World, slug: str, change: Callable[[Path], None]):
-    """Serve *slug* from a private copy whose tag moved to a commit made by *change*.
+def _overridden(world: World, slug: str):
+    """Serve a private bare copy of *slug* for this test; yield its path.
 
-    *change* edits a work tree of the repository; the shared per-worker map is
-    swapped for this test only and restored after.
+    Uses the public ``WorldServices.serve``. The first override of a slug keeps
+    a pristine mirror (cloned through the world's HTTPS server) that is served
+    again afterwards, so later tests see the published repository.
     """
-    served = _served_repositories(world)
-    original = served[slug]
+    if slug not in _PRISTINE:
+        mirror = _PRISTINE_ROOT[0] / slug.replace("/", "__")
+        _git(world, "clone", "-q", "--mirror", f"https://github.com/{slug}.git", str(mirror))
+        _PRISTINE[slug] = mirror
     copy = world.root / "upstream" / slug.replace("/", "__")
-    shutil.copytree(original, copy)
-    work = world.root / "upstream-work" / slug.replace("/", "__")
-    git = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
-    subprocess.run(("git", "clone", "-q", str(copy), str(work)), env=world.env, check=True)
+    _git(world, "clone", "-q", "--mirror", str(_PRISTINE[slug]), str(copy))
+    world.services.serve(slug, copy)
+    try:
+        yield copy
+    finally:
+        world.services.serve(slug, _PRISTINE[slug])
+
+
+def _commit_to(world: World, bare: Path, change: Callable[[Path], None], *, retag: bool) -> None:
+    """Commit *change* on the default branch of *bare*; *retag* moves TAG to it."""
+    work = bare.parent / f"{bare.name}-work"
+    _git(world, "clone", "-q", str(bare), str(work))
     change(work)
     branch = subprocess.run(
-        ("git", "--git-dir", str(copy), "symbolic-ref", "HEAD"),
+        ("git", "--git-dir", str(bare), "symbolic-ref", "HEAD"),
         env=world.env,
         capture_output=True,
         text=True,
         check=True,
     ).stdout.strip()
-    for args in (
-        ("add", "-A"),
-        ("commit", "-qm", "moved"),
-        ("tag", "-f", TAG),
-        ("push", "-qf", "origin", f"HEAD:{branch}", f"refs/tags/{TAG}"),
-    ):
-        subprocess.run(
-            (*git, "-C", str(work), *args), env=world.env, check=True, capture_output=True
-        )
-    served[slug] = copy
-    try:
+    _git(world, "-C", str(work), "add", "-A")
+    _git(world, "-C", str(work), "commit", "-qm", "moved")
+    refs = [f"HEAD:{branch}"]
+    if retag:
+        _git(world, "-C", str(work), "tag", "-f", TAG)
+        refs.append(f"refs/tags/{TAG}")
+    _git(world, "-C", str(work), "push", "-qf", "origin", *refs)
+
+
+@contextlib.contextmanager
+def _moved_upstream(world: World, slug: str, change: Callable[[Path], None]):
+    """Serve *slug* from a private copy whose tag moved to a commit made by *change*."""
+    with _overridden(world, slug) as copy:
+        _commit_to(world, copy, change, retag=True)
         yield
-    finally:
-        served[slug] = original
 
 
 def _edit_files(name: str, edit: Callable[[str], str]) -> Callable[[Path], None]:
@@ -281,6 +302,10 @@ class Expect:
     present: tuple[str, ...] = ()
     # Extra state fact on the world after the op (raises AssertionError).
     check: Callable[[World], None] | None = None
+    # True: the op fetched the org policy file; False: it did not.
+    policy_fetch: bool | None = None
+    # True: the op read the marketplace catalog over the network; False: it did not.
+    catalog_fetch: bool | None = None
     xfail: str | None = None  # _pending(<phrase>) -> strict expected failure
     smoke: bool = False
 
@@ -293,12 +318,15 @@ class ArtifactSlice:
     arrange: tuple[object, ...]  # replay steps that converge the world
     tampers: Mapping[str, Tamper]
     cells: Mapping[tuple[str, str], Expect]
-    setup: Callable[[World], None] | None = None  # input edits before arrange
+    # Input edits before arrange; cleanups go on the row's stack.
+    setup: Callable[[World, contextlib.ExitStack], None] | None = None
     # Steps after ``arrange`` that need the replay (for example an approval key).
     after_arrange: Callable[[World, TamperReplay], None] | None = None
     ops: Mapping[str, Callable[[str], str]] = field(default_factory=lambda: OPS)
     # Slice package name -> world package key (git sources by default, so the
     # upstream tamper is a real moved tag on the world's git server).
+    # Extra APM_HOME paths this slice's commands may write (I5).
+    home_allowed: tuple[str, ...] = ()
     package_keys: Mapping[str, str] = field(
         default_factory=lambda: {"p-skill": "p-skill:git", "p-exec": "p-exec:git"}
     )
@@ -885,6 +913,281 @@ BUNDLE_APPROVAL_PINS = _bundle_slice(
 )
 
 
+# -- slice: policy-hash-pin (a test-local org policy pinned by policy.hash) -------
+# policy/discovery.py _verify_hash_pin: fetched bytes must match apm.yml
+# policy.hash, otherwise the outcome is hash_mismatch, which always blocks
+# (policy/outcome_routing.py). _read_cache_entry ignores a cache entry whose
+# recorded raw_bytes_hash is not the pin. Cache layout:
+# $APM_CACHE_DIR/policy_v1/<project key>/<ref key>.yml + .meta.json (cached_at).
+
+POLICY_ORG = "policy-integrity"
+POLICY_SLUG = f"{POLICY_ORG}/.github"
+POLICY_BYTES = yaml.safe_dump(
+    {
+        "name": "integrity",
+        "version": "1.0",
+        "enforcement": "block",
+        "dependencies": {"deny": ["lifecycle/p-canvas"]},
+    }
+).encode("utf-8")
+_POLICY_CONTENTS = "/contents/apm-policy.yml"
+_HASH_MISMATCH = r"(?i)policy hash mismatch"
+
+
+def _publish_policy(world: World, stack: contextlib.ExitStack, document: bytes) -> None:
+    """Serve *document* as the org policy of POLICY_ORG for this test only."""
+    tree = world.root / "policy-src" / str(len(list((world.root).glob("policy-src/*"))))
+    tree.mkdir(parents=True)
+    (tree / "apm-policy.yml").write_bytes(document)
+    bare = tree.parent / f"{tree.name}.git"
+    git = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
+    for args in (
+        ("-C", str(tree), "init", "-q", "--initial-branch=main"),
+        ("-C", str(tree), "add", "-A"),
+        ("-C", str(tree), "commit", "-qm", "policy"),
+        ("clone", "-q", "--bare", str(tree), str(bare)),
+    ):
+        subprocess.run((*git, *args), env=world.env, check=True, capture_output=True)
+    # A test-local slug: no other test serves it, so nothing to restore.
+    del stack
+    world.services.serve(POLICY_SLUG, bare)
+
+
+def _use_pinned_policy(world: World, stack: contextlib.ExitStack, *, pin: bool = True) -> None:
+    _publish_policy(world, stack, POLICY_BYTES)
+    git = ("git", "-C", str(world.project))
+    if not (world.project / ".git").exists():
+        subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
+    remote = f"https://github.com/{POLICY_ORG}/consumer.git"
+    subprocess.run((*git, "remote", "add", "origin", remote), env=world.env, check=True)
+    if pin:
+        manifest = world.project / MANIFEST
+        data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        data["policy"] = {"hash": "sha256:" + hashlib.sha256(POLICY_BYTES).hexdigest()}
+        manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _policy_cache_entries(world: World) -> list[Path]:
+    root = (world.cache_root or world.root / "cache") / "policy_v1"
+    entries = sorted(root.rglob("*.meta.json")) if root.is_dir() else []
+    assert entries, "no policy cache entry"
+    return entries
+
+
+def _rewrite_policy_meta(world: World, change: Callable[[dict], None]) -> None:
+    for meta in _policy_cache_entries(world):
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        change(data)
+        meta.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _expire_policy_cache(world: World) -> None:
+    """Age every cache entry past its TTL but within the stale window."""
+    _rewrite_policy_meta(world, lambda meta: meta.__setitem__("cached_at", time.time() - 2 * 3600))
+
+
+def _edit_cached_policy(world: World, stack: contextlib.ExitStack) -> None:
+    """Edit the cached policy document; its metadata (and recorded hash) stay as written."""
+    del stack
+    root = (world.cache_root or world.root / "cache") / "policy_v1"
+    documents = sorted(root.rglob("*.yml"))
+    assert documents, "no cached policy document"
+    for path in documents:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data.setdefault("dependencies", {}).setdefault("deny", []).append("lifecycle/p-skill")
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _drop_cached_policy_hash(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+    _rewrite_policy_meta(world, lambda meta: meta.pop("raw_bytes_hash", None))
+
+
+def _change_upstream_policy(world: World, stack: contextlib.ExitStack) -> None:
+    _publish_policy(world, stack, POLICY_BYTES + b"# changed upstream\n")
+    _expire_policy_cache(world)
+
+
+_PIN_CACHE = _pending("policy cache content verified against the pin before use")
+_PIN_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill", ".github")
+
+POLICY_HASH_PIN = ArtifactSlice(
+    packages=("p-skill", "p-exec"),
+    arrange=("apm install p-skill",),
+    setup=_use_pinned_policy,
+    tampers={
+        "disk-or-cache": Tamper(_edit_cached_policy),
+        "missing-hash": Tamper(_drop_cached_policy_hash),
+        "upstream-or-proxy": Tamper(_change_upstream_policy),
+    },
+    ops={**OPS, "bundle-install": lambda pkg: "apm install p-exec"},
+    package_keys={"p-skill": "p-skill:git", "p-exec": "p-exec:bundle"},
+    cells={
+        # The pin covers the bytes that are evaluated, so a changed cache entry
+        # is not evaluated; the verified policy allows p-skill.
+        ("audit-ci", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
+        ("frozen", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
+        ("install", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
+        # Not registered: ("bundle-install", "disk-or-cache"). The bundle preflight
+        # reads the cache only, and no world bundle carries an approved item a
+        # cached-policy edit could change, so the row would not observe the cell.
+        ("update", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE),
+        # A cache entry with no recorded hash is ignored: the policy is fetched
+        # again and verified (_read_cache_entry).
+        ("audit-ci", "missing-hash"): Expect(0, unchanged=_PIN_STATE, policy_fetch=True),
+        ("frozen", "missing-hash"): Expect(0, unchanged=_PIN_STATE, policy_fetch=True),
+        ("install", "missing-hash"): Expect(0, unchanged=_PIN_STATE, policy_fetch=True),
+        ("bundle-install", "missing-hash"): Expect(
+            0, unchanged=(MANIFEST, ".agents"), policy_fetch=True
+        ),
+        ("update", "missing-hash"): Expect(0, unchanged=_PIN_STATE),
+        # Changed policy bytes always block (hash_mismatch, outcome_routing.py).
+        ("audit-ci", "upstream-or-proxy"): Expect(
+            1,
+            (_HASH_MISMATCH,),
+            unchanged=_PIN_STATE,
+            policy_fetch=True,
+            xfail=_pending("audit and install agree on policy hash mismatch"),
+        ),
+        ("frozen", "upstream-or-proxy"): Expect(
+            1, (_HASH_MISMATCH,), unchanged=_PIN_STATE, policy_fetch=True
+        ),
+        ("install", "upstream-or-proxy"): Expect(
+            1, (_HASH_MISMATCH,), unchanged=_PIN_STATE, policy_fetch=True
+        ),
+        ("bundle-install", "upstream-or-proxy"): Expect(
+            1, (_HASH_MISMATCH,), unchanged=_PIN_STATE, policy_fetch=True
+        ),
+        # Update with nothing to change consults no policy and writes nothing.
+        ("update", "upstream-or-proxy"): Expect(0, unchanged=_PIN_STATE),
+    },
+)
+
+
+# -- slice: marketplace-origin(source_url/digest) (p-skill declared from the catalog) --
+# installing-from-marketplaces.md: install and --frozen replay the locked commit
+# without contacting the marketplace; update revalidates it and fails rather than
+# use stale data; an origin that changed fails and names both origins; the
+# digest records provenance and is not a trust anchor.
+
+MARKETPLACE = "lifecycle-market"
+MARKETPLACE_SLUG = "lifecycle/marketplace"
+_CATALOG = ".claude-plugin/marketplace.json"
+# Catalog state a marketplace-declared install refreshes under APM_HOME.
+_MARKETPLACE_HOME = (".apm/cache/marketplace", ".apm/marketplaces.json", ".apm/marketplaces.lock")
+
+
+def _declare_from_marketplace(world: World, stack: contextlib.ExitStack) -> None:
+    """Register the world catalog and declare p-skill in object form (manifest-schema.md)."""
+    del stack
+    added = driver.run(world, f"apm marketplace add {MARKETPLACE_SLUG}")
+    assert added.returncode == 0, added.stdout + added.stderr
+    manifest = world.project / MANIFEST
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["dependencies"]["apm"] = [{"name": "p-skill", "marketplace": MARKETPLACE}]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _install_declared(world: World, replay: TamperReplay) -> None:
+    del world
+    replay.model = replay.model.declare("p-skill")
+    replay.step("apm install")
+    _marketplace_row(replay.world)
+
+
+def _marketplace_row(world: World) -> dict:
+    row = _dependency(_lock(world), "lifecycle/p-skill")
+    assert row.get("source_url") and row.get("source_digest"), row
+    return row
+
+
+def _rebind_in(document: dict) -> None:
+    for plugin in document["plugins"]:
+        if plugin["name"] == "p-skill":
+            plugin["source"]["repo"] = "lifecycle/p-exec"
+
+
+def _edit_cached_catalog(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+    caches = sorted((world.apm_home / "cache" / "marketplace").glob("*.json"))
+    edited = 0
+    for path in caches:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(document, dict) and "plugins" in document:
+            _rebind_in(document)
+            path.write_text(json.dumps(document), encoding="utf-8")
+            edited += 1
+    assert edited, "no cached catalog"
+
+
+def _edit_locked_origin(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+    origin = _marketplace_row(world)["source_url"]
+    _replace_in_lock(world, origin, "https://github.com/lifecycle/other-market")
+
+
+def _drop_locked_digest(world: World, stack: contextlib.ExitStack) -> None:
+    del stack
+    data = _lock(world)
+    del _dependency(data, "lifecycle/p-skill")["source_digest"]
+    _write_lock(world, data)
+
+
+def _rebind_upstream_catalog(world: World, stack: contextlib.ExitStack) -> None:
+    def change(work: Path) -> None:
+        path = work / _CATALOG
+        document = json.loads(path.read_text(encoding="utf-8"))
+        _rebind_in(document)
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
+
+    copy = stack.enter_context(_overridden(world, MARKETPLACE_SLUG))
+    _commit_to(world, copy, change, retag=False)
+
+
+def _catalog_fetched(egress) -> bool:
+    return any(MARKETPLACE_SLUG.split("/")[1] in str(entry["path"]) for entry in egress)
+
+
+def _rebound_to_catalog(world: World) -> None:
+    repos = [row["repo_url"] for row in _lock(world)["dependencies"]]
+    assert repos == ["lifecycle/p-exec"], repos
+
+
+_MK_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
+_REPLAY_ONLY = {"audit-ci", "frozen", "install"}
+_MK_CELLS: dict[tuple[str, str], Expect] = {}
+for _tamper in ("disk-or-cache", "lock-edited", "missing-hash", "upstream-or-proxy"):
+    for _op in _REPLAY_ONLY:
+        # The locked commit replays without contacting the marketplace.
+        _MK_CELLS[(_op, _tamper)] = Expect(0, unchanged=_MK_STATE, catalog_fetch=False)
+    _MK_CELLS[("uninstall-prune", _tamper)] = Expect(0, absent=(SKILL, LOCK))
+# Update revalidates the catalog: an edited cache is not used, a missing
+# digest is provenance only, a recorded origin that differs fails and names both.
+_MK_CELLS[("update", "disk-or-cache")] = Expect(0, unchanged=_MK_STATE, catalog_fetch=True)
+_MK_CELLS[("update", "missing-hash")] = Expect(0, (), present=(SKILL,), catalog_fetch=True)
+_MK_CELLS[("update", "lock-edited")] = Expect(1, (r"lifecycle/other-market",), unchanged=_MK_STATE)
+# A catalog change in the same marketplace is what update moves to.
+_MK_CELLS[("update", "upstream-or-proxy")] = Expect(
+    0, absent=(SKILL,), check=_rebound_to_catalog, catalog_fetch=True
+)
+
+MARKETPLACE_ORIGIN = ArtifactSlice(
+    packages=("p-skill",),
+    arrange=(),
+    setup=_declare_from_marketplace,
+    after_arrange=_install_declared,
+    tampers={
+        "disk-or-cache": Tamper(_edit_cached_catalog),
+        "lock-edited": Tamper(_edit_locked_origin),
+        "missing-hash": Tamper(_drop_locked_digest),
+        "upstream-or-proxy": Tamper(_rebind_upstream_catalog),
+    },
+    ops={**OPS, "uninstall-prune": lambda pkg: f"apm uninstall p-skill@{MARKETPLACE}"},
+    cells=_MK_CELLS,
+    home_allowed=_MARKETPLACE_HOME,
+)
+
+
 # Artifact id (second field of the obligation id) -> its slices (one per arrangement).
 SLICES: dict[str, tuple[ArtifactSlice, ...]] = {
     "deployed_file_hashes": (DEPLOYED_FILE_HASHES,),
@@ -892,6 +1195,8 @@ SLICES: dict[str, tuple[ArtifactSlice, ...]] = {
     "approval-pins": (APPROVAL_PINS, BUNDLE_APPROVAL_PINS),
     "path-containment": (PATH_CONTAINMENT, BUNDLE_PATH_CONTAINMENT),
     "bundle-files": (BUNDLE_FILES,),
+    "policy-hash-pin": (POLICY_HASH_PIN,),
+    "marketplace-origin(source_url/digest)": (MARKETPLACE_ORIGIN,),
 }
 
 
@@ -928,34 +1233,26 @@ def run_integrity_row(world: World, cell_id: str) -> None:
     slice_ = _slice_of(artifact, op, tamper_id)
     expect = slice_.cells[(op, tamper_id)]
     tamper = slice_.tampers[tamper_id]
-    if slice_.setup is not None:
-        slice_.setup(world)
-    view = _view(world, slice_)
-    row = Row(
-        id=f"T7c/integrity/{artifact}",
-        promises=("P-OWN-package-content-hash",),
-        packages=slice_.packages,
-        targets=("copilot",),
-        scope="project",
-        given=(),
-        when=(),
-    )
-    replay = TamperReplay(view, row)
-    replay._set_targets()
-    for step in slice_.arrange:
-        replay.step(step)
-    if slice_.after_arrange is not None:
-        slice_.after_arrange(world, replay)
     with contextlib.ExitStack() as stack:
+        if slice_.setup is not None:
+            slice_.setup(world, stack)
+        replay = _arranged(world, slice_, artifact)
         tamper.apply(world, stack)
         replay.tampered = True
         replay.excused = tamper.lock_paths
         before = replay.observe()
+        world.services.reset()
         line = slice_.ops[op](slice_.packages[0])
         replay._run(line, read_only=op in _READ_ONLY_OPS, pinned_exit=expect.exit)
         after = replay.observe()
+        egress = tuple(world.services.egress_log())
     if expect.check is not None:
         expect.check(world)
+    fetched = any(str(entry["path"]).endswith(_POLICY_CONTENTS) for entry in egress)
+    if expect.policy_fetch is not None:
+        assert fetched is expect.policy_fetch, egress
+    if expect.catalog_fetch is not None:
+        assert _catalog_fetched(egress) is expect.catalog_fetch, egress
     oracles.check_obligation(
         cell_id,
         strength=STRENGTH,
@@ -969,8 +1266,30 @@ def run_integrity_row(world: World, cell_id: str) -> None:
             unchanged={"project": expect.unchanged} if expect.unchanged else {},
             absent={"project": expect.absent} if expect.absent else {},
             present={"project": expect.present} if expect.present else {},
+            egress=egress,
         ),
     )
+
+
+def _arranged(world: World, slice_: ArtifactSlice, artifact: str) -> TamperReplay:
+    """Converge the world through the replay (I1-I9 after every step)."""
+    row = Row(
+        id=f"T7c/integrity/{artifact}",
+        promises=("P-OWN-package-content-hash",),
+        packages=slice_.packages,
+        targets=("copilot",),
+        scope="project",
+        given=(),
+        when=(),
+    )
+    replay = TamperReplay(_view(world, slice_), row)
+    replay.home_allowed = slice_.home_allowed
+    replay._set_targets()
+    for step in slice_.arrange:
+        replay.step(step)
+    if slice_.after_arrange is not None:
+        slice_.after_arrange(world, replay)
+    return replay
 
 
 @pytest.mark.parametrize("cell_id", list(_rows()))

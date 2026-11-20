@@ -31,8 +31,11 @@ Journey YAML schema (``schema: 1``)
         scope: project           # project (default) | user: apm lines get the scope flag
         env: {K: V}              # env for this step's commands only
         edit:                    # applied before run (index kind "edit")
-          - {append: <path>, text: <text>}
+          - {append: <path>, text: <text>}     # creates a missing file
           - {replace: <path>, old: <text>, new: <text>}
+          - {serve: <owner/repo>, path: <file>, text: <text>}  # commit upstream
+          - {unreachable: <owner/repo>}  # that repo answers 503 ...
+          - {reachable: <owner/repo>}    # ... until this edit or the journey's end
         cold_cache: true         # empty APM_CACHE_DIR before run (a fresh machine)
         chdir: ../teammate       # after run the project is this directory ("cd")
         converged: true          # I2: the step starts converged, so it is a byte no-op
@@ -42,6 +45,7 @@ Journey YAML schema (``schema: 1``)
                                  # O9: project paths the step creates, changes or
                                  # removes (fnmatch; "apm_modules/" covers its tree)
         key_lines: ["[+] ..."]   # must print (substring of the normalized output)
+        file_lines: {apm.sarif: ['"level": "error"']}  # KEY: substrings of project files
         forbidden_lines: ["[!]"] # must not print
         docs:                    # O13 / O2 source of the step
           page: quickstart.mdx   # or /README.md (repository root)
@@ -114,6 +118,7 @@ from tests.lifecycle.world.scopes import use_policy
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_scripted_https_proxy import ScriptedResponse
 
 pytestmark = [
     pytest.mark.e2e,
@@ -132,14 +137,15 @@ _JOURNEY_KEYS = {"schema", "id", "persona", "title", "docs", "steps"}
 _STEP_KEYS = {
     "n", "run", "exit", "edit", "cold_cache", "chdir", "converged", "drift", "git_clean",
     "files", "key_lines", "forbidden_lines", "docs", "help_docs", "remediate", "rerun",
-    "remediate_from", "note", "scope", "env",
+    "remediate_from", "note", "scope", "env", "file_lines",
 }  # fmt: skip
 _O_LAWS = {f"O{i}" for i in range(1, 14)} | {"KEY", "FORBID"}
 # HOME paths a project command may write: receipts and bookkeeping (as in rows.py).
 _HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
 # $APM_HOME entries that user-configuration commands own (declared write set for I5).
 _APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
-    "marketplace": ("marketplaces.json", "cache"),
+    "marketplace": ("marketplaces.json", "marketplaces.lock", "cache"),
+    "lifecycle": ("scripts-trust.json", "scripts-trust.json.lock", "logs/scripts.log"),
     "experimental": ("config.json",),
     "config": ("config.json",),
 }
@@ -235,8 +241,9 @@ def page_fences(page: str) -> list[Fence]:
 
 
 def _stripped(line: str) -> str:
-    """A fence line as a command: no list dash, no trailing ``# comment``."""
-    return re.sub(r"\s+#\s.*$", "", re.sub(r"^-\s+", "", line.strip()))
+    """A fence line as a command: no list dash or ``run:`` key, no trailing ``# comment``."""
+    line = re.sub(r"^(?:-\s+)?(?:run:\s+)?", "", line.strip())
+    return re.sub(r"\s+#\s.*$", "", line)
 
 
 def docs_problems(docs: Mapping) -> list[str]:
@@ -319,11 +326,12 @@ class _StepFacts:
         return _delta(self.before.snapshot("project"), self.after.snapshot("project"))
 
     @property
-    def last(self) -> CommandResult:
-        """The step's last apm command (its last command when it runs no apm)."""
-        return (self.apm or self.commands)[-1].result
+    def last(self) -> CommandResult | None:
+        """The step's last apm command (its last command when it runs no apm; None if none)."""
+        commands = self.apm or self.commands
+        return commands[-1].result if commands else None
 
-    def combined(self, *, normalized: bool) -> CommandResult:
+    def combined(self, *, normalized: bool) -> CommandResult | None:
         """The last command's result carrying the whole step's (normalized) output."""
         pick = (
             (lambda c: (c.stdout, c.stderr))
@@ -331,6 +339,8 @@ class _StepFacts:
             else (lambda c: (c.result.stdout, c.result.stderr))
         )
         last = self.last
+        if last is None:
+            return None
         return CommandResult(
             last.command,
             last.returncode,
@@ -422,9 +432,19 @@ class JourneyRun:
             shutil.rmtree(cache, ignore_errors=True)
             cache.mkdir(parents=True)
         for edit in step.get("edit") or ():
+            if "serve" in edit:
+                self._serve(edit["serve"], edit["path"], _sub(edit["text"]), step["n"])
+                continue
+            if "unreachable" in edit:
+                _unreachable(self.world.services).add(edit["unreachable"])
+                continue
+            if "reachable" in edit:
+                _unreachable(self.world.services).discard(edit["reachable"])
+                continue
             path = self.world.project / (edit.get("append") or edit["replace"])
-            text = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8") if path.exists() or "replace" in edit else ""
             if "append" in edit:
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text + _sub(edit["text"]), encoding="utf-8")
             else:
                 old = _sub(edit["old"])
@@ -434,6 +454,27 @@ class JourneyRun:
             source = step["remediate_from"]
             spec = next(s for s in self.journey["steps"] if s["n"] == source)
             self._remediate(self.world, spec["remediate"], self._text(source))
+
+    def _serve(self, slug: str, relative: str, text: str, n: int) -> None:
+        """Commit *text* as *relative* to the served repository *slug* (an upstream change)."""
+        origin = self.world.services._repositories[slug]
+        work = self.world.root / f"serve-{n}-{slug.replace('/', '__')}"
+        git = ("git", "-C", str(work))
+        steps = [
+            ("git", "clone", "-q", str(origin), str(work)),
+            (*git, "add", "--all"),
+            (*git, "commit", "-q", "-m", f"journey step {n}: {relative}"),
+            (*git, "push", "-q", "origin", "HEAD:main"),
+        ]
+        for index, command in enumerate(steps):
+            if index == 1:
+                (work / relative).parent.mkdir(parents=True, exist_ok=True)
+                (work / relative).write_text(text, encoding="utf-8")
+            subprocess.run(command, env=self.world.env, check=True, capture_output=True, timeout=60)
+        shutil.rmtree(work)
+
+    def close(self) -> None:
+        _unreachable(self.world.services).clear()
 
     def _finish(self, step: dict) -> None:
         if step.get("chdir"):
@@ -492,7 +533,9 @@ class JourneyRun:
         self.world.env.update({k: str(v) for k, v in (step.get("env") or {}).items()})
         try:
             self._prepare(step)
-            start = self._roots()
+            # After a chdir the delta is the new project's: snapshot it (maybe absent) first.
+            moved = (self.world.project / step["chdir"]).resolve() if step.get("chdir") else None
+            start = self._roots(moved)
             commands: list[_Command] = []
             exits: list[tuple[_Command, int]] = []
             for line, code in zip(step["run"], _exits(step), strict=True):
@@ -514,12 +557,25 @@ class JourneyRun:
             self.world.env.clear()
             self.world.env.update(saved)
         facts = _StepFacts(step, commands, exits, start, end)
+        if self.record_dir is not None:
+            # Every step's transcript, for journey authors (goldens are only the O1 .txt files).
+            log = self.record_dir / self.journey["id"] / f"{n:02d}.log"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(
+                "\n".join(
+                    "\n".join(norm.render_command(c.line, c.result.returncode, c.stdout, c.stderr))
+                    for c in commands
+                )
+                + "\n",
+                encoding="utf-8",
+            )
         violations = self._step_oracles(facts, oracles)
         self._pending[n] = self._credits(facts, oracles, violations)
         return violations
 
-    def _roots(self) -> ArtifactSnapshotSet:
-        return ArtifactSnapshotSet.capture({"project": self.world.project, "home": self.world.home})
+    def _roots(self, project: Path | None = None) -> ArtifactSnapshotSet:
+        project = project or self.world.project
+        return ArtifactSnapshotSet.capture({"project": project, "home": self.world.home})
 
     def _credits(self, facts: _StepFacts, oracles: set[str], violations) -> list[tuple]:
         """Index oracles of this step that passed with no violation (a known cell earns none)."""
@@ -529,8 +585,8 @@ class JourneyRun:
         }
         credits = []
         for law in sorted(oracles):
-            if law in failed or law in cell_laws:
-                continue
+            if law in failed or law in cell_laws or facts.last is None:
+                continue  # a command-less (manual) step has no CLI result to credit
             if law in ORACLE_LAWS:
                 # check_cross_cutting checked this invariant around every apm command.
                 credits.append((law, Evidence(exit=facts.last.returncode), facts.last, facts))
@@ -566,6 +622,8 @@ class JourneyRun:
     def _user_writes(self, args: tuple[str, ...]) -> tuple[str, ...]:
         """HOME-relative paths a user-configuration command declares it writes (I5)."""
         names = _APM_HOME_WRITES.get(args[0], ())
+        if args[0] == "lifecycle" and args[1:2] not in (("trust",), ("untrust",)):
+            names = ()
         if not names or "--help" in args:
             return ()
         try:
@@ -663,7 +721,12 @@ class JourneyRun:
     def _key(self, facts: _StepFacts) -> list[str]:
         keys = [_sub(k) for k in facts.step.get("key_lines") or ()]
         facts.record("KEY", Evidence(output_matches=[re.escape(k) for k in keys]))
-        return [f"key line not printed: {k!r}" for k in keys if k not in facts.text]
+        found = [f"key line not printed: {k!r}" for k in keys if k not in facts.text]
+        for relative, wanted in (facts.step.get("file_lines") or {}).items():
+            path = self.world.project / relative
+            text = path.read_text(encoding="utf-8") if path.is_file() else ""
+            found += [f"{relative} lacks {w!r}" for w in wanted if _sub(w) not in text]
+        return found
 
     def _forbid(self, facts: _StepFacts) -> list[str]:
         found = []
@@ -872,6 +935,8 @@ class JourneyRun:
         """Follow the printed advice in a copy of the project; the failing command then passes."""
         step = facts.step
         if not step.get("remediate"):
+            if not re.search(r"'apm [^']+'", facts.text):
+                return ["the red step prints no 'apm ...' advice to follow"]
             return ["red step names O8 but has no remediate actions"]
         copy = self.world.root / f"o8-{self.journey['id']}-{step['n']}"
         shutil.copytree(self.world.project, copy, symlinks=True)
@@ -998,6 +1063,29 @@ class JourneyRun:
         strict = {_label(c) for c in self.journey.get("known_cells") or ()}
         missing = sorted(strict - self.seen)
         assert not missing, f"strict expected failures that no longer fail: {missing}"
+
+
+def _unreachable(services) -> set[str]:
+    """Served ``owner/repo`` slugs that answer 503 (an outage), wrapping the handlers once."""
+    slugs = getattr(services, "journey_unreachable", None)
+    if slugs is not None:
+        return slugs
+    slugs = services.journey_unreachable = set()
+    handlers = services.proxy._server.handlers
+    for host in ("github.com", "api.github.com", "raw.githubusercontent.com"):
+        original = handlers[host]
+
+        def handler(request, original=original):
+            parts = [p for p in request.path.split("/") if p]
+            if parts[:1] == ["repos"]:
+                parts = parts[1:]
+            slug = "/".join(parts[:2]).removesuffix(".git")
+            if slug in slugs:
+                return ScriptedResponse(503, {"Content-Type": "text/plain"}, b"unavailable")
+            return original(request)
+
+        handlers[host] = handler
+    return slugs
 
 
 def _label(cell: Mapping) -> str:
@@ -1134,11 +1222,14 @@ def test_journey(path: Path, lifecycle_world, journey_twins) -> None:
     entry = next(j for j in index["journeys"] if j["id"] == journey["id"])
     record = os.environ.get(RECORD_ENV)
     run = JourneyRun(lifecycle_world, journey, entry, Path(record) if record else None)
-    run.start()
-    for step, spec in zip(journey["steps"], entry["steps"], strict=True):
-        oracles = set(spec["oracles"])
-        run.settle(step["n"], run.run_step(step, oracles))
-    run.check_seen()
+    try:
+        run.start()
+        for step, spec in zip(journey["steps"], entry["steps"], strict=True):
+            oracles = set(spec["oracles"])
+            run.settle(step["n"], run.run_step(step, oracles))
+        run.check_seen()
+    finally:
+        run.close()
 
 
 @pytest.mark.live

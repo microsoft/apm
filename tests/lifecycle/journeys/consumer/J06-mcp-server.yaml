@@ -1,0 +1,75 @@
+# J06 Add an MCP server, nightly (#4110). Schema: test_journeys.py.
+# Twin (twins_consumer_a.py): the world MCP registry also serves
+# io.github.github/github-mcp-server (a remote streamable-http server).
+schema: 1
+id: J06
+persona: consumer
+title: Add an MCP server (and LSP)
+docs: [consumer/install-mcp-servers.md]
+world:
+  project: empty
+  setup: ["apm init -y --target claude,copilot"]
+# Per-server detail lines repeat once per server by design (O4 per-item allowlist).
+allow_repeat:
+  - "|     +- Configuring for Claude Code, Copilot CLI..."
+  - "|     +- wrote: .mcp.json (Claude Code, Copilot CLI)"
+steps:
+  - n: 1
+    run: [apm install --mcp io.github.github/github-mcp-server --transport http]
+    exit: 0
+    files: [apm.yml, apm.lock.yaml, .mcp.json]
+    key_lines:
+      - "io.github.github/github-mcp-server -> Claude Code, Copilot CLI (configured)"
+      - "wrote: .mcp.json (Claude Code, Copilot CLI)"
+      - "[*] Configured 1 server"
+      - "[+] Added MCP server 'io.github.github/github-mcp-server'"
+    forbidden_lines:
+      - Successfully configured MCP server
+      - "apm.yml: <PROJECT>"
+  - n: 2
+    run: [apm mcp list, apm mcp show github-mcp-server]
+    exit: 0
+    files: []
+    key_lines:
+      - "Showing 2 MCP servers"
+      - "MCP Server: io.github.github/github-mcp-server"
+  - n: 3
+    run: [apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace]
+    exit: 0
+    files: [apm.yml, apm.lock.yaml, .mcp.json]
+    key_lines:
+      - "filesystem -> Claude Code, Copilot CLI (configured)"
+      - "[+] Added MCP server 'filesystem'"
+  - n: 4
+    run: ["rm -f .mcp.json", apm install --frozen]
+    exit: 0
+    cold_cache: true
+    note: a fresh clone has no harness config; --frozen rewrites both servers from the lock
+    files: []
+    key_lines: ["[*] Configured 2 servers", "[*] Installed 2 MCP servers"]
+  - n: 5
+    edit:
+      - replace: apm.yml
+        old: "    - name: filesystem\n      registry: false\n      transport: stdio\n      command: npx\n      args:\n        - -y\n        - '@modelcontextprotocol/server-filesystem'\n        - /workspace\n"
+        new: ""
+    run: [apm install]
+    exit: 0
+    note: removing the entry from apm.yml and installing removes the server from every harness config
+    files: [apm.lock.yaml, .mcp.json]
+    key_lines: ["[i] Removed stale MCP server 'filesystem' from .mcp.json"]
+known_cells:
+  - id: mcp-add-prints-absolute-manifest-path
+    law: FORBID
+    tracking: "#4190"
+    step: 1
+    match: "apm.yml: <PROJECT>"
+  - id: frozen-mcp-targets-line-twice
+    law: O4
+    tracking: "#4196"
+    step: 4
+    match: "repeats .*Targeting declared targets from apm.yml"
+  - id: runner-gap-o1-non-golden
+    law: O1
+    tracking: "#0"
+    step: 4
+    match: "no golden tests/lifecycle/journeys/goldens/J06/04.txt"

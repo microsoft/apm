@@ -21,12 +21,17 @@ POLICY_VARIANTS = (
     "none",
     "allow",
     "deny-pkg",
+    "deny-lsp",
+    "deny-native",
     "exec-deny-all",
+    "exec-gate-on",
     "mcp-deny",
     "unreachable",
     "hash-mismatch",
     "chain-cycle",
 )
+# Policy variants that deny named packages (``policy_denied``).
+PACKAGE_DENY_POLICIES = frozenset({"deny-pkg", "deny-lsp", "deny-native"})
 # Policy variants whose effect on an install the model does not predict.
 UNPREDICTED_POLICIES = frozenset({"unreachable", "hash-mismatch", "chain-cycle"})
 DECISIONS = ("allowed", "denied")
@@ -69,7 +74,7 @@ class ModelState:
         return "unapproved-exec"
 
     def policy_allows(self, package: str) -> bool:
-        return not (self.policy == "deny-pkg" and package in self.policy_denied)
+        return not (self.policy in PACKAGE_DENY_POLICIES and package in self.policy_denied)
 
     def org_denies(self, kind: str) -> bool:
         if self.policy == "exec-deny-all":

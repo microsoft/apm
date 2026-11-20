@@ -60,6 +60,8 @@ pytestmark = [
 # A clone must stay well under a second; the median pins the steady cost.
 CLONE_BUDGET_SECONDS = 0.25
 _GATED = frozenset({"hook", "mcp", "lsp", "bin", "canvas", "native"})
+# The Claude bin plugin has its own user-scope test (--trust-bin, claude target).
+_APM_GIT_PACKAGES = tuple(name for name in GIT_PUBLISHED if name != "p-native-claude-bin")
 _TRACK_USER_TRANSITIVE = "#4153"
 _TRACK_NATIVE_APPROVE = "#4154"
 
@@ -99,11 +101,18 @@ _SURFACES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("p-native-claude", "project"): ((".claude/skills/p-native-claude/SKILL.md", "p-native"),),
     ("p-native-claude", "user"): ((".claude/settings.json", "p-native-claude"),),
     ("p-native-codex", "user"): ((".codex/config.toml", "p-native-codex"),),
+    ("p-native-claude-bin", "project"): (
+        (".claude/skills/p-native-claude-bin/SKILL.md", "p-native-claude-bin"),
+    ),
     ("p-canvas", "project"): ((".github/extensions/p-canvas/extension.mjs", "p-canvas"),),
     # Copilot has no user-scope canvas surface (integration/targets.py "copilot").
     ("p-canvas", "user"): (),
 }
-_TARGETS = {"p-native-claude": "claude", "p-native-codex": "codex"}
+_TARGETS = {
+    "p-native-claude": "claude",
+    "p-native-codex": "codex",
+    "p-native-claude-bin": "claude",
+}
 _KNOWN = {
     ("p-parent", "user"): _TRACK_USER_TRANSITIVE,
     ("p-parent2", "user"): _TRACK_USER_TRANSITIVE,
@@ -235,6 +244,24 @@ def test_each_package_installs_through_the_real_cli(
     assert world.services.egress_log() == [], "a local-path install reached the network"
 
 
+@pytest.mark.parametrize("source", ["marketplace", "git"])
+def test_claude_plugin_bin_deploys_at_user_scope_after_trust(
+    lifecycle_world: World, source: str
+) -> None:
+    world = lifecycle_world
+    _set_targets(world, "user", "claude")
+    if source == "marketplace":
+        _ok(world, ["marketplace", "add", world.services.marketplace_url])
+    _ok(world, ["install", world.packages[f"p-native-claude-bin:{source}"].spec], "user")
+    _ok(world, ["approve", f"{ORG}/p-native-claude-bin"], "user")
+    _ok(world, ["install", "--trust-bin"], "user")
+    plugin = world.home / ".agents" / "plugins" / "p-native-claude-bin"
+    binary = plugin / "bin" / "p-native-claude-bin"
+    assert binary.is_file() and binary.stat().st_mode & 0o100, binary
+    assert (plugin / ".claude-plugin" / "plugin.json").is_file()
+    assert "p-native-claude-bin" in _locked(world, "user")
+
+
 def test_codex_plugin_is_refused_at_project_scope(lifecycle_world: World) -> None:
     world = lifecycle_world
     _set_targets(world, "project", "codex")
@@ -258,7 +285,7 @@ def test_user_scope_with_apm_home_outside_home(lifecycle_world: World) -> None:
 
 
 @pytest.mark.parametrize("scope", ["project", "user"])
-@pytest.mark.parametrize("package", GIT_PUBLISHED)
+@pytest.mark.parametrize("package", _APM_GIT_PACKAGES)
 def test_git_source_installs_through_the_local_https_server(
     lifecycle_world: World, package: str, scope: str
 ) -> None:
@@ -274,7 +301,7 @@ def test_git_source_installs_through_the_local_https_server(
 
 
 @pytest.mark.parametrize("scope", ["project", "user"])
-@pytest.mark.parametrize("package", GIT_PUBLISHED)
+@pytest.mark.parametrize("package", _APM_GIT_PACKAGES)
 def test_marketplace_source_installs(lifecycle_world: World, package: str, scope: str) -> None:
     world = lifecycle_world
     _ok(world, ["marketplace", "add", world.services.marketplace_url])
@@ -321,6 +348,9 @@ _POLICY_EXIT = {
     "unreachable": 0,
     "hash-mismatch": 1,
     "chain-cycle": 1,
+    "deny-lsp": 0,
+    "deny-native": 0,
+    "exec-gate-on": 0,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
@@ -346,6 +376,42 @@ def test_policy_variant_is_served_and_recorded(lifecycle_world: World, variant: 
         if entry["host"] == API_HOST and entry["path"].endswith("/contents/apm-policy.yml")
     }
     assert policy_org(variant) in fetched, world.services.egress_log()
+
+
+@pytest.mark.parametrize(
+    ("variant", "package"),
+    [
+        ("deny-pkg", "p-exec"),
+        ("deny-lsp", "p-lsp"),
+        ("deny-native", "p-native-claude"),
+        ("deny-native", "p-native-codex"),
+    ],
+)
+def test_dependency_deny_variant_blocks_its_package(
+    lifecycle_world: World, variant: str, package: str
+) -> None:
+    world = lifecycle_world
+    use_policy(world, variant)
+    before = (world.project / "apm.yml").read_bytes()
+    result = driver.run(world, ["install", world.packages[package].spec])
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert f"denied by pattern: **/{package}" in output, output
+    assert (world.project / "apm.yml").read_bytes() == before
+
+
+def test_exec_gate_on_variant_gates_a_project_without_an_executables_block(
+    lifecycle_world: World,
+) -> None:
+    world = lifecycle_world
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    del data["executables"]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    use_policy(world, "exec-gate-on")
+    result = _ok(world, ["install", world.packages["p-exec"].spec])
+    assert "hooks skipped (not approved" in " ".join((result.stdout + result.stderr).split())
+    assert not (world.project / ".github" / "hooks" / "p-exec-session.json").exists()
 
 
 @pytest.mark.parametrize(
