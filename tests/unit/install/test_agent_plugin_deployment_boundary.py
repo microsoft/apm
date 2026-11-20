@@ -520,7 +520,7 @@ def test_target_exclusion_does_not_hard_fail_when_the_rest_of_the_batch_installs
         # The refusal must not hand a consumer producer-side repack advice --
         # that fix contradicts "select the copilot target".
         assert "apm pack --claude-plugin" not in output
-    assert "ask the publisher for a legacy-compatible package" not in output
+    assert "ask the publisher for one" not in output
 
 
 def test_target_exclusion_fails_when_no_package_is_deployed(
