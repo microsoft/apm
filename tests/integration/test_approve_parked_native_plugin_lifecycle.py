@@ -204,6 +204,12 @@ def _codex_world(tmp_path: Path, apm_binary_path: Path) -> tuple[_World, Path]:
     return world, _codex_plugin(world.packages)
 
 
+def _assert_codex_stayed_offline(world: _World) -> None:
+    """No Codex app-server start synced its curated marketplace from the network."""
+    sync_log = world.home / ".codex" / ".stand-in-curated-sync"
+    assert not sync_log.exists(), sync_log.read_text("utf-8")
+
+
 def _codex_registered(world: _World, plugin: Path) -> bool:
     """The plugin is registered with Codex, and the lock and ownership ledger agree (I1)."""
     config = world.home / ".codex" / "config.toml"
@@ -259,6 +265,7 @@ def test_codex_bundle_parks_until_the_printed_command_approves_it(
     retired = world.apm("install", "-g")
     assert retired.returncode == 0, _evidence(retired)
     assert not _codex_registered(world, plugin), _evidence(retired)
+    _assert_codex_stayed_offline(world)
 
 
 def test_parked_codex_bundle_record_survives_and_uninstall_clears_it(
@@ -279,6 +286,7 @@ def test_parked_codex_bundle_record_survives_and_uninstall_clears_it(
     assert not (world.apm_home / "apm_modules" / "_local" / "p-native-codex").exists()
     gone = world.apm("approve", "-g", str(plugin))
     assert gone.returncode == 1, _evidence(gone)
+    _assert_codex_stayed_offline(world)
 
 
 @pytest.mark.parametrize("scope", ["user", "project"])

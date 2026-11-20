@@ -2372,8 +2372,9 @@
         "outcome.status_matches_state"
       ],
       "regression_tests": [
-        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_user_scope_claude_plugin_is_approved_by_the_printed_command",
-        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_user_scope_codex_bundle_parks_and_the_printed_command_approves_it",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_claude_plugin_is_approved_by_the_printed_command",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_codex_bundle_parks_until_the_printed_command_approves_it",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_parked_codex_bundle_record_survives_and_uninstall_clears_it",
         "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_approve_exits_1_when_it_approves_nothing"
       ]
     },
@@ -2922,6 +2923,17 @@
       "regression_tests": [
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
+      ]
+    },
+    {
+      "issue": 4432,
+      "fixed_in": "Unreleased",
+      "summary": "A local native Codex plugin install at user scope stays offline: APM starts the Codex app-server with plugins off in its startup configuration, so no curated marketplace sync reaches the network or writes under the Codex home.",
+      "failure_modes": ["observation"],
+      "properties": ["filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/lifecycle/world/test_world.py::test_each_package_installs_through_the_real_cli",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_codex_bundle_parks_until_the_printed_command_approves_it"
       ]
     }
   ],

@@ -7,6 +7,12 @@ methods APM's native registrar calls (``initialize``, ``config/read``,
 ``$HOME/.codex/config.toml`` with a compare-and-swap version and installs
 marketplace and plugin copies with local ``git`` clones, so APM verifies a
 real installed copy. No network, no agent and no MCP process.
+
+Like Codex, every ``app-server`` start syncs the curated plugin marketplace
+unless plugins are off in the startup configuration: a ``.codex/config.toml``
+in the working directory with ``[features] plugins = false``, trusted through
+a ``-c projects=...`` override. The stand-in records each sync it would make
+in ``$HOME/.codex/.stand-in-curated-sync`` instead of reaching the network.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ import sys
 from pathlib import Path
 
 _SCRIPT = r"""
-import json, os, shutil, subprocess, sys
+import json, os, re, shutil, subprocess, sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -26,6 +32,21 @@ ROOT = HOME / ".codex"
 CONFIG = ROOT / "config.toml"
 STATE = ROOT / ".stand-in-version"
 INSTALLS = ROOT / ".stand-in"
+CURATED_SYNC = ROOT / ".stand-in-curated-sync"
+
+
+def _startup_plugins_off():
+    cwd = os.path.realpath(os.getcwd())
+    trusted = any(
+        os.path.realpath(json.loads(quoted)) == cwd
+        for arg in sys.argv
+        if arg.startswith("projects=") and 'trust_level="trusted"' in arg
+        for quoted in re.findall(r'"(?:[^"\\]|\\.)*"', arg)
+        if quoted != '"trusted"'
+    )
+    project = Path(cwd, ".codex", "config.toml")
+    features = tomlkit.parse(project.read_text()).get("features", {}) if project.is_file() else {}
+    return trusted and features.get("plugins") is False
 
 
 def _version():
@@ -107,6 +128,10 @@ def handle(method, params):
 if sys.argv[1:] == ["--version"]:
     print("codex-cli 0.164.0")
     sys.exit(0)
+if sys.argv[1:2] == ["app-server"] and not _startup_plugins_off():
+    ROOT.mkdir(parents=True, exist_ok=True)
+    with CURATED_SYNC.open("a") as log:
+        log.write("https://github.com/openai/plugins.git\n")
 for line in sys.stdin:
     message = json.loads(line)
     if "id" not in message:
