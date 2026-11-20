@@ -12,7 +12,7 @@ run publishes a fresh one as an artifact, and a committed seed keeps the lanes
 balanced when no artifact is available. Node IDs missing from the file are
 weighted with the mean known duration. Without any file every test weighs 1.
 
-Four modes:
+Five modes:
 
 * ``--shard-plan-out PATH`` (with ``--collect-only``) estimates the work of the
   selection and writes ``{"shard_count": N, "shards": [1..N], ...}``. N is the
@@ -24,6 +24,8 @@ Four modes:
 * ``--shard-store-durations PATH`` records the measured setup + call +
   teardown seconds of every test that ran (on the xdist controller) so the
   nightly run can publish fresh durations.
+* ``--shard-inventory-out PATH`` writes every selected node ID with its marker
+  names, so the drift guard can evaluate each job's ``-m`` from one collect.
 * ``python -m scripts.ci_sharding files`` (no pytest collection) writes the
   test modules of one shard to a pytest ``@argfile``. Each sharded CI job
   passes that file list instead of whole directories, so every shard imports
@@ -418,16 +420,15 @@ def top_level_tests(text: str) -> tuple[str, ...]:
     names: list[str] = []
     for node in tree.body:
         if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
-            alias.asname is None and alias.name.split(".")[-1].startswith(("test", "Test"))
+            (alias.asname is None and alias.name.split(".")[-1].startswith(("test", "Test")))
             or (alias.asname or "").startswith(("test", "Test"))
             for alias in node.names
         ):
             return ()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
-            "test"
-        ):
-            names.append(node.name)
-        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith("test")
+        ) or (isinstance(node, ast.ClassDef) and node.name.startswith("Test")):
             names.append(node.name)
     return tuple(dict.fromkeys(names))
 
@@ -537,6 +538,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--shard-workers", type=int, default=DEFAULT_WORKERS)
     group.addoption("--shard-max", type=int, default=DEFAULT_MAX_SHARDS)
     group.addoption(
+        "--shard-inventory-out",
+        default=None,
+        help="Write {node_id: [marker names]} of every selected test (drift guard input).",
+    )
+    group.addoption(
         "--shard-store-durations",
         default=None,
         help="Write measured {node_id: seconds} for every test that ran.",
@@ -569,6 +575,12 @@ def pytest_configure(config: pytest.Config) -> None:
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Plan or select one shard after pytest's marker selection."""
+    inventory_out = config.getoption("shard_inventory_out", default=None)
+    if inventory_out is not None:
+        inventory = {
+            item.nodeid: sorted({mark.name for mark in item.iter_markers()}) for item in items
+        }
+        Path(inventory_out).write_text(json.dumps(inventory, sort_keys=True), encoding="utf-8")
     plan_out = config.getoption("shard_plan_out")
     count = config.getoption("shard_count")
     index = config.getoption("shard_index")

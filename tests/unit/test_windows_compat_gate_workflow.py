@@ -5,19 +5,22 @@ class (CRLF text-mode writes, backslash path separators leaking into
 diagnostics, bare "git" argv resolution, and the websockets.sync
 shutdown race) was structurally invisible at PR time because ci.yml
 was Linux-only for PR feedback and the full Windows matrix only runs
-post-merge in build-release.yml. These tests pin the focused Windows
-job that closes that gap.
+post-merge in build-release.yml. These tests pin the Windows job
+that closes that gap.
 
-Selection is declarative: each shard runs `pytest -m windows_compat`
-over the test files `python -m scripts.ci_sharding files` derives from
-`tests/unit` and `tests/integration`, rather than enumerating test
-files in this workflow. Adding a new Windows-relevant
-regression test therefore only requires applying the `windows_compat`
-marker (see pyproject.toml `[tool.pytest.ini_options].markers`) to the
-test -- not editing ci.yml or this file. These tests assert the
-*shape* of that contract (marker-scoped, bounded, non-empty, required,
-non-duplicative) instead of pinning an exact file list, so they do not
-need to change every time a test gains or loses the marker.
+Each shard runs its slice of the full Windows unit suite through
+scripts/ci_selections.py (pinned by tests/quality/test_ci_topology.py,
+#4115) and then its slice of the integration contract family. That
+family is selected declaratively: `pytest -m windows_compat` over the
+test files `python -m scripts.ci_sharding files` derives from
+`tests/integration`, rather than enumerating test files in this workflow.
+Adding a new Windows-relevant integration regression test therefore only
+requires applying the `windows_compat` marker (see pyproject.toml
+`[tool.pytest.ini_options].markers`) -- not editing ci.yml or this file.
+These tests assert the *shape* of that contract (marker-scoped, bounded,
+non-empty, required, non-duplicative) instead of pinning an exact file
+list, so they do not need to change every time a test gains or loses the
+marker.
 """
 
 from __future__ import annotations
@@ -55,9 +58,8 @@ GATE_MARKER = "windows_compat"
 GATE_DURATIONS = ".github/ci-durations/windows-compat.json"
 _SHARD_VALUE_FLAGS = ("--shard-count", "--shard-index", "--shard-durations", "--out")
 
-# The full-suite roots already covered by build-and-test-shard (Linux).
-# The gate must never invoke these WITHOUT a marker filter -- that
-# would silently regress into a duplicate full-suite run.
+# Unit roots: the gate's unit step already runs them in full through
+# scripts/ci_selections.py, so the contract-family step must not re-run them.
 FULL_SUITE_ROOTS = ("tests/unit", "tests/test_console.py", "tests/red_team")
 
 
@@ -201,7 +203,8 @@ def test_windows_compat_gate_runs_on_windows_with_bounded_timeout(shard: int) ->
     # Every shard runs the same steps; only SHARD selects its slice.
     assert job["steps"] == workflow_job(ci, GATE_SHARD_JOBS[0])["steps"]
     step = _gate_step(ci, GATE_SHARD_JOBS[shard - 1])
-    assert "if" not in step and "continue-on-error" not in step
+    # Runs even when the unit step failed, so one run reports both families.
+    assert step["if"] == "${{ !cancelled() }}" and "continue-on-error" not in step
 
 
 def test_windows_compat_gate_shards_partition_one_family() -> None:
@@ -212,6 +215,7 @@ def test_windows_compat_gate_shards_partition_one_family() -> None:
     run_args = _gate_pytest_args(_gate_step(ci))
     assert _positional_test_paths(run_args) == [f"@{SHARD_FILE_LIST}"]
     assert not any(arg.startswith("--shard") for arg in run_args)
+    assert _select_step(ci)["if"] == "${{ !cancelled() }}"
     for flag, value in (
         ("--shard-count", str(len(GATE_SHARD_JOBS))),
         ("--shard-index", "$env:SHARD"),
@@ -329,33 +333,39 @@ def test_windows_compat_gate_runs_over_narrowest_maintainable_root() -> None:
     """Discover marked contracts without a per-file integration allowlist."""
     ci = _ci_workflow()
     step = _gate_step(ci)
-    args = _emitter_args(_select_step(ci))
-    positional = _positional_test_paths(args)
-    expected = ["tests/unit", "tests/integration"]
+    assert _step_roots(step) == [f"@{SHARD_FILE_LIST}"]
+    positional = _step_roots(_select_step(ci))
+    expected = ["tests/integration"]
     assert positional == expected, (
         f"{GATE_STEP!r} must collect marked contracts from {expected!r}, got: {positional!r}"
     )
     assert step["env"]["APM_E2E_TESTS"] == "1"
 
 
+def _step_roots(step: dict) -> list[str]:
+    """Roots of the file-list emitter step, or the pytest step's own paths."""
+    if any("scripts.ci_sharding" in command for command in shell_commands(step)):
+        return _positional_test_paths(_emitter_args(step))
+    return _positional_test_paths(_gate_pytest_args(step))
+
+
+def _unit_roots_rerun(step: dict) -> set[str]:
+    return set(FULL_SUITE_ROOTS) & set(_step_roots(step))
+
+
 def test_windows_compat_gate_does_not_duplicate_full_suite() -> None:
-    """The gate must stay a marker-scoped subset, not a second full-suite
-    run.
+    """The contract-family step must not re-run unit roots.
 
-    A bare `tests/unit` (or `tests/test_console.py` / `tests/red_team`)
-    invocation with no marker filter would duplicate build-and-test-shard's
-    Linux coverage at double the PR-time cost with no new signal.
+    The shard's unit step already runs the whole Windows unit suite;
+    marked unit tests in this step would run twice per PR.
     """
-    # The emitter's roots and marker decide the family pytest runs.
-    tokens = set(_emitter_args(_select_step(_ci_workflow())))
-
-    overlapping_roots = set(FULL_SUITE_ROOTS) & tokens
-    assert overlapping_roots, "sanity: gate should scope at least one known root"
-    assert "-m" in tokens, (
-        "Windows compatibility gate invokes a full-suite root "
-        f"({sorted(overlapping_roots)}) without a `-m` marker filter -- "
-        "this duplicates build-and-test-shard instead of running a "
-        "focused, marker-scoped subset"
+    ci = _ci_workflow()
+    step = _gate_step(ci)
+    assert not _unit_roots_rerun(_select_step(ci)), (
+        f"{SELECT_STEP!r} lists unit roots the Windows unit step already covers"
+    )
+    assert not _unit_roots_rerun(step), (
+        f"{GATE_STEP!r} re-runs unit roots the Windows unit step already covers"
     )
 
 
@@ -524,30 +534,24 @@ def test_windows_compat_gate_check_name_removal_breaks_merge_gate_contract() -> 
     assert GATE_CHECK_NAME not in expected_checks
 
 
-def test_dropping_marker_filter_is_detected_as_full_suite_duplication() -> None:
-    """Mutation-break proof: if a future edit drops `-m windows_compat`
-    from the run step while leaving `tests/unit` in place, the
-    duplicate-full-suite guard must catch it."""
+def test_adding_unit_root_is_detected_as_full_suite_duplication() -> None:
+    """Mutation-break proof: putting `tests/unit` back into the contract
+    family (the pre-#4115 layout) must trip the duplication guard."""
     ci = deepcopy(_ci_workflow())
     step = _select_step(ci)
-    step["run"] = step["run"].replace(f"-m {GATE_MARKER}\n", "").replace(f"-m {GATE_MARKER}", "")
+    step["run"] = step["run"].replace("tests/integration", "tests/unit tests/integration")
 
-    tokens = set(_emitter_args(step))
-    overlapping_roots = set(FULL_SUITE_ROOTS) & tokens
-    assert overlapping_roots and "-m" not in tokens, (
-        "mutation setup sanity check failed -- marker was not actually removed"
-    )
+    assert _unit_roots_rerun(step) == {"tests/unit"}
 
 
 def test_narrowing_root_below_windows_compat_root_breaks_contract() -> None:
     """Mutation-break proof: if the declared root no longer matches
-    `tests/unit`, the narrowest-root contract test must fail."""
+    `tests/integration`, the narrowest-root contract test must fail."""
     ci = deepcopy(_ci_workflow())
     step = _select_step(ci)
-    step["run"] = step["run"].replace("tests/unit", "tests/unit/scripts")
+    step["run"] = step["run"].replace("tests/integration", "tests/integration/scripts")
 
-    args = _emitter_args(step)
-    positional = [arg for arg in _positional_test_paths(args) if arg != GATE_MARKER]
-    assert positional != ["tests/unit"], (
+    positional = [arg for arg in _step_roots(step) if arg != GATE_MARKER]
+    assert positional != ["tests/integration"], (
         "mutation setup sanity check failed -- root was not actually narrowed"
     )

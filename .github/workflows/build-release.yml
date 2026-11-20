@@ -230,9 +230,9 @@ jobs:
           PYTHONUNBUFFERED: "1"
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-        run: >-
-          uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
-          -vv --tb=short --show-capture=no --no-showlocals
+        # scripts/ci_selections.py owns the Windows unit selection; the PR
+        # Windows Compatibility Gate (ci.yml) runs the same one.
+        run: uv run --frozen python -m scripts.ci_selections windows-unit
 
       # Runtime smoke runs only on full validation (schedule/dispatch): the
       # nightly regression catch for upstream codex URL drift.
@@ -412,18 +412,12 @@ jobs:
       - *push-python
       - *push-uv
       - *push-sync
-      - name: Select shard test files
-        run: >-
-          uv run --frozen python -m scripts.ci_sharding files
-          --shard-count 3 --shard-index $env:SHARD
-          --shard-durations .github/ci-durations/windows-unit.json
-          --out shard-files.txt tests/unit tests/test_console.py
       - name: Run unit tests (Windows diagnostics)
         timeout-minutes: 60
         env: *windows-unit-env
         run: >-
-          uv run --frozen python -m pytest '@shard-files.txt' -n auto --dist worksteal
-          -vv --tb=short --show-capture=no --no-showlocals
+          uv run --frozen python -m scripts.ci_selections windows-unit
+          --shard-count 3 --shard-index $env:SHARD
 
   windows-unit-2:
     name: Windows units (2/3)

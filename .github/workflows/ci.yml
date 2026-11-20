@@ -114,25 +114,25 @@ jobs:
     - name: Lint - architecture authority boundaries
       run: bash scripts/lint-architecture-boundaries.sh
 
-  # Focused Windows compatibility gate -- runs at PR time (not just
-  # post-merge in build-release.yml) so Windows-only path, encoding,
-  # process, and junction regressions are caught before merge. Python
-  # contracts are selected declaratively via the `windows_compat`
-  # marker; the contributor dashboard's dependency-free Node suite
-  # separately exercises its static-asset junction boundary. This is
-  # intentionally narrower than either full suite.
+  # Windows compatibility gate -- runs at PR time (not just post-merge
+  # in build-release.yml) so Windows-only path, encoding, process, and
+  # junction regressions are caught before merge (#4115). Each shard runs:
+  #   1. its slice of the full Windows unit suite through
+  #      scripts/ci_selections.py, the same selection main push runs;
+  #   2. its slice of the `windows_compat` integration contracts (serial).
+  # The contributor dashboard's dependency-free Node suite separately
+  # exercises its static-asset junction boundary.
   #
-  # The serial selection runs as three shards on parallel runners.
-  # scripts/ci_sharding.py balances them by the measured seed in
-  # .github/ci-durations/windows-compat.json (weights, not an allowlist)
-  # and writes each shard's disjoint test file list, so a shard imports only
-  # its own modules; tests/quality/test_ci_topology.py compares the lists
-  # with a full collect. The required
+  # scripts/ci_sharding.py balances each selection by its measured seed
+  # in .github/ci-durations/ (weights, not an allowlist) and gives each
+  # shard a disjoint list of test files, so a shard imports only its own
+  # modules; tests/quality/test_ci_topology.py compares the lists with a
+  # full collect. The required
   # `Windows Compatibility Gate` aggregate needs all three results.
   windows-compat-gate-1:
     name: Windows Compatibility Gate (1/3)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -175,16 +175,24 @@ jobs:
         git --version
         where git
 
+    - name: Run Windows unit suite
+      env:
+        PYTHONUNBUFFERED: '1'
+      run: >-
+        uv run --frozen python -m scripts.ci_selections windows-unit
+        --shard-count 3 --shard-index $env:SHARD
+
     - name: Select shard test files
+      if: ${{ !cancelled() }}
       run: >-
         uv run --extra dev python -m scripts.ci_sharding files
         --shard-count 3 --shard-index $env:SHARD
         --shard-durations .github/ci-durations/windows-compat.json
         -m windows_compat --out shard-files.txt
-        tests/unit
         tests/integration
 
     - name: Run cross-platform contract family
+      if: ${{ !cancelled() }}
       env:
         APM_E2E_TESTS: '1'
       run: >-
@@ -205,7 +213,7 @@ jobs:
   windows-compat-gate-2:
     name: Windows Compatibility Gate (2/3)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -215,7 +223,7 @@ jobs:
   windows-compat-gate-3:
     name: Windows Compatibility Gate (3/3)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:

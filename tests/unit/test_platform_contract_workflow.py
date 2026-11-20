@@ -230,14 +230,13 @@ def _assert_sharded_linux_lanes(workflow: dict) -> None:
         assert not any(arg in ("--shard-count", "--shard-index") for arg in args)
         assert step["env"]["PYTEST_TARGETS"] == "@shard-files.txt"
         select = re.findall(
-            r'"[^"]*"|(?:\$\{\{.*?\}\}|[^\s"])+', workflow_step(job, "Select shard test files")["run"]
+            r'"[^"]*"|(?:\$\{\{.*?\}\}|[^\s"])+',
+            workflow_step(job, "Select shard test files")["run"],
         )
         assert select[select.index("scripts.ci_sharding") + 1] == "files"
         assert select[select.index("--shard-count") + 1] == "${{ env.SHARD_COUNT }}"
         assert select[select.index("--shard-index") + 1] == "${{ matrix.shard }}"
-        assert select[select.index("--shard-durations") + 1] == (
-            "shard-plan/${{ env.LANE }}.json"
-        )
+        assert select[select.index("--shard-durations") + 1] == ("shard-plan/${{ env.LANE }}.json")
         assert select[select.index("-m", select.index("files")) + 1] == '"$LANE_MARK_EXPR"'
         assert select[select.index("--out") + 1] == "shard-files.txt"
         assert select[-1] == "tests/integration"
