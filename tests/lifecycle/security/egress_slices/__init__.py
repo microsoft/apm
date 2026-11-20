@@ -28,6 +28,10 @@ class EgressRow:
     smoke: bool = False
     # Strict expected failure: "S-pending (neutral issue to follow): <phrase>".
     xfail: str = ""
+    # Exit the decisive command must end with (a refused anonymous request is 1).
+    exit: int = 0
+    # The host refuses anonymous requests (Azure DevOps: ``require_ado_auth``).
+    auth: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,8 @@ class HostSlice:
     spec: str  # dependency spec of p-skill on this host
     pat_env: str = ""  # the env variable APM reads a PAT for this host from
     env: Mapping[str, str] = field(default_factory=dict)  # extra env, e.g. GITHUB_HOST
+    # Password the ``helper`` credential answers with ("" = a sentinel the host rejects).
+    helper_password: str = ""
     rows: tuple[EgressRow, ...] = ()
 
 

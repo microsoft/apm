@@ -51,8 +51,14 @@ from tests.lifecycle import driver
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.security.egress_slices import EgressRow, HostSlice, slices
-from tests.lifecycle.world import World
-from tests.lifecycle.world.services import POLICY_REPO, REGISTRY_SERVER, policy_org
+from tests.lifecycle.world import World, login_azure, use_policy, use_registry
+from tests.lifecycle.world.services import (
+    ADO_BEARER,
+    ADO_PAT,
+    POLICY_REPO,
+    REGISTRY_SERVER,
+    policy_org,
+)
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.local_ado_org_fixture import install_logging_credential_helper
@@ -68,7 +74,8 @@ pytestmark = [
 PATS: Mapping[str, str] = {
     "GITHUB_APM_PAT": "ghp_" + "LifecycleEgressGithubPat".ljust(36, "0"),
     "GITLAB_APM_PAT": "glpat-" + "LifecycleEgressGitlabPat".ljust(20, "1"),
-    "ADO_APM_PAT": "lifecycleegressadopat".ljust(52, "q"),
+    # The world's fake ADO PAT: dev.azure.com accepts it when it requires auth.
+    "ADO_APM_PAT": ADO_PAT,
 }
 GH_TOKEN = "gho_" + "LifecycleEgressGhCli".ljust(36, "2")
 HELPER_PASSWORD = "lifecycle-egress-helper-sentinel-7c2d"
@@ -90,8 +97,11 @@ def _with_env(world: World, **values: str) -> World:
 
 def _pat(world: World, host: HostSlice) -> Arranged:
     world = _with_env(world, **PATS)
-    own = tuple(PATS[name] for name in (host.pat_env,) if name)
-    return Arranged(world, own, tuple(v for k, v in PATS.items() if k != host.pat_env))
+    # A host whose PAT is not a platform PAT (the package registry token) keeps the world's.
+    own = tuple(PATS.get(name) or world.env.get(name, "") for name in (host.pat_env,) if name)
+    return Arranged(
+        world, tuple(v for v in own if v), tuple(v for k, v in PATS.items() if k != host.pat_env)
+    )
 
 
 def _gh(world: World, host: HostSlice) -> Arranged:
@@ -112,18 +122,28 @@ def _gh(world: World, host: HostSlice) -> Arranged:
 
 def _helper(world: World, host: HostSlice) -> Arranged:
     """A git credential helper that answers only for the row's host."""
+    password = host.helper_password or HELPER_PASSWORD
     install_logging_credential_helper(
         Path(world.env["GIT_CONFIG_GLOBAL"]),
         world.root / "credential-helper",
         username="lifecycle-helper",
-        password=HELPER_PASSWORD,
+        password=password,
         hosts=(host.git_host,),
     )
-    return Arranged(world, (HELPER_PASSWORD,), ())
+    return Arranged(world, (password,), ())
 
 
 def _none(world: World, host: HostSlice) -> Arranged:
+    """No credential: also withhold one the world itself provides (the registry token)."""
+    if host.pat_env and host.pat_env in world.env:
+        world = replace(world, env={k: v for k, v in world.env.items() if k != host.pat_env})
     return Arranged(world, (), ())
+
+
+def _az_bearer(world: World, host: HostSlice) -> Arranged:
+    """``az`` logged in: APM's Azure DevOps chain falls back to its bearer (no PAT set)."""
+    login_azure(world)
+    return Arranged(world, (ADO_BEARER,), tuple(PATS.values()))
 
 
 CREDENTIALS: Mapping[str, Callable[[World, HostSlice], Arranged]] = {
@@ -131,6 +151,7 @@ CREDENTIALS: Mapping[str, Callable[[World, HostSlice], Arranged]] = {
     "gh": _gh,
     "helper": _helper,
     "none": _none,
+    "az-bearer": _az_bearer,
 }
 
 
@@ -143,6 +164,22 @@ def _set_remote(world: World, host: HostSlice, org: str) -> None:
     subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
     remote = f"https://{host.git_host}/{org}/consumer.git"
     subprocess.run((*git, "remote", "add", "origin", remote), env=world.env, check=True)
+
+
+def _policy_remote(world: World, host: HostSlice) -> None:
+    if host.host == "ADO":
+        use_policy(world, "allow", host="ado")
+    else:
+        _set_remote(world, host, policy_org("allow"))
+
+
+def _is_policy(request: ScriptedRequest) -> bool:
+    path = request.path
+    return (
+        path.endswith(f"/{POLICY_REPO}/contents/apm-policy.yml")
+        or "/contents/apm-policy.yml" in path
+        or ("/_apis/git/repositories/" in path and "apm-policy.yml" in path)
+    )
 
 
 def _is_git(request: ScriptedRequest) -> bool:
@@ -166,15 +203,12 @@ OPERATIONS: Mapping[str, Operation] = {
     "clone": Operation(lambda w, h: ["install", h.spec], _is_git),
     "api-probe": Operation(lambda w, h: ["install", h.spec], _is_api),
     "marketplace-fetch": Operation(lambda w, h: ["marketplace", "add", f"{h.base}/marketplace"]),
-    "policy-fetch": Operation(
-        lambda w, h: ["policy", "status"],
-        lambda request: (
-            request.path.endswith(f"/{POLICY_REPO}/contents/apm-policy.yml")
-            or "/contents/apm-policy.yml" in request.path
-        ),
-        lambda w, h: _set_remote(w, h, policy_org("allow")),
-    ),
+    "policy-fetch": Operation(lambda w, h: ["policy", "status"], _is_policy, _policy_remote),
     "mcp-registry": Operation(lambda w, h: ["install", "--mcp", REGISTRY_SERVER]),
+    "registry": Operation(
+        lambda w, h: ["install", w.packages["p-skill:registry"].spec],
+        setup=lambda w, h: use_registry(w, "project"),
+    ),
 }
 
 
@@ -225,10 +259,15 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
         "cache": world.cache_root or world.root / "cache",
     }
     world.services.reset()
+    if row.auth:
+        world.services.require_ado_auth()
     before = ArtifactSnapshotSet.capture(roots)
     result: CommandResult = driver.run(world, operation.command(world, host))
     after = ArtifactSnapshotSet.capture(roots)
-    assert result.returncode == 0, f"{row.egress} failed:\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == row.exit, (
+        f"{row.egress} exited {result.returncode}, wanted {row.exit}:\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
     requests = [
         request
         for request in world.services.proxy.observations
@@ -268,7 +307,7 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
             egress_present_hosts=present,
             egress_absent_hosts=(*others, *(() if arranged.own else host.family)),
             secrets_absent=secrets,
-            exit=0,
+            exit=row.exit,
         ),
     )
 
