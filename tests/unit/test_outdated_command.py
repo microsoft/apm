@@ -251,10 +251,13 @@ class TestOutdatedCommand:
             assert result.exit_code == 0
             assert "\u2026" not in result.output
             assert "..." not in result.output
-            cells = "".join(
-                line.split("|")[1].strip() for line in result.output.splitlines() if "|" in line
-            )
+            rows = [line for line in result.output.splitlines() if "|" in line]
+            cells = "".join(line.split("|")[1].strip() for line in rows)
             assert name in cells
+            # No row is wider than the terminal, so Rich never crops the Source column.
+            assert all(len(line) <= 80 for line in rows), result.output
+            source = "".join(line.split("|")[-2].strip() for line in rows[2:])
+            assert source.endswith("git tags") or "tags" in source, result.output
 
     # --- Branch ref (SHA-based comparison) ---
 

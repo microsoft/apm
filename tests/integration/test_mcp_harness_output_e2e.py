@@ -62,3 +62,13 @@ def test_opencode_install_uses_the_product_name(tmp_path, apm_binary_path):
     # One success line per server: the adapter no longer echoes its own.
     assert "Successfully configured MCP server" not in output
     assert "  + fetch\n" not in output
+
+
+def test_copilot_project_install_names_the_root_mcp_json(tmp_path, apm_binary_path):
+    """0.37 moves Copilot servers to root .mcp.json; install output names it (#3994)."""
+    _isolated, root, apm = _project(tmp_path, apm_binary_path, "copilot")
+
+    output = apm("install", "--no-policy", "--mcp", "fetch", "--", "echo", "ready")
+    assert "fetch -> Copilot CLI (configured)" in output
+    assert "|     +- wrote: .mcp.json (Copilot CLI)" in output
+    assert (root / ".mcp.json").is_file()

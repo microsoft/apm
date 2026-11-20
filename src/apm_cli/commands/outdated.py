@@ -616,19 +616,22 @@ def outdated(global_, verbose, parallel_checks):
             header_style="bold cyan",
             box=ASCII,
         )
-        table.add_column(
-            "Package",
-            style="white",
-            min_width=20,
-            # Fold, never clip: the name is what users copy into apm update.
-            overflow="fold",
-        )
-        table.add_column("Current", style="white", min_width=1 if has_replacements else 10)
+        # Minimum widths that overflow the terminal make Rich crop whole rows
+        # (the Source column lost "marketplace: <name>" at 80 columns), so
+        # they apply only when they fit; every column folds instead (#3994).
+        version_min = 1 if has_replacements else 10
+        mins = [20, version_min, *([version_min] if show_wanted else []), version_min]
+        mins += [14 if has_replacements else 12, 20]
+        fits = sum(mins) + 3 * len(mins) + 1 <= console.width
+        widths = iter(mins if fits else [1] * len(mins))
+        # Fold, never clip: the name is what users copy into apm update.
+        table.add_column("Package", style="white", min_width=next(widths), overflow="fold")
+        table.add_column("Current", style="white", min_width=next(widths), overflow="fold")
         if show_wanted:
-            table.add_column("Wanted", style="white", min_width=1 if has_replacements else 10)
-        table.add_column("Latest", style="white", min_width=1 if has_replacements else 10)
-        table.add_column("Status", min_width=14 if has_replacements else 12)
-        table.add_column("Source", style="dim", min_width=20, overflow="fold")
+            table.add_column("Wanted", style="white", min_width=next(widths), overflow="fold")
+        table.add_column("Latest", style="white", min_width=next(widths), overflow="fold")
+        table.add_column("Status", min_width=next(widths), overflow="fold")
+        table.add_column("Source", style="dim", min_width=next(widths), overflow="fold")
 
         status_styles = {
             "origin-conflict": "red",

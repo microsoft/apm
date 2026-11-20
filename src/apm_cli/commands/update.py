@@ -744,7 +744,9 @@ def _run_dep_update_locked(
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)
 
-    logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
+    logger = InstallLogger(
+        verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
+    )
     from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
 
     reconcile_scope_bundle_hooks(scope, apm_package, logger=logger, dry_run=dry_run)

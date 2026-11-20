@@ -1340,9 +1340,20 @@ def _resolve_target_runtimes(
 
 
 def _print_user_wide_configs(console: Any, runtimes: list[str]) -> None:
-    """Name user-wide configs a project install wrote (Windsurf has no workspace config)."""
+    """Name config files a project install wrote outside each harness's own dir.
+
+    Root ``.mcp.json`` (Copilot, Claude Code; the 0.37 Copilot move) and
+    user-wide files (Windsurf has no workspace config) are named once (#3994).
+    """
     from apm_cli.factory import ClientFactory
 
+    shared = [rt for rt in runtimes if ClientFactory.project_destination_is_root_mcp_json(rt)]
+    if shared:
+        console.print(
+            f"|     +- wrote: .mcp.json ({', '.join(harness_label(rt) for rt in shared)})",
+            markup=False,
+            highlight=False,
+        )
     for rt in runtimes:
         path = ClientFactory.user_wide_config_display(rt)
         if path:
