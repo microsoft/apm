@@ -24,4 +24,6 @@ def surface_target_cleanup(
         return
     for skipped in cleanup.skipped_user_edit:
         logger.cleanup_skipped_user_edit(skipped, dep_key)
+    for kept in cleanup.unproven:
+        logger.cleanup_kept_without_evidence(kept, dep_key)
     logger.stale_cleanup(dep_key, len(cleanup.deleted))
