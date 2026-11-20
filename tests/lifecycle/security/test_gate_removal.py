@@ -714,3 +714,50 @@ def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecy
     )
     assert "verdict: blocked" in explained.stdout, explained.stdout
     assert "apm approve" not in explained.stdout, explained.stdout
+
+
+# -- local trust controls at user scope (-g) -----------------------------------
+#
+# Org-sourced controls at -g are definition cells (#3703); the local controls
+# must still apply: the approval gate parks executables until approved, and a
+# deny by the installed identity retires them.
+
+_USER_MCP = ".copilot/mcp-config.json"
+_MCP_SERVER = "p-exec-mcp"
+
+
+def _user_mcp_servers(world) -> set[str]:
+    path = world.home / _USER_MCP
+    if not path.is_file():
+        return set()
+    return set(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
+
+
+def test_user_scope_approval_gate_parks_hook_and_mcp_until_approved(lifecycle_world) -> None:
+    world = lifecycle_world
+    spec = world.packages["p-exec:marketplace"].spec
+    added = driver.run(world, ("marketplace", "add", world.services.marketplace_url))
+    assert added.returncode == 0, added.stdout + added.stderr
+    parked = driver.run(world, ("install", spec), scope="user")
+    assert parked.returncode == 0, parked.stdout + parked.stderr
+    assert not (world.home / _USER_HOOK).exists(), "an unapproved hook must park at -g"
+    assert _MCP_SERVER not in _user_mcp_servers(world), "an unapproved MCP must park at -g"
+    assert re.search(r"Parked MCP server 'p-exec-mcp'", parked.stdout), parked.stdout
+    assert re.search(r"hooks skipped \(not approved", parked.stdout), parked.stdout
+    # Positive control: the same package deploys both once approved.
+    for args in (("approve", f"{ORG}/p-exec"), ("install",)):
+        result = driver.run(world, args, scope="user")
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert (world.home / _USER_HOOK).is_file()
+    assert _MCP_SERVER in _user_mcp_servers(world)
+
+
+def test_user_scope_deny_by_identity_retires_hook_and_mcp(lifecycle_world) -> None:
+    world = lifecycle_world
+    _marketplace_exec_deployed(world)
+    assert _MCP_SERVER in _user_mcp_servers(world), "the approved MCP must deploy"
+    for args in (("deny", f"{ORG}/p-exec"), ("install",)):
+        result = driver.run(world, args, scope="user")
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert not (world.home / _USER_HOOK).exists(), "deny -g by identity must retire the hook"
+    assert _MCP_SERVER not in _user_mcp_servers(world), "deny -g must retire the MCP server"
