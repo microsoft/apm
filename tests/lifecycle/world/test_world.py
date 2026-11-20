@@ -8,19 +8,36 @@ expected failures naming their tracking issue.
 
 from __future__ import annotations
 
+import base64
 import json
+import shutil
 import statistics
+import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import requests
 import yaml
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
-from tests.lifecycle.world import World, apm_home_outside_home, clone, use_policy
+from tests.lifecycle.world import (
+    World,
+    apm_home_outside_home,
+    clone,
+    login_azure,
+    registry,
+    use_ado_pat,
+    use_policy,
+    use_registry,
+)
 from tests.lifecycle.world.packages import GIT_PUBLISHED, LSP_SERVER, MCP_SERVER, PACKAGE_NAMES
 from tests.lifecycle.world.services import (
+    ADO_BEARER,
+    ADO_HOST,
+    ADO_PAT,
     API_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
@@ -30,6 +47,7 @@ from tests.lifecycle.world.services import (
     REGISTRY_SERVER,
     policy_org,
 )
+from tests.lifecycle.world.shims import AZ_CALL_LOG, TRAP_EXIT, TRAPPED
 
 pytestmark = [
     pytest.mark.e2e,
@@ -356,6 +374,203 @@ def test_host_alias_serves_the_world_repository(lifecycle_world: World, shape: s
     host = HOST_ALIASES[shape][0]
     assert _hosts(world) == {host}, world.services.egress_log()
     assert any(entry["path"].endswith("/git-upload-pack") for entry in world.services.egress_log())
+
+
+# -- OS-aware shims ------------------------------------------------------------
+
+
+def _shim(world: World, name: str) -> str:
+    found = shutil.which(name, path=world.env["PATH"])
+    assert found is not None, f"{name} is not on the world PATH"
+    assert Path(found).is_relative_to(world.root), f"{name} resolves outside the world: {found}"
+    return found
+
+
+def _run_shim(world: World, name: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        (_shim(world, name), *args),
+        env=world.env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("name", TRAPPED)
+def test_trap_binary_records_and_fails_on_this_os(lifecycle_world: World, name: str) -> None:
+    world = lifecycle_world
+    result = _run_shim(world, name, "--version")
+    assert result.returncode == TRAP_EXIT, result
+    assert (world.root / f"{name}-was-run").read_text(encoding="utf-8") == "--version\n"
+
+
+def test_azure_cli_is_the_hermetic_world_stub(lifecycle_world: World) -> None:
+    """The runner's real az must never run: it phones home through the proxy."""
+    world = lifecycle_world
+    config = Path(world.env["AZURE_CONFIG_DIR"])
+    assert config.is_relative_to(world.root)
+    assert world.env["AZURE_CORE_COLLECT_TELEMETRY"] == "no"
+    result = _run_shim(world, "az", "account", "get-access-token", "-o", "json")
+    assert result.returncode == 1 and "az login" in result.stderr, result
+    calls = (config / AZ_CALL_LOG).read_text(encoding="utf-8").splitlines()
+    assert json.loads(calls[-1])[:2] == ["account", "get-access-token"]
+    assert world.services.egress_log() == []
+
+
+# -- package registry ----------------------------------------------------------
+
+
+def _locked_entry(world: World, scope: str, name: str) -> dict:
+    lock = yaml.safe_load((_manifest_root(world, scope) / "apm.lock.yaml").read_text("utf-8"))
+    entries = [d for d in lock["dependencies"] if str(d.get("repo_url", "")).endswith(name)]
+    assert len(entries) == 1, lock["dependencies"]
+    return entries[0]
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_registry_source_installs_and_locks_the_archive_hash(
+    lifecycle_world: World, scope: str
+) -> None:
+    world = lifecycle_world
+    use_registry(world, scope)
+    _ok(world, ["install", world.packages["p-skill:registry"].spec], scope)
+    _assert_surfaces(world, "p-skill", scope)
+    archive = world.services.package_registry.archives[f"{ORG}/p-skill"]["1.0.0"]
+    assert _locked_entry(world, scope, "p-skill")["resolved_hash"] == registry.digest(archive)
+    assert _hosts(world) == {registry.HOST}, world.services.egress_log()
+    assert world.services.proxy.hosts_receiving(registry.TOKEN) == {registry.HOST}
+
+
+def test_registry_serves_a_newer_version(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_registry(world)
+    _ok(world, ["install", f"{ORG}/p-skill#1.1.0"])
+    skill = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Registry release 1.1.0." in skill.read_text(encoding="utf-8")
+    archive = world.services.package_registry.archives[f"{ORG}/p-skill"]["1.1.0"]
+    assert _locked_entry(world, "project", "p-skill")["resolved_hash"] == registry.digest(archive)
+
+
+def test_registry_refuses_a_request_without_its_token(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_registry(world)
+    env = {k: v for k, v in world.env.items() if k != registry.TOKEN_ENV}
+    result = driver.run(
+        replace(world, env=env), ["install", world.packages["p-skill:registry"].spec]
+    )
+    assert result.returncode != 0, result.stdout
+    statuses = {e["status"] for e in world.services.egress_log() if e["host"] == registry.HOST}
+    assert statuses == {401}, world.services.egress_log()
+    assert not (world.project / ".agents/skills/p-skill").exists()
+
+
+# -- Azure DevOps auth and Items API --------------------------------------------
+
+
+def _ado_statuses(world: World) -> set[int]:
+    return {e["status"] for e in world.services.egress_log() if e["host"] == ADO_HOST}
+
+
+def test_ado_auth_required_refuses_an_anonymous_install(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    world.services.require_ado_auth()
+    result = driver.run(world, ["install", f"{world.services.host_alias('ado')}/p-skill"])
+    assert result.returncode != 0, result.stdout
+    assert 401 in _ado_statuses(world), world.services.egress_log()
+    assert not (world.project / ".agents/skills/p-skill").exists()
+
+
+@pytest.mark.parametrize("credential", ["pat", "az"])
+def test_ado_auth_required_accepts_the_world_credential(
+    lifecycle_world: World, credential: str
+) -> None:
+    world = lifecycle_world
+    world.services.require_ado_auth()
+    if credential == "pat":
+        use_ado_pat(world)
+    else:
+        login_azure(world)
+    _ok(world, ["install", f"{world.services.host_alias('ado')}/p-skill"])
+    _assert_surfaces(world, "p-skill", "project")
+    assert _hosts(world) == {ADO_HOST}, world.services.egress_log()
+    presented = world.services.proxy.hosts_receiving
+    if credential == "pat":
+        assert presented(base64.b64encode(f":{ADO_PAT}".encode()).decode()) | presented(
+            base64.b64encode(f"x:{ADO_PAT}".encode()).decode()
+        ) == {ADO_HOST}
+    else:
+        assert presented(ADO_BEARER) == {ADO_HOST}
+        calls = (Path(world.env["AZURE_CONFIG_DIR"]) / AZ_CALL_LOG).read_text("utf-8")
+        assert '"get-access-token"' in calls
+
+
+def test_ado_auth_mode_is_reset_for_the_next_world(
+    lifecycle_template: World, tmp_path: Path
+) -> None:
+    lifecycle_template.services.require_ado_auth()
+    world = clone(lifecycle_template, tmp_path / "next")
+    world.services.reset()
+    assert world.services.ado_auth_required is False
+
+
+def test_ado_policy_is_read_through_the_items_api(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    world.services.require_ado_auth()
+    use_ado_pat(world)
+    use_policy(world, "deny-pkg", host="ado")
+    result = driver.run(world, ["install", world.packages["p-exec"].spec])
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert "denied by pattern" in output, output
+    items = [
+        e
+        for e in world.services.egress_log()
+        if e["host"] == ADO_HOST and "/_apis/git/repositories/apm-policy/items" in e["path"]
+    ]
+    assert items and items[0]["status"] == 200, world.services.egress_log()
+
+
+# -- GHE Cloud /api/v3 ------------------------------------------------------------
+
+
+def _get(world: World, url: str, accept: str = "application/vnd.github+json"):
+    return requests.get(
+        url,
+        headers={"Accept": accept},
+        proxies={"https": world.services.proxy_url},
+        verify=str(world.services.ca_path),
+        timeout=30,
+    )
+
+
+def test_ghe_cloud_serves_contents_and_commits_under_api_v3(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    base = f"https://{HOST_ALIASES['ghe'][0]}/api/v3/repos/{ORG}/p-skill"
+    contents = _get(world, f"{base}/contents/apm.yml?ref=v1.0.0")
+    assert contents.status_code == 200, contents.text
+    assert b"p-skill" in base64.b64decode(contents.json()["content"])
+    commit = _get(world, f"{base}/commits/v1.0.0")
+    assert commit.status_code == 200 and len(commit.json()["sha"]) == 40, commit.text
+    sha = _get(world, f"{base}/commits/v1.0.0", accept="application/vnd.github.sha")
+    assert sha.text == commit.json()["sha"]
+    assert _get(world, f"{base}/contents/missing.md").status_code == 404
+
+
+def test_ghe_cloud_policy_is_read_through_api_v3(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_policy(world, "deny-pkg", host="ghe")
+    result = driver.run(world, ["install", world.packages["p-exec"].spec])
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert "denied by pattern" in output, output
+    served = f"/api/v3/repos/{policy_org('deny-pkg')}/.github/contents/apm-policy.yml"
+    statuses = [
+        e["status"]
+        for e in world.services.egress_log()
+        if e["host"] == HOST_ALIASES["ghe"][0] and e["path"] == served
+    ]
+    assert 200 in statuses, world.services.egress_log()
 
 
 _POLICY_EXIT = {

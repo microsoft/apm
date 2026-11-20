@@ -7,11 +7,13 @@ so ``egress_log`` sees all of it. The proxy terminates TLS for these origins:
 - git smart HTTP for ``github.com`` and the host aliases (GHE Cloud, GHES,
   Azure DevOps, GitLab URL shapes), answered by ``git http-backend`` from
   local bare repositories;
-- ``api.github.com`` (and the GHE Cloud / GHES API shapes): repository
+- ``api.github.com`` (and the GHE Cloud / GHES API shapes, including
+  ``https://<host>/api/v3`` on both): repository
   metadata, commits and the Contents API, read from the same repositories --
   policy discovery and marketplace catalogs use it;
 - ``raw.githubusercontent.com``;
-- a local MCP registry (``/v0.1/servers``).
+- a local MCP registry (``/v0.1/servers``);
+- a private APM package registry (``registry.py``).
 
 Policy variants live in one org per variant: the project's ``origin`` remote
 selects the org, as it does for a real user (``use_policy`` in
@@ -30,6 +32,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from tests.lifecycle.world import registry as package_registry
 from tests.utils.local_scripted_https_proxy import (
     Handler,
     ScriptedHttpsProxy,
@@ -58,9 +61,22 @@ HOST_ALIASES: Mapping[str, tuple[str, str]] = {
     "ado": ("dev.azure.com", f"{ORG}/{ORG}/_git"),
     "gitlab": ("gitlab.com", f"{ORG}/group"),
 }
+ADO_HOST = HOST_ALIASES["ado"][0]
+# Azure DevOps credentials of the world: a PAT (ADO_APM_PAT) and the bearer
+# the az stub hands out after ``login_azure`` (shaped like a JWT, as APM checks).
+ADO_PAT = "lifecycle-ado-pat-7d41e2"
+ADO_BEARER = "eyJ" + "lifecycle-ado-bearer-" + "0" * 96
+_ADO_ITEMS = "/_apis/git/repositories/"
+# Org policy repositories APM reads on Azure DevOps (policy/discovery.py), both
+# served from the variant's ``.github`` repository.
+_ADO_POLICY_REPOS = {("apm", "apm-policy"), ("_apm", "_apm")}
 # API base per GitHub-family host: GHE Cloud uses an api. subdomain, GHES /api/v3.
 _API_HOSTS = {API_HOST: "", f"api.{HOST_ALIASES['ghe'][0]}": ""}
 _GHES_API_PREFIX = "/api/v3"
+# Hosts that also answer ``https://<host>/api/v3``: GHES, and GHE Cloud, whose
+# contents and commits APM reads there (deps/download_strategies.py,
+# policy/discovery.py).
+_V3_API_HOSTS = frozenset({HOST_ALIASES["ghes"][0], HOST_ALIASES["ghe"][0]})
 _GIT_SERVICES = ("/info/refs", "/git-upload-pack", "/HEAD")
 
 # Policy documents per variant (schema: src/apm_cli/policy/schema.py).
@@ -148,9 +164,13 @@ class WorldServices:
     marketplace_url = f"https://{GITHUB_HOST}/{ORG}/{MARKETPLACE_REPO}"
     mcp_registry_url = f"https://{REGISTRY_HOST}"
 
+    package_registry_url = package_registry.URL
+
     def __init__(self, repositories: Mapping[str, Path]) -> None:
         self._repositories = dict(repositories)
         self._proxy: ScriptedHttpsProxy | None = None
+        self.package_registry = package_registry.PackageRegistry()
+        self.ado_auth_required = False
 
     @property
     def proxy(self) -> ScriptedHttpsProxy:
@@ -193,7 +213,13 @@ class WorldServices:
         ]
 
     def reset(self) -> None:
+        """Clear the egress log and every per-test mode (services are shared per worker)."""
         self.proxy.clear()
+        self.ado_auth_required = False
+
+    def require_ado_auth(self, required: bool = True) -> None:
+        """Make dev.azure.com refuse anonymous git and REST requests with 401."""
+        self.ado_auth_required = required
 
     def serve(self, slug: str, origin: Path) -> None:
         """Serve bare repository *origin* as ``owner/repo`` *slug* on every git host.
@@ -231,6 +257,7 @@ class WorldServices:
     def handlers(self) -> dict[str, Handler]:
         handlers: dict[str, Handler] = {GITHUB_HOST: self._git, RAW_HOST: self._raw}
         handlers[REGISTRY_HOST] = self._registry
+        handlers[package_registry.HOST] = self.package_registry.handle
         for host in _API_HOSTS:
             handlers[host] = self._api
         for host, _prefix in HOST_ALIASES.values():
@@ -240,9 +267,29 @@ class WorldServices:
     def _slug_repository(self, owner: str, repo: str) -> Path | None:
         return self._repositories.get(f"{owner}/{repo.removesuffix('.git')}")
 
+    def _ado_refusal(self, request: ScriptedRequest) -> ScriptedResponse | None:
+        if request.host != ADO_HOST or not self.ado_auth_required:
+            return None
+        header = request.header("Authorization") or ""
+        scheme, _, value = header.partition(" ")
+        if scheme == "Bearer" and value == ADO_BEARER:
+            return None
+        if scheme == "Basic":
+            with contextlib.suppress(ValueError):
+                if base64.b64decode(value).decode("ascii").partition(":")[2] == ADO_PAT:
+                    return None
+        return ScriptedResponse(
+            401, {"WWW-Authenticate": f'Basic realm="https://{ADO_HOST}/"'}, b"Unauthorized"
+        )
+
     def _git(self, request: ScriptedRequest) -> ScriptedResponse:
         path = unquote(request.path)
-        if request.host == HOST_ALIASES["ghes"][0] and path.startswith(_GHES_API_PREFIX + "/"):
+        refusal = self._ado_refusal(request)
+        if refusal is not None:
+            return refusal
+        if request.host == ADO_HOST and _ADO_ITEMS in path:
+            return self._ado_items(request, path)
+        if request.host in _V3_API_HOSTS and path.startswith(_GHES_API_PREFIX + "/"):
             return self._api(request, path[len(_GHES_API_PREFIX) :])
         service = next((s for s in _GIT_SERVICES if path.endswith(s)), None)
         if service is None:
@@ -254,6 +301,25 @@ class WorldServices:
         if repository is None:
             return _not_found()
         return git_smart_http(repository, request, service)
+
+    def _ado_items(self, request: ScriptedRequest, path: str) -> ScriptedResponse:
+        """Azure DevOps Items API: ``/{org}/{project}/_apis/git/repositories/{repo}/items``."""
+        head, _, tail = path.partition(_ADO_ITEMS)
+        org, _, project = head.strip("/").partition("/")
+        repo, _, endpoint = tail.partition("/")
+        query = parse_qs(request.query)
+        file_path = (query.get("path") or [""])[0].lstrip("/")
+        if endpoint != "items" or not file_path:
+            return _not_found()
+        if org == policy_org("unreachable"):
+            return _json(503, {"message": "Service Unavailable"})
+        slug_repo = POLICY_REPO if (project, repo) in _ADO_POLICY_REPOS else repo
+        repository = self._slug_repository(org, slug_repo)
+        ref = (query.get("versionDescriptor.version") or ["HEAD"])[0]
+        content = None if repository is None else self._blob(repository, ref, file_path)
+        if content is None:
+            return _json(404, {"message": f"TF401174: The item '{file_path}' could not be found."})
+        return ScriptedResponse(200, {"Content-Type": "application/octet-stream"}, content)
 
     def _blob(self, repository: Path, ref: str, file_path: str) -> bytes | None:
         git = shutil.which("git") or "git"
