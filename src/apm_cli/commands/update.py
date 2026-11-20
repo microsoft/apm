@@ -471,7 +471,7 @@ def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
     from apm_cli.marketplace.errors import MarketplaceError
 
     try:
-        restored = reverify_locked_provenance(lockfile, lock_path.parent / "apm.yml")
+        restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
     except MarketplaceError as exc:
         _rich_error(str(exc), symbol="error")
         sys.exit(1)
