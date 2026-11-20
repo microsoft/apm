@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` now fails before deploying when any deployed file was edited, including instructions, agents and commands it used to restore silently; restore with `apm install --force`. (#PRD)
 - `PROXY_REGISTRY_ONLY=1` also refuses default MCP registry lookups and marketplace catalogs the proxy cannot serve; point `MCP_REGISTRY_URL` at a proxied registry. Policy fetches stay direct. (#PRD)
 - `apm install --frozen` now fails before deploying when any deployed file was edited, including instructions, agents and commands it used to restore silently; restore with `apm install --force`. (closes #3994, #4004)
+- `apm install --frozen` now fails before deploying on any edited deployed file, of every primitive type; delete the files, rerun `apm install`, and commit. (closes #3994, #4004)
 - `PROXY_REGISTRY_ONLY=1` also refuses default MCP registry lookups and marketplace catalogs the proxy cannot serve; point `MCP_REGISTRY_URL` at a proxied registry. Policy fetches stay direct. (closes #3994, #4004)
 
 ### Added
@@ -49,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm lock export` identifies GitHub packages as `pkg:github/<owner>/<repo>@<commit>`, adds `#<subpath>` for subdirectory packages, and includes the lock's SHA-256 hashes. (closes #3994, #4004)
 - `apm init --apply` implies `--discover`, and `apm plugin init` scaffolds a commented `license:` line without choosing a license. (closes #3994, #4004)
 - Tables and panels render in ASCII, and `apm marketplace browse` lists full install names instead of a truncated table. (closes #3994, #4004)
-- Help and hints: `--frozen` describes its hash check, `audit --policy` is no longer marked experimental, `apm --help` drops `apm run`, and the unpinned warning credits the lockfile pin. (closes #3994, #4004)
+- `--frozen` help describes its hash check, `audit --policy` is no longer marked experimental, `apm --help` drops `apm run`, and the unpinned warning credits the lockfile. (closes #3994, #4004)
 
 ### Removed
 

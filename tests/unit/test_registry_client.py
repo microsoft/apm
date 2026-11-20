@@ -792,3 +792,27 @@ class TestRegistryOnlyEgress(unittest.TestCase):
             client._http_cache = None
             client.list_servers()
         mock_get.assert_called_once()
+
+    @mock.patch("requests.Session.get")
+    def test_manifest_registry_url_is_refused(self, mock_get):
+        """A registry: URL from apm.yml is not the operator's sanctioned mirror."""
+        from apm_cli.registry.client import RegistryEgressRefusedError
+
+        with mock.patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=False):
+            os.environ.pop("MCP_REGISTRY_URL", None)
+            with mock.patch("apm_cli.config.get_mcp_registry_url", return_value=None):
+                client = SimpleRegistryClient("https://other.example")
+                client._http_cache = None
+                with self.assertRaises(RegistryEgressRefusedError):
+                    client.list_servers()
+        mock_get.assert_not_called()
+
+    @mock.patch("requests.Session.get")
+    def test_manifest_url_naming_configured_registry_is_allowed(self, mock_get):
+        mock_get.return_value = _streamed_response({"servers": [], "metadata": {}})
+        env = {"PROXY_REGISTRY_ONLY": "1", "MCP_REGISTRY_URL": "https://mcp.proxy.example/"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            client = SimpleRegistryClient("https://mcp.proxy.example")
+            client._http_cache = None
+            client.list_servers()
+        mock_get.assert_called_once()

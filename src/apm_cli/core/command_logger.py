@@ -563,7 +563,7 @@ class InstallLogger(CommandLogger):
         """Log detected package type (verbose only). 4-space indent."""
         if not self.verbose:
             return
-        _rich_echo(f"    Package type: {type_label}", color="dim")
+        self._emit_or_hold(partial(_rich_echo, f"    Package type: {type_label}", color="dim"))
 
     # --- Performance diagnostics (perf #1433) ---
 

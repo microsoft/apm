@@ -70,6 +70,15 @@ def _spdx_license_declared(declared: str | None) -> str:
     return declared
 
 
+# content_hash is APM's package tree hash (lockfile spec), not an archive
+# digest; name it so SBOM consumers do not hash a download to compare.
+_TREE_HASH_ALGORITHM = "apm-package-tree-sha256"
+_TREE_HASH_NOTE = (
+    f"Checksum is the {_TREE_HASH_ALGORITHM} content_hash from apm.lock.yaml, "
+    "not an archive digest; verify it with 'apm audit'."
+)
+
+
 def _sha256_hex(dep: LockedDependency) -> str | None:
     """The lockfile-recorded SHA-256 content hash as bare hex, when recorded."""
     algorithm, _, digest = (dep.content_hash or "").partition(":")
@@ -116,6 +125,7 @@ def _build_cyclonedx(lockfile: LockFile, timestamp: str) -> dict[str, Any]:
         digest = _sha256_hex(dep)
         if digest:
             comp["hashes"] = [{"alg": "SHA-256", "content": digest}]
+            comp["properties"] = [{"name": "apm:hash-algorithm", "value": _TREE_HASH_ALGORITHM}]
         refs = _external_references(dep)
         if refs:
             comp["externalReferences"] = refs
@@ -160,6 +170,7 @@ def _build_spdx(lockfile: LockFile, timestamp: str) -> dict[str, Any]:
         digest = _sha256_hex(dep)
         if digest:
             pkg["checksums"] = [{"algorithm": "SHA256", "checksumValue": digest}]
+            pkg["comment"] = _TREE_HASH_NOTE
         packages.append(pkg)
     return {
         "spdxVersion": SPDX_VERSION,

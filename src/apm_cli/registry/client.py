@@ -375,21 +375,30 @@ class SimpleRegistryClient:
         self._http_cache = self._init_http_cache()
 
     def _refuse_direct_egress_when_proxy_only(self) -> None:
-        """Refuse the public default registry when ``PROXY_REGISTRY_ONLY`` is set.
+        """Refuse an unsanctioned MCP registry when ``PROXY_REGISTRY_ONLY`` is set.
 
         Registry-only mode sanctions no direct egress for dependency content;
-        MCP server metadata is dependency content. A registry URL the user
-        configured (flag, ``MCP_REGISTRY_URL``, or ``apm config``) is the
-        sanctioned mirror and stays allowed.
+        MCP server metadata is dependency content. Only the registry the
+        operator configured (``--registry``, ``MCP_REGISTRY_URL``, or ``apm
+        config``) is the sanctioned mirror. The public default and a
+        manifest's own ``registry:`` URL are refused unless that URL names
+        the configured registry (#3994).
         """
         from apm_cli.deps.registry_proxy import is_enforce_only
 
-        if self.registry_url_source == "default" and is_enforce_only():
-            raise RegistryEgressRefusedError(
-                f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
-                f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
-                "mcp-registry-url') at your proxied registry, or unset PROXY_REGISTRY_ONLY."
-            )
+        if not is_enforce_only() or self.registry_url_source in {"flag", "env", "config"}:
+            return
+        if self.registry_url_source == "explicit":
+            configured, configured_source = resolve_mcp_registry_url(None)
+            if configured_source != "default" and redact_mcp_registry_url(
+                normalize_mcp_registry_url(configured)
+            ) == redact_mcp_registry_url(self.registry_url):
+                return
+        raise RegistryEgressRefusedError(
+            f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
+            f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
+            "mcp-registry-url') at your proxied registry, or unset PROXY_REGISTRY_ONLY."
+        )
 
     @staticmethod
     def _init_http_cache():

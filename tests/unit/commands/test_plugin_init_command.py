@@ -367,7 +367,8 @@ class TestInitConsumerNextSteps:
                 result = self.runner.invoke(cli, ["init", "--yes"])
                 assert result.exit_code == 0, result.output
                 assert "apm install" in result.output
-                assert "apm run" in result.output
+                # Experimental 'apm run' is not a next step (#3994).
+                assert "apm run" not in result.output
                 assert "apm plugin init" in result.output
                 assert "apm marketplace init" in result.output
             finally:

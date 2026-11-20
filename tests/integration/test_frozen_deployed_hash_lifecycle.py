@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -241,3 +242,73 @@ def test_frozen_fails_on_edit_of_every_primitive_type(
     scenario.run("install", "--force", "--no-policy", cwd=project, env=env)
     assert edited.read_bytes() != b"Edited.\n"
     scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
+def test_frozen_fails_when_locked_file_is_replaced_by_a_symlink(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A symlink in place of a locked file is never followed or trusted (#3994).
+
+    Even a link to identical bytes fails: the link target can change after
+    the check, so the gate treats the path as unresolved.
+    """
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    sha, env = _published(scenario)
+    project = _project(scenario, sha, env, ["claude"])
+    relative = ".claude/rules/global.md"
+    deployed = project / relative
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(deployed.read_bytes())
+    deployed.unlink()
+    deployed.symlink_to(outside)
+
+    frozen = scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env, expect=1)
+    text = output(frozen)
+    assert f"{relative}: unsafe or unresolved deployed path" in text, text
+    assert deployed.is_symlink()
+    audit = scenario.run("audit", "--ci", "--no-policy", cwd=project, env=env, expect=1)
+    assert relative in output(audit)
+
+
+def test_identical_unmanaged_native_skill_is_adopted_then_owned(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An existing copy equal to the install output is adopted, then owned (#3994)."""
+    remote = "https://git.example.test/test/review-skill.git"
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    repositories = LocalGitRepositoryFactory(scenario.isolated.repository_root, env=scenario.env)
+    source = scenario.isolated.package_root / "review"
+    skill_text = "---\nname: review\ndescription: Review code\n---\nReview the change.\n"
+    write(source / "SKILL.md", skill_text)
+    repository = repositories.create("review", source_tree=source)
+    sha = repositories.commit(repository, message="publish").sha
+    env = repositories.url_rewrite_subprocess_env(repository, remote)
+
+    project = scenario.isolated.work_root / "proj"
+    project.mkdir()
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": [{"git": remote, "ref": sha}]},
+        },
+        project / "apm.yml",
+    )
+    adopted = project / ".claude/skills/review-skill/SKILL.md"
+    write(adopted, skill_text)
+    sentinel = project / ".claude/skills/mine/SKILL.md"
+    write(sentinel, "---\nname: mine\ndescription: Mine\n---\nMine.\n")
+
+    install = scenario.run("install", "--no-policy", cwd=project, env=env)
+    text = output(install)
+    assert "skipped" not in text, text
+    lock = load_yaml(project / "apm.lock.yaml")
+    claimed = [path for dep in lock["dependencies"] for path in dep.get("deployed_files") or []]
+    assert ".claude/skills/review-skill/SKILL.md" in claimed, claimed
+    scenario.run("audit", "--ci", "--no-policy", cwd=project, env=env)
+
+    scenario.run("uninstall", remote, cwd=project, env=env)
+    assert not adopted.exists()
+    assert sentinel.read_text(encoding="utf-8").endswith("Mine.\n")

@@ -45,6 +45,7 @@ from ..utils.http_credentials import (
     origin_root,
 )
 from .errors import (
+    MarketplaceEgressRefusedError,
     MarketplaceError,
     MarketplaceFetchError,
     MarketplaceFreshnessError,
@@ -1108,7 +1109,11 @@ def fetch_raw(
         raise MarketplaceError(
             f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
             "PROXY_REGISTRY_ONLY blocks the direct GitHub fetch"
-            + (" after a proxy miss" if cfg is not None else "; no PROXY_REGISTRY_URL is set")
+            + (
+                " after a proxy miss"
+                if cfg is not None
+                else "; set PROXY_REGISTRY_URL or unset PROXY_REGISTRY_ONLY"
+            )
         )
 
     from ..core.auth import AuthResolver
@@ -1157,7 +1162,9 @@ def _refuse_direct_egress(source_name: str, what: str) -> None:
     from ..deps.registry_proxy import is_enforce_only
 
     if is_enforce_only():
-        raise MarketplaceFetchError(
+        # Drop any query string: a signed catalog URL must not reach CI logs.
+        what = re.sub(r"\?\S*", "", what)
+        raise MarketplaceEgressRefusedError(
             source_name,
             f"PROXY_REGISTRY_ONLY is set: refusing direct fetch of {what}",
             retry_hint=(
@@ -1396,6 +1403,8 @@ def fetch_marketplace(
             _write_cache(cache_name, data)
         return manifest
     except MarketplaceFetchError as exc:
+        if isinstance(exc, MarketplaceEgressRefusedError):
+            raise
         if strict:
             raise MarketplaceFreshnessError(source.name, exc.reason or str(exc)) from exc
         # Stale-while-revalidate (API kinds only): serve expired cache on network error

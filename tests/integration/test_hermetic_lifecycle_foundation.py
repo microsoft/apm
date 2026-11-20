@@ -445,7 +445,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             assert set(failed_checks) == {"content-integrity", "drift"}
             assert instruction_path in failed_checks["content-integrity"]["details"][0]
             assert (
-                "'apm install --force' to restore drifted files"
+                "'apm install' after deleting the drifted files"
                 in (failed_checks["content-integrity"]["message"])
             )
         elif mutation == "resolved-ref":

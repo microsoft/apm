@@ -1131,6 +1131,32 @@ class TestProxyOnlyRefusesDirectCatalogEgress:
                 client_mod.fetch_marketplace(source, force_refresh=True)
         network.assert_not_called()
 
+    def test_refusal_skips_stale_cache_and_hides_query(self, monkeypatch):
+        """A policy refusal is not a network error: no stale catalog, no URL token."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        monkeypatch.delenv("PROXY_REGISTRY_URL", raising=False)
+        source = MarketplaceSource(
+            name="mkt", url="https://catalog.example.com/m.json?sig=SECRET", path=""
+        )
+        stale = MagicMock(side_effect=AssertionError("stale cache served"))
+        with patch("apm_cli.marketplace.client._manifest_from_cache", stale):
+            with pytest.raises(MarketplaceFetchError) as excinfo:
+                client_mod.fetch_marketplace(source, force_refresh=True)
+        assert "SECRET" not in str(excinfo.value)
+        stale.assert_not_called()
+
+    def test_fetch_raw_without_proxy_is_refused(self, monkeypatch):
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        network = MagicMock(side_effect=AssertionError("direct egress"))
+        with (
+            patch("apm_cli.marketplace.client._try_proxy_fetch_raw", return_value=None),
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client._http_get", network),
+        ):
+            with pytest.raises(MarketplaceError, match="set PROXY_REGISTRY_URL"):
+                client_mod.fetch_raw(host="github.com", owner="o", repo="r", file_path="f", ref="m")
+        network.assert_not_called()
+
 
 class TestCacheKey:
     """Cache key includes host for non-github.com sources."""

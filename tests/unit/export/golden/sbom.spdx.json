@@ -18,6 +18,7 @@
           "checksumValue": "aaa111"
         }
       ],
+      "comment": "Checksum is the apm-package-tree-sha256 content_hash from apm.lock.yaml, not an archive digest; verify it with 'apm audit'.",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -88,6 +89,7 @@
           "checksumValue": "bbb222"
         }
       ],
+      "comment": "Checksum is the apm-package-tree-sha256 content_hash from apm.lock.yaml, not an archive digest; verify it with 'apm audit'.",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {

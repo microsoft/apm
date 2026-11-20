@@ -783,10 +783,12 @@ class InstallService:
                 tip=_FROZEN_REPAIR_TIP,
             )
 
-        InstallService._enforce_frozen_deployed_hashes(request, deployed=True)
+        InstallService._enforce_frozen_deployed_hashes(request, committed, deployed=True)
 
     @staticmethod
-    def _enforce_frozen_deployed_hashes(request: InstallRequest, *, deployed: bool) -> None:
+    def _enforce_frozen_deployed_hashes(
+        request: InstallRequest, committed: LockFile | None = None, *, deployed: bool
+    ) -> None:
         """Fail a frozen install whose deployed bytes differ from the lock (req-lk-017).
 
         Runs twice through the verifier ``apm audit`` uses.  Before the
@@ -802,11 +804,17 @@ class InstallService:
         from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
 
         lockfile_path = _frozen_lockfile_path(request)
-        committed = LockFile.read(lockfile_path)
+        committed = committed or LockFile.read(lockfile_path)
         if committed is None:  # pragma: no cover -- enforce_frozen ran first
             return
-        deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
+        deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
         drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)
+        if not deployed and drifted:
+            # Stale APM output (receipt-proven) is replaced, then re-verified.
+            from apm_cli.install.local_edits import unedited_apm_output
+
+            stale = unedited_apm_output(deploy_root, user_scope, committed, targets, drifted)
+            drifted = [drift for drift in drifted if drift.path not in stale]
         if not drifted and not unresolved:
             return
         if deployed:

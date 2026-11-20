@@ -42,7 +42,11 @@ _SCAFFOLD = (
         pytest.param(
             {"name": "p", "version": "1.0.0", "description": "d", "author": "a"},
             True,
-            _SCAFFOLD.format(author="author: a\n", dev="devDependencies:\n  apm: []\n"),
+            _SCAFFOLD.format(author="author: a\n", dev="devDependencies:\n  apm: []\n").replace(
+                "\ndependencies:\n",
+                "\n# SPDX license for this package (set before publishing), for example:\n"
+                "# license: MIT\n\ndependencies:\n",
+            ),
             id="plugin-init",
         ),
     ],

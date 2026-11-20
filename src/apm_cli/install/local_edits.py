@@ -44,8 +44,14 @@ def restore_locked_content_hint(subject: str) -> str:
     """
     return (
         f"To restore the locked content, delete {subject} and rerun 'apm install', "
-        "or run 'apm install --force' (overwrites local edits)"
+        "then commit the result ('apm install --force' also restores them, but "
+        "overwrites every local edit and deploys despite critical security findings)"
     )
+
+
+def restore_drifted_files_remedy() -> str:
+    """Return the audit remedy clause for files whose bytes drifted from the lock."""
+    return "'apm install' after deleting the drifted files (plain install keeps local edits)"
 
 
 def rendering_change_hint(count: int) -> str:
@@ -187,3 +193,36 @@ def hint_local_edits_before_install(ctx: InstallContext, lockfile: LockFile | No
     edited = count_local_edits(ctx.project_root, lockfile, keys)
     if edited:
         ctx.logger.info(local_edit_hint(edited, installing=True))
+
+
+def unedited_apm_output(
+    deploy_root: Path,
+    user_scope: bool,
+    lockfile: LockFile,
+    targets: Collection,
+    drifted: Iterable,
+) -> frozenset[str]:
+    """Return drifted paths whose bytes are exactly what this installation last wrote.
+
+    A trusted local receipt proves such a file is stale APM output (for
+    example after a branch switch), not a local edit, so a frozen install
+    may replace it. Without a trusted receipt every mismatch counts as an
+    edit. Invalid receipt state proves nothing.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    try:
+        session = DeploymentMaterializationSession(deploy_root, scope, lockfile)
+    except (OSError, ValueError):
+        return frozenset()
+    stale: set[str] = set()
+    for drift in drifted:
+        try:
+            baseline = session.baseline(deploy_root / drift.path, list(targets))
+        except (OSError, ValueError):
+            continue
+        if baseline is not None and baseline == drift.actual:
+            stale.add(drift.path)
+    return frozenset(stale)

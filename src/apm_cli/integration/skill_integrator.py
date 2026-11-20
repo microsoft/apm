@@ -1312,11 +1312,12 @@ class SkillIntegrator(BaseIntegrator):
             rel_path = deployed_path_entry(target_skill_dir, project_root, [target])
             session_owned = resolved in self._native_skill_session_owners
             target_existed = skill_dir_has_content(target_skill_dir)
-            # An unowned copy equal to this install's output is adopted (#3994).
-            unchanged = not session_owned and tree_equals_install_output(
+            owned = {rel_path} if session_owned else collision_managed
+            # A would-be collision equal to this install's output is adopted (#3994).
+            may_adopt = target_existed and not force and rel_path not in owned
+            unchanged = may_adopt and tree_equals_install_output(
                 self, package_path, target_skill_dir, native_ignore
             )
-            owned = {rel_path} if session_owned else collision_managed
             collides = target_existed and not unchanged
             if collides and self.check_collision(
                 target_skill_dir, rel_path, owned, force, diagnostics=diagnostics

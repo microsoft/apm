@@ -10,6 +10,12 @@
         }
       ],
       "name": "acme/local-helper",
+      "properties": [
+        {
+          "name": "apm:hash-algorithm",
+          "value": "apm-package-tree-sha256"
+        }
+      ],
       "purl": "pkg:generic/local-helper@sha256:aaa111",
       "type": "library",
       "version": "sha256:aaa111"
@@ -63,6 +69,12 @@
         }
       ],
       "name": "acme/skills",
+      "properties": [
+        {
+          "name": "apm:hash-algorithm",
+          "value": "apm-package-tree-sha256"
+        }
+      ],
       "purl": "pkg:github/acme/skills@feed01#skills/review",
       "type": "library",
       "version": "feed01"
