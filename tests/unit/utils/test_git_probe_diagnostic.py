@@ -67,6 +67,25 @@ def test_probe_detail_masks_config_values_and_stays_bounded_ascii() -> None:
     assert "...); check Git configuration with" in message
 
 
+def test_probe_detail_masks_a_config_value_that_contains_apostrophes() -> None:
+    stderr = b"fatal: bad boolean config value 'prefix'private-suffix' for 'core.bare'\n"
+
+    message = str(GitUrlRewriteProbeError("Git config probe failed", stderr=stderr))
+
+    assert "private-suffix" not in message
+    assert "config value '***' for 'core.bare'" in message
+
+
+def test_probe_remedy_never_names_a_truncated_config_path() -> None:
+    path = "/home/dev/" + "nested/" * 40 + ".gitconfig"
+    stderr = f"fatal: bad config line 3 in file {path}\n".encode()
+
+    message = str(GitUrlRewriteProbeError("Git config probe failed", stderr=stderr))
+
+    assert message.endswith(f"...); check Git configuration with {_LIST} and retry")
+    assert "fix line" not in message
+
+
 @pytest.mark.parametrize(
     "category", ("Git config probe could not start", "Git config probe timed out")
 )

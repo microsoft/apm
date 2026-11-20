@@ -155,46 +155,48 @@ class GitUrlRewriteError(ValueError):
 _CONFIG_ORIGIN_COMMAND = "'git config --show-origin --list'"
 _PROBE_DETAIL_MAX_CHARS = 200
 _PROBE_SEVERITY_RE = re.compile(r"^(?:fatal|error|warning):\s*", re.IGNORECASE)
-_PROBE_CONFIG_VALUE_RE = re.compile(r"(config value )'[^']*'", re.IGNORECASE)
+# A value may itself contain apostrophes: mask through the last "' for '" Git
+# appends, or to the end of the line when that suffix is absent.
+_PROBE_CONFIG_VALUE_RE = re.compile(r"(config value )'(?:.*'(?= for ')|.*$)", re.IGNORECASE)
 _PROBE_FILE_LINE_RE = re.compile(r"\bline (\d+) in file (.+?)\s*$")
 _PROBE_FILE_AT_LINE_RE = re.compile(r"in file '([^']+)' at line (\d+)")
 _PROBE_FILE_ACCESS_RE = re.compile(r"unable to (?:access|read config file) '([^']+)'")
 
 
-def _probe_stderr_detail(stderr: bytes | str | None) -> str:
-    """Return Git's first diagnostic line, redacted, printable ASCII and bounded."""
+def _probe_stderr_line(stderr: bytes | str | None) -> str:
+    """Return Git's first diagnostic line, redacted and printable ASCII."""
     if isinstance(stderr, bytes):
         stderr = stderr.decode("utf-8", errors="replace")
     if not stderr:
         return ""
     first = next((line.strip() for line in stderr.splitlines() if line.strip()), "")
-    detail = _PROBE_SEVERITY_RE.sub("", first)
-    detail = _PROBE_CONFIG_VALUE_RE.sub(r"\1'***'", redact_git_diagnostic(detail))
-    detail = "".join(ch if " " <= ch <= "~" else "?" for ch in detail)
-    if len(detail) > _PROBE_DETAIL_MAX_CHARS:
-        detail = f"{detail[: _PROBE_DETAIL_MAX_CHARS - 3]}..."
-    return detail
+    line = _PROBE_SEVERITY_RE.sub("", first)
+    line = _PROBE_CONFIG_VALUE_RE.sub(r"\1'***'", redact_git_diagnostic(line))
+    return "".join(ch if " " <= ch <= "~" else "?" for ch in line)
 
 
-def _probe_remedy(detail: str) -> str:
+def _probe_remedy(line: str) -> str:
     """Return one runnable next step for the configuration Git reported."""
-    if "'$GIT_DIR' too big" in detail:
+    inspect = f"check Git configuration with {_CONFIG_ORIGIN_COMMAND} and retry"
+    if "'$GIT_DIR' too big" in line:
         return (
             "the project path is too long for Git; move the project to a shorter path "
             "or run 'git config --global core.longpaths true', then retry"
         )
-    if match := _PROBE_FILE_LINE_RE.search(detail):
-        line, path = match.groups()
-    elif match := _PROBE_FILE_AT_LINE_RE.search(detail):
-        path, line = match.groups()
-    elif match := _PROBE_FILE_ACCESS_RE.search(detail):
-        return (
-            f"fix or remove the config file '{match.group(1)}', "
-            f"then check with {_CONFIG_ORIGIN_COMMAND} and retry"
-        )
+    if match := _PROBE_FILE_LINE_RE.search(line):
+        number, path = match.groups()
+    elif match := _PROBE_FILE_AT_LINE_RE.search(line):
+        path, number = match.groups()
+    elif match := _PROBE_FILE_ACCESS_RE.search(line):
+        path, number = match.group(1), None
     else:
-        return f"check Git configuration with {_CONFIG_ORIGIN_COMMAND} and retry"
-    return f"fix line {line} of '{path}', then check with {_CONFIG_ORIGIN_COMMAND} and retry"
+        return inspect
+    if len(path) > _PROBE_DETAIL_MAX_CHARS:
+        return inspect
+    check = f"then check with {_CONFIG_ORIGIN_COMMAND} and retry"
+    if number is None:
+        return f"fix or remove the config file '{path}', {check}"
+    return f"fix line {number} of '{path}', {check}"
 
 
 class GitUrlRewriteProbeError(ValueError):
@@ -203,11 +205,14 @@ class GitUrlRewriteProbeError(ValueError):
     def __init__(self, category: str, *, stderr: bytes | str | None = None) -> None:
         """Initialize a probe failure; Git's first stderr line is shown redacted."""
         self.category = category
-        self.detail = _probe_stderr_detail(stderr)
-        if self.detail:
+        line = _probe_stderr_line(stderr)
+        self.detail = line
+        if len(line) > _PROBE_DETAIL_MAX_CHARS:
+            self.detail = f"{line[: _PROBE_DETAIL_MAX_CHARS - 3]}..."
+        if line:
             message = (
                 f"Unable to verify Git URL rewrite safety ({category}: {self.detail}); "
-                f"{_probe_remedy(self.detail)}"
+                f"{_probe_remedy(line)}"
             )
         else:
             message = (
