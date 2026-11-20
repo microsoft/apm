@@ -22,6 +22,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import stored_alias
 
 if TYPE_CHECKING:
+    from apm_cli.core.deployment_ledger import OverwriteGate
     from apm_cli.integration.cleanup import DeploymentEvidence
 
 
@@ -166,6 +167,17 @@ def untrusted_baseline_message(entry: str) -> str:
     )
 
 
+def unproven_overwrite_message(entry: str, *, user_scope: bool) -> str:
+    """Refuse to replace a managed file that APM cannot prove it deployed (#4360)."""
+    install = "apm install -g" if user_scope else "apm install"
+    return (
+        f"Kept {entry}: it differs from what APM renders and there is no local "
+        "deployment receipt or locked render proving APM wrote it, so it may hold "
+        f"local edits. Move it aside, then run '{install}' to restore it; or run "
+        f"'{install} --force' to overwrite it."
+    )
+
+
 class BaseIntegrator:
     """Shared infrastructure for file-level integrators.
 
@@ -173,6 +185,9 @@ class BaseIntegrator:
     detection, sync removal, and link resolution logic is
     handled here.
     """
+
+    # Overwrite evidence for one install call, bound by ``recorded_writes`` (#4360).
+    _overwrite_gate: "OverwriteGate | None" = None
 
     # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
     # ``False`` = byte-preserving identity (the safe default any future
@@ -667,7 +682,21 @@ class BaseIntegrator:
             target_path, rel_path, managed_files, force, diagnostics=diagnostics
         ):
             return True, False
-        return False, False
+        # A managed file that differs from the render is replaced only with
+        # deployment evidence; the lockfile hash alone never authorizes it (#4360).
+        gate = self._overwrite_gate
+        if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
+            return False, False
+        if gate is not None and gate.keep(target_path):
+            # The claim stays with its prior lock entry; finalize names the file.
+            target_paths.append(target_path)
+            return True, False
+        message = unproven_overwrite_message(rel_path, user_scope=bool(gate and gate.user_scope))
+        if diagnostics is not None:
+            diagnostics.error(message, package=gate.owner if gate else "")
+        else:
+            _rich_warning(message)
+        return True, False
 
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.

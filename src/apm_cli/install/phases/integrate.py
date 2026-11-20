@@ -627,6 +627,19 @@ def _fail_explicit_target_without_deploy(ctx: InstallContext) -> None:
         raise DirectDependencyError(message)
 
 
+def _keep_prior_entries(ctx: InstallContext, kept: list[tuple[str, Path]]) -> None:
+    """Keep each unproven managed file's prior lock entry, as cleanup keeps its files (#4360)."""
+    from apm_cli.install.deployed_paths import deployed_path_entry
+
+    lockfile = ctx.existing_lockfile
+    for owner, path in kept:
+        entry = deployed_path_entry(path, ctx.project_root, ctx.targets)
+        previous = lockfile.get_dependency(owner) if lockfile is not None else None
+        prior = previous.deployed_file_hashes.get(entry) if previous is not None else None
+        ctx.package_cleanup_retained.setdefault(owner, {})[entry] = prior
+        ctx.kept_overwrites.append((owner, entry))
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the sequential integration phase.
 
@@ -654,6 +667,12 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.install.lsp.integration import preflight_lsp_targets
 
     preflight_lsp_targets(ctx)
+    session = getattr(ctx.integrators.get("skill"), "_materialization_session", None)
+    if session is not None:
+        from apm_cli.install.phases.cleanup import deployment_evidence
+
+        # Receipt-less managed files are replaced only when they equal the locked render (#4360).
+        session.render_evidence = deployment_evidence(ctx)
 
     # Direct dep keys: used to distinguish direct vs transitive failures
     # so direct failures can be surfaced immediately.
@@ -857,6 +876,9 @@ def run(ctx: InstallContext) -> None:
     # a cowork target with a resolved_deploy_root is active.
     # ------------------------------------------------------------------
     _check_cowork_caps(ctx)
+    if session is not None and session.kept_overwrites:
+        _keep_prior_entries(ctx, session.kept_overwrites)
+        ctx.kept_overwrite_written = session.written_entries()
 
     # ------------------------------------------------------------------
     # Executable approval prompt: if any packages had their hooks or

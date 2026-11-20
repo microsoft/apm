@@ -312,6 +312,16 @@ class InstallLogger(CommandLogger):
             f"{'remains' if total == 1 else 'remain'} in place."
         )
 
+    def kept_overwrites(self, kept: int, written: Sequence[str]) -> None:
+        """Name the files an install wrote beside the managed files it kept (#4360)."""
+        if written:
+            self.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
+            for path in written:
+                self.error_detail(f"  {path}")
+        self._failed_install_residue_note = (
+            f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
+        )
+
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
         count = len(skips)
